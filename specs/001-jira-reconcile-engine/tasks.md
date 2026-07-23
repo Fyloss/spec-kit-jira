@@ -238,17 +238,17 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 6 ⚠️
 
-- [ ] T066 [P] [US6] Unchanged corpus → zero writes of every kind (create/update/transition/comment/link/label) (FR-030, SC-001) in `tests/conformance/scenarios/us6-zero-churn.json`
-- [ ] T067 [P] [US6] Fault injection (401/network/404/429-exhausted) → zero writes for the affected spec + monotonic exit codes 2/3 (FR-032) in `tests/bash/sink/test_fail_closed.bats`, `tests/powershell/sink/FailClosed.Tests.ps1`, and `tests/conformance/scenarios/us6-fail-closed.json`
-- [ ] T068 [P] [US6] Status-category drift: post-scope never backward; unknown → named + suggest classify; halted → stop all writes + two remediations; mapped advanced Jira-side → named warning, never silent overwrite (FR-031, FR-034) in `tests/bash/engine/test_drift.bats` and `tests/powershell/engine/Drift.Tests.ps1`
-- [ ] T069 [P] [US6] Post-scope regression aborts transition unless `--on-drift=proceed` (FR-035); Flagged withholds transitions, flag surfaced, never set/removed (FR-036); human links never modified, blockers info-note (FR-037) in `tests/bash/sink/test_lifecycle_safety.bats` and `tests/powershell/sink/LifecycleSafety.Tests.ps1`
-- [ ] T070 [P] [US6] `--dry-run` report equals the real run's action set (FR-033) in `tests/conformance/scenarios/us6-dry-run.json`
+- [X] T066 [P] [US6] Unchanged corpus → zero writes of every kind (create/update/transition/comment/link/label) (FR-030, SC-001) in `tests/conformance/scenarios/us6-zero-churn.json`
+- [X] T067 [P] [US6] Fault injection (401/network/404/429-exhausted) → zero writes for the affected spec + monotonic exit codes 2/3 (FR-032) in `tests/bash/sink/test_fail_closed.bats`, `tests/powershell/sink/FailClosed.Tests.ps1`, and `tests/conformance/scenarios/us6-fail-closed.json`
+- [X] T068 [P] [US6] Status-category drift: post-scope never backward; unknown → named + suggest classify; halted → stop all writes + two remediations; mapped advanced Jira-side → named warning, never silent overwrite (FR-031, FR-034) in `tests/bash/engine/test_drift.bats` and `tests/powershell/engine/Drift.Tests.ps1`
+- [X] T069 [P] [US6] Post-scope regression aborts transition unless `--on-drift=proceed` (FR-035); Flagged withholds transitions, flag surfaced, never set/removed (FR-036); human links never modified, blockers info-note (FR-037) in `tests/bash/sink/test_lifecycle_safety.bats` and `tests/powershell/sink/LifecycleSafety.Tests.ps1`
+- [X] T070 [P] [US6] `--dry-run` report equals the real run's action set (FR-033) in `tests/conformance/scenarios/us6-dry-run.json`
 
 ### Implementation for User Story 6
 
-- [ ] T071 [US6] Implement status-category-aware drift classification (pure functions, no Jira calls) in `.specify/extensions/jira/scripts/bash/engine/drift.sh` and `.specify/extensions/jira/scripts/powershell/engine/Drift.psm1`
-- [ ] T072 [US6] Implement the managed-section idempotency diff + zero-churn decision (pure functions) in `.specify/extensions/jira/scripts/bash/engine/idempotency.sh` and `.specify/extensions/jira/scripts/powershell/engine/Idempotency.psm1`
-- [ ] T073 [US6] Implement `--on-drift` handling, Flagged-transition withholding, human-link preservation, and the `--dry-run` twin in `.specify/extensions/jira/scripts/bash/sink/jira/plan_apply.sh`, `.specify/extensions/jira/scripts/powershell/sink/jira/PlanApply.psm1`, and the reconcile command
+- [X] T071 [US6] Implement status-category-aware drift classification (pure functions, no Jira calls) in `.specify/extensions/jira/scripts/bash/engine/drift.sh` and `.specify/extensions/jira/scripts/powershell/engine/Drift.psm1`
+- [X] T072 [US6] Implement the managed-section idempotency diff + zero-churn decision (pure functions) in `.specify/extensions/jira/scripts/bash/engine/idempotency.sh` and `.specify/extensions/jira/scripts/powershell/engine/Idempotency.psm1`
+- [X] T073 [US6] Implement `--on-drift` handling, Flagged-transition withholding, human-link preservation, and the `--dry-run` twin in `.specify/extensions/jira/scripts/bash/sink/jira/plan_apply.sh`, `.specify/extensions/jira/scripts/powershell/sink/jira/PlanApply.psm1`, and the reconcile command
 
 **Checkpoint**: Reconcile is idempotent, drift-aware, fail-closed, and dry-run-predictable.
 

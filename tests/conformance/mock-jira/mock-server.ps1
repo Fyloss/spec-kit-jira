@@ -32,7 +32,7 @@ if (-not (Test-Path -LiteralPath $FixtureDir)) {
 }
 
 $ReasonPhrase = @{
-    200 = 'OK'; 201 = 'Created'; 401 = 'Unauthorized'; 404 = 'Not Found'
+    200 = 'OK'; 201 = 'Created'; 204 = 'No Content'; 401 = 'Unauthorized'; 404 = 'Not Found'
     429 = 'Too Many Requests'; 500 = 'Internal Server Error'
 }
 
@@ -84,6 +84,7 @@ function Resolve-Route {
         '^/rest/api/3/priority$'                                      { return (Read-FixtureBody 'priority') }
         '^/rest/api/3/field$'                                         { return (Read-FixtureBody 'field') }
         '^/rest/api/3/issue$'                                         { if ($Method -eq 'POST') { $b = Read-FixtureBody 'issue-created'; $b.status = 201; return $b } }
+        '^/rest/api/3/issue/[^/]+/transitions$'                       { if ($Method -eq 'POST') { return @{ status = 204; body = '' } } }
         '^/rest/api/3/issue/[^/]+/properties/[^/]+$' {
             if ($Method -eq 'PUT') { return @{ status = 204; body = '' } }
             if ($Method -eq 'GET') {

@@ -53,6 +53,7 @@ function Invoke-JiraReconcile {
     }
     $json = $state['json'] -eq 'true'
     $dryRun = $state['dry_run'] -eq 'true'
+    $onDrift = if ($state.ContainsKey('on_drift') -and $state['on_drift']) { $state['on_drift'] } else { 'abort' }
 
     # The spec file is the first positional argument.
     $specFile = ''
@@ -93,13 +94,41 @@ function Invoke-JiraReconcile {
     # SINK: plan the ordered action set (the --dry-run report is exactly this set).
     $planCtx = Get-JiraReconcilePlanContext -BaseUrl $base
     $actionsJson = Get-JiraPlanWriteSet -NeutralDocJson $built.Document -PlanContextJson $planCtx
+
+    # US6 lifecycle safety: when the current-Jira facts are supplied (the seam the
+    # config/discovery integration fills from a fail-closed read), fold in
+    # zero-churn idempotency, status-category drift, Flagged withholding, and the
+    # blocker note. Runs in BOTH dry-run and real mode so the --dry-run report
+    # equals the real run's action set exactly (FR-033). Mirror of reconcile.sh.
+    $warnsJson = '[]'
+    $notesJson = '[]'
+    $hasLifecycle = $false
+    if ($env:SPEC_KIT_JIRA_LIFECYCLE) {
+        $hasLifecycle = $true
+        $lcObj = $env:SPEC_KIT_JIRA_LIFECYCLE | ConvertFrom-Json -Depth 100
+        $lcMap = [ordered]@{}
+        if ($lcObj -is [System.Management.Automation.PSCustomObject]) {
+            foreach ($p in $lcObj.PSObject.Properties) { $lcMap[$p.Name] = $p.Value }
+        }
+        $lcMap['base_url'] = $base
+        $lcMap['on_drift'] = $onDrift
+        $lcJson = ConvertTo-JiraJsonValue $lcMap
+        $lresult = Get-JiraLifecyclePlan -ContentActionsJson $actionsJson -NeutralDocJson $built.Document -LifecycleContextJson $lcJson | ConvertFrom-Json -Depth 100
+        $actionsJson = ConvertTo-JiraJsonValue $lresult.actions
+        $warnsJson = ConvertTo-JiraJsonValue $lresult.warnings
+        $notesJson = ConvertTo-JiraJsonValue $lresult.notes
+    }
+
     # A List keeps a single-element action set an ARRAY (a bare @() unwraps to an
     # object under ConvertTo-JiraJsonValue, diverging from the Bash port).
     $actions = [System.Collections.Generic.List[object]]::new()
     foreach ($x in @($actionsJson | ConvertFrom-Json -Depth 100)) { $actions.Add($x) }
 
-    $created = @($actions | Where-Object { $_.method -eq 'POST' }).Count
+    # created counts only create-endpoint POSTs; a transition is also a POST but is
+    # not a ticket creation, so it is excluded from the created tally.
+    $created = @($actions | Where-Object { $_.method -eq 'POST' -and ([string]$_.url).EndsWith('/issue') }).Count
     $updated = @($actions | Where-Object { $_.method -eq 'PUT' }).Count
+    $warnCount = @($warnsJson | ConvertFrom-Json -Depth 100).Count
 
     $rc = 0
     if (-not $dryRun) {
@@ -116,14 +145,20 @@ function Invoke-JiraReconcile {
         $disp.Add($x)
     }
 
+    # The warnings/notes keys appear only when the lifecycle facts were supplied,
+    # so the content-only reconcile (US3) summary is byte-for-byte unchanged.
     $summaryObj = [ordered]@{
         schema_version = '1.0'
         command        = 'reconcile'
         dry_run        = [bool]$dryRun
-        counts         = [ordered]@{ created = $created; updated = $updated; skipped = 0; warnings = 0; errors = 0 }
+        counts         = [ordered]@{ created = $created; updated = $updated; skipped = 0; warnings = $warnCount; errors = 0 }
         actions        = $disp
-        exit_code      = $rc
     }
+    if ($hasLifecycle) {
+        $summaryObj['warnings'] = @($warnsJson | ConvertFrom-Json -Depth 100)
+        $summaryObj['notes'] = @($notesJson | ConvertFrom-Json -Depth 100)
+    }
+    $summaryObj['exit_code'] = $rc
     $summary = ConvertTo-JiraJsonValue $summaryObj
 
     if ($json) {

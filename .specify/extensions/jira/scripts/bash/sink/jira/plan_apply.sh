@@ -30,6 +30,11 @@ source "${_plan_apply_dir}/privacy_guard.sh"
 source "${_plan_apply_dir}/client.sh"
 # shellcheck source=/dev/null
 source "${_plan_apply_dir}/adf.sh"
+# The sink may consume the neutral engine (the boundary only forbids engine->sink).
+# shellcheck source=/dev/null
+source "${_plan_apply_dir}/../../engine/drift.sh"
+# shellcheck source=/dev/null
+source "${_plan_apply_dir}/../../engine/idempotency.sh"
 
 # plan_writes <neutral-doc-json> <plan-context-json> — resolve the validated
 # neutral document into an ordered action set (US3, T058). Each story becomes a
@@ -83,6 +88,111 @@ plan_writes() {
   json_canonical <<< "${actions}"
 }
 
+# plan_lifecycle <content-actions-json> <neutral-doc-json> <lifecycle-ctx-json>
+#   Fold the US6 lifecycle-safety rules over the planned content actions and emit
+#   the final action set plus the human-facing warnings/notes. PURE: no Jira reads
+#   or writes happen here; the current Jira facts (status, its classification,
+#   Flagged marker, open blockers, the transition id) arrive in the lifecycle
+#   context — the seam the config/discovery integration fills from a fail-closed
+#   read. content-actions[i] corresponds to neutral-doc.stories[i] (plan_writes
+#   emits one content action per story, in order).
+#
+# lifecycle-ctx: { on_drift, base_url, order:[status,...],
+#   tickets:{ <local_id>: { key, current:{fields...}, status, category, target,
+#                           transition_id, flagged, blockers:[...] } } }
+#
+# Rules applied per story:
+#   - Zero churn (FR-030): an UPDATE whose desired fields already match the
+#     ticket's `current` fields is dropped — no content write.
+#   - Drift (FR-031/034/035): the drift engine decides the transition. `withhold`
+#     suppresses the transition (content still reconciles); `halt` stops every
+#     write to the ticket and surfaces the remediations; `transition` emits the
+#     transition action. --on-drift=proceed authorises a backward pull.
+#   - Flagged (FR-036): a flagged ticket has its transition withheld and the flag
+#     surfaced; the bridge never sets or removes the flag (no flag write is emitted).
+#   - Human links (FR-037): the bridge emits no link mutation, so human links are
+#     never modified; advancing past open blockers adds an info note, not a block.
+# Returns { actions, warnings, notes } (canonical).
+plan_lifecycle() {
+  local actions="$1" doc="$2" lc="$3"
+  local on_drift order n i
+  on_drift="$(jq -r '.on_drift // "abort"' <<< "${lc}")"
+  order="$(jq -c '.order // []' <<< "${lc}")"
+  n="$(jq '.stories | length' <<< "${doc}")"
+
+  local kept="[]" warns="[]" notes="[]"
+  for ((i = 0; i < n; i++)); do
+    local sid action method tk
+    sid="$(jq -r ".stories[${i}].local_id" <<< "${doc}")"
+    action="$(jq -c ".[${i}] // null" <<< "${actions}")"
+    [[ "${action}" == "null" ]] && continue
+    method="$(jq -r '.method' <<< "${action}")"
+    tk="$(jq -c --arg s "${sid}" '.tickets[$s] // {}' <<< "${lc}")"
+
+    local drop_content="false" do_transition="false"
+    # --- Zero churn: drop an unchanged UPDATE ---------------------------------
+    if [[ "${method}" == "PUT" ]]; then
+      local current
+      current="$(jq -c '.current // null' <<< "${tk}")"
+      if [[ "${current}" != "null" ]]; then
+        local desired st
+        desired="$(jq -c '.body.fields' <<< "${action}")"
+        st="$(idempotency_field_status "${current}" "${desired}")"
+        [[ "${st}" == "unchanged" ]] && drop_content="true"
+      fi
+    fi
+
+    # --- Drift / Flagged: decide the transition -------------------------------
+    local status target category flagged transition_id key
+    status="$(jq -r '.status // ""' <<< "${tk}")"
+    target="$(jq -r '.target // ""' <<< "${tk}")"
+    category="$(jq -r '.category // "unknown"' <<< "${tk}")"
+    flagged="$(jq -r '.flagged // false' <<< "${tk}")"
+    transition_id="$(jq -r '.transition_id // ""' <<< "${tk}")"
+    key="$(jq -r '.key // ""' <<< "${tk}")"
+
+    if [[ -n "${status}" && -n "${target}" && "${status}" != "${target}" ]]; then
+      if [[ "${flagged}" == "true" ]]; then
+        warns="$(jq -c --arg w "ticket \"${sid}\" carries the Flagged (impediment) marker; its transition is withheld and the flag is left untouched" '. + [$w]' <<< "${warns}")"
+      else
+        local di dec d cw dwarns
+        di="$(jq -cn --arg cs "${status}" --arg cc "${category}" --arg ts "${target}" --argjson o "${order}" --arg od "${on_drift}" \
+          '{current_status:$cs, current_category:$cc, target_status:$ts, order:$o, on_drift:$od}')"
+        dec="$(drift_evaluate "${di}")"
+        d="$(jq -r '.decision' <<< "${dec}")"
+        cw="$(jq -r '.content_writes' <<< "${dec}")"
+        dwarns="$(jq -c '.warnings' <<< "${dec}")"
+        warns="$(jq -c --argjson dw "${dwarns}" '. + $dw' <<< "${warns}")"
+        [[ "${cw}" == "false" ]] && drop_content="true"
+        [[ "${d}" == "transition" ]] && do_transition="true"
+      fi
+    fi
+
+    [[ "${drop_content}" == "false" ]] && kept="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${kept}")"
+
+    if [[ "${do_transition}" == "true" && -n "${transition_id}" && -n "${key}" ]]; then
+      local base taction
+      base="$(jq -r '.base_url // ""' <<< "${lc}")"
+      taction="$(jq -cn --arg u "${base}/rest/api/3/issue/${key}/transitions" --arg tid "${transition_id}" \
+        '{method:"POST", url:$u, body:{transition:{id:$tid}}}')"
+      kept="$(jq -c --argjson a "${taction}" '. + [$a]' <<< "${kept}")"
+
+      local blockers bcount
+      blockers="$(jq -c '.blockers // []' <<< "${tk}")"
+      bcount="$(jq 'length' <<< "${blockers}")"
+      if [[ "${bcount}" -gt 0 ]]; then
+        local blist note
+        blist="$(jq -r 'join(", ")' <<< "${blockers}")"
+        note="transition of \"${sid}\" proceeds with open blocking links (${blist}); human-created links are left unchanged"
+        notes="$(jq -c --arg n "${note}" '. + [$n]' <<< "${notes}")"
+      fi
+    fi
+  done
+
+  jq -cn --argjson a "${kept}" --argjson w "${warns}" --argjson no "${notes}" \
+    '{actions:$a, warnings:$w, notes:$no}' | json_canonical
+}
+
 # _apply_known_coords <extra-json> — the known-coordinate set the guard checks:
 # the real site host derived from SPEC_KIT_JIRA_BASE_URL plus any caller extras.
 _apply_known_coords() {
@@ -110,7 +220,10 @@ apply_writes() {
     privacy_guard_scan "${body}" "${coords}" || return $?
   done
 
-  # (2) Write pass — all payloads cleared; perform each write in order.
+  # (2) Write pass — all payloads cleared; perform each write in order. A
+  # fail-closed transport result (exit >= 2: fail_closed or auth) ABORTS the
+  # remaining writes for this spec and is returned verbatim — no further mutation
+  # is attempted once a read/write is unreliable (FR-032, monotonic escalation).
   local worst=0 method url rc
   for ((i = 0; i < n; i++)); do
     method="$(jq -r ".[${i}].method" <<< "${actions}")"
@@ -123,6 +236,7 @@ apply_writes() {
     fi
     rc=$?
     ((rc > worst)) && worst=${rc}
+    ((rc >= 2)) && return "${worst}"
   done
   return "${worst}"
 }

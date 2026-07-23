@@ -44,12 +44,13 @@ _reconcile_plan_context() {
 # cmd_reconcile <argv...> — reconcile one specification into its Jira project.
 # Echoes the run summary to stdout; returns the exit code.
 cmd_reconcile() {
-  local parsed json="false" dry_run="false" exit_code="0" error=""
+  local parsed json="false" dry_run="false" on_drift="abort" exit_code="0" error=""
   parsed="$(cli_parse "$@")"
   while IFS='=' read -r key value; do
     case "${key}" in
       json) json="${value}" ;;
       dry_run) dry_run="${value}" ;;
+      on_drift) on_drift="${value}" ;;
       exit) exit_code="${value}" ;;
       error) error="${value}" ;;
     esac
@@ -106,13 +107,34 @@ cmd_reconcile() {
   plan_ctx="$(_reconcile_plan_context "${base}")"
   actions="$(plan_writes "${doc}" "${plan_ctx}")"
 
-  local created updated rc=0
-  created="$(jq '[.[] | select(.method=="POST")] | length' <<< "${actions}")"
+  # US6 lifecycle safety: when the current-Jira facts are supplied (the seam the
+  # config/discovery integration fills from a fail-closed read), fold in zero-churn
+  # idempotency, status-category drift, Flagged withholding, and the blocker note.
+  # The filtering runs in BOTH dry-run and real mode so the --dry-run report equals
+  # the real run's action set exactly (FR-033).
+  local warns="[]" notes="[]" has_lifecycle="false"
+  local lifecycle="${SPEC_KIT_JIRA_LIFECYCLE:-}"
+  if [[ -n "${lifecycle}" ]]; then
+    has_lifecycle="true"
+    lifecycle="$(jq -c --arg b "${base}" --arg od "${on_drift}" '. + {base_url:$b, on_drift:$od}' <<< "${lifecycle}")"
+    local lresult
+    lresult="$(plan_lifecycle "${actions}" "${doc}" "${lifecycle}")"
+    actions="$(jq -c '.actions' <<< "${lresult}")"
+    warns="$(jq -c '.warnings' <<< "${lresult}")"
+    notes="$(jq -c '.notes' <<< "${lresult}")"
+  fi
+
+  # created counts only create-endpoint POSTs; a transition is also a POST but is
+  # not a ticket creation, so it is excluded from the created tally.
+  local created updated warn_count rc=0
+  created="$(jq '[.[] | select(.method=="POST" and (.url|endswith("/issue")))] | length' <<< "${actions}")"
   updated="$(jq '[.[] | select(.method=="PUT")] | length' <<< "${actions}")"
+  warn_count="$(jq 'length' <<< "${warns}")"
 
   if [[ "${dry_run}" != "true" ]]; then
-    apply_writes "${actions}"
-    rc=$?
+    # `|| rc=$?` keeps a fail-closed apply (exit >= 2) from aborting the command
+    # under the dispatcher's `set -e`, so the run summary always prints (FR-032).
+    apply_writes "${actions}" || rc=$?
   fi
 
   # Report the action set with the base URL stripped to a host-relative path: the
@@ -121,13 +143,19 @@ cmd_reconcile() {
   local disp_actions
   disp_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b)]' <<< "${actions}")"
 
+  # The warnings/notes keys appear only when the lifecycle facts were supplied, so
+  # the content-only reconcile (US3) summary is byte-for-byte unchanged.
   local summary
   summary="$(jq -cn \
     --argjson dry "${dry_run}" --argjson c "${created}" --argjson u "${updated}" \
-    --argjson x "${rc}" --argjson actions "${disp_actions}" '
+    --argjson x "${rc}" --argjson actions "${disp_actions}" \
+    --argjson wc "${warn_count}" --argjson w "${warns}" --argjson no "${notes}" \
+    --argjson hl "${has_lifecycle}" '
     {schema_version:"1.0", command:"reconcile", dry_run:$dry,
-     counts:{created:$c, updated:$u, skipped:0, warnings:0, errors:0},
-     actions:$actions, exit_code:$x}' | json_canonical)"
+     counts:{created:$c, updated:$u, skipped:0, warnings:$wc, errors:0},
+     actions:$actions}
+    + (if $hl then {warnings:$w, notes:$no} else {} end)
+    + {exit_code:$x}' | json_canonical)"
 
   if [[ "${json}" == "true" ]]; then
     printf '%s\n' "${summary}"

@@ -15,6 +15,9 @@ Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../../lib/Output.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Adf.psm1') -Force
+# The sink may consume the neutral engine (the boundary only forbids engine->sink).
+Import-Module (Join-Path $PSScriptRoot '../../engine/Drift.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../../engine/Idempotency.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PrivacyGuard.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Client.psm1') -Force
 
@@ -80,6 +83,106 @@ function Get-JiraPlanWriteSet {
     return (ConvertTo-JiraJsonValue $actions)
 }
 
+function Get-JiraLifecyclePlan {
+    <#
+    .SYNOPSIS
+      Fold the US6 lifecycle-safety rules over the planned content actions and emit
+      the final action set plus warnings/notes. Mirror of plan_lifecycle. PURE: no
+      Jira reads or writes. content-actions[i] corresponds to doc.stories[i]. See
+      plan_apply.sh for the full contract (zero-churn FR-030, drift FR-031/034/035,
+      Flagged FR-036, human links FR-037).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ContentActionsJson,
+        [Parameter(Mandatory)] [string] $NeutralDocJson,
+        [Parameter(Mandatory)] [string] $LifecycleContextJson
+    )
+    # Lists never unwrap to a scalar (a 1-element @() flowing through an if/else
+    # expression collapses under StrictMode, and its .Count then throws).
+    $actions = [System.Collections.Generic.List[object]]::new()
+    foreach ($x in @($ContentActionsJson | ConvertFrom-Json -Depth 100)) { $actions.Add($x) }
+    $doc = $NeutralDocJson | ConvertFrom-Json -Depth 100
+    $lc = $LifecycleContextJson | ConvertFrom-Json -Depth 100
+
+    $onDrift = [string](Get-JiraPlanProp $lc 'on_drift'); if ($onDrift -eq '') { $onDrift = 'abort' }
+    $base = [string](Get-JiraPlanProp $lc 'base_url')
+    $order = [System.Collections.Generic.List[object]]::new()
+    $orderVal = Get-JiraPlanProp $lc 'order'
+    if ($null -ne $orderVal) { foreach ($o in @($orderVal)) { $order.Add([string]$o) } }
+    $tickets = Get-JiraPlanProp $lc 'tickets'
+    $stories = [System.Collections.Generic.List[object]]::new()
+    $storyProp = Get-JiraPlanProp $doc 'stories'
+    if ($null -ne $storyProp) { foreach ($s in @($storyProp)) { $stories.Add($s) } }
+
+    $kept = [System.Collections.Generic.List[object]]::new()
+    $warns = [System.Collections.Generic.List[string]]::new()
+    $notes = [System.Collections.Generic.List[string]]::new()
+
+    for ($i = 0; $i -lt $stories.Count; $i++) {
+        if ($i -ge $actions.Count) { continue }
+        $sid = [string]$stories[$i].local_id
+        $action = $actions[$i]
+        if ($null -eq $action) { continue }
+        $method = [string]$action.method
+        $tk = Get-JiraPlanProp $tickets $sid
+        if ($null -eq $tk) { $tk = [pscustomobject]@{} }
+
+        $dropContent = $false
+        $doTransition = $false
+
+        # --- Zero churn: drop an unchanged UPDATE -----------------------------
+        if ($method -eq 'PUT') {
+            $current = Get-JiraPlanProp $tk 'current'
+            if ($null -ne $current) {
+                $desired = ConvertTo-JiraJsonValue $action.body.fields
+                $currentJson = ConvertTo-JiraJsonValue $current
+                if ((Get-JiraIdempotentFieldStatus -CurrentFieldsJson $currentJson -DesiredFieldsJson $desired) -eq 'unchanged') {
+                    $dropContent = $true
+                }
+            }
+        }
+
+        # --- Drift / Flagged: decide the transition ---------------------------
+        $status = [string](Get-JiraPlanProp $tk 'status')
+        $target = [string](Get-JiraPlanProp $tk 'target')
+        $category = [string](Get-JiraPlanProp $tk 'category'); if ($category -eq '') { $category = 'unknown' }
+        $flaggedVal = Get-JiraPlanProp $tk 'flagged'
+        $flagged = ($flaggedVal -eq $true)
+        $transitionId = [string](Get-JiraPlanProp $tk 'transition_id')
+        $key = [string](Get-JiraPlanProp $tk 'key')
+
+        if ($status -ne '' -and $target -ne '' -and $status -ne $target) {
+            if ($flagged) {
+                $warns.Add("ticket `"$sid`" carries the Flagged (impediment) marker; its transition is withheld and the flag is left untouched")
+            }
+            else {
+                $di = [ordered]@{ current_status = $status; current_category = $category; target_status = $target; order = $order.ToArray(); on_drift = $onDrift } | ConvertTo-Json -Compress -Depth 10
+                $dec = Get-JiraDriftDecision -InputJson $di | ConvertFrom-Json -Depth 100
+                foreach ($w in @($dec.warnings)) { $warns.Add([string]$w) }
+                if ($dec.content_writes -eq $false) { $dropContent = $true }
+                if ([string]$dec.decision -eq 'transition') { $doTransition = $true }
+            }
+        }
+
+        if (-not $dropContent) { $kept.Add($action) }
+
+        if ($doTransition -and $transitionId -ne '' -and $key -ne '') {
+            $kept.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue/$key/transitions"; body = [ordered]@{ transition = [ordered]@{ id = $transitionId } } })
+            $blockersVal = Get-JiraPlanProp $tk 'blockers'
+            $blockers = [System.Collections.Generic.List[string]]::new()
+            if ($null -ne $blockersVal) { foreach ($b in @($blockersVal)) { $blockers.Add([string]$b) } }
+            if ($blockers.Count -gt 0) {
+                $blist = ($blockers -join ', ')
+                $notes.Add("transition of `"$sid`" proceeds with open blocking links ($blist); human-created links are left unchanged")
+            }
+        }
+    }
+
+    $out = [ordered]@{ actions = $kept; warnings = $warns; notes = $notes }
+    return (ConvertTo-JiraJsonValue $out)
+}
+
 function Get-JiraApplyKnownCoordinate {
     # The known-coordinate set: the real site host from SPEC_KIT_JIRA_BASE_URL plus
     # any caller extras. Mirror of _apply_known_coords.
@@ -117,7 +220,10 @@ function Invoke-JiraApplyWriteSet {
         if ($code -ne 0) { return [int]$code }
     }
 
-    # (2) Write pass — all payloads cleared; perform each write in order.
+    # (2) Write pass — all payloads cleared; perform each write in order. A
+    # fail-closed transport result (exit >= 2) ABORTS the remaining writes for this
+    # spec and is returned verbatim — no further mutation once a read/write is
+    # unreliable (FR-032, monotonic escalation).
     $worst = 0
     foreach ($a in $actions) {
         $bodyObj = if ($a.PSObject.Properties.Name -contains 'body') { $a.body } else { $null }
@@ -129,8 +235,9 @@ function Invoke-JiraApplyWriteSet {
             $r = Invoke-JiraRequest -Method $a.method -Url $a.url
         }
         if ([int]$r.ExitCode -gt $worst) { $worst = [int]$r.ExitCode }
+        if ([int]$r.ExitCode -ge 2) { return $worst }
     }
     return $worst
 }
 
-Export-ModuleMember -Function Get-JiraApplyKnownCoordinate, Invoke-JiraApplyWriteSet, Get-JiraPlanWriteSet
+Export-ModuleMember -Function Get-JiraApplyKnownCoordinate, Invoke-JiraApplyWriteSet, Get-JiraPlanWriteSet, Get-JiraLifecyclePlan
