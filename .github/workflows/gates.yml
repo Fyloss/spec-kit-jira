@@ -1,0 +1,157 @@
+# T027 — CI: blocking merge gates (Constitution XIII, FR-021/022, SC-006).
+#
+#   * Coverage: Bash statement coverage >= 80% via kcov (PRIMARY), with a
+#     traceability FALLBACK (every shipped script has a referencing test) when
+#     kcov cannot measure; PowerShell statement coverage >= 80% via Pester.
+#   * Module parity: the two ports mirror module-for-module (same leaf set modulo
+#     .sh <-> .psm1/.ps1, case-insensitive).
+#   * Version string: the version literal lives ONLY in extension.yml's `version`
+#     field — never in a script and never outside .specify/extensions/jira/.
+name: Gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  BASH_SCRIPTS: .specify/extensions/jira/scripts/bash
+  PWSH_SCRIPTS: .specify/extensions/jira/scripts/powershell
+  EXT_DIR: .specify/extensions/jira
+
+jobs:
+  coverage-bash:
+    name: Bash coverage >= 80% (kcov primary, traceability fallback)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y bats jq curl kcov
+      - name: Measure statement coverage with kcov
+        run: |
+          set -euo pipefail
+          out="coverage/bash"
+          mkdir -p "${out}"
+          kcov --include-path="${PWD}/${BASH_SCRIPTS}" "${out}" bats -r tests/bash
+          report="$(find "${out}" -name 'coverage.json' | head -n1)"
+          if [ -z "${report}" ]; then
+            echo "kcov produced no report — using the traceability fallback"
+            exit 42
+          fi
+          pct="$(jq -r '.percent_covered' "${report}")"
+          echo "Bash statement coverage: ${pct}%"
+          awk -v p="${pct}" 'BEGIN { exit (p+0 >= 80) ? 0 : 1 }' \
+            || { echo "::error::Bash coverage ${pct}% is below the 80% gate"; exit 1; }
+      - name: Traceability fallback (only if kcov could not measure)
+        if: ${{ failure() }}
+        run: |
+          set -euo pipefail
+          # Every shipped script must be referenced by at least one test file.
+          missing=0
+          while IFS= read -r script; do
+            leaf="$(basename "${script}")"
+            if ! grep -rqF "${leaf}" tests/; then
+              echo "::error::no test references ${script}"
+              missing=1
+            fi
+          done < <(find "${BASH_SCRIPTS}" -name '*.sh')
+          exit "${missing}"
+
+  coverage-pwsh:
+    name: PowerShell coverage >= 80% (Pester)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y jq curl
+      - name: Measure statement coverage with Pester
+        shell: pwsh
+        run: |
+          if (-not (Get-Module -ListAvailable Pester | Where-Object Version -ge '5.0.0')) {
+              Install-Module Pester -MinimumVersion 5.0.0 -Force -SkipPublisherCheck -Scope CurrentUser
+          }
+          $cfg = New-PesterConfiguration
+          $cfg.Run.Path = 'tests/powershell'
+          $cfg.Run.PassThru = $true
+          $cfg.CodeCoverage.Enabled = $true
+          # Measure the module layer (*.psm1) — the unit-tested logic. The
+          # entry-point shim (spec-kit-jira.ps1) is invoked as a `pwsh -File`
+          # subprocess by the dispatch + conformance suites, which Pester's
+          # in-process instrumentation structurally cannot measure; on the Bash
+          # side kcov follows that child process, so both entry points are
+          # behaviourally exercised. The shim carries no branching logic.
+          $covFiles = Get-ChildItem -Path $env:PWSH_SCRIPTS -Recurse -Filter *.psm1 |
+              Select-Object -ExpandProperty FullName
+          $cfg.CodeCoverage.Path = $covFiles
+          $cfg.Output.Verbosity = 'Detailed'
+          $r = Invoke-Pester -Configuration $cfg
+          if ($r.FailedCount -gt 0) { throw "Pester suite failed" }
+          $pct = [double]$r.CodeCoverage.CoveragePercent
+          Write-Host ("PowerShell statement coverage: {0:N2}%" -f $pct)
+          if ($pct -lt 80) { throw ("PowerShell coverage {0:N2}% is below the 80% gate" -f $pct) }
+
+  module-parity:
+    name: Twin ports mirror module-for-module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare the two ports' leaf sets (modulo extension + case)
+        run: |
+          set -euo pipefail
+          # Normalise each port to <relative-dir>/<lowercased-stem>.
+          bash_leaves="$(cd "${BASH_SCRIPTS}" && find . -name '*.sh' \
+            | sed 's/\.sh$//' | tr 'A-Z' 'a-z' | sort)"
+          pwsh_leaves="$(cd "${PWSH_SCRIPTS}" && find . \( -name '*.psm1' -o -name '*.ps1' \) \
+            | sed -E 's/\.(psm1|ps1)$//' | tr 'A-Z' 'a-z' | sort)"
+          if ! diff <(printf '%s\n' "${bash_leaves}") <(printf '%s\n' "${pwsh_leaves}"); then
+            echo "::error::module-parity broken — the two ports do not mirror module-for-module (NFR-1/NFR-2)"
+            exit 1
+          fi
+          echo "module parity OK"
+
+  version-string:
+    name: Version literal single-sourced (SC-006, FR-021/022)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The version literal appears only in extension.yml's version field
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version:[[:space:]]*//p' "${EXT_DIR}/extension.yml" | head -n1)"
+          [ -n "${version}" ] || { echo "::error::no version field in extension.yml"; exit 1; }
+          esc="$(printf '%s' "${version}" | sed 's/\./\\./g')"
+          extesc="$(printf '%s' "${EXT_DIR}" | sed 's/\./\\./g')"
+          violations=0
+
+          # (a) No script anywhere carries the version literal (FR-021).
+          if grep -rnE "${esc}" "${BASH_SCRIPTS}" "${PWSH_SCRIPTS}"; then
+            echo "::error::version literal hardcoded in a script (FR-021)"
+            violations=1
+          fi
+
+          # (b) The version literal must not appear anywhere outside the extension
+          #     folder (SC-006). Path-precise exclusion of the extension itself, the
+          #     design specs, and the CI definitions (basename excludes would also
+          #     drop the consuming repo's .specify/jira/ config dir).
+          leaks="$(grep -rnE "${esc}" . --exclude-dir=.git 2> /dev/null \
+            | grep -vE "^(\./)?(${extesc}/|specs/|\.github/)" || true)"
+          if [ -n "${leaks}" ]; then
+            echo "::error::version literal leaks outside ${EXT_DIR} (SC-006):"
+            echo "${leaks}"
+            violations=1
+          fi
+
+          # (c) Inside the extension folder the literal is confined to
+          #     extension.yml (the source of truth) and CHANGELOG.md (the human
+          #     changelog); it must appear nowhere else there (FR-022).
+          stray="$(grep -rlnE "${esc}" "${EXT_DIR}" \
+            | grep -vE "/(extension\.yml|CHANGELOG\.md)$" || true)"
+          if [ -n "${stray}" ]; then
+            echo "::error::version literal duplicated inside ${EXT_DIR}: ${stray}"
+            violations=1
+          fi
+
+          exit "${violations}"

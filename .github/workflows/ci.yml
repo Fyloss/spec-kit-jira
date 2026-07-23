@@ -1,0 +1,87 @@
+# T025 — CI: three-OS matrix running the Bash (bats) and PowerShell (Pester)
+# unit suites plus the conformance corpus. The conformance corpus proves the two
+# ports are byte-identical (NFR-1): each scenario runs against both ports and the
+# captured stdout / exit / call-sequence / written-file tree are diffed.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit suites (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bash toolchain (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bats jq shellcheck curl
+
+      - name: Install Bash toolchain (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bats-core jq shellcheck
+
+      - name: Run bats (Bash port — POSIX hosts only)
+        if: runner.os != 'Windows'
+        run: bats -r tests/bash
+
+      - name: Run Pester (PowerShell port — all hosts)
+        shell: pwsh
+        run: |
+          Set-PSResourceRepository -Name PSGallery -Trusted -ErrorAction SilentlyContinue
+          if (-not (Get-Module -ListAvailable Pester | Where-Object Version -ge '5.0.0')) {
+              Install-Module Pester -MinimumVersion 5.0.0 -Force -SkipPublisherCheck -Scope CurrentUser
+          }
+          $r = Invoke-Pester -Path tests/powershell -PassThru -Output Detailed
+          if ($r.FailedCount -gt 0) { exit 1 }
+
+  conformance:
+    name: Conformance corpus (both ports)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y bats jq curl
+
+      - name: Run every scenario against both ports and diff the captures
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          harness="tests/conformance/run-scenario.sh"
+          failed=0
+          scenarios=(tests/conformance/scenarios/*.json)
+          if [ ${#scenarios[@]} -eq 0 ]; then
+            echo "conformance corpus is empty — nothing to compare (scenarios land per user story)"
+            exit 0
+          fi
+          for scenario in "${scenarios[@]}"; do
+            name="$(basename "${scenario}" .json)"
+            out_bash="$(mktemp -d)"
+            out_ps="$(mktemp -d)"
+            "${harness}" "${scenario}" bash "${out_bash}"
+            "${harness}" "${scenario}" powershell "${out_ps}"
+            # The observable contract: stdout, exit code, Jira call sequence, and
+            # the written repository tree must be byte-identical across ports.
+            for artifact in stdout exit calls.log; do
+              if ! diff -u "${out_bash}/${artifact}" "${out_ps}/${artifact}"; then
+                echo "::error::conformance divergence in ${name} (${artifact})"
+                failed=1
+              fi
+            done
+            if ! diff -ru "${out_bash}/workdir" "${out_ps}/workdir"; then
+              echo "::error::conformance divergence in ${name} (written files)"
+              failed=1
+            fi
+          done
+          exit "${failed}"

@@ -76,15 +76,15 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 - [X] T020 [P] Neutral-interchange schema-validation tests (valid + invalid docs against `contracts/neutral-interchange.schema.json`; validation failure ⇒ zero writes + error) in `tests/bash/engine/test_interchange.bats` and `tests/powershell/engine/Interchange.Tests.ps1`
 - [X] T021 Implement the neutral-document schema validator (validate before any write, Constitution VIII) in `.specify/extensions/jira/scripts/bash/engine/interchange.sh` and `.specify/extensions/jira/scripts/powershell/engine/Interchange.psm1`
-- [ ] T022 [P] Sink REST-transport tests (retry/backoff honouring `Retry-After` on 429, exit-code mapping 2/3, credential-safe header) against the mocked double in `tests/bash/sink/test_client.bats` and `tests/powershell/sink/Client.Tests.ps1`
-- [ ] T023 Implement the REST v3 transport (retry/backoff, exit-code mapping, credential-safe header from T019) in `.specify/extensions/jira/scripts/bash/sink/jira/client.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Client.psm1`
-- [ ] T024 Implement the entry-point dispatcher (routes `config`/`reconcile`/`mention`, runs prereq checks first) in `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` and `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1`
+- [X] T022 [P] Sink REST-transport tests (retry/backoff honouring `Retry-After` on 429, exit-code mapping 2/3, credential-safe header) against the mocked double in `tests/bash/sink/test_client.bats` and `tests/powershell/sink/Client.Tests.ps1`
+- [X] T023 Implement the REST v3 transport (retry/backoff, exit-code mapping, credential-safe header from T019) in `.specify/extensions/jira/scripts/bash/sink/jira/client.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Client.psm1`
+- [X] T024 Implement the entry-point dispatcher (routes `config`/`reconcile`/`mention`, runs prereq checks first) in `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` and `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1`
 
 ### CI enforcement gates
 
-- [ ] T025 [P] CI: three-OS matrix (ubuntu / macos / windows) running bats + Pester unit suites and the conformance corpus in `.github/workflows/ci.yml`
-- [ ] T026 [P] CI: engine/sink boundary greps — #1 no `engine/` script sources/imports `sink/`; #2 no `engine/` script contains any Atlassian identifier (issue-key regex, `atlassian.net`, `createmeta`, ADF node names, field ids); grep builds the vendor token from split literals — in `.github/workflows/boundary.yml`
-- [ ] T027 [P] CI: coverage gate (kcov Bash ≥ 80% PRIMARY with traceability FALLBACK, Pester CodeCoverage ≥ 80%), module-parity check (same leaf set modulo `.sh`↔`.psm1`), and version-string grep (SC-006: no version string outside `.specify/extensions/jira/`; and within that folder the version literal appears only in the `version` field of `extension.yml`, never duplicated elsewhere, per FR-021/022) in `.github/workflows/gates.yml`
+- [X] T025 [P] CI: three-OS matrix (ubuntu / macos / windows) running bats + Pester unit suites and the conformance corpus in `.github/workflows/ci.yml`
+- [X] T026 [P] CI: engine/sink boundary greps — #1 no `engine/` script sources/imports `sink/`; #2 no `engine/` script contains any Atlassian identifier (issue-key regex, `atlassian.net`, `createmeta`, ADF node names, field ids); grep builds the vendor token from split literals — in `.github/workflows/boundary.yml`
+- [X] T027 [P] CI: coverage gate (kcov Bash ≥ 80% PRIMARY with traceability FALLBACK, Pester CodeCoverage ≥ 80%), module-parity check (same leaf set modulo `.sh`↔`.psm1`), and version-string grep (SC-006: no version string outside `.specify/extensions/jira/`; and within that folder the version literal appears only in the `version` field of `extension.yml`, never duplicated elsewhere, per FR-021/022) in `.github/workflows/gates.yml`
 
 **Checkpoint**: Infrastructure ready — user story implementation can begin.
 
