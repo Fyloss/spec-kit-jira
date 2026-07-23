@@ -51,6 +51,39 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
+# --- interchange_build assembly (T055) --------------------------------------
+
+@test "interchange_build assembles a schema-valid neutral document" {
+  local parse ctx
+  parse='{"epic":{"title":"Repo Epic","description":{"blocks":[{"type":"paragraph","text":"x"}]}},"stories":[{"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},"priority_logical":"P1"}]}'
+  ctx='{"spec_ref":{"repo":"acme/app","spec_slug":"001-feature","folder":"specs/001-feature"},"project_key":"PROJ","epic_strategy":"per_repo"}'
+  run interchange_build "${parse}" "${ctx}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.schema_version' <<< "$output")" = "1.0" ]
+  [ "$(jq -r '.routing.project_key' <<< "$output")" = "PROJ" ]
+  [ "$(jq -r '.epic.strategy' <<< "$output")" = "per_repo" ]
+  [ "$(jq -r '.epic.title' <<< "$output")" = "Repo Epic" ]
+}
+
+@test "interchange_build refuses an assembly with an invalid project_key (zero writes)" {
+  local parse ctx
+  parse='{"epic":{"title":"E","description":{"blocks":[{"type":"paragraph","text":"x"}]}},"stories":[{"local_id":"s1","title":"S","description":{"blocks":[{"type":"paragraph","text":"n"}]},"priority_logical":"P1"}]}'
+  ctx='{"spec_ref":{"repo":"acme/app","spec_slug":"001-feature","folder":"specs/001-feature"},"project_key":"bad-key","epic_strategy":"per_repo"}'
+  run interchange_build "${parse}" "${ctx}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"project_key"* ]]
+}
+
+@test "interchange_build is byte-identical across ports (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local parse ctx b p
+  parse='{"epic":{"title":"Repo Epic","description":{"blocks":[{"type":"paragraph","text":"x"}]}},"stories":[{"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},"priority_logical":"P2","estimation":3}]}'
+  ctx='{"spec_ref":{"repo":"acme/app","spec_slug":"001-feature","folder":"specs/001-feature"},"project_key":"PROJ","epic_strategy":"per_feature"}'
+  b="$(interchange_build "${parse}" "${ctx}")"
+  p="$(pwsh -NoProfile -Command "Import-Module '${PS_ENGINE}/Interchange.psm1' -Force; [Console]::Out.Write((Build-JiraNeutralDocument -ParseJson '${parse}' -ContextJson '${ctx}').Document)")"
+  [ "${b}" = "${p}" ]
+}
+
 @test "both ports agree on validity for the same inputs" {
   for mutation in '.' '.schema_version="2.0"' '.routing.project_key="bad-key"' '.stories=[]'; do
     doc="$(jq -c "${mutation}" "${VALID}")"

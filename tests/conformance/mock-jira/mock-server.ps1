@@ -84,6 +84,14 @@ function Resolve-Route {
         '^/rest/api/3/priority$'                                      { return (Read-FixtureBody 'priority') }
         '^/rest/api/3/field$'                                         { return (Read-FixtureBody 'field') }
         '^/rest/api/3/issue$'                                         { if ($Method -eq 'POST') { $b = Read-FixtureBody 'issue-created'; $b.status = 201; return $b } }
+        '^/rest/api/3/issue/[^/]+/properties/[^/]+$' {
+            if ($Method -eq 'PUT') { return @{ status = 204; body = '' } }
+            if ($Method -eq 'GET') {
+                $b = Read-FixtureBody 'issue-property'
+                if ($b.status -eq 500) { return @{ status = 404; body = '{"errorMessages":["not found"],"errors":{}}' } }
+                return $b
+            }
+        }
         default { }
     }
     return @{ status = 404; body = '{"errorMessages":["not found"],"errors":{}}' }

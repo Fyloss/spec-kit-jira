@@ -13,8 +13,72 @@
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot '../../lib/Cli.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../../lib/Output.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Adf.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PrivacyGuard.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Client.psm1') -Force
+
+function Get-JiraPlanProp {
+    # Safe property read: an EMPTY PSCustomObject's `.PSObject.Properties.Name`
+    # throws under StrictMode, so index the member collection instead.
+    param($Object, [string] $Name)
+    if ($null -eq $Object) { return $null }
+    $member = $Object.PSObject.Properties[$Name]
+    if ($null -eq $member) { return $null }
+    return $member.Value
+}
+
+function Get-JiraPlanWriteSet {
+    <#
+    .SYNOPSIS
+      Resolve the validated neutral document into an ordered action set. Mirror of
+      plan_writes (US3, T058). Each story becomes a create OR an update, priority
+      resolved by logical name (FR-017), estimation written on CREATE ONLY
+      (FR-018). No Jira mutation happens here.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $NeutralDocJson, [Parameter(Mandatory)] [string] $PlanContextJson)
+    $doc = $NeutralDocJson | ConvertFrom-Json -Depth 100
+    $ctx = $PlanContextJson | ConvertFrom-Json -Depth 100
+
+    $base = [string](Get-JiraPlanProp $ctx 'base_url')
+    $storyType = [string](Get-JiraPlanProp $ctx 'story_type_id')
+    $estId = [string](Get-JiraPlanProp $ctx 'estimation_field_id')
+    $tickets = Get-JiraPlanProp $ctx 'tickets'
+    $priorityIds = Get-JiraPlanProp $ctx 'priority_ids'
+
+    $stories = @()
+    $storyProp = Get-JiraPlanProp $doc 'stories'
+    if ($null -ne $storyProp) { $stories = @($storyProp) }
+
+    $actions = [System.Collections.Generic.List[object]]::new()
+    foreach ($story in $stories) {
+        $sid = [string]$story.local_id
+        $title = [string]$story.title
+        $prio = [string]$story.priority_logical
+
+        $ticket = [string](Get-JiraPlanProp $tickets $sid)
+        $priorityId = [string](Get-JiraPlanProp $priorityIds $prio)
+
+        # The story object already carries description / acceptance_criteria / design.
+        $storyJson = ConvertTo-JiraJsonValue $story
+        $adf = ConvertTo-JiraAdfDocument -ContentJson $storyJson | ConvertFrom-Json -Depth 100
+
+        $fields = [ordered]@{ summary = $title; description = $adf }
+        if ($ticket -eq '') {
+            if ($storyType -ne '') { $fields['issuetype'] = [ordered]@{ id = $storyType } }
+            if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
+            $estValue = Get-JiraPlanProp $story 'estimation'
+            if ($estId -ne '' -and $null -ne $estValue) { $fields[$estId] = $estValue }
+            $actions.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue"; body = [ordered]@{ fields = $fields } })
+        }
+        else {
+            if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
+            $actions.Add([ordered]@{ method = 'PUT'; url = "$base/rest/api/3/issue/$ticket"; body = [ordered]@{ fields = $fields } })
+        }
+    }
+    return (ConvertTo-JiraJsonValue $actions)
+}
 
 function Get-JiraApplyKnownCoordinate {
     # The known-coordinate set: the real site host from SPEC_KIT_JIRA_BASE_URL plus
@@ -69,4 +133,4 @@ function Invoke-JiraApplyWriteSet {
     return $worst
 }
 
-Export-ModuleMember -Function Get-JiraApplyKnownCoordinate, Invoke-JiraApplyWriteSet
+Export-ModuleMember -Function Get-JiraApplyKnownCoordinate, Invoke-JiraApplyWriteSet, Get-JiraPlanWriteSet

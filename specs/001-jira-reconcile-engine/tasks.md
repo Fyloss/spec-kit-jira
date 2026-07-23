@@ -190,19 +190,19 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T050 [P] [US3] Title-ladder + never-empty description incl. no-`## Summary` specs (FR-013, FR-014, SC-002) in `tests/bash/engine/test_parse_title_desc.bats` and `tests/powershell/engine/Parse.TitleDesc.Tests.ps1`
-- [ ] T051 [P] [US3] Gherkin → panel and Figma/UX → distinct Design section (FR-015, FR-016) in `tests/bash/sink/test_adf.bats` and `tests/powershell/sink/Adf.Tests.ps1`
-- [ ] T052 [P] [US3] Priority P1/P2/P3 → project priority by logical name; estimation written on create only, never re-sent on update (FR-017, FR-018) in `tests/bash/sink/test_plan_apply_content.bats` and `tests/powershell/sink/PlanApply.Content.Tests.ps1`
-- [ ] T053 [P] [US3] Action-set parity: neutral doc built + schema-validated before write, both ports emit an identical create/update action set in `tests/conformance/scenarios/us3-ticket-content.json`
+- [X] T050 [P] [US3] Title-ladder + never-empty description incl. no-`## Summary` specs (FR-013, FR-014, SC-002) in `tests/bash/engine/test_parse_title_desc.bats` and `tests/powershell/engine/Parse.TitleDesc.Tests.ps1`
+- [X] T051 [P] [US3] Gherkin → panel and Figma/UX → distinct Design section (FR-015, FR-016) in `tests/bash/sink/test_adf.bats` and `tests/powershell/sink/Adf.Tests.ps1`
+- [X] T052 [P] [US3] Priority P1/P2/P3 → project priority by logical name; estimation written on create only, never re-sent on update (FR-017, FR-018) in `tests/bash/sink/test_plan_apply_content.bats` and `tests/powershell/sink/PlanApply.Content.Tests.ps1`
+- [X] T053 [P] [US3] Action-set parity: neutral doc built + schema-validated before write, both ports emit an identical create/update action set in `tests/conformance/scenarios/us3-ticket-content.json`
 
 ### Implementation for User Story 3
 
-- [ ] T054 [US3] Implement the engine parser (title ladder, description synthesis, Gherkin, Design, priority, estimation, user_stories, tasks — zero Jira identifiers) in `.specify/extensions/jira/scripts/bash/engine/parse.sh` and `.specify/extensions/jira/scripts/powershell/engine/Parse.psm1`
-- [ ] T055 [US3] Implement neutral-doc assembly + validation (build from parse output, validate via T021) in `.specify/extensions/jira/scripts/bash/engine/interchange.sh` and `.specify/extensions/jira/scripts/powershell/engine/Interchange.psm1`
-- [ ] T056 [US3] Implement neutral-blocks → ADF rendering (panels for Gherkin, heading+section for Design) in `.specify/extensions/jira/scripts/bash/sink/jira/adf.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Adf.psm1`
-- [ ] T057 [US3] Implement the ticket identity marker (entity property read/write, origin, per-project scope, research §5) in `.specify/extensions/jira/scripts/bash/sink/jira/identity.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Identity.psm1`
-- [ ] T058 [US3] Implement `plan_writes` + `apply_writes` (resolve logical→id, ordered create/update/transition/comment/link/label action set, estimation create-only) in `.specify/extensions/jira/scripts/bash/sink/jira/plan_apply.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PlanApply.psm1`
-- [ ] T059 [US3] Implement the `reconcile` command wiring engine → sink → summary (BLOCK guard from US11) in `.specify/extensions/jira/scripts/bash/commands/reconcile.sh` and `.specify/extensions/jira/scripts/powershell/commands/Reconcile.psm1`
+- [X] T054 [US3] Implement the engine parser (title ladder, description synthesis, Gherkin, Design, priority, estimation, user_stories, tasks — zero Jira identifiers) in `.specify/extensions/jira/scripts/bash/engine/parse.sh` and `.specify/extensions/jira/scripts/powershell/engine/Parse.psm1`
+- [X] T055 [US3] Implement neutral-doc assembly + validation (build from parse output, validate via T021) in `.specify/extensions/jira/scripts/bash/engine/interchange.sh` and `.specify/extensions/jira/scripts/powershell/engine/Interchange.psm1`
+- [X] T056 [US3] Implement neutral-blocks → ADF rendering (panels for Gherkin, heading+section for Design) in `.specify/extensions/jira/scripts/bash/sink/jira/adf.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Adf.psm1`
+- [X] T057 [US3] Implement the ticket identity marker (entity property read/write, origin, per-project scope, research §5) in `.specify/extensions/jira/scripts/bash/sink/jira/identity.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Identity.psm1`
+- [X] T058 [US3] Implement `plan_writes` + `apply_writes` (resolve logical→id, ordered create/update/transition/comment/link/label action set, estimation create-only) in `.specify/extensions/jira/scripts/bash/sink/jira/plan_apply.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PlanApply.psm1`
+- [X] T059 [US3] Implement the `reconcile` command wiring engine → sink → summary (BLOCK guard from US11) in `.specify/extensions/jira/scripts/bash/commands/reconcile.sh` and `.specify/extensions/jira/scripts/powershell/commands/Reconcile.psm1`
 
 **Checkpoint**: Reconcile creates and updates rich, non-empty tickets from a spec corpus.
 

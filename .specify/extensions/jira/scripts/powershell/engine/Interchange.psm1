@@ -8,6 +8,8 @@
 
 Set-StrictMode -Version Latest
 
+Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force # canonical serialiser only — lib/, never sink/
+
 function Test-JiraInterchangeProp {
     param($Object, [string] $Name)
     if ($null -eq $Object) { return $false }
@@ -90,4 +92,42 @@ function Test-JiraInterchange {
     return $false
 }
 
-Export-ModuleMember -Function Test-JiraInterchange
+function Build-JiraNeutralDocument {
+    <#
+    .SYNOPSIS
+      Assemble the neutral document from the parse output plus routing/strategy
+      decisions, then validate it. Mirror of interchange_build (US3, T055).
+      Returns a pscustomobject { Valid; Document }; Document is the canonical JSON
+      when valid, empty otherwise. A validation failure blocks downstream writes.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $ParseJson, [Parameter(Mandatory)] [string] $ContextJson)
+    $parse = $ParseJson | ConvertFrom-Json -Depth 100
+    $ctx = $ContextJson | ConvertFrom-Json -Depth 100
+
+    $projectKey = [string](Get-JiraInterchangeProp $ctx 'project_key')
+    $strategy = [string](Get-JiraInterchangeProp $ctx 'epic_strategy')
+    $specRef = Get-JiraInterchangeProp $ctx 'spec_ref'
+    $epic = Get-JiraInterchangeProp $parse 'epic'
+    $epicTitle = [string](Get-JiraInterchangeProp $epic 'title')
+    $epicDesc = Get-JiraInterchangeProp $epic 'description'
+    if ($null -eq $epicDesc) { $epicDesc = [ordered]@{ blocks = @() } }
+    $stories = Get-JiraInterchangeProp $parse 'stories'
+    if ($null -eq $stories) { $stories = @() }
+
+    $doc = [ordered]@{
+        schema_version = '1.0'
+        spec_ref       = $specRef
+        routing        = [ordered]@{ project_key = $projectKey }
+        epic           = [ordered]@{ strategy = $strategy; title = $epicTitle; description = $epicDesc }
+        stories        = @($stories)
+    }
+    $json = ConvertTo-JiraJsonValue $doc
+
+    if (-not (Test-JiraInterchange $json)) {
+        return [pscustomobject]@{ Valid = $false; Document = '' }
+    }
+    return [pscustomobject]@{ Valid = $true; Document = $json }
+}
+
+Export-ModuleMember -Function Test-JiraInterchange, Build-JiraNeutralDocument

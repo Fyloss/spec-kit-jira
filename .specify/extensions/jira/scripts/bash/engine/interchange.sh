@@ -11,6 +11,10 @@
 [[ -n ${_JIRA_ENGINE_INTERCHANGE:-} ]] && return 0
 _JIRA_ENGINE_INTERCHANGE=1
 
+_interchange_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${_interchange_dir}/../lib/output.sh" # json_canonical only — lib/, never sink/
+
 # The validation program: emits a JSON array of human-readable error strings
 # (empty array => valid). Kept as a jq program so the rules are declarative.
 _INTERCHANGE_ERRORS_JQ='
@@ -56,4 +60,36 @@ interchange_validate() {
     printf 'interchange: %s\n' "${line}" >&2
   done
   return 1
+}
+
+# interchange_build <parse-json> <context-json> — assemble the neutral document
+# from the engine's parse output plus the routing/strategy decisions the parser
+# does not own (US3, T055). The parser produces the CONTENT (epic title +
+# description, stories); the assembly injects `spec_ref`, `routing.project_key`,
+# and the `epic.strategy` from config. The result is VALIDATED against the schema
+# before it is returned: an invalid document surfaces an error and returns
+# non-zero — a validation failure blocks every downstream write (Constitution VIII).
+#
+# context-json: { spec_ref:{repo,spec_slug,folder}, project_key, epic_strategy }
+interchange_build() {
+  local parse="$1" ctx="$2" doc
+
+  doc="$(jq -cn \
+    --argjson parse "${parse}" --argjson ctx "${ctx}" '
+    {
+      schema_version: "1.0",
+      spec_ref: $ctx.spec_ref,
+      routing: { project_key: ($ctx.project_key // "") },
+      epic: {
+        strategy: ($ctx.epic_strategy // ""),
+        title: ($parse.epic.title // ""),
+        description: ($parse.epic.description // {blocks: []})
+      },
+      stories: ($parse.stories // [])
+    }' | json_canonical)"
+
+  if ! printf '%s' "${doc}" | interchange_validate; then
+    return 1
+  fi
+  printf '%s' "${doc}"
 }
