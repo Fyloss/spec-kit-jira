@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-kit-jira/contracts/neutral-interchange.schema.json",
+  "title": "Neutral Interchange Document",
+  "description": "The ONLY object crossing the engine to Jira-sink interface (Constitution VIII). Built by the engine, schema-validated before any write. Carries zero Jira identifiers: logical/neutral values only; the sink resolves them to ids. Any Atlassian-specific identifier appearing here is a schema violation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "spec_ref", "routing", "epic", "stories"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Neutral document schema version; bumped in the same change that alters this schema."
+    },
+    "spec_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "spec_slug", "folder"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "spec_slug": { "type": "string", "pattern": "^[0-9]{3}-[a-z0-9-]+$" },
+        "folder": { "type": "string", "minLength": 1 }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_key"],
+      "properties": {
+        "project_key": {
+          "type": "string",
+          "description": "Resolved by the engine from routing rules. A project KEY (public within the org), never a site URL, id, or coordinate.",
+          "pattern": "^[A-Z][A-Z0-9_]+$"
+        }
+      }
+    },
+    "epic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy", "title", "description"],
+      "properties": {
+        "strategy": { "enum": ["per_repo", "per_feature"] },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "$ref": "#/$defs/content_blocks" }
+      }
+    },
+    "stories": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/story" }
+    }
+  },
+  "$defs": {
+    "story": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local_id", "title", "description", "priority_logical"],
+      "properties": {
+        "local_id": { "type": "string", "minLength": 1, "description": "Engine-local id, stable across runs; NOT a Jira key." },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Derived from the title ladder (FR-013); never empty, never from a ## Summary section."
+        },
+        "description": { "$ref": "#/$defs/content_blocks" },
+        "acceptance_criteria": {
+          "type": "array",
+          "description": "Given/When/Then blocks (FR-015).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["given", "when", "then"],
+            "properties": {
+              "given": { "type": "array", "items": { "type": "string" } },
+              "when": { "type": "array", "items": { "type": "string" } },
+              "then": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "design": {
+          "type": "array",
+          "description": "Figma links and UX/UI guidance for the Design section (FR-016).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "value"],
+            "properties": {
+              "kind": { "enum": ["figma_link", "guidance"] },
+              "label": { "type": "string" },
+              "value": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "priority_logical": {
+          "type": "string",
+          "enum": ["P1", "P2", "P3"],
+          "description": "Spec priority; the sink maps it to the project's priority field by logical name (FR-017). Never a Jira priority id."
+        },
+        "estimation": {
+          "type": ["number", "null"],
+          "description": "Declared estimation, create-only; the sink writes it to the discovered estimation field and never re-sends on update (FR-018)."
+        },
+        "tasks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/task" }
+        }
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local_id", "title", "relation"],
+      "properties": {
+        "local_id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "relation": {
+          "enum": ["subtask", "linked_story"],
+          "description": "Task strategy chosen explicitly in config (FR-009)."
+        },
+        "link_type_logical": {
+          "type": "string",
+          "description": "Required iff relation = linked_story; logical link-type name resolved by the sink."
+        }
+      }
+    },
+    "content_blocks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blocks"],
+      "description": "A neutral, Jira-agnostic block tree. The sink renders it to ADF. NO ADF node names appear here.",
+      "properties": {
+        "blocks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "enum": ["heading", "paragraph", "bullet_list", "code", "panel_ref"],
+                "description": "Neutral block kinds. 'panel_ref' marks where the sink should place a panel (e.g. acceptance criteria); the engine does not know what a Jira panel is."
+              },
+              "level": { "type": "integer", "minimum": 1, "maximum": 6 },
+              "text": { "type": "string" },
+              "items": { "type": "array", "items": { "type": "string" } },
+              "ref": { "type": "string", "description": "For panel_ref: a logical section name, e.g. 'acceptance_criteria' or 'design'." }
+            }
+          }
+        }
+      }
+    }
+  }
+}
