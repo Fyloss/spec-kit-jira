@@ -30,7 +30,7 @@ The technical approach is a **neutral reconcile engine** (parse spec artifacts �
 
 **Constraints**: Zero tokens in the tree, ever, and never in argv/logs/traces (NFR-3, eliminatory). Any repository-written output (managed README block, neutral interchange document, run summaries) MUST be byte-identical between ports (Constitution VI). The engine MUST contain zero Jira knowledge (Constitution VIII, grep-enforced). Never write under `.specify/scripts/` or `.specify/templates/` (Spec Kit core; FR-055). Jira Cloud only — no Data Center/Server.
 
-**Scale/Scope**: Enterprise: multiple teams, multiple Jira projects per repository (mixed company-managed/team-managed), heterogeneous workflows (Scrum/Kanban/SAFe). Twelve user stories (7×P1, 4×P2, 2×P3 — US11 privacy BLOCK is P1), 55 functional requirements, 6 non-functional requirements, 9 measurable success criteria. No `NEEDS CLARIFICATION` remain (the command-name gate was operator-confirmed to `/speckit.jira.config` on 2026-07-23).
+**Scale/Scope**: Enterprise: multiple teams, multiple Jira projects per repository (mixed company-managed/team-managed), heterogeneous workflows (Scrum/Kanban/SAFe). Twelve user stories (6×P1, 4×P2, 2×P3 — US11 privacy BLOCK is P1), 55 functional requirements, 6 non-functional requirements, 9 measurable success criteria. No `NEEDS CLARIFICATION` remain (the command-name gate was operator-confirmed to `/speckit.jira.config` on 2026-07-23).
 
 ## Constitution Check
 
@@ -89,8 +89,7 @@ The extension is a Spec Kit extension: its runtime scripts, templates, and versi
 
 ```text
 .specify/extensions/jira/
-├── VERSION                       # SINGLE source of truth for the version (FR-021/022); no other version string in the tree
-├── extension.yml                 # Extension metadata (id, catalog name, version pointer)
+├── extension.yml                 # Extension metadata (id, catalog name, version) — the SINGLE source of truth for the version (FR-021/022); no other version string in the tree, grep-enforced by SC-006
 ├── CHANGELOG.md                  # SemVer changelog (Constitution XII)
 │
 ├── scripts/
@@ -173,7 +172,7 @@ tests/
 .github/workflows/                # Three-OS matrix, engine/sink grep gates, coverage gate, version-string grep
 ```
 
-**Structure Decision**: A **twin-port, single-engine/sink-interface** layout. The two ports (`scripts/bash/` and `scripts/powershell/`) mirror each other **module-for-module — same count, one `*.psm1` per `*.sh`** (22 modules + 1 entry point each) — so the conformance corpus can prove behavioural equivalence (NFR-1). No command is Bash-only (NFR-2): the PowerShell port is not a reduced subset, it is a strict mirror; the only differences are language-idiomatic (PascalCase module names, in-process token handling vs. `curl --config`). A future `git diff`-style module-parity check (same set of leaf names, modulo the `.sh`↔`.psm1` mapping) belongs in the CI gates alongside the engine/sink greps. Within each port, three concentric layers keep the constitution's boundaries mechanically greppable: `lib/` (port infrastructure, no domain knowledge), `engine/` (neutral reconcile — zero Jira identifiers, never sources/imports `sink/`), and `sink/jira/` (all Jira knowledge). The single source of truth for the version is `.specify/extensions/jira/VERSION` (FR-021/022) — note the pre-existing `.gitignore` entry for `.specify/jira/VERSION.local` will be removed during implementation, since FR-022 forbids any hand-maintained version marker. Everything the extension owns lives under `.specify/extensions/jira/`; Spec Kit core's `.specify/scripts/` and `.specify/templates/` are never touched (FR-055, SC-009).
+**Structure Decision**: A **twin-port, single-engine/sink-interface** layout. The two ports (`scripts/bash/` and `scripts/powershell/`) mirror each other **module-for-module — same count, one `*.psm1` per `*.sh`** (22 modules + 1 entry point each) — so the conformance corpus can prove behavioural equivalence (NFR-1). No command is Bash-only (NFR-2): the PowerShell port is not a reduced subset, it is a strict mirror; the only differences are language-idiomatic (PascalCase module names, in-process token handling vs. `curl --config`). A future `git diff`-style module-parity check (same set of leaf names, modulo the `.sh`↔`.psm1` mapping) belongs in the CI gates alongside the engine/sink greps. Within each port, three concentric layers keep the constitution's boundaries mechanically greppable: `lib/` (port infrastructure, no domain knowledge), `engine/` (neutral reconcile — zero Jira identifiers, never sources/imports `sink/`), and `sink/jira/` (all Jira knowledge). The single source of truth for the version is the `version` field of `.specify/extensions/jira/extension.yml` — the metadata already shipped with the extension (FR-021), so no separate version marker is introduced; FR-022 forbids any other hand-maintained version marker, and the pre-existing `.gitignore` entry for `.specify/jira/VERSION.local` will be removed during implementation for the same reason. Everything the extension owns lives under `.specify/extensions/jira/`; Spec Kit core's `.specify/scripts/` and `.specify/templates/` are never touched (FR-055, SC-009).
 
 ## Complexity Tracking
 

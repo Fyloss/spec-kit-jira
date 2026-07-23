@@ -22,7 +22,7 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 - **Bash port**: `.specify/extensions/jira/scripts/bash/` → `spec-kit-jira.sh`, `lib/`, `engine/`, `sink/jira/`, `commands/`, `hooks/`
 - **PowerShell port**: `.specify/extensions/jira/scripts/powershell/` → `spec-kit-jira.ps1`, `lib/`, `engine/`, `sink/jira/`, `commands/`, `hooks/`
-- **Extension metadata**: `.specify/extensions/jira/` → `VERSION`, `extension.yml`, `CHANGELOG.md`, `templates/`
+- **Extension metadata**: `.specify/extensions/jira/` → `extension.yml` (holds the version), `CHANGELOG.md`, `templates/`
 - **Agent command file**: `commands/speckit.jira.config.md` (outside `.specify/`)
 - **Team config (consuming repo)**: `.specify/jira/config.yml`, `.specify/jira/config.local.yml`, `.specify/jira/.env`
 - **Tests**: `tests/bash/`, `tests/powershell/`, `tests/conformance/{run-scenario.sh,scenarios/,fixtures/,mock-jira/}`, `tests/live/`
@@ -37,11 +37,11 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 **Purpose**: Create the twin-port skeleton, version single-source, test tree, lint config, and CI shell.
 
 - [ ] T001 Create the twin-port directory skeleton: `.specify/extensions/jira/scripts/bash/{lib,engine,sink/jira,commands,hooks}/` and `.specify/extensions/jira/scripts/powershell/{lib,engine,sink/jira,commands,hooks}/` and `.specify/extensions/jira/templates/`
-- [ ] T002 [P] Create the single version source `.specify/extensions/jira/VERSION`, extension metadata `.specify/extensions/jira/extension.yml` (id, catalog name, version pointer), and `.specify/extensions/jira/CHANGELOG.md` (SemVer, initial entry)
+- [ ] T002 [P] Create the extension metadata `.specify/extensions/jira/extension.yml` (id, catalog name, and the `version` field — the SINGLE source of truth for the version, the only place the version literal appears in the tree, FR-021/022) and `.specify/extensions/jira/CHANGELOG.md` (SemVer, initial entry)
 - [ ] T003 [P] Create the test tree: `tests/bash/{lib,engine,sink,commands}/`, `tests/powershell/{lib,engine,sink,commands}/`, `tests/conformance/{scenarios,fixtures,mock-jira}/`, `tests/live/`
 - [ ] T004 [P] Add Bash lint/format config at repo root: `.shellcheckrc` and shfmt settings in `.editorconfig`
 - [ ] T005 [P] Add PowerShell lint config `PSScriptAnalyzerSettings.psd1` at repo root
-- [ ] T006 [P] Update `.gitignore`: remove the stale `.specify/jira/VERSION.local` line (FR-022 forbids any hand-maintained version marker) and add `.specify/jira/config.local.yml` and `.specify/jira/.env`
+- [ ] T006 [P] Update `.gitignore`: remove the stale `.specify/jira/VERSION.local` line (FR-022 forbids any hand-maintained version marker). Note: `.specify/jira/config.local.yml` and `.specify/jira/.env` are already gitignored — verify they remain present (do not re-add duplicates)
 - [ ] T007 [P] Create the self-documenting `.specify/extensions/jira/templates/config.yml.template` (business-language keys + comments, Constitution XVI) and `.specify/extensions/jira/templates/readme-block.template`
 
 **Checkpoint**: Skeleton, version source, and test tree exist — foundational work can begin.
@@ -84,7 +84,7 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 - [ ] T025 [P] CI: three-OS matrix (ubuntu / macos / windows) running bats + Pester unit suites and the conformance corpus in `.github/workflows/ci.yml`
 - [ ] T026 [P] CI: engine/sink boundary greps — #1 no `engine/` script sources/imports `sink/`; #2 no `engine/` script contains any Atlassian identifier (issue-key regex, `atlassian.net`, `createmeta`, ADF node names, field ids); grep builds the vendor token from split literals — in `.github/workflows/boundary.yml`
-- [ ] T027 [P] CI: coverage gate (kcov Bash ≥ 80% PRIMARY with traceability FALLBACK, Pester CodeCoverage ≥ 80%), module-parity check (same leaf set modulo `.sh`↔`.psm1`), and version-string grep (SC-006: no version string outside `.specify/extensions/jira/`) in `.github/workflows/gates.yml`
+- [ ] T027 [P] CI: coverage gate (kcov Bash ≥ 80% PRIMARY with traceability FALLBACK, Pester CodeCoverage ≥ 80%), module-parity check (same leaf set modulo `.sh`↔`.psm1`), and version-string grep (SC-006: no version string outside `.specify/extensions/jira/`; and within that folder the version literal appears only in the `version` field of `extension.yml`, never duplicated elsewhere, per FR-021/022) in `.github/workflows/gates.yml`
 
 **Checkpoint**: Infrastructure ready — user story implementation can begin.
 
@@ -107,7 +107,7 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 - [ ] T030 [US4] Implement config load/merge (`config.yml` + `config.local.yml`) and schema validation against `contracts/config.schema.json` / `contracts/config.local.schema.json` in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
 - [ ] T031 [US4] Implement credential-shape rejection (ATATT prefix, real `*.atlassian.net`, email/token shapes) in both YAML layers with exit code 4 in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
-- [ ] T032 [US4] Implement the single-source version reader (reads `.specify/extensions/jira/VERSION`; asserts absence of `.specify/jira/VERSION`) consumed by config command, README markers, run summary, and upgrade check in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
+- [ ] T032 [US4] Implement the single-source version reader (reads the `version` field of `.specify/extensions/jira/extension.yml`; asserts absence of `.specify/jira/VERSION` and any other hand-maintained version marker) consumed by config command, README markers, run summary, and upgrade check in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
 
 **Checkpoint**: Config storage, credential rejection, and version single-sourcing work independently.
 
@@ -123,7 +123,7 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 - [ ] T033 [P] [US2] Style-detection + company-managed discovery (scheme-based endpoints, research §1/§2) against the mocked double in `tests/bash/sink/test_discovery_company.bats`, `tests/powershell/sink/Discovery.Company.Tests.ps1`, and `tests/conformance/scenarios/us2-company-managed-discovery.json`
 - [ ] T034 [P] [US2] Team-managed discovery (project-scoped, research §3): estimation-field heuristic ranking + operator confirmation (never the global Story Points field, no literal name), hierarchy limited to Epic/Sub-task in `tests/bash/sink/test_discovery_team.bats`, `tests/powershell/sink/Discovery.Team.Tests.ps1`, and `tests/conformance/scenarios/us2-team-managed-discovery.json`
-- [ ] T035 [P] [US2] Status classification into `mapped`/`post-scope`/`halted`/`unknown` (statusCategory-seeded + operator, research §4) and many-to-one phase→status mapping in `tests/bash/sink/test_status_classification.bats` and `tests/powershell/sink/StatusClassification.Tests.ps1`
+- [ ] T035 [P] [US2] Status classification into `mapped`/`post-scope`/`halted`/`unknown` (statusCategory-seeded + operator, research §4) and many-to-one phase→status mapping; assert no built-in "ideal" status/phase default table is shipped and the operator's configured workflow is authoritative (FR-012) in `tests/bash/sink/test_status_classification.bats` and `tests/powershell/sink/StatusClassification.Tests.ps1`
 - [ ] T036 [P] [US2] Config-time refusal of a team-managed level-above-Epic (FR-007, exit 4 naming limitation + style) in `tests/bash/commands/test_config_refusal.bats` and `tests/powershell/commands/Config.Refusal.Tests.ps1`
 
 ### Implementation for User Story 2
@@ -149,7 +149,7 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 - [ ] T041 [P] [US1] Byte-identical re-run (FR-003, SC-004) + both-ports-identical `config.yml` in `tests/conformance/scenarios/us1-config-idempotent.json`
 - [ ] T042 [P] [US1] Every step is API-read / config-read / closed enumerated question with machine-readable key/value or JSON output (FR-001, FR-002) in `tests/bash/commands/test_config_determinism.bats` and `tests/powershell/commands/Config.Determinism.Tests.ps1`
-- [ ] T043 [P] [US1] Run summary reports the three effects (discovery / hooks / README) separately (FR-054) in `tests/bash/commands/test_config_three_effects.bats` and `tests/powershell/commands/Config.ThreeEffects.Tests.ps1`
+- [ ] T043 [P] [US1] Run summary reports the three effects (discovery / hooks / README) separately (FR-054) in `tests/bash/commands/test_config_three_effects.bats` and `tests/powershell/commands/Config.ThreeEffects.Tests.ps1`. **Scope note**: at this phase only the discovery effect is wired, so this task asserts the summary *structure* (all three effects reported as distinct sections). The assertion that the hooks and README effects actually *perform their writes* is completed when T065 (README wiring, Phase 8) and T085 (hook wiring, Phase 12) land — extend this scenario there rather than duplicating it.
 
 ### Implementation for User Story 1
 
@@ -157,7 +157,7 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 - [ ] T045 [US1] Author the agent command file with the exact, ordered, model-independent algorithm (closed enumerated questions only, no inferred keys/fields) in `commands/speckit.jira.config.md`
 - [ ] T046 [US1] Implement three-effect run-summary reporting (discovery / hooks / README reported separately) in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
 
-**Checkpoint 🎯 MVP**: The config command produces a byte-identical, deterministic `config.yml` on both ports — the feature's entry point is usable.
+**Checkpoint 🎯 MVP**: The config command produces a byte-identical, deterministic `config.yml` on both ports — the feature's entry point is usable. The discovery effect and the three-effect summary *structure* are validated here; US1's full Independent Test ("one run performs all three effects") is only satisfiable once the README effect (T065, Phase 8) and the hook effect (T085, Phase 12) are wired — the three-effect assertion is completed at Phase 12, not here.
 
 ---
 
