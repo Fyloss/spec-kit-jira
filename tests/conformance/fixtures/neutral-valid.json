@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "spec_ref": {
+    "repo": "acme/app",
+    "spec_slug": "001-jira-reconcile-engine",
+    "folder": "specs/001-jira-reconcile-engine"
+  },
+  "routing": { "project_key": "PROJ" },
+  "epic": {
+    "strategy": "per_repo",
+    "title": "Repository Epic",
+    "description": { "blocks": [{ "type": "paragraph", "text": "The repo epic." }] }
+  },
+  "stories": [
+    {
+      "local_id": "s1",
+      "title": "A user story",
+      "description": { "blocks": [{ "type": "paragraph", "text": "As a user..." }] },
+      "priority_logical": "P1"
+    }
+  ]
+}

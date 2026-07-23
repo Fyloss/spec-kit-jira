@@ -27,3 +27,42 @@ uri_encode() {
   encoded="$(jq -rn --arg s "$1" '$s|@uri')"
   printf '%s' "${encoded//%20/+}"
 }
+
+# output_warn <message> — the WARNING channel (NFR-5). Always to stderr so it
+# never contaminates a --json summary on stdout.
+output_warn() {
+  printf 'WARNING: %s\n' "$1" >&2
+}
+
+# summary_build_json <command> <dry_run> <created> <updated> <skipped> <warnings> <errors> <exit_code>
+# Build the canonical --json run summary (run-summary.schema.json). Commands may
+# extend the object; this is the required core.
+summary_build_json() {
+  jq -cn \
+    --arg cmd "$1" --argjson dry "$2" \
+    --argjson c "$3" --argjson u "$4" --argjson s "$5" \
+    --argjson w "$6" --argjson e "$7" --argjson x "$8" \
+    '{schema_version:"1.0",command:$cmd,dry_run:$dry,counts:{created:$c,updated:$u,skipped:$s,warnings:$w,errors:$e},exit_code:$x}' \
+    | json_canonical
+}
+
+# summary_render_prose — read a run-summary JSON on stdin, render human prose
+# (the default output). Byte-identical to the PowerShell port.
+summary_render_prose() {
+  local json
+  json="$(cat)"
+  local command dry created updated skipped warnings errors exit_code suffix=""
+  command="$(jq -r '.command' <<< "${json}")"
+  dry="$(jq -r '.dry_run // false' <<< "${json}")"
+  created="$(jq -r '.counts.created' <<< "${json}")"
+  updated="$(jq -r '.counts.updated' <<< "${json}")"
+  skipped="$(jq -r '.counts.skipped' <<< "${json}")"
+  warnings="$(jq -r '.counts.warnings' <<< "${json}")"
+  errors="$(jq -r '.counts.errors' <<< "${json}")"
+  exit_code="$(jq -r '.exit_code' <<< "${json}")"
+  [[ "${dry}" == "true" ]] && suffix=" (dry-run)"
+  printf 'Command: %s%s\n' "${command}" "${suffix}"
+  printf 'Created: %s, Updated: %s, Skipped: %s\n' "${created}" "${updated}" "${skipped}"
+  printf 'Warnings: %s, Errors: %s\n' "${warnings}" "${errors}"
+  printf 'Exit: %s\n' "${exit_code}"
+}

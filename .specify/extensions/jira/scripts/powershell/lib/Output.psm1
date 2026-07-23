@@ -121,4 +121,66 @@ function ConvertTo-JiraUriComponent {
     return $sb.ToString().Replace('%20', '+')
 }
 
-Export-ModuleMember -Function ConvertTo-JiraCanonicalJson, ConvertTo-JiraUriComponent, ConvertTo-JiraJsonValue, ConvertTo-JiraJsonString
+function Write-JiraWarning {
+    # The WARNING channel (NFR-5). Always to stderr so it never contaminates a
+    # --json summary on stdout.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $Message)
+    [Console]::Error.WriteLine("WARNING: $Message")
+}
+
+function New-JiraSummaryJson {
+    <#
+    .SYNOPSIS
+      Build the canonical --json run summary (run-summary.schema.json). Byte-identical
+      to the Bash port's summary_build_json.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Command,
+        [bool] $DryRun = $false,
+        [int] $Created = 0,
+        [int] $Updated = 0,
+        [int] $Skipped = 0,
+        [int] $Warnings = 0,
+        [int] $Errors = 0,
+        [int] $ExitCode = 0
+    )
+    $obj = @{
+        schema_version = '1.0'
+        command        = $Command
+        dry_run        = [bool]$DryRun
+        counts         = @{
+            created  = $Created
+            updated  = $Updated
+            skipped  = $Skipped
+            warnings = $Warnings
+            errors   = $Errors
+        }
+        exit_code      = $ExitCode
+    }
+    return ConvertTo-JiraJsonValue $obj
+}
+
+function ConvertTo-JiraSummaryProse {
+    <#
+    .SYNOPSIS
+      Render a run-summary JSON document as human prose. Byte-identical to the
+      Bash port's summary_render_prose.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $Json)
+    $s = $Json | ConvertFrom-Json
+    $suffix = if ($s.dry_run) { ' (dry-run)' } else { '' }
+    $lines = @(
+        "Command: $($s.command)$suffix",
+        "Created: $($s.counts.created), Updated: $($s.counts.updated), Skipped: $($s.counts.skipped)",
+        "Warnings: $($s.counts.warnings), Errors: $($s.counts.errors)",
+        "Exit: $($s.exit_code)"
+    )
+    return (($lines -join "`n") + "`n")
+}
+
+Export-ModuleMember -Function ConvertTo-JiraCanonicalJson, ConvertTo-JiraUriComponent, `
+    ConvertTo-JiraJsonValue, ConvertTo-JiraJsonString, Write-JiraWarning, `
+    New-JiraSummaryJson, ConvertTo-JiraSummaryProse
