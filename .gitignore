@@ -1,0 +1,21 @@
+.serena/
+
+# Go
+bin/
+dist/
+*.out
+*.test
+*.prof
+
+# spec-kit-jira: gitignored personal config, secrets, resolved bindings
+.specify/jira/config.local.yml
+.specify/jira/.env
+.specify/jira/VERSION.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Headroom
+.claude/.headroom_wrap_marker.json
+.tokensave/
