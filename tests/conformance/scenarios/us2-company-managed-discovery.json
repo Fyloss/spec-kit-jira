@@ -1,0 +1,14 @@
+{
+  "name": "us2-company-managed-discovery",
+  "description": "Company-managed (classic) project discovery: style detected first, then the scheme-based per-style path. Both ports must produce a byte-identical binding, exit code, and Jira API call sequence (NFR-1). Discovery parity is asserted directly in tests/bash/sink/test_discovery_company.bats; this golden scenario is wired end-to-end through the config command in US1.",
+  "mock": {
+    "projects": { "COMP": "company" }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-config",
+  "argv": ["config", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1"
+  }
+}

@@ -26,6 +26,8 @@ _JIRA_LIB_CONFIG=1
 : "${JIRA_CONFIG_DIR:=.specify/jira}"
 
 _CONFIG_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${_CONFIG_LIB_DIR}/output.sh"   # json_canonical (byte-parity serialiser)
 
 # =============================================================================
 # Version single-source (T032, FR-021/FR-022)
@@ -272,6 +274,42 @@ _cfg_credential_errors() {
           else empty end )
     ] | .[]
   ' 2> /dev/null
+}
+
+# =============================================================================
+# Status classification + phase->status mapping (T039, FR-011/FR-034)
+# =============================================================================
+
+# config_classify_statuses <statuses-json> [phase-status-map-json] [halted-json]
+# Classify each discovered status into mapped|post-scope|halted|unknown. The
+# classification is SEEDED objectively from Jira's statusCategory (done ->
+# post-scope, everything else -> unknown) and refined by the operator: a status a
+# phase maps to is `mapped` (overriding the done seed, research §4); an operator-
+# designated stop state is `halted`. There is NO built-in "ideal" status/phase
+# default table — the operator's configured workflow is authoritative (FR-012).
+# Prints the canonical {status_name: category} object.
+config_classify_statuses() {
+  local statuses="$1" psmap="${2:-}" halted="${3:-}"
+  [[ -z "${psmap}" ]] && psmap='{}'
+  [[ -z "${halted}" ]] && halted='[]'
+  jq -n --argjson st "${statuses}" --argjson pm "${psmap}" --argjson hd "${halted}" '
+    ($pm | [.[]]) as $targets
+    | reduce $st[] as $s ({};
+        .[$s.name] = (
+          if ($s.name | IN($targets[])) then "mapped"
+          elif ($s.name | IN($hd[])) then "halted"
+          elif ($s.status_category == "done") then "post-scope"
+          else "unknown" end))
+  ' | json_canonical
+}
+
+# config_phase_status_targets <phase-status-map-json> — the DISTINCT statuses a
+# phase->status map resolves to. Many-to-one: two consecutive phases on one
+# status collapse to a single target, so no transition is produced (FR-011).
+config_phase_status_targets() {
+  local psmap="${1:-}"
+  [[ -z "${psmap}" ]] && psmap='{}'
+  jq -n --argjson pm "${psmap}" '[ $pm[] ] | unique' | json_canonical
 }
 
 # =============================================================================

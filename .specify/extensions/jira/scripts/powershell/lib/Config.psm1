@@ -425,6 +425,68 @@ function Import-JiraConfig {
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue $merged); Errors = @() }
 }
 
+# =============================================================================
+# Status classification + phase->status mapping (T039, FR-011/FR-034)
+# Mirror of config_classify_statuses / config_phase_status_targets.
+# =============================================================================
+
+function Get-JiraStatusClassification {
+    <#
+    .SYNOPSIS
+      Classify each discovered status into mapped|post-scope|halted|unknown,
+      seeded from statusCategory and refined by the operator (research §4). No
+      built-in default table (FR-012). Returns the canonical {name:category} JSON.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $StatusesJson,
+        [string] $PhaseStatusMapJson = '{}',
+        [string] $HaltedJson = '[]'
+    )
+    $statuses = $StatusesJson | ConvertFrom-Json -Depth 100
+    $pm = $PhaseStatusMapJson | ConvertFrom-Json -Depth 100
+    $halted = @($HaltedJson | ConvertFrom-Json -Depth 100)
+
+    $targets = [System.Collections.Generic.List[string]]::new()
+    if ($pm -is [System.Management.Automation.PSCustomObject]) {
+        foreach ($p in $pm.PSObject.Properties) { $targets.Add([string] $p.Value) }
+    }
+    $haltedSet = [System.Collections.Generic.HashSet[string]]::new()
+    foreach ($h in $halted) { [void]$haltedSet.Add([string] $h) }
+
+    $out = [ordered]@{}
+    foreach ($s in $statuses) {
+        $name = [string] $s.name
+        $category =
+            if ($targets.Contains($name)) { 'mapped' }
+            elseif ($haltedSet.Contains($name)) { 'halted' }
+            elseif ($s.status_category -eq 'done') { 'post-scope' }
+            else { 'unknown' }
+        $out[$name] = $category
+    }
+    return (ConvertTo-JiraJsonValue $out)
+}
+
+function Get-JiraPhaseStatusTargetSet {
+    <#
+    .SYNOPSIS
+      The DISTINCT statuses a phase->status map resolves to (many-to-one collapses
+      to a single target, FR-011). Returns the canonical sorted-unique JSON array.
+    #>
+    [CmdletBinding()]
+    param([string] $PhaseStatusMapJson = '{}')
+    $pm = $PhaseStatusMapJson | ConvertFrom-Json -Depth 100
+    $values = [System.Collections.Generic.List[string]]::new()
+    if ($pm -is [System.Management.Automation.PSCustomObject]) {
+        foreach ($p in $pm.PSObject.Properties) { $values.Add([string] $p.Value) }
+    }
+    # `unique` in jq sorts ascending; mirror with an ordinal sort of distinct values.
+    $distinct = [System.Collections.Generic.List[object]]::new()
+    foreach ($v in ($values | Sort-Object -Culture Ordinal -Unique)) { $distinct.Add($v) }
+    return (ConvertTo-JiraJsonValue $distinct)
+}
+
 Export-ModuleMember -Function Get-JiraExtensionVersion, Assert-JiraSingleVersionSource, `
     ConvertFrom-JiraConfigYaml, Read-JiraConfigYamlObject, Get-JiraConfigCredentialError, `
-    Test-JiraTeamConfig, Test-JiraLocalConfig, Import-JiraConfig
+    Test-JiraTeamConfig, Test-JiraLocalConfig, Import-JiraConfig, `
+    Get-JiraStatusClassification, Get-JiraPhaseStatusTargetSet
