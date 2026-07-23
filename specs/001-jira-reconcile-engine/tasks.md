@@ -100,14 +100,14 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T028 [P] [US4] Config-schema tests: credential-shaped values rejected in both layers (FR-023, exit 4); `config.yml`/`config.local.yml` split; no version marker outside the extension (SC-006) in `tests/bash/lib/test_config.bats` and `tests/powershell/lib/Config.Tests.ps1`
-- [ ] T029 [P] [US4] Reinstall/upgrade preservation conformance scenario (config.yml + config.local.yml survive intact, FR-020) in `tests/conformance/scenarios/us4-reinstall-preserves-config.json`
+- [X] T028 [P] [US4] Config-schema tests: credential-shaped values rejected in both layers (FR-023, exit 4); `config.yml`/`config.local.yml` split; no version marker outside the extension (SC-006) in `tests/bash/lib/test_config.bats` and `tests/powershell/lib/Config.Tests.ps1`
+- [X] T029 [P] [US4] Reinstall/upgrade preservation conformance scenario (config.yml + config.local.yml survive intact, FR-020) in `tests/conformance/scenarios/us4-reinstall-preserves-config.json`
 
 ### Implementation for User Story 4
 
-- [ ] T030 [US4] Implement config load/merge (`config.yml` + `config.local.yml`) and schema validation against `contracts/config.schema.json` / `contracts/config.local.schema.json` in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
-- [ ] T031 [US4] Implement credential-shape rejection (ATATT prefix, real `*.atlassian.net`, email/token shapes) in both YAML layers with exit code 4 in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
-- [ ] T032 [US4] Implement the single-source version reader (reads the `version` field of `.specify/extensions/jira/extension.yml`; asserts absence of `.specify/jira/VERSION` and any other hand-maintained version marker) consumed by config command, README markers, run summary, and upgrade check in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
+- [X] T030 [US4] Implement config load/merge (`config.yml` + `config.local.yml`) and schema validation against `contracts/config.schema.json` / `contracts/config.local.schema.json` in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
+- [X] T031 [US4] Implement credential-shape rejection (ATATT prefix, real `*.atlassian.net`, email/token shapes) in both YAML layers with exit code 4 in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
+- [X] T032 [US4] Implement the single-source version reader (reads the `version` field of `.specify/extensions/jira/extension.yml`; asserts absence of `.specify/jira/VERSION` and any other hand-maintained version marker) consumed by config command, README markers, run summary, and upgrade check in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
 
 **Checkpoint**: Config storage, credential rejection, and version single-sourcing work independently.
 
