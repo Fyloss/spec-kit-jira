@@ -16,6 +16,10 @@
 [[ -n ${_JIRA_ENGINE_MANAGED_SECTION:-} ]] && return 0
 _JIRA_ENGINE_MANAGED_SECTION=1
 
+_ms_this_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${_ms_this_dir}/../lib/output.sh"
+
 # _ms_count <haystack> <needle> — echo the number of non-overlapping occurrences
 # of <needle> in <haystack>. Substring-based (not line-based) so the count is
 # identical to the PowerShell port's regex Matches count.
@@ -131,4 +135,31 @@ managed_section_splice() {
   fi
   printf '%s%s%s%s' "${before}" "${rblock}" "${nl}" "${after}"
   return 0
+}
+
+# managed_section_panel_split <marker>   (stdin: an array of opaque content nodes)
+#   Split an existing rich-text description's content-node array at the managed
+#   panel marker (US7, T075). The marker is a PARAMETER — this module knows nothing
+#   about the panel's wording or the host format; it treats every node as opaque
+#   JSON and searches every string value inside it, so no sink vocabulary reaches
+#   the neutral layer. Everything before the first node that carries the marker is
+#   the human-authored prefix, preserved verbatim; everything from that node onward
+#   is the previously-written managed section. When no node carries the marker the
+#   whole array is human prefix (the first managed write appends the panel below).
+#   Emits canonical {prefix, managed, had_marker}.
+managed_section_panel_split() {
+  local marker="$1" nodes
+  nodes="$(cat)"
+  [[ -z "${nodes}" ]] && nodes="[]"
+  jq -c --arg m "${marker}" '
+    . as $nodes
+    | ( first(
+          range(0; ($nodes | length)) as $i
+          | select(([ $nodes[$i] | .. | strings ] | join("\n")) | contains($m))
+          | $i
+        ) // null ) as $k
+    | if $k == null
+      then { prefix: $nodes, managed: [], had_marker: false }
+      else { prefix: $nodes[0:$k], managed: $nodes[$k:], had_marker: true }
+      end' <<< "${nodes}" | json_canonical
 }

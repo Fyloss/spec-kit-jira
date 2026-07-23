@@ -18,6 +18,7 @@ Import-Module (Join-Path $PSScriptRoot 'Adf.psm1') -Force
 # The sink may consume the neutral engine (the boundary only forbids engine->sink).
 Import-Module (Join-Path $PSScriptRoot '../../engine/Drift.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../../engine/Idempotency.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../../engine/ManagedSection.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PrivacyGuard.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Client.psm1') -Force
 
@@ -69,6 +70,7 @@ function Get-JiraPlanWriteSet {
 
         $fields = [ordered]@{ summary = $title; description = $adf }
         if ($ticket -eq '') {
+            # CREATE: a bridge-created ticket owns its whole description (FR-040).
             if ($storyType -ne '') { $fields['issuetype'] = [ordered]@{ id = $storyType } }
             if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
             $estValue = Get-JiraPlanProp $story 'estimation'
@@ -76,11 +78,48 @@ function Get-JiraPlanWriteSet {
             $actions.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue"; body = [ordered]@{ fields = $fields } })
         }
         else {
+            # UPDATE: on a human-origin ticket the description is spliced into the
+            # managed panel so the human prose above survives (FR-038).
+            $origins = Get-JiraPlanProp $ctx 'ticket_origins'
+            $origin = [string](Get-JiraPlanProp $origins $sid)
+            if ($origin -ne '' -and $origin -ne 'bridge-created') {
+                $descs = Get-JiraPlanProp $ctx 'ticket_descriptions'
+                $existing = Get-JiraPlanProp $descs $sid
+                $existingJson = if ($null -eq $existing) { '{}' } else { ConvertTo-JiraJsonValue $existing }
+                $adf = ConvertTo-JiraManagedAdfDocument -ContentJson $storyJson -Origin $origin -ExistingJson $existingJson | ConvertFrom-Json -Depth 100
+                $fields['description'] = $adf
+            }
             if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
             $actions.Add([ordered]@{ method = 'PUT'; url = "$base/rest/api/3/issue/$ticket"; body = [ordered]@{ fields = $fields } })
         }
     }
     return (ConvertTo-JiraJsonValue $actions)
+}
+
+function Get-JiraManagedDescriptionStatus {
+    <#
+    .SYNOPSIS
+      FR-039: decide description churn on the managed section alone. Both
+      descriptions are split at the panel marker and only their managed portions are
+      compared. Mirror of plan_managed_description_status. Returns 'unchanged' |
+      'changed'.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $CurrentDescJson,
+        [Parameter(Mandatory)] [string] $NewDescJson
+    )
+    $marker = Get-JiraManagedMarker
+    $cur = $CurrentDescJson | ConvertFrom-Json -Depth 100
+    $new = $NewDescJson | ConvertFrom-Json -Depth 100
+    $curContent = Get-JiraPlanProp $cur 'content'; if ($null -eq $curContent) { $curContent = @() }
+    $newContent = Get-JiraPlanProp $new 'content'; if ($null -eq $newContent) { $newContent = @() }
+    $cm = (Split-JiraManagedSectionPanel -Marker $marker -ContentJson (ConvertTo-JiraJsonValue @($curContent)) | ConvertFrom-Json).managed
+    $nm = (Split-JiraManagedSectionPanel -Marker $marker -ContentJson (ConvertTo-JiraJsonValue @($newContent)) | ConvertFrom-Json).managed
+    $cmJson = ConvertTo-JiraJsonValue @($cm)
+    $nmJson = ConvertTo-JiraJsonValue @($nm)
+    if ([System.String]::Equals($cmJson, $nmJson, [System.StringComparison]::Ordinal)) { return 'unchanged' }
+    return 'changed'
 }
 
 function Get-JiraLifecyclePlan {
@@ -137,7 +176,20 @@ function Get-JiraLifecyclePlan {
             if ($null -ne $current) {
                 $desired = ConvertTo-JiraJsonValue $action.body.fields
                 $currentJson = ConvertTo-JiraJsonValue $current
-                if ((Get-JiraIdempotentFieldStatus -CurrentFieldsJson $currentJson -DesiredFieldsJson $desired) -eq 'unchanged') {
+                $origin = [string](Get-JiraPlanProp $tk 'origin')
+                if ($origin -ne '' -and $origin -ne 'bridge-created') {
+                    # FR-039: description diff on the managed section alone; the
+                    # other fields compare normally.
+                    $curDesc = Get-JiraPlanProp $current 'description'; if ($null -eq $curDesc) { $curDesc = [pscustomobject]@{} }
+                    $desObj = $action.body.fields
+                    $newDesc = Get-JiraPlanProp $desObj 'description'; if ($null -eq $newDesc) { $newDesc = [pscustomobject]@{} }
+                    $descSt = Get-JiraManagedDescriptionStatus -CurrentDescJson (ConvertTo-JiraJsonValue $curDesc) -NewDescJson (ConvertTo-JiraJsonValue $newDesc)
+                    $curRest = [ordered]@{}; foreach ($p in $current.PSObject.Properties) { if ($p.Name -ne 'description') { $curRest[$p.Name] = $p.Value } }
+                    $desRest = [ordered]@{}; foreach ($p in $desObj.PSObject.Properties) { if ($p.Name -ne 'description') { $desRest[$p.Name] = $p.Value } }
+                    $otherSt = Get-JiraIdempotentFieldStatus -CurrentFieldsJson (ConvertTo-JiraJsonValue $curRest) -DesiredFieldsJson (ConvertTo-JiraJsonValue $desRest)
+                    if ($descSt -eq 'unchanged' -and $otherSt -eq 'unchanged') { $dropContent = $true }
+                }
+                elseif ((Get-JiraIdempotentFieldStatus -CurrentFieldsJson $currentJson -DesiredFieldsJson $desired) -eq 'unchanged') {
                     $dropContent = $true
                 }
             }
@@ -240,4 +292,4 @@ function Invoke-JiraApplyWriteSet {
     return $worst
 }
 
-Export-ModuleMember -Function Get-JiraApplyKnownCoordinate, Invoke-JiraApplyWriteSet, Get-JiraPlanWriteSet, Get-JiraLifecyclePlan
+Export-ModuleMember -Function Get-JiraApplyKnownCoordinate, Invoke-JiraApplyWriteSet, Get-JiraPlanWriteSet, Get-JiraLifecyclePlan, Get-JiraManagedDescriptionStatus

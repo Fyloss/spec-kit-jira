@@ -21,6 +21,9 @@ _JIRA_SINK_ADF=1
 _adf_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${_adf_dir}/../../lib/output.sh"
+# The sink may consume the neutral engine (the boundary only forbids engine->sink).
+# shellcheck source=/dev/null
+source "${_adf_dir}/../../engine/managed_section.sh"
 
 # _adf_blocks_to_nodes <blocks-json> — render neutral content blocks to ADF
 # nodes. panel_ref blocks are dropped here: the sink appends the acceptance and
@@ -65,13 +68,13 @@ _adf_design_nodes() {
     end' <<< "$1"
 }
 
-# adf_render_description <content-json> — render a story's neutral content into a
-# single canonical ADF document. content-json carries `description` (content
-# blocks) and the optional `acceptance_criteria` and `design` arrays.
-adf_render_description() {
-  local content="$1"
-  local blocks ac design body panel design_nodes
-
+# _adf_content_nodes <content-json> — the managed content-node array for a story:
+# description body, then the acceptance panel (with its heading), then the Design
+# section, in that fixed order. This is the bridge-owned "managed section" — the
+# whole description for a bridge-created ticket, or the region below the delimiter
+# on a human-origin ticket.
+_adf_content_nodes() {
+  local content="$1" blocks ac design body panel design_nodes
   blocks="$(jq -c '.description.blocks // []' <<< "${content}")"
   ac="$(jq -c '.acceptance_criteria // []' <<< "${content}")"
   design="$(jq -c '.design // []' <<< "${content}")"
@@ -80,17 +83,61 @@ adf_render_description() {
   panel="$(_adf_gherkin_panel "${ac}")"
   design_nodes="$(_adf_design_nodes "${design}")"
 
-  # Assemble the doc content in a fixed order: description body, then the
-  # acceptance panel (with its heading), then the Design section.
   jq -cn \
     --argjson body "${body}" \
     --argjson panel "${panel:-null}" \
     --argjson design "$(jq -cs '.' <<< "${design_nodes}")" '
-    { type:"doc", version:1,
-      content: (
-        $body
-        + (if $panel == null then []
-           else [ {type:"heading", attrs:{level:3}, content:[{type:"text", text:"Acceptance Criteria"}]}, $panel ] end)
-        + $design
-      ) }' | json_canonical
+    $body
+    + (if $panel == null then []
+       else [ {type:"heading", attrs:{level:3}, content:[{type:"text", text:"Acceptance Criteria"}]}, $panel ] end)
+    + $design'
+}
+
+# adf_render_description <content-json> — render a story's neutral content into a
+# single canonical ADF document. content-json carries `description` (content
+# blocks) and the optional `acceptance_criteria` and `design` arrays.
+adf_render_description() {
+  jq -cn --argjson c "$(_adf_content_nodes "$1")" '{type:"doc", version:1, content:$c}' | json_canonical
+}
+
+# adf_managed_marker — the human-facing text that delimits the bridge-owned
+# managed panel on a human-origin ticket (US7, FR-038). Passed to the neutral
+# engine splice as a parameter (the engine never hard-codes it).
+adf_managed_marker() {
+  printf 'Synced from spec-kit — do not edit below this line'
+}
+
+# _adf_marker_nodes — the delimiter the managed section begins with: a single
+# strong paragraph carrying the marker text. The marker MUST live in the FIRST
+# managed node so the engine split re-attributes it (and everything below) to the
+# managed section, leaving the human prefix untouched and stable on re-render.
+_adf_marker_nodes() {
+  jq -cn --arg m "$(adf_managed_marker)" \
+    '[ {type:"paragraph", content:[{type:"text", text:$m, marks:[{type:"strong"}]}]} ]'
+}
+
+# adf_render_managed_description <content-json> <origin> [existing-desc-json]
+#   Origin-discriminated description rendering (US7, T075). On a bridge-created
+#   ticket the whole description IS the managed section, with no delimiter (FR-040).
+#   On a human-origin ticket the human-authored prefix of the existing description
+#   is preserved verbatim above a delimited managed panel (FR-038): the engine
+#   splits the existing content at the marker, and the new description is
+#   prefix + marker + freshly-rendered managed nodes.
+adf_render_managed_description() {
+  local content="$1" origin="$2" existing="${3:-}"
+  local managed
+  managed="$(_adf_content_nodes "${content}")"
+
+  if [[ "${origin}" == "bridge-created" ]]; then
+    jq -cn --argjson c "${managed}" '{type:"doc", version:1, content:$c}' | json_canonical
+    return 0
+  fi
+
+  [[ -z "${existing}" ]] && existing='{}'
+  local existing_content prefix marker_nodes
+  existing_content="$(jq -c '.content // []' <<< "${existing}")"
+  prefix="$(printf '%s' "${existing_content}" | managed_section_panel_split "$(adf_managed_marker)" | jq -c '.prefix')"
+  marker_nodes="$(_adf_marker_nodes)"
+  jq -cn --argjson p "${prefix}" --argjson m "${marker_nodes}" --argjson c "${managed}" \
+    '{type:"doc", version:1, content: ($p + $m + $c)}' | json_canonical
 }

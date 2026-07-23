@@ -45,7 +45,13 @@ source "${_plan_apply_dir}/../../engine/idempotency.sh"
 #
 # plan-context carries the resolved facts the engine cannot know:
 #   { base_url, story_type_id, priority_ids:{P1,P2,P3}, estimation_field_id|null,
-#     tickets:{<local_id>: <existing-issue-key>} }   (a local_id absent => create)
+#     tickets:{<local_id>: <existing-issue-key>},   (a local_id absent => create)
+#     ticket_origins:{<local_id>: "bridge-created"|"human"},  (optional, US7)
+#     ticket_descriptions:{<local_id>: <existing-adf-doc>} }   (optional, US7)
+# When a ticket carries a human origin and its existing description, the update's
+# description is rendered through the managed-panel splice so the human-authored
+# prose above the panel is preserved verbatim (FR-038); absent that context the
+# whole description is bridge-owned (the US3 behaviour, byte-for-byte unchanged).
 plan_writes() {
   local doc="$1" ctx="$2"
   local base story_type estid
@@ -67,7 +73,8 @@ plan_writes() {
     adf="$(adf_render_description "${story}")"
 
     if [[ -z "${ticket}" ]]; then
-      # CREATE: full content + issuetype + priority + estimation (create-only).
+      # CREATE: full content + issuetype + priority + estimation (create-only). A
+      # bridge-created ticket owns its whole description (no delimiter, FR-040).
       fields="$(jq -cn --arg t "${title}" --argjson d "${adf}" --arg it "${story_type}" \
         '{summary:$t, description:$d} + (if $it == "" then {} else {issuetype:{id:$it}} end)')"
       [[ -n "${priority_id}" ]] && fields="$(jq -c --arg pid "${priority_id}" '. + {priority:{id:$pid}}' <<< "${fields}")"
@@ -77,7 +84,15 @@ plan_writes() {
       action="$(jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" \
         '{method:"POST", url:$u, body:{fields:$f}}')"
     else
-      # UPDATE: content + priority; the estimation is NEVER re-sent (FR-018).
+      # UPDATE: content + priority; the estimation is NEVER re-sent (FR-018). On a
+      # human-origin ticket the description is spliced into the managed panel so the
+      # human prose above it survives (FR-038).
+      local origin existing
+      origin="$(jq -r --arg s "${sid}" '.ticket_origins[$s] // ""' <<< "${ctx}")"
+      if [[ -n "${origin}" && "${origin}" != "bridge-created" ]]; then
+        existing="$(jq -c --arg s "${sid}" '.ticket_descriptions[$s] // {}' <<< "${ctx}")"
+        adf="$(adf_render_managed_description "${story}" "${origin}" "${existing}")"
+      fi
       fields="$(jq -cn --arg t "${title}" --argjson d "${adf}" '{summary:$t, description:$d}')"
       [[ -n "${priority_id}" ]] && fields="$(jq -c --arg pid "${priority_id}" '. + {priority:{id:$pid}}' <<< "${fields}")"
       action="$(jq -cn --arg u "${base}/rest/api/3/issue/${ticket}" --argjson f "${fields}" \
@@ -86,6 +101,23 @@ plan_writes() {
     actions="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${actions}")"
   done
   json_canonical <<< "${actions}"
+}
+
+# plan_managed_description_status <current-desc-json> <new-desc-json>
+#   FR-039: decide description churn on the managed section ALONE. Both descriptions
+#   are split at the panel marker and only their managed portions are compared, so a
+#   human edit to the prose above the panel never counts as churn. Echoes
+#   "unchanged" | "changed".
+plan_managed_description_status() {
+  local current="$1" new="$2" marker cm nm
+  marker="$(adf_managed_marker)"
+  cm="$(jq -c '.content // []' <<< "${current}" | managed_section_panel_split "${marker}" | jq -c '.managed')"
+  nm="$(jq -c '.content // []' <<< "${new}" | managed_section_panel_split "${marker}" | jq -c '.managed')"
+  if [[ "$(json_canonical <<< "${cm}")" == "$(json_canonical <<< "${nm}")" ]]; then
+    printf 'unchanged'
+  else
+    printf 'changed'
+  fi
 }
 
 # plan_lifecycle <content-actions-json> <neutral-doc-json> <lifecycle-ctx-json>
@@ -135,10 +167,24 @@ plan_lifecycle() {
       local current
       current="$(jq -c '.current // null' <<< "${tk}")"
       if [[ "${current}" != "null" ]]; then
-        local desired st
+        local desired origin st
         desired="$(jq -c '.body.fields' <<< "${action}")"
-        st="$(idempotency_field_status "${current}" "${desired}")"
-        [[ "${st}" == "unchanged" ]] && drop_content="true"
+        origin="$(jq -r '.origin // ""' <<< "${tk}")"
+        if [[ -n "${origin}" && "${origin}" != "bridge-created" ]]; then
+          # FR-039: on a human-origin ticket the description diff is computed on the
+          # managed section alone; the other fields compare normally.
+          local desc_st other_st cur_desc new_desc cur_rest des_rest
+          cur_desc="$(jq -c '.description // {}' <<< "${current}")"
+          new_desc="$(jq -c '.description // {}' <<< "${desired}")"
+          desc_st="$(plan_managed_description_status "${cur_desc}" "${new_desc}")"
+          cur_rest="$(jq -c 'del(.description)' <<< "${current}")"
+          des_rest="$(jq -c 'del(.description)' <<< "${desired}")"
+          other_st="$(idempotency_field_status "${cur_rest}" "${des_rest}")"
+          [[ "${desc_st}" == "unchanged" && "${other_st}" == "unchanged" ]] && drop_content="true"
+        else
+          st="$(idempotency_field_status "${current}" "${desired}")"
+          [[ "${st}" == "unchanged" ]] && drop_content="true"
+        fi
       fi
     fi
 

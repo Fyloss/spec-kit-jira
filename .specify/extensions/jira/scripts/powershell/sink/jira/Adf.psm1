@@ -10,6 +10,8 @@
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot '../../lib/Output.psm1') -Force
+# The sink may consume the neutral engine (the boundary only forbids engine->sink).
+Import-Module (Join-Path $PSScriptRoot '../../engine/ManagedSection.psm1') -Force
 
 function New-JiraAdfText {
     param([string] $Text)
@@ -95,13 +97,10 @@ function New-JiraAdfDesignNode {
     return $nodes
 }
 
-function ConvertTo-JiraAdfDocument {
-    <#
-    .SYNOPSIS
-      Render a story's neutral content into a single canonical ADF document.
-      Mirror of adf_render_description.
-    #>
-    [CmdletBinding()]
+function Get-JiraAdfContentNode {
+    # The managed content-node list for a story (description body, acceptance
+    # panel, Design section) — the bridge-owned managed section. Mirror of
+    # _adf_content_nodes. Returns a List[object].
     param([Parameter(Mandatory)] [string] $ContentJson)
     $content = $ContentJson | ConvertFrom-Json -Depth 100
 
@@ -129,8 +128,71 @@ function ConvertTo-JiraAdfDocument {
         foreach ($n in (New-JiraAdfDesignNode $design)) { $docContent.Add($n) }
     }
 
-    $doc = [ordered]@{ type = 'doc'; version = 1; content = $docContent }
-    return (ConvertTo-JiraJsonValue $doc)
+    return $docContent
 }
 
-Export-ModuleMember -Function ConvertTo-JiraAdfDocument
+function ConvertTo-JiraAdfDocument {
+    <#
+    .SYNOPSIS
+      Render a story's neutral content into a single canonical ADF document.
+      Mirror of adf_render_description.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $ContentJson)
+    $docContent = Get-JiraAdfContentNode -ContentJson $ContentJson
+    return (ConvertTo-JiraJsonValue ([ordered]@{ type = 'doc'; version = 1; content = $docContent }))
+}
+
+function Get-JiraManagedMarker {
+    # The human-facing text delimiting the bridge-owned managed panel on a
+    # human-origin ticket (FR-038). Mirror of adf_managed_marker.
+    return 'Synced from spec-kit — do not edit below this line'
+}
+
+function New-JiraAdfMarkerNode {
+    # The delimiter the managed section begins with: a single strong paragraph
+    # carrying the marker text (must be the FIRST managed node). Mirror of
+    # _adf_marker_nodes.
+    $text = New-JiraAdfText (Get-JiraManagedMarker)
+    $text.Add('marks', @([ordered]@{ type = 'strong' }))
+    return [ordered]@{ type = 'paragraph'; content = @($text) }
+}
+
+function ConvertTo-JiraManagedAdfDocument {
+    <#
+    .SYNOPSIS
+      Origin-discriminated description rendering (US7, T075). Mirror of
+      adf_render_managed_description. Bridge-created => whole managed section, no
+      delimiter (FR-040). Human => existing human prefix preserved verbatim above a
+      delimited managed panel (FR-038).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ContentJson,
+        [Parameter(Mandatory)] [string] $Origin,
+        [Parameter()] [AllowEmptyString()] [string] $ExistingJson = ''
+    )
+    $managed = Get-JiraAdfContentNode -ContentJson $ContentJson
+
+    if ($Origin -eq 'bridge-created') {
+        return (ConvertTo-JiraJsonValue ([ordered]@{ type = 'doc'; version = 1; content = $managed }))
+    }
+
+    $existingContentJson = '[]'
+    if (-not [string]::IsNullOrEmpty($ExistingJson)) {
+        $existing = $ExistingJson | ConvertFrom-Json -Depth 100
+        if ($existing.PSObject.Properties.Name -contains 'content' -and $null -ne $existing.content) {
+            $existingContentJson = ConvertTo-JiraJsonValue @($existing.content)
+        }
+    }
+    $split = Split-JiraManagedSectionPanel -Marker (Get-JiraManagedMarker) -ContentJson $existingContentJson | ConvertFrom-Json -Depth 100
+
+    $docContent = [System.Collections.Generic.List[object]]::new()
+    foreach ($n in @($split.prefix)) { $docContent.Add($n) }
+    $docContent.Add((New-JiraAdfMarkerNode))
+    foreach ($n in $managed) { $docContent.Add($n) }
+
+    return (ConvertTo-JiraJsonValue ([ordered]@{ type = 'doc'; version = 1; content = $docContent }))
+}
+
+Export-ModuleMember -Function ConvertTo-JiraAdfDocument, ConvertTo-JiraManagedAdfDocument, Get-JiraManagedMarker

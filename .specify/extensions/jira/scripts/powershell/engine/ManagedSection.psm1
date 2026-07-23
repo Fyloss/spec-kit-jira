@@ -11,6 +11,8 @@
 
 Set-StrictMode -Version Latest
 
+Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
+
 function Get-JiraManagedSectionLineEnding {
     <#
     .SYNOPSIS
@@ -112,4 +114,57 @@ function Invoke-JiraManagedSectionSplice {
     return [pscustomobject]@{ ExitCode = 0; Content = ($before + $rblock + $nl + $after) }
 }
 
-Export-ModuleMember -Function Get-JiraManagedSectionLineEnding, Invoke-JiraManagedSectionSplice
+function Get-JiraNodeStringValue {
+    # Recursively collect every string value inside an opaque JSON node. Mirror of
+    # the Bash `[ node | .. | strings ]` descent — no host-format knowledge.
+    param([object] $Node)
+    $out = [System.Collections.Generic.List[string]]::new()
+    if ($null -eq $Node) { return $out }
+    if ($Node -is [string]) { $out.Add($Node); return $out }
+    if ($Node -is [System.Collections.IEnumerable]) {
+        foreach ($item in $Node) { foreach ($s in (Get-JiraNodeStringValue $item)) { $out.Add($s) } }
+        return $out
+    }
+    if ($Node -is [psobject] -or $Node.PSObject.Properties.Count -gt 0) {
+        foreach ($p in $Node.PSObject.Properties) { foreach ($s in (Get-JiraNodeStringValue $p.Value)) { $out.Add($s) } }
+    }
+    return $out
+}
+
+function Split-JiraManagedSectionPanel {
+    <#
+    .SYNOPSIS
+      Split an existing description's content-node array at the managed panel
+      marker. Mirror of managed_section_panel_split (US7, T075). The marker is a
+      parameter; nodes are treated as opaque JSON. Returns canonical
+      { prefix, managed, had_marker } — everything before the first node carrying
+      the marker is the human-authored prefix; everything from it onward is the
+      previously-written managed section.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Marker,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $ContentJson
+    )
+    $nodes = @()
+    if (-not [string]::IsNullOrEmpty($ContentJson)) { $nodes = @($ContentJson | ConvertFrom-Json -Depth 100) }
+
+    $k = -1
+    for ($i = 0; $i -lt $nodes.Count; $i++) {
+        $strings = Get-JiraNodeStringValue $nodes[$i]
+        if (($strings -join "`n").Contains($Marker)) { $k = $i; break }
+    }
+
+    $prefix = [System.Collections.Generic.List[object]]::new()
+    $managed = [System.Collections.Generic.List[object]]::new()
+    if ($k -lt 0) {
+        foreach ($n in $nodes) { $prefix.Add($n) }
+        return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; managed = $managed; had_marker = $false }))
+    }
+    for ($i = 0; $i -lt $nodes.Count; $i++) {
+        if ($i -lt $k) { $prefix.Add($nodes[$i]) } else { $managed.Add($nodes[$i]) }
+    }
+    return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; managed = $managed; had_marker = $true }))
+}
+
+Export-ModuleMember -Function Get-JiraManagedSectionLineEnding, Invoke-JiraManagedSectionSplice, Split-JiraManagedSectionPanel

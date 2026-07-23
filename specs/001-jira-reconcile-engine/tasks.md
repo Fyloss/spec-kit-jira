@@ -262,11 +262,11 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 7 ⚠️
 
-- [ ] T074 [P] [US7] Human-origin: write only inside the panel, preserve human lines verbatim incl. after later edit; diff on managed section only; bridge-created whole-description no delimiters; discriminator is recorded origin (FR-038, FR-039, FR-040) in `tests/bash/engine/test_managed_panel.bats`, `tests/powershell/engine/ManagedPanel.Tests.ps1`, and `tests/conformance/scenarios/us7-human-content.json`
+- [X] T074 [P] [US7] Human-origin: write only inside the panel, preserve human lines verbatim incl. after later edit; diff on managed section only; bridge-created whole-description no delimiters; discriminator is recorded origin (FR-038, FR-039, FR-040) in `tests/bash/engine/test_managed_panel.bats`, `tests/powershell/engine/ManagedPanel.Tests.ps1`, and `tests/conformance/scenarios/us7-human-content.json`
 
 ### Implementation for User Story 7
 
-- [ ] T075 [US7] Implement origin-discriminated managed-panel splice for Jira descriptions (preserve human lines above the panel; whole-description for bridge-created) in `.specify/extensions/jira/scripts/bash/engine/managed_section.sh` and `.specify/extensions/jira/scripts/powershell/engine/ManagedSection.psm1`, wired into ADF render + plan_apply
+- [X] T075 [US7] Implement origin-discriminated managed-panel splice for Jira descriptions (preserve human lines above the panel; whole-description for bridge-created) in `.specify/extensions/jira/scripts/bash/engine/managed_section.sh` and `.specify/extensions/jira/scripts/powershell/engine/ManagedSection.psm1`, wired into ADF render + plan_apply
 
 **Checkpoint**: Human-authored description content is provably never overwritten.
 

@@ -42,3 +42,37 @@ Describe 'ConvertTo-JiraAdfDocument' {
         @($d.content | Where-Object { $_.type -eq 'panel' }).Count | Should -Be 0
     }
 }
+
+Describe 'ConvertTo-JiraManagedAdfDocument (US7)' {
+    BeforeAll {
+        $m = Get-JiraManagedMarker
+        $script:ExistingHuman = @"
+{"type":"doc","version":1,"content":[
+  {"type":"paragraph","content":[{"type":"text","text":"A note the PO wrote."}]},
+  {"type":"paragraph","content":[{"type":"text","text":"$m","marks":[{"type":"strong"}]}]},
+  {"type":"paragraph","content":[{"type":"text","text":"OLD MANAGED BODY"}]}
+]}
+"@
+    }
+
+    It 'renders the whole description as the managed section for a bridge-created ticket (FR-040)' {
+        $out = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -Origin 'bridge-created' -ExistingJson '{}'
+        $out | Should -Not -BeLike '*do not edit below this line*'
+        ($out | ConvertFrom-Json).type | Should -Be 'doc'
+    }
+
+    It 'preserves the human prefix verbatim above a delimited managed panel (FR-038)' {
+        $out = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -Origin 'human' -ExistingJson $script:ExistingHuman
+        $d = $out | ConvertFrom-Json
+        $d.content[0].content[0].text | Should -Be 'A note the PO wrote.'
+        $out | Should -BeLike '*do not edit below this line*'
+        $out | Should -Not -BeLike '*OLD MANAGED BODY*'
+        $out | Should -BeLike '*The need statement.*'
+    }
+
+    It 'reproduces the description byte-for-byte when the managed content is unchanged (idempotent)' {
+        $once = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -Origin 'human' -ExistingJson $script:ExistingHuman
+        $twice = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -Origin 'human' -ExistingJson $once
+        [System.String]::Equals($once, $twice, [System.StringComparison]::Ordinal) | Should -BeTrue
+    }
+}
