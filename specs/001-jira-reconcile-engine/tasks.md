@@ -36,13 +36,13 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 **Purpose**: Create the twin-port skeleton, version single-source, test tree, lint config, and CI shell.
 
-- [ ] T001 Create the twin-port directory skeleton: `.specify/extensions/jira/scripts/bash/{lib,engine,sink/jira,commands,hooks}/` and `.specify/extensions/jira/scripts/powershell/{lib,engine,sink/jira,commands,hooks}/` and `.specify/extensions/jira/templates/`
-- [ ] T002 [P] Create the extension metadata `.specify/extensions/jira/extension.yml` (id, catalog name, and the `version` field — the SINGLE source of truth for the version, the only place the version literal appears in the tree, FR-021/022) and `.specify/extensions/jira/CHANGELOG.md` (SemVer, initial entry)
-- [ ] T003 [P] Create the test tree: `tests/bash/{lib,engine,sink,commands}/`, `tests/powershell/{lib,engine,sink,commands}/`, `tests/conformance/{scenarios,fixtures,mock-jira}/`, `tests/live/`
-- [ ] T004 [P] Add Bash lint/format config at repo root: `.shellcheckrc` and shfmt settings in `.editorconfig`
-- [ ] T005 [P] Add PowerShell lint config `PSScriptAnalyzerSettings.psd1` at repo root
-- [ ] T006 [P] Update `.gitignore`: remove the stale `.specify/jira/VERSION.local` line (FR-022 forbids any hand-maintained version marker). Note: `.specify/jira/config.local.yml` and `.specify/jira/.env` are already gitignored — verify they remain present (do not re-add duplicates)
-- [ ] T007 [P] Create the self-documenting `.specify/extensions/jira/templates/config.yml.template` (business-language keys + comments, Constitution XVI) and `.specify/extensions/jira/templates/readme-block.template`
+- [X] T001 Create the twin-port directory skeleton: `.specify/extensions/jira/scripts/bash/{lib,engine,sink/jira,commands,hooks}/` and `.specify/extensions/jira/scripts/powershell/{lib,engine,sink/jira,commands,hooks}/` and `.specify/extensions/jira/templates/`
+- [X] T002 [P] Create the extension metadata `.specify/extensions/jira/extension.yml` (id, catalog name, and the `version` field — the SINGLE source of truth for the version, the only place the version literal appears in the tree, FR-021/022) and `.specify/extensions/jira/CHANGELOG.md` (SemVer, initial entry)
+- [X] T003 [P] Create the test tree: `tests/bash/{lib,engine,sink,commands}/`, `tests/powershell/{lib,engine,sink,commands}/`, `tests/conformance/{scenarios,fixtures,mock-jira}/`, `tests/live/`
+- [X] T004 [P] Add Bash lint/format config at repo root: `.shellcheckrc` and shfmt settings in `.editorconfig`
+- [X] T005 [P] Add PowerShell lint config `PSScriptAnalyzerSettings.psd1` at repo root
+- [X] T006 [P] Update `.gitignore`: remove the stale `.specify/jira/VERSION.local` line (FR-022 forbids any hand-maintained version marker). Note: `.specify/jira/config.local.yml` and `.specify/jira/.env` are already gitignored — verify they remain present (do not re-add duplicates)
+- [X] T007 [P] Create the self-documenting `.specify/extensions/jira/templates/config.yml.template` (business-language keys + comments, Constitution XVI) and `.specify/extensions/jira/templates/readme-block.template`
 
 **Checkpoint**: Skeleton, version source, and test tree exist — foundational work can begin.
 
@@ -61,12 +61,12 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Port infrastructure — `lib/` (no domain knowledge)
 
-- [ ] T010 [P] Prereq-check tests (bash ≥ 4 with macOS 3.2 named explicitly, curl/jq/git present; pwsh 7+) asserting exit code 5 in `tests/bash/lib/test_prereq.bats` and `tests/powershell/lib/Prereq.Tests.ps1`
-- [ ] T011 Implement prerequisite checks (exit 5 before any Jira interaction, NFR-4) in `.specify/extensions/jira/scripts/bash/lib/prereq.sh` and `.specify/extensions/jira/scripts/powershell/lib/Prereq.psm1`
-- [ ] T012 [P] Canonical-serializer parity tests (stable key ordering, UTF-8, explicit line-ending control, `jq` ↔ `ConvertTo-Json` byte-parity incl. `@uri` `%20`→`+` rule, research §11) in `tests/bash/lib/test_serialize.bats`, `tests/powershell/lib/Serialize.Tests.ps1`, and a conformance scenario
-- [ ] T013 Implement the canonical serializer (shared by config/output/interchange) in `.specify/extensions/jira/scripts/bash/lib/output.sh` and `.specify/extensions/jira/scripts/powershell/lib/Output.psm1`
-- [ ] T014 [P] CLI arg-parsing and exit-code-table tests (`--dry-run`/`--json`/`--on-drift`/`--verbose`/`--help`; codes 0/1/2/3/4/5/9 per contracts/cli-contract.md) in `tests/bash/lib/test_cli.bats` and `tests/powershell/lib/Cli.Tests.ps1`
-- [ ] T015 Implement CLI arg parsing + the shared exit-code table in `.specify/extensions/jira/scripts/bash/lib/cli.sh` and `.specify/extensions/jira/scripts/powershell/lib/Cli.psm1`
+- [X] T010 [P] Prereq-check tests (bash ≥ 4 with macOS 3.2 named explicitly, curl/jq/git present; pwsh 7+) asserting exit code 5 in `tests/bash/lib/test_prereq.bats` and `tests/powershell/lib/Prereq.Tests.ps1`
+- [X] T011 Implement prerequisite checks (exit 5 before any Jira interaction, NFR-4) in `.specify/extensions/jira/scripts/bash/lib/prereq.sh` and `.specify/extensions/jira/scripts/powershell/lib/Prereq.psm1`
+- [X] T012 [P] Canonical-serializer parity tests (stable key ordering, UTF-8, explicit line-ending control, `jq` ↔ `ConvertTo-Json` byte-parity incl. `@uri` `%20`→`+` rule, research §11) in `tests/bash/lib/test_serialize.bats`, `tests/powershell/lib/Serialize.Tests.ps1`, and a conformance scenario
+- [X] T013 Implement the canonical serializer (shared by config/output/interchange) in `.specify/extensions/jira/scripts/bash/lib/output.sh` and `.specify/extensions/jira/scripts/powershell/lib/Output.psm1`
+- [X] T014 [P] CLI arg-parsing and exit-code-table tests (`--dry-run`/`--json`/`--on-drift`/`--verbose`/`--help`; codes 0/1/2/3/4/5/9 per contracts/cli-contract.md) in `tests/bash/lib/test_cli.bats` and `tests/powershell/lib/Cli.Tests.ps1`
+- [X] T015 Implement CLI arg parsing + the shared exit-code table in `.specify/extensions/jira/scripts/bash/lib/cli.sh` and `.specify/extensions/jira/scripts/powershell/lib/Cli.psm1`
 - [ ] T016 [P] Run-summary rendering tests (prose default + `--json` validated against `contracts/run-summary.schema.json`, WARNING channel) in `tests/bash/lib/test_output.bats` and `tests/powershell/lib/Output.Tests.ps1`
 - [ ] T017 Implement run-summary rendering (prose + `--json`, WARNING channel) in `.specify/extensions/jira/scripts/bash/lib/output.sh` and `.specify/extensions/jira/scripts/powershell/lib/Output.psm1`
 - [ ] T018 [P] Credential-resolution tests — **eliminatory NFR-3**: env → OS secret manager → gitignored `.env`; assert the resolved token NEVER appears in argv, logs, errors, or under `set -x` / `-Verbose` (SC-007) in `tests/bash/lib/test_credentials.bats` and `tests/powershell/lib/Credentials.Tests.ps1`

@@ -10,7 +10,6 @@ dist/
 # spec-kit-jira: gitignored personal config, secrets, resolved bindings
 .specify/jira/config.local.yml
 .specify/jira/.env
-.specify/jira/VERSION.local
 
 # OS
 .DS_Store

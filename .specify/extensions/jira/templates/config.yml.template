@@ -1,0 +1,56 @@
+# spec-kit-jira team configuration.
+#
+# This file is COMMITTABLE and MUST stay credential-free. It never contains a
+# token, an email, or a real *.atlassian.net site host — the schema rejects any
+# such value (exit 4). Personal overrides and resolved ids live in the gitignored
+# .specify/jira/config.local.yml; secrets live in the gitignored .specify/jira/.env.
+#
+# Keys use business language (what the team decides), not Jira internals. The
+# `/speckit.jira.config` command fills the discovered ids into config.local.yml.
+
+# Which Jira project(s) this repository mirrors into.
+projects:
+  - # The project key (public within your org), e.g. PROJ.
+    key: PROJ
+
+    # How the project is managed in Jira. Detected automatically at config time;
+    # persisted here by its logical value. One of: company_managed | team_managed.
+    style: company_managed
+
+    # Where the Epic for this repo's work lives.
+    #   per_repo    — one Epic for the whole repository.
+    #   per_feature — one Epic per feature folder.
+    epic_strategy: per_repo
+
+    # How a spec's tasks relate to its Story.
+    #   subtask      — tasks become Jira sub-tasks under the Story.
+    #   linked_story — tasks become their own Stories, joined by a link type.
+    task_strategy: subtask
+
+    # Required only when task_strategy = linked_story: the logical link-type name.
+    # link_type: relates to
+
+    # Spec priority (P1/P2/P3) -> your project's priority name.
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+
+    # The estimation field to use. Discovered and operator-confirmed at config
+    # time (for team-managed projects this is the project's own field, never the
+    # global Story Points custom field). Stored by logical descriptor.
+    # estimation_field: Story point estimate
+
+# Route each spec folder to a project. First matching rule wins.
+routing:
+  - match:
+      folder_prefix: '' # e.g. 'billing-' matches specs/billing-*
+    project: PROJ
+
+# The project used when no routing rule matches.
+routing_default: PROJ
+
+# Privacy allowlist: hosts/domains that never block or warn (e.g. your public
+# documentation Confluence host).
+privacy:
+  allowlist: []
