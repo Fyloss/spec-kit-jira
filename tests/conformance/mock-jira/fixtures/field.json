@@ -1,0 +1,8 @@
+[
+  { "id": "summary", "name": "Summary", "custom": false },
+  { "id": "description", "name": "Description", "custom": false },
+  { "id": "priority", "name": "Priority", "custom": false },
+  { "id": "customfield_20011", "name": "T-Shirt Estimate", "custom": true, "schema": { "type": "number", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:float" } },
+  { "id": "customfield_20044", "name": "Impediment", "custom": true, "schema": { "type": "array", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:multicheckboxes" } },
+  { "id": "customfield_30044", "name": "Effort Points", "custom": true, "schema": { "type": "number", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:float" } }
+]

@@ -1,0 +1,11 @@
+{
+  "projects": {
+    "COMP": "company"
+  },
+  "faults": {
+    "AUTH": { "status": 401 },
+    "MISSING": { "status": 404 },
+    "RATE": { "status": 429, "retryAfter": 1 },
+    "NET": { "network": true }
+  }
+}

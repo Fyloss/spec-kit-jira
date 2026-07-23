@@ -56,8 +56,8 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Test infrastructure
 
-- [ ] T008 [P] Build the mocked Jira double (company-managed + team-managed discovery responses, and 401 / 404 / 429-exhausted / network fault injection) in `tests/conformance/mock-jira/`
-- [ ] T009 Implement the conformance harness `tests/conformance/run-scenario.sh` (signature `run-scenario <scenario.json> <bash|powershell> [outdir]`) that runs a port against a scenario and captures stdout, exit code, written files, and Jira API call sequence for byte-identical comparison (NFR-1)
+- [X] T008 [P] Build the mocked Jira double (company-managed + team-managed discovery responses, and 401 / 404 / 429-exhausted / network fault injection) in `tests/conformance/mock-jira/`
+- [X] T009 Implement the conformance harness `tests/conformance/run-scenario.sh` (signature `run-scenario <scenario.json> <bash|powershell> [outdir]`) that runs a port against a scenario and captures stdout, exit code, written files, and Jira API call sequence for byte-identical comparison (NFR-1)
 
 ### Port infrastructure — `lib/` (no domain knowledge)
 
