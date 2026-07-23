@@ -1,0 +1,91 @@
+#!/usr/bin/env bats
+# T047/T048/T049 [US11] — Privacy guard BLOCK tier (FR-052, Constitution IV/IX).
+#
+# Before EVERY write, a pre-write guard blocks on an exact match of a known
+# site/project coordinate, the ATATT token prefix, or a real non-documentation
+# *.atlassian.net host — producing ZERO writes and the dedicated exit code 9.
+# Precision over recall: the guard matches these specific shapes, never the
+# generic email/UUID shapes (those are the P3 WARN tier). The offending value is
+# never echoed (only the reason). The PowerShell port blocks identically (NFR-1).
+
+setup() {
+  ROOT="${BATS_TEST_DIRNAME}/../../.."
+  SINK_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/sink/jira"
+  PS_SINK="${ROOT}/.specify/extensions/jira/scripts/powershell/sink/jira"
+  MOCK="${ROOT}/tests/conformance/mock-jira"
+  # shellcheck source=/dev/null
+  source "${MOCK}/lib.sh"
+  # shellcheck source=/dev/null
+  source "${SINK_DIR}/privacy_guard.sh"
+  # shellcheck source=/dev/null
+  source "${SINK_DIR}/plan_apply.sh"
+  export JIRA_EMAIL="user@example.com"
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  export JIRA_NO_SLEEP=1
+}
+
+teardown() {
+  mock_stop
+}
+
+# --- Guard unit: the three BLOCK shapes -------------------------------------
+
+@test "blocks on an ATATT token prefix (exit 9), never echoing the value" {
+  run privacy_guard_scan 'see token ATATT3xFfGF0abcdef for access'
+  [ "$status" -eq 9 ]
+  [[ "$output" != *"ATATT3xFfGF0abcdef"* ]]   # the value is never echoed (NFR-3)
+}
+
+@test "blocks on a real *.atlassian.net host (exit 9)" {
+  run privacy_guard_scan 'mirror of https://acme-corp.atlassian.net/browse/X'
+  [ "$status" -eq 9 ]
+}
+
+@test "blocks on an exact known coordinate (exit 9)" {
+  run privacy_guard_scan 'internal ref ACME-PROD site' '["ACME-PROD site"]'
+  [ "$status" -eq 9 ]
+}
+
+@test "passes ordinary content — precision over recall (exit 0)" {
+  run privacy_guard_scan 'Add the billing feature; contact team@example.com; id 550e8400-e29b-41d4-a716-446655440000' '[]'
+  [ "$status" -eq 0 ]
+}
+
+# --- Apply path: the mandatory pre-write gate (zero writes on block) ---------
+
+@test "apply_writes blocks before any write and performs ZERO writes (exit 9)" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local actions='[{"method":"POST","url":"'"${MOCK_BASE_URL}"'/rest/api/3/issue","body":{"fields":{"summary":"leak acme-corp.atlassian.net"}}}]'
+  run apply_writes "${actions}"
+  [ "$status" -eq 9 ]
+  # Zero writes: the mock recorded no calls at all.
+  run mock_calls
+  [ -z "$output" ]
+}
+
+@test "apply_writes lets a clean write through (no gap for legitimate writes)" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local actions='[{"method":"POST","url":"'"${MOCK_BASE_URL}"'/rest/api/3/issue","body":{"fields":{"summary":"Add the billing feature"}}}]'
+  run apply_writes "${actions}"
+  [ "$status" -eq 0 ]
+  run mock_calls
+  [[ "$output" == *"POST /rest/api/3/issue"* ]]
+}
+
+# --- Cross-port parity ------------------------------------------------------
+
+@test "the PowerShell port blocks the same three shapes identically (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local ps
+  ps="$(pwsh -NoProfile -Command "
+    Import-Module '${PS_SINK}/PrivacyGuard.psm1' -Force
+    \$a = Test-JiraPrivacyBlock -Payload 'ATATT3xFfGF0abc'
+    \$b = Test-JiraPrivacyBlock -Payload 'x acme-corp.atlassian.net y'
+    \$c = Test-JiraPrivacyBlock -Payload 'ref ACME-PROD site' -KnownCoordinatesJson '[\"ACME-PROD site\"]'
+    \$d = Test-JiraPrivacyBlock -Payload 'Add the billing feature'
+    [Console]::Out.Write(\"\$a\$b\$c\$d\")
+  ")"
+  [ "$ps" = "9990" ]
+}

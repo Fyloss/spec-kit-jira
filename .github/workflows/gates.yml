@@ -101,11 +101,15 @@ jobs:
       - name: Compare the two ports' leaf sets (modulo extension + case)
         run: |
           set -euo pipefail
-          # Normalise each port to <relative-dir>/<lowercased-stem>.
+          # Normalise each port to <relative-dir>/<stem>, lowercased and stripped
+          # of word separators, so the snake_case Bash convention (plan_apply.sh)
+          # mirrors the PascalCase PowerShell convention (PlanApply.psm1) — the
+          # cross-port module naming documented in tasks.md. Hyphenated shared
+          # names (spec-kit-jira) normalise identically on both ports.
           bash_leaves="$(cd "${BASH_SCRIPTS}" && find . -name '*.sh' \
-            | sed 's/\.sh$//' | tr 'A-Z' 'a-z' | sort)"
+            | sed 's/\.sh$//' | tr 'A-Z' 'a-z' | tr -d '_-' | sort)"
           pwsh_leaves="$(cd "${PWSH_SCRIPTS}" && find . \( -name '*.psm1' -o -name '*.ps1' \) \
-            | sed -E 's/\.(psm1|ps1)$//' | tr 'A-Z' 'a-z' | sort)"
+            | sed -E 's/\.(psm1|ps1)$//' | tr 'A-Z' 'a-z' | tr -d '_-' | sort)"
           if ! diff <(printf '%s\n' "${bash_leaves}") <(printf '%s\n' "${pwsh_leaves}"); then
             echo "::error::module-parity broken — the two ports do not mirror module-for-module (NFR-1/NFR-2)"
             exit 1

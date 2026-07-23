@@ -171,12 +171,12 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 11 ⚠️
 
-- [ ] T047 [P] [US11] BLOCK-tier tests: known site/project coordinate, ATATT prefix, real `*.atlassian.net` host → exit 9 + zero writes (FR-052) in `tests/bash/sink/test_privacy_block.bats`, `tests/powershell/sink/PrivacyGuard.Block.Tests.ps1`, and `tests/conformance/scenarios/us11-block-tier.json`
+- [X] T047 [P] [US11] BLOCK-tier tests: known site/project coordinate, ATATT prefix, real `*.atlassian.net` host → exit 9 + zero writes (FR-052) in `tests/bash/sink/test_privacy_block.bats`, `tests/powershell/sink/PrivacyGuard.Block.Tests.ps1`, and `tests/conformance/scenarios/us11-block-tier.json`
 
 ### Implementation for User Story 11
 
-- [ ] T048 [US11] Implement the privacy guard BLOCK tier (exact-match detection, dedicated exit 9, precision over recall) in `.specify/extensions/jira/scripts/bash/sink/jira/privacy_guard.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PrivacyGuard.psm1`
-- [ ] T049 [US11] Wire the BLOCK guard as the mandatory pre-write gate in the apply path (every write, no gap) in `.specify/extensions/jira/scripts/bash/sink/jira/plan_apply.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PlanApply.psm1`
+- [X] T048 [US11] Implement the privacy guard BLOCK tier (exact-match detection, dedicated exit 9, precision over recall) in `.specify/extensions/jira/scripts/bash/sink/jira/privacy_guard.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PrivacyGuard.psm1`
+- [X] T049 [US11] Wire the BLOCK guard as the mandatory pre-write gate in the apply path (every write, no gap) in `.specify/extensions/jira/scripts/bash/sink/jira/plan_apply.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PlanApply.psm1`
 
 **Checkpoint**: No write can occur without passing the BLOCK guard.
 
