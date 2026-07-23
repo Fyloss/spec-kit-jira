@@ -64,5 +64,19 @@ summary_render_prose() {
   printf 'Command: %s%s\n' "${command}" "${suffix}"
   printf 'Created: %s, Updated: %s, Skipped: %s\n' "${created}" "${updated}" "${skipped}"
   printf 'Warnings: %s, Errors: %s\n' "${warnings}" "${errors}"
+  # The config ceremony's three effects, reported separately (FR-054). Rendered
+  # in a fixed order (discovery, hooks, readme) so both ports match byte-for-byte.
+  if [[ "$(jq -r 'has("effects")' <<< "${json}")" == "true" ]]; then
+    printf 'Effects:\n'
+    local effect status detail line
+    for effect in discovery hooks readme; do
+      status="$(jq -r --arg e "${effect}" '.effects[$e].status // empty' <<< "${json}")"
+      [[ -z "${status}" ]] && continue
+      detail="$(jq -r --arg e "${effect}" '.effects[$e].detail // empty' <<< "${json}")"
+      line="  ${effect}: ${status}"
+      [[ -n "${detail}" ]] && line="${line} — ${detail}"
+      printf '%s\n' "${line}"
+    done
+  fi
   printf 'Exit: %s\n' "${exit_code}"
 }

@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
-# commands/config.sh — Config-command building blocks (SINK-facing, T040).
+# commands/config.sh — The config command: the deterministic install ceremony.
 #
-# US2 lands the mapping-validation and strategy-persistence pieces the config
-# command orchestrates; the full `cmd_config` entry point (the deterministic
-# ceremony) is authored in US1 (T044/T045) and defined here then.
+# `cmd_config` (US1, T044/T046) orchestrates the single `/speckit.jira.config`
+# run: it reads the committed team config, discovers each project's metadata by
+# API read (US2), persists the resolved-id table into the machine-owned
+# config.local.yml with a DETERMINISTIC canonical serialisation (byte-identical
+# on re-run, FR-003), and reports the run's THREE effects separately — discovery,
+# `after_*` hook registration, and managed-README-block management (FR-054). At
+# this increment only the discovery effect performs its write; the hooks and
+# README effects are wired in later increments (T085 Phase 12, T065 Phase 8) and
+# already appear as distinct summary sections here.
 #
-# Mapping validation refuses an impossible mapping at config time (FR-007): a
-# team-managed project supports only an Epic parent and Sub-task children
+# Every step is an API read, a config read, or a closed enumerated question — no
+# step is left to model judgement (FR-001); the machine-readable `--json` summary
+# and the resolved-id table make the run fully reproducible (FR-002).
+#
+# Mapping validation (US2) refuses an impossible mapping at config time (FR-007):
+# a team-managed project supports only an Epic parent and Sub-task children
 # (research §3), so a hierarchy level ABOVE Epic is rejected with EXIT_CONFIG (4).
 # The "Epic" tier is identified from the DISCOVERED binding — the top non-subtask
 # hierarchy level — never a name compiled into the script (Constitution VII).
-#
-# Strategy persistence builds the project mapping entry by LOGICAL name; the
-# config command writes it into config.yml.
 
 [[ -n ${_JIRA_CMD_CONFIG:-} ]] && return 0
 _JIRA_CMD_CONFIG=1
@@ -22,8 +29,13 @@ _cmd_config_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_cmd_config_dir}/../lib/cli.sh"
 # shellcheck source=/dev/null
 source "${_cmd_config_dir}/../lib/output.sh"
+# shellcheck source=/dev/null
+source "${_cmd_config_dir}/../lib/config.sh"
+# shellcheck source=/dev/null
+source "${_cmd_config_dir}/../sink/jira/discovery.sh"
 
 : "${EXIT_CONFIG:=4}"
+: "${JIRA_CONFIG_DIR:=.specify/jira}"
 
 # config_validate_mapping <style> <hierarchy-json> <binding-json>
 # Refuse a team-managed hierarchy level above the discovered Epic tier (FR-007).
@@ -75,4 +87,100 @@ config_project_mapping() {
     {key: $key, style: $style, epic_strategy: $epic, task_strategy: $task}
     + (if $link == "" then {} else {link_type: $link} end)
   ' | json_canonical
+}
+
+# config_resolved_ids_for <binding-json> — reshape a discovered project binding
+# into the resolved-id lookup table the reconcile path consumes: logical name ->
+# id for issue types, priorities, and statuses. Prints the canonical object.
+config_resolved_ids_for() {
+  jq -c '{
+    issue_types: ( reduce .issue_types[] as $t ({}; .[$t.logical_name] = $t.id) ),
+    priorities:  ( reduce .priorities[] as $p ({}; .[$p.logical_name] = $p.id) ),
+    statuses:    ( reduce .statuses[] as $s ({}; .[$s.name] = $s.id) )
+  }' <<< "$1" | json_canonical
+}
+
+# cmd_config <argv...> — the deterministic install ceremony (US1). Echoes the run
+# summary to stdout and returns the exit code.
+cmd_config() {
+  # Parse flags (config-read, no model judgement). The dispatcher already handled
+  # --help; re-parse here so the command is runnable standalone.
+  local parsed json="false" dry_run="false" exit_code="0" error=""
+  parsed="$(cli_parse "$@")"
+  while IFS='=' read -r key value; do
+    case "${key}" in
+      json) json="${value}" ;;
+      dry_run) dry_run="${value}" ;;
+      exit) exit_code="${value}" ;;
+      error) error="${value}" ;;
+    esac
+  done <<< "${parsed}"
+  if [[ "${exit_code}" != "0" ]]; then
+    [[ -n "${error}" ]] && printf 'config: %s\n' "${error}" >&2
+    return "${exit_code}"
+  fi
+
+  local configdir="${JIRA_CONFIG_DIR}"
+
+  # Config read: load and validate the committed team config (US4).
+  local cfg
+  cfg="$(config_load "${configdir}")" || return $?
+
+  # API reads: discover each project's metadata (US2) and build the resolved-id
+  # table. Discovery is deterministic, so an unchanged project yields identical
+  # bytes on every run (FR-003).
+  local keys
+  keys="$(jq -r '.projects[]?.key // empty' <<< "${cfg}")"
+  local resolved="{}" nproj=0 pkey binding rids
+  while IFS= read -r pkey; do
+    [[ -z "${pkey}" ]] && continue
+    binding="$(discover_binding "${pkey}")" || return $?
+    rids="$(config_resolved_ids_for "${binding}")"
+    resolved="$(jq -c --arg k "${pkey}" --argjson r "${rids}" '. + {($k): $r}' <<< "${resolved}")"
+    nproj=$((nproj + 1))
+  done <<< "${keys}"
+
+  # Merge the resolved-id table into the machine-owned local layer, preserving
+  # the operator's site_alias / overrides, and emit deterministic canonical YAML.
+  local localf="${configdir}/config.local.yml" existing="{}"
+  [[ -f "${localf}" ]] && existing="$(config_yaml_to_json "${localf}")"
+  local newlocal yaml
+  newlocal="$(jq -cS --argjson r "${resolved}" '. + {resolved_ids: $r}' <<< "${existing}")"
+  yaml="$(printf '%s' "${newlocal}" | config_to_yaml)"
+
+  # Discovery-effect status: created / unchanged / written.
+  local disc_status="written"
+  if [[ ! -f "${localf}" ]]; then
+    disc_status="created"
+  elif [[ "$(cat "${localf}")" == "${yaml}" ]]; then
+    disc_status="unchanged"
+  fi
+  if [[ "${dry_run}" != "true" ]]; then
+    printf '%s\n' "${yaml}" > "${localf}"
+  fi
+
+  # Build the three-effect summary (FR-054). Only discovery writes this phase;
+  # hooks (T085) and README (T065) are wired in later increments — reported here
+  # as distinct sections so the summary structure is stable across increments.
+  local effects
+  effects="$(jq -cn \
+    --arg ds "${disc_status}" --arg dd "${nproj} project(s) discovered" '
+    {
+      discovery: {status: $ds, detail: $dd},
+      hooks:     {status: "skipped", detail: "hook registration wired in a later increment"},
+      readme:    {status: "skipped", detail: "managed README block wired in a later increment"}
+    }')"
+
+  local summary
+  summary="$(jq -cn --argjson effects "${effects}" --argjson dry "${dry_run}" '
+    {schema_version: "1.0", command: "config", dry_run: $dry,
+     counts: {created: 0, updated: 0, skipped: 0, warnings: 0, errors: 0},
+     effects: $effects, exit_code: 0}' | json_canonical)"
+
+  if [[ "${json}" == "true" ]]; then
+    printf '%s\n' "${summary}"
+  else
+    printf '%s' "${summary}" | summary_render_prose
+  fi
+  return 0
 }

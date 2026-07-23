@@ -230,6 +230,83 @@ function ConvertFrom-JiraConfigYaml {
 }
 
 # =============================================================================
+# JSON -> canonical YAML (T044) — the deterministic writer. Mirror of
+# config_to_yaml; emits byte-identical output.
+# =============================================================================
+
+function Write-CfgYamlScalar {
+    param($Value)
+    if ($null -eq $Value) { return 'null' }
+    if ($Value -is [bool]) { return $(if ($Value) { 'true' } else { 'false' }) }
+    if ($Value -is [string]) { return '"' + $Value + '"' }
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [double] -or
+        $Value -is [decimal] -or $Value -is [single]) {
+        return [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0}', $Value)
+    }
+    return '"' + [string]$Value + '"'
+}
+
+function Write-CfgYamlNode {
+    # Recursively emit a parsed value as canonical YAML lines (2-space indent,
+    # sorted object keys ordinal, `- ` sequences). Returns the joined lines with
+    # no trailing newline — byte-identical to the Bash emitter's jq program.
+    param($Node, [string] $Ind)
+
+    if ($Node -is [System.Collections.IDictionary] -or $Node -is [System.Management.Automation.PSCustomObject]) {
+        $map = [ordered]@{}
+        if ($Node -is [System.Collections.IDictionary]) {
+            foreach ($k in $Node.Keys) { $map[[string]$k] = $Node[$k] }
+        }
+        else {
+            foreach ($p in $Node.PSObject.Properties) { $map[[string]$p.Name] = $p.Value }
+        }
+        # Sort keys by Unicode code point (ordinal) — the same order as the
+        # canonical JSON serialiser, so both ports converge to identical bytes.
+        $names = [System.Collections.Generic.List[string]]::new()
+        foreach ($k in $map.Keys) { $names.Add([string]$k) }
+        $names.Sort([System.StringComparer]::Ordinal)
+        $lines = foreach ($k in $names) {
+            $v = $map[$k]
+            if ($v -is [System.Collections.IDictionary] -or $v -is [System.Management.Automation.PSCustomObject]) {
+                $childCount = @($(if ($v -is [System.Collections.IDictionary]) { $v.Keys } else { $v.PSObject.Properties })).Count
+                if ($childCount -eq 0) { "$Ind${k}: {}" }
+                else { "$Ind${k}:`n" + (Write-CfgYamlNode $v ($Ind + '  ')) }
+            }
+            elseif (($v -is [System.Collections.IEnumerable]) -and ($v -isnot [string])) {
+                if (@($v).Count -eq 0) { "$Ind${k}: []" }
+                else { "$Ind${k}:`n" + (Write-CfgYamlNode $v ($Ind + '  ')) }
+            }
+            else { "$Ind${k}: " + (Write-CfgYamlScalar $v) }
+        }
+        return ($lines -join "`n")
+    }
+
+    if (($Node -is [System.Collections.IEnumerable]) -and ($Node -isnot [string])) {
+        $lines = foreach ($item in $Node) {
+            $isObj = $item -is [System.Collections.IDictionary] -or $item -is [System.Management.Automation.PSCustomObject]
+            $isArr = ($item -is [System.Collections.IEnumerable]) -and ($item -isnot [string])
+            if ($isObj -or $isArr) { "$Ind-`n" + (Write-CfgYamlNode $item ($Ind + '  ')) }
+            else { "$Ind- " + (Write-CfgYamlScalar $item) }
+        }
+        return ($lines -join "`n")
+    }
+
+    return [string]$Node
+}
+
+function ConvertTo-JiraConfigYaml {
+    <#
+    .SYNOPSIS
+      Emit a JSON value as canonical YAML (no trailing newline), byte-identical to
+      the Bash port's config_to_yaml. The caller adds exactly one trailing newline.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $Json)
+    $obj = $Json | ConvertFrom-Json -Depth 100
+    return (Write-CfgYamlNode $obj '')
+}
+
+# =============================================================================
 # Credential-shape rejection (T031, FR-023)
 # =============================================================================
 
@@ -487,6 +564,6 @@ function Get-JiraPhaseStatusTargetSet {
 }
 
 Export-ModuleMember -Function Get-JiraExtensionVersion, Assert-JiraSingleVersionSource, `
-    ConvertFrom-JiraConfigYaml, Read-JiraConfigYamlObject, Get-JiraConfigCredentialError, `
-    Test-JiraTeamConfig, Test-JiraLocalConfig, Import-JiraConfig, `
+    ConvertFrom-JiraConfigYaml, ConvertTo-JiraConfigYaml, Read-JiraConfigYamlObject, `
+    Get-JiraConfigCredentialError, Test-JiraTeamConfig, Test-JiraLocalConfig, Import-JiraConfig, `
     Get-JiraStatusClassification, Get-JiraPhaseStatusTargetSet

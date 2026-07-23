@@ -147,15 +147,15 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 1 ⚠️
 
-- [ ] T041 [P] [US1] Byte-identical re-run (FR-003, SC-004) + both-ports-identical `config.yml` in `tests/conformance/scenarios/us1-config-idempotent.json`
-- [ ] T042 [P] [US1] Every step is API-read / config-read / closed enumerated question with machine-readable key/value or JSON output (FR-001, FR-002) in `tests/bash/commands/test_config_determinism.bats` and `tests/powershell/commands/Config.Determinism.Tests.ps1`
-- [ ] T043 [P] [US1] Run summary reports the three effects (discovery / hooks / README) separately (FR-054) in `tests/bash/commands/test_config_three_effects.bats` and `tests/powershell/commands/Config.ThreeEffects.Tests.ps1`. **Scope note**: at this phase only the discovery effect is wired, so this task asserts the summary *structure* (all three effects reported as distinct sections). The assertion that the hooks and README effects actually *perform their writes* is completed when T065 (README wiring, Phase 8) and T085 (hook wiring, Phase 12) land — extend this scenario there rather than duplicating it.
+- [X] T041 [P] [US1] Byte-identical re-run (FR-003, SC-004) + both-ports-identical `config.yml` in `tests/conformance/scenarios/us1-config-idempotent.json`
+- [X] T042 [P] [US1] Every step is API-read / config-read / closed enumerated question with machine-readable key/value or JSON output (FR-001, FR-002) in `tests/bash/commands/test_config_determinism.bats` and `tests/powershell/commands/Config.Determinism.Tests.ps1`
+- [X] T043 [P] [US1] Run summary reports the three effects (discovery / hooks / README) separately (FR-054) in `tests/bash/commands/test_config_three_effects.bats` and `tests/powershell/commands/Config.ThreeEffects.Tests.ps1`. **Scope note**: at this phase only the discovery effect is wired, so this task asserts the summary *structure* (all three effects reported as distinct sections). The assertion that the hooks and README effects actually *perform their writes* is completed when T065 (README wiring, Phase 8) and T085 (hook wiring, Phase 12) land — extend this scenario there rather than duplicating it.
 
 ### Implementation for User Story 1
 
-- [ ] T044 [US1] Implement the config-command orchestration (discovery → persist config with deterministic canonical serialisation → three-effect summary) in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
-- [ ] T045 [US1] Author the agent command file with the exact, ordered, model-independent algorithm (closed enumerated questions only, no inferred keys/fields) in `commands/speckit.jira.config.md`
-- [ ] T046 [US1] Implement three-effect run-summary reporting (discovery / hooks / README reported separately) in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
+- [X] T044 [US1] Implement the config-command orchestration (discovery → persist config with deterministic canonical serialisation → three-effect summary) in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
+- [X] T045 [US1] Author the agent command file with the exact, ordered, model-independent algorithm (closed enumerated questions only, no inferred keys/fields) in `commands/speckit.jira.config.md`
+- [X] T046 [US1] Implement three-effect run-summary reporting (discovery / hooks / README reported separately) in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
 
 **Checkpoint 🎯 MVP**: The config command produces a byte-identical, deterministic `config.yml` on both ports — the feature's entry point is usable. The discovery effect and the three-effect summary *structure* are validated here; US1's full Independent Test ("one run performs all three effects") is only satisfiable once the README effect (T065, Phase 8) and the hook effect (T085, Phase 12) are wired — the three-effect assertion is completed at Phase 12, not here.
 

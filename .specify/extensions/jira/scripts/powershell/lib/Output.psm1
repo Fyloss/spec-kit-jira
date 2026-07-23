@@ -172,12 +172,26 @@ function ConvertTo-JiraSummaryProse {
     param([Parameter(Mandatory)] [string] $Json)
     $s = $Json | ConvertFrom-Json
     $suffix = if ($s.dry_run) { ' (dry-run)' } else { '' }
-    $lines = @(
-        "Command: $($s.command)$suffix",
-        "Created: $($s.counts.created), Updated: $($s.counts.updated), Skipped: $($s.counts.skipped)",
-        "Warnings: $($s.counts.warnings), Errors: $($s.counts.errors)",
-        "Exit: $($s.exit_code)"
-    )
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("Command: $($s.command)$suffix")
+    $lines.Add("Created: $($s.counts.created), Updated: $($s.counts.updated), Skipped: $($s.counts.skipped)")
+    $lines.Add("Warnings: $($s.counts.warnings), Errors: $($s.counts.errors)")
+    # The config ceremony's three effects, reported separately (FR-054), in a
+    # fixed order (discovery, hooks, readme) so both ports match byte-for-byte.
+    if ($s.PSObject.Properties.Name -contains 'effects') {
+        $lines.Add('Effects:')
+        foreach ($effect in @('discovery', 'hooks', 'readme')) {
+            $e = $s.effects.$effect
+            if ($null -eq $e) { continue }
+            $status = $e.status
+            if ([string]::IsNullOrEmpty($status)) { continue }
+            $detail = if ($e.PSObject.Properties.Name -contains 'detail') { [string]$e.detail } else { '' }
+            $line = "  ${effect}: $status"
+            if (-not [string]::IsNullOrEmpty($detail)) { $line = "$line — $detail" }
+            $lines.Add($line)
+        }
+    }
+    $lines.Add("Exit: $($s.exit_code)")
     return (($lines -join "`n") + "`n")
 }
 

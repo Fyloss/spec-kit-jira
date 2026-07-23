@@ -254,6 +254,56 @@ config_yaml_to_json() {
 }
 
 # =============================================================================
+# JSON -> canonical YAML (T044) — the deterministic writer
+# =============================================================================
+
+# The config command writes the machine-owned config.local.yml (the resolved-id
+# table filled by discovery). To make a re-run byte-identical (FR-003), the
+# writer is DETERMINISTIC and a FIXED POINT of the reader above: emitting a value
+# then re-parsing it yields the same value. Keys are sorted (ordinal, matching
+# json_canonical) and emitted plain (the reader does not accept quoted keys);
+# string values are double-quoted (the reader strips the quotes verbatim, so any
+# numeric-looking id round-trips as a string, exactly as the reader produces).
+# The PowerShell port (ConvertTo-JiraConfigYaml) emits byte-identical output.
+#
+# The restricted subset carries no `"`/`\` in keys or values (Jira logical names
+# and ids do not); the reader's naive quote handling makes those safe to omit.
+
+# _cfg_yaml_emit_jq — the recursive jq emitter (2-space block indent, sorted
+# object keys, `- ` sequences). Kept as a single self-recursive function because
+# jq forbids mutual recursion between separate defs.
+# shellcheck disable=SC2016  # `\(...)`-free; single-quoted jq program
+_CFG_YAML_EMIT_JQ='
+def yscalar:
+  if type=="string" then "\"" + . + "\""
+  elif type=="boolean" then (if . then "true" else "false" end)
+  elif type=="null" then "null"
+  else tostring end;
+def yemit(ind):
+  if type=="object" then
+    (to_entries | sort_by(.key) | map(
+      .key as $k | .value as $v |
+      (if ($v|type)=="object" then
+         (if ($v|length)==0 then ind+$k+": {}" else ind+$k+":\n"+($v|yemit(ind+"  ")) end)
+       elif ($v|type)=="array" then
+         (if ($v|length)==0 then ind+$k+": []" else ind+$k+":\n"+($v|yemit(ind+"  ")) end)
+       else ind+$k+": "+($v|yscalar) end)
+    ) | join("\n"))
+  elif type=="array" then
+    (map(
+      (if (type=="object" or type=="array") then ind+"-\n"+(yemit(ind+"  "))
+       else ind+"- "+yscalar end)
+    ) | join("\n"))
+  else . end;
+yemit("")'
+
+# config_to_yaml — read a JSON value on stdin, print its canonical YAML on stdout
+# (no trailing newline; the caller adds exactly one when writing the file).
+config_to_yaml() {
+  jq -rS "${_CFG_YAML_EMIT_JQ}"
+}
+
+# =============================================================================
 # Credential-shape rejection (T031, FR-023)
 # =============================================================================
 
