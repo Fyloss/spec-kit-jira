@@ -19,6 +19,7 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../hooks/ReadmeBlock.psm1') -Force
 
 $script:ExitConfig = 4
 
@@ -170,11 +171,28 @@ function Invoke-JiraConfig {
         [System.IO.File]::WriteAllText($localf, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
     }
 
+    # README effect (US5, T065): splice the version-marked managed block into the
+    # consuming repository's README. The path derives from the config dir's repo
+    # root (the parent of .specify), overridable via SPEC_KIT_JIRA_README.
+    $repoRoot = Split-Path -Parent (Split-Path -Parent $configdir)
+    if ([string]::IsNullOrEmpty($repoRoot)) { $repoRoot = '.' }
+    $readmePath = if ($env:SPEC_KIT_JIRA_README) { $env:SPEC_KIT_JIRA_README } else { Join-Path $repoRoot 'README.md' }
+    $readmeResult = Set-JiraReadmeBlock -Path $readmePath -DryRun ([bool]$dryRun)
+    $readmeStatus = $readmeResult.Status
+    $readmeDetail = switch ($readmeStatus) {
+        'created' { 'managed README block created' }
+        'written' { 'managed README block updated' }
+        'unchanged' { 'managed README block unchanged' }
+        'refused' { 'README markers malformed; block not written' }
+        default { $readmeStatus }
+    }
+
     # Build the three-effect summary (FR-054), byte-identical to the Bash port.
+    # Discovery and README write this phase; hook registration (T085) lands later.
     $effects = [ordered]@{
         discovery = [ordered]@{ status = $discStatus; detail = "$nproj project(s) discovered" }
         hooks     = [ordered]@{ status = 'skipped'; detail = 'hook registration wired in a later increment' }
-        readme    = [ordered]@{ status = 'skipped'; detail = 'managed README block wired in a later increment' }
+        readme    = [ordered]@{ status = $readmeStatus; detail = $readmeDetail }
     }
     $summaryObj = [ordered]@{
         schema_version = '1.0'

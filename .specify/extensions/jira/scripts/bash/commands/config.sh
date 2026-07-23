@@ -33,6 +33,8 @@ source "${_cmd_config_dir}/../lib/output.sh"
 source "${_cmd_config_dir}/../lib/config.sh"
 # shellcheck source=/dev/null
 source "${_cmd_config_dir}/../sink/jira/discovery.sh"
+# shellcheck source=/dev/null
+source "${_cmd_config_dir}/../hooks/readme_block.sh"
 
 : "${EXIT_CONFIG:=4}"
 : "${JIRA_CONFIG_DIR:=.specify/jira}"
@@ -159,16 +161,31 @@ cmd_config() {
     printf '%s\n' "${yaml}" > "${localf}"
   fi
 
-  # Build the three-effect summary (FR-054). Only discovery writes this phase;
-  # hooks (T085) and README (T065) are wired in later increments — reported here
-  # as distinct sections so the summary structure is stable across increments.
+  # README effect (US5, T065): splice the version-marked managed block into the
+  # consuming repository's README. The path derives from the config dir's repo
+  # root (the parent of .specify), overridable via SPEC_KIT_JIRA_README.
+  local readme_path readme_status="skipped" readme_detail
+  readme_path="${SPEC_KIT_JIRA_README:-$(dirname "$(dirname "${configdir}")")/README.md}"
+  readme_status="$(readme_block_write "${readme_path}" "${dry_run}")" || readme_status="refused"
+  case "${readme_status}" in
+    created) readme_detail="managed README block created" ;;
+    written) readme_detail="managed README block updated" ;;
+    unchanged) readme_detail="managed README block unchanged" ;;
+    refused) readme_detail="README markers malformed; block not written" ;;
+    *) readme_detail="${readme_status}" ;;
+  esac
+
+  # Build the three-effect summary (FR-054). Discovery and README write this
+  # phase; hook registration (T085) is wired in a later increment — reported here
+  # as a distinct section so the summary structure is stable across increments.
   local effects
   effects="$(jq -cn \
-    --arg ds "${disc_status}" --arg dd "${nproj} project(s) discovered" '
+    --arg ds "${disc_status}" --arg dd "${nproj} project(s) discovered" \
+    --arg rs "${readme_status}" --arg rd "${readme_detail}" '
     {
       discovery: {status: $ds, detail: $dd},
       hooks:     {status: "skipped", detail: "hook registration wired in a later increment"},
-      readme:    {status: "skipped", detail: "managed README block wired in a later increment"}
+      readme:    {status: $rs, detail: $rd}
     }')"
 
   local summary

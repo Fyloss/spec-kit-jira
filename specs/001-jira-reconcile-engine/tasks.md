@@ -216,15 +216,15 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 5 ⚠️
 
-- [ ] T060 [P] [US5] Replace only between markers; preserve every byte outside (CRLF-safe); adopt host dominant line-ending; new README uses LF; byte-identical block across ports (FR-025, SC-005) in `tests/bash/engine/test_readme_splice.bats`, `tests/powershell/engine/ReadmeSplice.Tests.ps1`, and `tests/conformance/scenarios/us5-readme-block.json`
-- [ ] T061 [P] [US5] Absent block appended once at documented position; absent README created with only the block; malformed markers (start-without-end/nested/duplicated) → zero writes + located error exit 4 (FR-026, FR-027) in `tests/bash/engine/test_readme_edgecases.bats` and `tests/powershell/engine/ReadmeEdgecases.Tests.ps1`
-- [ ] T062 [P] [US5] Idempotent (unchanged version + content → zero rewrite, zero-change report); hand-edited block regenerated + summary states replaced (FR-028, FR-029) in `tests/bash/engine/test_readme_idempotent.bats` and `tests/powershell/engine/ReadmeIdempotent.Tests.ps1`
+- [X] T060 [P] [US5] Replace only between markers; preserve every byte outside (CRLF-safe); adopt host dominant line-ending; new README uses LF; byte-identical block across ports (FR-025, SC-005) in `tests/bash/engine/test_readme_splice.bats`, `tests/powershell/engine/ReadmeSplice.Tests.ps1`, and `tests/conformance/scenarios/us5-readme-block.json`
+- [X] T061 [P] [US5] Absent block appended once at documented position; absent README created with only the block; malformed markers (start-without-end/nested/duplicated) → zero writes + located error exit 4 (FR-026, FR-027) in `tests/bash/engine/test_readme_edgecases.bats` and `tests/powershell/engine/ReadmeEdgecases.Tests.ps1`
+- [X] T062 [P] [US5] Idempotent (unchanged version + content → zero rewrite, zero-change report); hand-edited block regenerated + summary states replaced (FR-028, FR-029) in `tests/bash/engine/test_readme_idempotent.bats` and `tests/powershell/engine/ReadmeIdempotent.Tests.ps1`
 
 ### Implementation for User Story 5
 
-- [ ] T063 [US5] Implement the README byte-splice + dominant line-ending detection + malformed-marker refusal (engine owns the byte manipulation) in `.specify/extensions/jira/scripts/bash/engine/managed_section.sh` and `.specify/extensions/jira/scripts/powershell/engine/ManagedSection.psm1`
-- [ ] T064 [US5] Implement the version-marked README-block writer (markers from the single version source, FR-024) in `.specify/extensions/jira/scripts/bash/hooks/readme_block.sh` and `.specify/extensions/jira/scripts/powershell/hooks/ReadmeBlock.psm1`
-- [ ] T065 [US5] Wire the README-block writer as the config command's third reported effect in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
+- [X] T063 [US5] Implement the README byte-splice + dominant line-ending detection + malformed-marker refusal (engine owns the byte manipulation) in `.specify/extensions/jira/scripts/bash/engine/managed_section.sh` and `.specify/extensions/jira/scripts/powershell/engine/ManagedSection.psm1`
+- [X] T064 [US5] Implement the version-marked README-block writer (markers from the single version source, FR-024) in `.specify/extensions/jira/scripts/bash/hooks/readme_block.sh` and `.specify/extensions/jira/scripts/powershell/hooks/ReadmeBlock.psm1`
+- [X] T065 [US5] Wire the README-block writer as the config command's third reported effect in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
 
 **Checkpoint**: All P1 stories complete — deterministic config, dual-style discovery, BLOCK guard, rich tickets, managed README block.
 

@@ -1,0 +1,17 @@
+projects:
+  - key: COMP
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+    issue_types:
+      Epic: "10001"
+      Story: "10002"
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: "billing-"
+    project: COMP
+routing_default: COMP
