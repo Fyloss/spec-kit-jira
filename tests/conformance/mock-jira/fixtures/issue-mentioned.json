@@ -1,0 +1,30 @@
+{
+  "id": "88010",
+  "key": "MENT-1",
+  "fields": {
+    "summary": "Adjust the onboarding checklist",
+    "description": {
+      "type": "doc",
+      "version": 1,
+      "content": [
+        { "type": "paragraph", "content": [ { "type": "text", "text": "Operators need a shorter onboarding checklist." } ] },
+        {
+          "type": "panel",
+          "attrs": { "panelType": "info" },
+          "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "Given a new operator When they open the app Then the checklist has five steps" } ] } ]
+        }
+      ]
+    },
+    "priority": { "id": "2", "name": "High" },
+    "labels": [ "onboarding", "ux" ],
+    "status": { "name": "In Progress", "statusCategory": { "key": "indeterminate" } },
+    "issuelinks": [
+      {
+        "type": { "name": "Blocks", "inward": "is blocked by", "outward": "blocks" },
+        "outwardIssue": { "key": "MENT-4", "fields": { "summary": "Ship the API", "status": { "name": "To Do" } } }
+      }
+    ],
+    "parent": { "key": "MENT-9", "fields": { "summary": "Onboarding epic", "status": { "name": "In Progress" } } },
+    "customfield_40099": [ { "value": "Impediment" } ]
+  }
+}

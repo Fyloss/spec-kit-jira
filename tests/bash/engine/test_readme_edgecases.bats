@@ -16,8 +16,11 @@ setup() {
   END='<!-- x:end'
   BLOCK=$'<!-- x:begin v1 -->\nMANAGED LINE A\n<!-- x:end v1 -->'
   WORK="$(mktemp -d)"
+  # The version is read from the single source (extension.yml), never hardcoded in
+  # a test — the version literal must live only in extension.yml (SC-006/FR-022).
+  VERSION="$(sed -n 's/^version:[[:space:]]*//p' "${ROOT}/.specify/extensions/jira/extension.yml" | head -n1)"
   # A small synthetic template keeps writer assertions stable; the version comes
-  # from the real single source (extension.yml → 0.1.0).
+  # from that real single source.
   printf '<!-- spec-kit-jira:begin v{{VERSION}} -->\nMANAGED v{{VERSION}}\n<!-- spec-kit-jira:end v{{VERSION}} -->\n' > "${WORK}/tmpl"
   export SPEC_KIT_JIRA_README_TEMPLATE="${WORK}/tmpl"
 }
@@ -76,7 +79,7 @@ teardown() { rm -rf "${WORK}"; }
   readme_block_write "${WORK}/README.md" false > "${WORK}/status"
   [ "$(cat "${WORK}/status")" = "created" ]
   [ -f "${WORK}/README.md" ]
-  grep -q 'MANAGED v0.1.0' "${WORK}/README.md"
+  grep -q "MANAGED v${VERSION}" "${WORK}/README.md"
   [ "$(grep -c 'spec-kit-jira:begin' "${WORK}/README.md")" -eq 1 ]
 }
 

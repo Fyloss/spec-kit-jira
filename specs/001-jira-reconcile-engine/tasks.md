@@ -322,12 +322,12 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 10 ⚠️
 
-- [ ] T086 [P] [US10] Read-only fetch (content/AC/priority/labels/status/flag/links, Confluence title+url only, parent context, sibling one-liners) (FR-050); claimed-by-other → zero writes + actionable refusal offering reopen or new-linked (FR-051) in `tests/bash/commands/test_mention.bats`, `tests/powershell/commands/Mention.Tests.ps1`, and `tests/conformance/scenarios/us10-mention.json`
+- [X] T086 [P] [US10] Read-only fetch (content/AC/priority/labels/status/flag/links, Confluence title+url only, parent context, sibling one-liners) (FR-050); claimed-by-other → zero writes + actionable refusal offering reopen or new-linked (FR-051) in `tests/bash/commands/test_mention.bats`, `tests/powershell/commands/Mention.Tests.ps1`, and `tests/conformance/scenarios/us10-mention.json`
 
 ### Implementation for User Story 10
 
-- [ ] T087 [US10] Implement `fetch_mentioned` (read-only; Confluence page content NOT fetched) in `.specify/extensions/jira/scripts/bash/sink/jira/discovery.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Discovery.psm1`
-- [ ] T088 [US10] Implement the `mention` command (stamp identity, update only that ticket, log every mutation, refuse on claimed-by-other) in `.specify/extensions/jira/scripts/bash/commands/mention.sh` and `.specify/extensions/jira/scripts/powershell/commands/Mention.psm1`
+- [X] T087 [US10] Implement `fetch_mentioned` (read-only; Confluence page content NOT fetched) in `.specify/extensions/jira/scripts/bash/sink/jira/discovery.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Discovery.psm1`
+- [X] T088 [US10] Implement the `mention` command (stamp identity, update only that ticket, log every mutation, refuse on claimed-by-other) in `.specify/extensions/jira/scripts/bash/commands/mention.sh` and `.specify/extensions/jira/scripts/powershell/commands/Mention.psm1`
 
 **Checkpoint**: Mentioned-ticket read/edit flow works with identity safety.
 
@@ -341,11 +341,11 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 12 ⚠️
 
-- [ ] T089 [P] [US12] Generic shapes warn but don't block; allowlisted Confluence/domain → neither block nor warning; `.extensionignore` paths excluded from parse + scan; allowlisted content never BLOCK-false-positives (FR-053) in `tests/bash/sink/test_privacy_warn.bats`, `tests/powershell/sink/PrivacyGuard.Warn.Tests.ps1`, and `tests/conformance/scenarios/us12-warn-allowlist.json`
+- [X] T089 [P] [US12] Generic shapes warn but don't block; allowlisted Confluence/domain → neither block nor warning; `.extensionignore` paths excluded from parse + scan; allowlisted content never BLOCK-false-positives (FR-053) in `tests/bash/sink/test_privacy_warn.bats`, `tests/powershell/sink/PrivacyGuard.Warn.Tests.ps1`, and `tests/conformance/scenarios/us12-warn-allowlist.json`
 
 ### Implementation for User Story 12
 
-- [ ] T090 [US12] Implement the WARN tier + allowlist (`.extensionignore` + `config.privacy.allowlist`) + parse/scan exclusion in `.specify/extensions/jira/scripts/bash/sink/jira/privacy_guard.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PrivacyGuard.psm1`
+- [X] T090 [US12] Implement the WARN tier + allowlist (`.extensionignore` + `config.privacy.allowlist`) + parse/scan exclusion in `.specify/extensions/jira/scripts/bash/sink/jira/privacy_guard.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PrivacyGuard.psm1`
 
 **Checkpoint**: All twelve user stories complete.
 
@@ -355,13 +355,13 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 **Purpose**: Live verification, governance, docs, and final gate confirmation across all stories.
 
-- [ ] T091 [P] Implement the opt-in live zero-churn suite (real instance, non-blocking on fork PRs) verifying SC-001 and SC-008 in `tests/live/`
-- [ ] T092 [P] Add dedicated SC-007 tests: the resolved token never appears in argv, logs, errors, or traces at maximum verbosity on either port in `tests/bash/lib/test_token_leak.bats` and `tests/powershell/lib/TokenLeak.Tests.ps1`
-- [ ] T093 [P] Add the SC-009 test: `git diff` over `.specify/scripts/` and `.specify/templates/` is empty after a full install + config run in `tests/conformance/scenarios/sc009-core-untouched.json`
-- [ ] T094 [P] Finalize `.specify/extensions/jira/CHANGELOG.md` (SemVer) and the README managed-block template body; verify the catalog id (Constitution XII) in `.specify/extensions/jira/extension.yml`
-- [ ] T095 Run the quickstart.md end-to-end validation (every scenario mapped to its SC-00x) per `specs/001-jira-reconcile-engine/quickstart.md`
-- [ ] T096 [P] Write install/prerequisite docs (bash ≥ 4 with macOS 3.2 named, pwsh 7+, curl/jq/git; NFR-4) in the README managed block and `.specify/extensions/jira/` docs
-- [ ] T097 Confirm the final gates green: coverage ≥ 80% both ports (kcov + Pester), critical paths near 100%, module-parity check, engine/sink greps, and version-string grep (SC-006)
+- [X] T091 [P] Implement the opt-in live zero-churn suite (real instance, non-blocking on fork PRs) verifying SC-001 and SC-008 in `tests/live/`
+- [X] T092 [P] Add dedicated SC-007 tests: the resolved token never appears in argv, logs, errors, or traces at maximum verbosity on either port in `tests/bash/lib/test_token_leak.bats` and `tests/powershell/lib/TokenLeak.Tests.ps1`
+- [X] T093 [P] Add the SC-009 test: `git diff` over `.specify/scripts/` and `.specify/templates/` is empty after a full install + config run in `tests/conformance/scenarios/sc009-core-untouched.json`
+- [X] T094 [P] Finalize `.specify/extensions/jira/CHANGELOG.md` (SemVer) and the README managed-block template body; verify the catalog id (Constitution XII) in `.specify/extensions/jira/extension.yml`
+- [X] T095 Run the quickstart.md end-to-end validation (every scenario mapped to its SC-00x) per `specs/001-jira-reconcile-engine/quickstart.md`
+- [X] T096 [P] Write install/prerequisite docs (bash ≥ 4 with macOS 3.2 named, pwsh 7+, curl/jq/git; NFR-4) in the README managed block and `.specify/extensions/jira/` docs
+- [X] T097 Confirm the final gates green: coverage ≥ 80% both ports (kcov + Pester), critical paths near 100%, module-parity check, engine/sink greps, and version-string grep (SC-006)
 
 ---
 

@@ -262,13 +262,16 @@ function Invoke-JiraApplyWriteSet {
         [string] $ExtraKnownCoordinatesJson = '[]'
     )
     $coords = Get-JiraApplyKnownCoordinate -ExtraJson $ExtraKnownCoordinatesJson
+    # The allowlist (US12, FR-053) neutralises allowlisted Confluence links/domains so
+    # they never false-block; empty unless the caller supplies one out of band.
+    $allow = if ($env:SPEC_KIT_JIRA_ALLOWLIST) { $env:SPEC_KIT_JIRA_ALLOWLIST } else { '[]' }
     $actions = @($ActionsJson | ConvertFrom-Json -Depth 100)
 
     # (1) Pre-write gate — scan every content payload before writing anything.
     foreach ($a in $actions) {
         $bodyObj = if ($a.PSObject.Properties.Name -contains 'body') { $a.body } else { $null }
         $bodyText = if ($null -eq $bodyObj) { '{}' } else { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 }
-        $code = Test-JiraPrivacyBlock -Payload $bodyText -KnownCoordinatesJson $coords
+        $code = Test-JiraPrivacyBlock -Payload $bodyText -KnownCoordinatesJson $coords -AllowlistJson $allow
         if ($code -ne 0) { return [int]$code }
     }
 

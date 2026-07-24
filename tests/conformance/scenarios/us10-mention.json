@@ -1,0 +1,14 @@
+{
+  "name": "us10-mention",
+  "description": "Mentioning an unclaimed issue key reads that ticket (content, acceptance criteria, priority, labels, status, flag, links, Confluence title+url, parent context, siblings — FR-050), stamps the spec's identity, updates only that ticket, and logs the mutation (FR-049). Both ports must emit a byte-identical --json summary, an identical Jira API call sequence (the read reads plus exactly one identity PUT), and an identical post-run tree (NFR-1).",
+  "mock": { "projects": { "MENT": "company" } },
+  "argv": ["mention", "MENT-1", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-onboarding",
+    "SPEC_KIT_JIRA_FLAGGED_FIELD_ID": "customfield_40099"
+  }
+}

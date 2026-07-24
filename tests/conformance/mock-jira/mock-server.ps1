@@ -44,6 +44,10 @@ $cfg = if ($ConfigPath -and (Test-Path -LiteralPath $ConfigPath)) {
 $Projects   = if ($cfg.ContainsKey('projects')) { $cfg.projects } else { @{} }
 $Faults     = if ($cfg.ContainsKey('faults'))   { $cfg.faults }   else { @{} }
 $GlobalFault = if ($cfg.ContainsKey('fault'))   { $cfg.fault }    else { $null }
+# Optional per-issue-key identity markers (US10): when a GET of an issue's identity
+# property matches a configured key, the mock returns that stored marker instead of
+# a 404 — this is how the "claimed by another spec" case (FR-051) is exercised.
+$Identity   = if ($cfg.ContainsKey('identity')) { $cfg.identity } else { @{} }
 
 # --- Helpers ----------------------------------------------------------------
 
@@ -61,6 +65,22 @@ function Get-Fault {
         if ($Path -match "/$([regex]::Escape($key))(/|-|$)") { return $Faults[$key] }
     }
     return $GlobalFault
+}
+
+function Get-IdentityMarker {
+    # Return the stored identity property body ({key,value}) for an issue whose key
+    # matches a configured identity entry, or $null when no entry matches (unclaimed).
+    param([string]$Path)
+    foreach ($key in $Identity.Keys) {
+        if ($Path -match "/rest/api/3/issue/$([regex]::Escape($key))/properties/") {
+            $marker = $Identity[$key]
+            $value = @{}
+            foreach ($k in $marker.Keys) { $value[$k] = $marker[$k] }
+            $wrapped = @{ key = 'spec-kit-jira'; value = $value }
+            return ($wrapped | ConvertTo-Json -Depth 20 -Compress)
+        }
+    }
+    return $null
 }
 
 function Read-FixtureBody {
@@ -85,14 +105,19 @@ function Resolve-Route {
         '^/rest/api/3/field$'                                         { return (Read-FixtureBody 'field') }
         '^/rest/api/3/issue$'                                         { if ($Method -eq 'POST') { $b = Read-FixtureBody 'issue-created'; $b.status = 201; return $b } }
         '^/rest/api/3/issue/[^/]+/transitions$'                       { if ($Method -eq 'POST') { return @{ status = 204; body = '' } } }
+        '^/rest/api/3/issue/[^/]+/remotelink$'                        { if ($Method -eq 'GET') { return (Read-FixtureBody 'remotelinks') } }
+        '^/rest/api/3/(search|search/jql)$'                           { if ($Method -eq 'GET') { return (Read-FixtureBody 'search-siblings') } }
         '^/rest/api/3/issue/[^/]+/properties/[^/]+$' {
             if ($Method -eq 'PUT') { return @{ status = 204; body = '' } }
             if ($Method -eq 'GET') {
+                $marker = Get-IdentityMarker -Path $Path
+                if ($marker) { return @{ status = 200; body = $marker } }
                 $b = Read-FixtureBody 'issue-property'
                 if ($b.status -eq 500) { return @{ status = 404; body = '{"errorMessages":["not found"],"errors":{}}' } }
                 return $b
             }
         }
+        '^/rest/api/3/issue/[^/]+$'                                   { if ($Method -eq 'GET') { return (Read-FixtureBody 'issue-mentioned') } }
         default { }
     }
     return @{ status = 404; body = '{"errorMessages":["not found"],"errors":{}}' }

@@ -253,8 +253,11 @@ _apply_known_coords() {
 # payload is blocked; otherwise returns the worst (highest) transport exit code.
 apply_writes() {
   local actions="$1" extra="${2:-[]}"
-  local coords
+  local coords allow
   coords="$(_apply_known_coords "${extra}")"
+  # The allowlist (US12, FR-053) neutralises allowlisted Confluence links/domains so
+  # they never false-block; it is empty unless the caller supplies one out of band.
+  allow="${SPEC_KIT_JIRA_ALLOWLIST:-[]}"
 
   local n
   n="$(jq 'length' <<< "${actions}")"
@@ -263,7 +266,7 @@ apply_writes() {
   local i body
   for ((i = 0; i < n; i++)); do
     body="$(jq -c ".[${i}].body // {}" <<< "${actions}")"
-    privacy_guard_scan "${body}" "${coords}" || return $?
+    privacy_guard_scan "${body}" "${coords}" "${allow}" || return $?
   done
 
   # (2) Write pass — all payloads cleared; perform each write in order. A

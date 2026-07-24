@@ -10,6 +10,9 @@ setup() {
   HOOKS="${ROOT}/.specify/extensions/jira/scripts/bash/hooks"
   # shellcheck source=/dev/null
   source "${HOOKS}/readme_block.sh"
+  # The version is read from the single source (extension.yml), never hardcoded in
+  # a test — the version literal must live only in extension.yml (SC-006/FR-022).
+  VERSION="$(sed -n 's/^version:[[:space:]]*//p' "${ROOT}/.specify/extensions/jira/extension.yml" | head -n1)"
   WORK="$(mktemp -d)"
   printf '<!-- spec-kit-jira:begin v{{VERSION}} -->\nMANAGED v{{VERSION}}\n<!-- spec-kit-jira:end v{{VERSION}} -->\n' > "${WORK}/tmpl"
   export SPEC_KIT_JIRA_README_TEMPLATE="${WORK}/tmpl"
@@ -29,17 +32,17 @@ teardown() { rm -rf "${WORK}"; }
 @test "readme_block_render emits the version-marked block from the single source" {
   run readme_block_render
   [ "$status" -eq 0 ]
-  [[ "$output" == *"spec-kit-jira:begin v0.1.0"* ]]
-  [[ "$output" == *"spec-kit-jira:end v0.1.0"* ]]
+  [[ "$output" == *"spec-kit-jira:begin v${VERSION}"* ]]
+  [[ "$output" == *"spec-kit-jira:end v${VERSION}"* ]]
 }
 
 @test "a hand-edited block is regenerated and reported written" {
   readme_block_write "${WORK}/README.md" false > /dev/null
-  sed 's/MANAGED v0.1.0/HUMAN EDIT/' "${WORK}/README.md" > "${WORK}/tampered"
+  sed "s/MANAGED v${VERSION}/HUMAN EDIT/" "${WORK}/README.md" > "${WORK}/tampered"
   cp "${WORK}/tampered" "${WORK}/README.md"
   readme_block_write "${WORK}/README.md" false > "${WORK}/status"
   [ "$(cat "${WORK}/status")" = "written" ]
-  grep -q 'MANAGED v0.1.0' "${WORK}/README.md"
+  grep -q "MANAGED v${VERSION}" "${WORK}/README.md"
   ! grep -q 'HUMAN EDIT' "${WORK}/README.md"
 }
 
@@ -55,5 +58,5 @@ teardown() { rm -rf "${WORK}"; }
   [ "$(cat "${WORK}/status")" = "written" ]
   [ "$(head -n1 "${WORK}/README.md")" = "INTRO LINE" ]
   [ "$(tail -n1 "${WORK}/README.md")" = "OUTRO LINE" ]
-  grep -q 'MANAGED v0.1.0' "${WORK}/README.md"
+  grep -q "MANAGED v${VERSION}" "${WORK}/README.md"
 }

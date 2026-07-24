@@ -118,3 +118,84 @@ discover_binding() {
         | {logical_name: .name, id: .fieldId} ] | (.[0] // null) )
     }' | json_canonical
 }
+
+# fetch_mentioned <issue_key> — READ-ONLY fetch of a mentioned ticket (US10, T087;
+# FR-050). Returns the neutral fetch document on stdout: the ticket's content and
+# acceptance criteria (extracted from its description; panels seed the criteria),
+# priority (logical name), labels, status, flag, links, its linked Confluence
+# pages (title and URL only — the page CONTENT is never fetched), its parent's
+# context one level up, and a one-line sibling list. On a fail-closed read of the
+# ticket itself nothing is emitted and the transport's mapped exit code is returned
+# (Constitution III). The flagged field id, which the engine cannot know, is
+# supplied out of band via SPEC_KIT_JIRA_FLAGGED_FIELD_ID (empty ⇒ flag reported
+# false); the discovery binding fills it in the wired flow.
+fetch_mentioned() {
+  local key="$1"
+  local base="${SPEC_KIT_JIRA_BASE_URL:-}"
+  if [[ -z "${base}" ]]; then
+    printf 'fetch_mentioned: SPEC_KIT_JIRA_BASE_URL is not set\n' >&2
+    return "$(cli_exit_code fail_closed)"
+  fi
+  local api="${base}/rest/api/3"
+  local flagged_id="${SPEC_KIT_JIRA_FLAGGED_FIELD_ID:-}"
+
+  # (1) The ticket itself — the only read that must succeed (fail-closed).
+  local issue
+  issue="$(jira_request GET "${api}/issue/${key}")" || return $?
+
+  # (2) Remote links (Confluence titles/URLs). Supplementary enrichment: a failure
+  #     degrades to "no linked pages", never failing the read-only convenience fetch.
+  local remote
+  remote="$(jira_request GET "${api}/issue/${key}/remotelink")" || remote='[]'
+  [[ -z "${remote}" ]] && remote='[]'
+
+  # (3) Siblings — only when the ticket has a parent (JQL over the parent's children).
+  local parent_key sib='{"issues":[]}'
+  parent_key="$(jq -r '.fields.parent.key // ""' <<< "${issue}")"
+  if [[ -n "${parent_key}" ]]; then
+    local jql
+    jql="$(jq -rn --arg p "${parent_key}" '("parent=" + $p) | @uri')"
+    sib="$(jira_request GET "${api}/search?jql=${jql}&fields=summary,status")" || sib='{"issues":[]}'
+    [[ -z "${sib}" ]] && sib='{"issues":[]}'
+  fi
+
+  jq -n \
+    --argjson issue "${issue}" \
+    --argjson remote "${remote}" \
+    --argjson sib "${sib}" \
+    --arg key "${key}" \
+    --arg flaggedId "${flagged_id}" '
+    ($issue.fields // {}) as $f
+    | {
+        key: $key,
+        content: ( [ $f.description.content[]? | select(.type != "panel")
+                     | [ .. | .text? // empty ] | join("") ]
+                   | map(select(. != "")) | join("\n") ),
+        acceptance_criteria: ( [ $f.description.content[]? | select(.type == "panel")
+                                 | [ .. | .text? // empty ] | join("") ]
+                               | map(select(. != "")) | join("\n") ),
+        priority_logical: ( $f.priority.name // null ),
+        labels: ( $f.labels // [] ),
+        status: ( $f.status.name // null ),
+        flagged: ( ($f[$flaggedId] // null) as $v
+                   | if ($flaggedId == "") or ($v == null) then false
+                     elif ($v | type) == "array" then (($v | length) > 0)
+                     else true end ),
+        links: ( [ $f.issuelinks[]?
+                   | if has("outwardIssue") then
+                       {type: .type.name, direction: .type.outward, key: .outwardIssue.key,
+                        title: .outwardIssue.fields.summary, status: .outwardIssue.fields.status.name}
+                     elif has("inwardIssue") then
+                       {type: .type.name, direction: .type.inward, key: .inwardIssue.key,
+                        title: .inwardIssue.fields.summary, status: .inwardIssue.fields.status.name}
+                     else empty end ] ),
+        confluence_pages: ( [ $remote[]?
+                              | select( ((.application.type // "") | test("confluence"; "i"))
+                                        or ((.globalId // "") | test("confluence"; "i")) )
+                              | {title: .object.title, url: .object.url} ] ),
+        parent_context: ( ($f.parent // null)
+                          | if . == null then null
+                            else {key: .key, title: .fields.summary, status: .fields.status.name} end ),
+        siblings: ( [ $sib.issues[]? | {key: .key, title: .fields.summary, status: .fields.status.name} ] )
+      }' | json_canonical
+}

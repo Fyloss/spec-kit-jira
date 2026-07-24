@@ -1,0 +1,12 @@
+{
+  "name": "sc009-core-untouched",
+  "description": "SC-009 / FR-055: a full config run (discovery + hook registration + managed README block) MUST NOT create, modify, or delete any file under .specify/scripts/ or .specify/templates/ — those belong to Spec Kit core and are overwritten on core upgrade. The fixture seeds both directories with sentinel core files; after the config run the post-run tree snapshot must carry them byte-identical on both ports (NFR-1), and a reviewer/CI diff of the snapshot's .specify/scripts and .specify/templates against this fixture must be empty — proving the extension wrote nothing into Spec Kit core's own directories.",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-core",
+  "argv": ["config", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1"
+  }
+}
