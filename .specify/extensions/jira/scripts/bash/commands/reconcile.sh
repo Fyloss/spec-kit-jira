@@ -30,6 +30,8 @@ source "${_cmd_reconcile_dir}/../engine/parse.sh"
 source "${_cmd_reconcile_dir}/../engine/interchange.sh"
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/plan_apply.sh"
+# shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../hooks/register_hooks.sh" # hook health + one-command repair (US9)
 
 : "${EXIT_CONFIG:=4}"
 
@@ -44,13 +46,14 @@ _reconcile_plan_context() {
 # cmd_reconcile <argv...> — reconcile one specification into its Jira project.
 # Echoes the run summary to stdout; returns the exit code.
 cmd_reconcile() {
-  local parsed json="false" dry_run="false" on_drift="abort" exit_code="0" error=""
+  local parsed json="false" dry_run="false" on_drift="abort" repair_hooks="false" exit_code="0" error=""
   parsed="$(cli_parse "$@")"
   while IFS='=' read -r key value; do
     case "${key}" in
       json) json="${value}" ;;
       dry_run) dry_run="${value}" ;;
       on_drift) on_drift="${value}" ;;
+      repair_hooks) repair_hooks="${value}" ;;
       exit) exit_code="${value}" ;;
       error) error="${value}" ;;
     esac
@@ -137,6 +140,25 @@ cmd_reconcile() {
     apply_writes "${actions}" || rc=$?
   fi
 
+  # US9 self-healing: --repair-hooks performs the one-command hook repair reachable
+  # from any run (FR-047); every run then reports hook health in the summary. The
+  # path is relative to the repository root (cwd), overridable for tests.
+  local ext_path hooks_health
+  ext_path="${SPEC_KIT_JIRA_EXTENSIONS_YML:-.specify/extensions.yml}"
+  if [[ "${repair_hooks}" == "true" ]]; then
+    register_hooks_write "${ext_path}" "${dry_run}" > /dev/null || true
+  fi
+  hooks_health="$(register_hooks_health "${ext_path}")" || true
+  [[ -z "${hooks_health}" ]] && hooks_health='{}'
+
+  # FR-046: in hook context a bridge failure NEVER fails the host command — after
+  # surfacing a single actionable WARNING the exit is downgraded to 0, so the mirror
+  # can fail without ever affecting the spec-kit command that triggered it.
+  if [[ -n "${SPEC_KIT_JIRA_HOOK_CONTEXT:-}" && "${rc}" -ne 0 ]]; then
+    printf 'WARNING: the Jira mirror did not complete (exit %s); the host command is unaffected. Run reconcile --repair-hooks or /speckit.jira.config to recover.\n' "${rc}" >&2
+    rc=0
+  fi
+
   # Report the action set with the base URL stripped to a host-relative path: the
   # site host is a coordinate that must never appear in output (Constitution IV),
   # and it also keeps the summary stable across the mock's per-run ephemeral port.
@@ -150,12 +172,12 @@ cmd_reconcile() {
     --argjson dry "${dry_run}" --argjson c "${created}" --argjson u "${updated}" \
     --argjson x "${rc}" --argjson actions "${disp_actions}" \
     --argjson wc "${warn_count}" --argjson w "${warns}" --argjson no "${notes}" \
-    --argjson hl "${has_lifecycle}" '
+    --argjson hl "${has_lifecycle}" --argjson hooks "${hooks_health}" '
     {schema_version:"1.0", command:"reconcile", dry_run:$dry,
      counts:{created:$c, updated:$u, skipped:0, warnings:$wc, errors:0},
      actions:$actions}
     + (if $hl then {warnings:$w, notes:$no} else {} end)
-    + {exit_code:$x}' | json_canonical)"
+    + {hooks:$hooks, exit_code:$x}' | json_canonical)"
 
   if [[ "${json}" == "true" ]]; then
     printf '%s\n' "${summary}"

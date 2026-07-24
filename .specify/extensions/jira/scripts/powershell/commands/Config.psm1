@@ -20,6 +20,7 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../hooks/ReadmeBlock.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force
 
 $script:ExitConfig = 4
 
@@ -132,8 +133,28 @@ function Invoke-JiraConfig {
     if ($cfg.ExitCode -ne 0) { return [int] $cfg.ExitCode }
     $cfgObj = $cfg.Json | ConvertFrom-Json -Depth 100
 
-    # API reads: discover each project and build the resolved-id table.
+    # Read the machine-owned local layer up front: its prior resolved-id table seeds
+    # this run so re-running only (re)binds the currently configured projects while
+    # every previously-bound project's mapping is preserved untouched — the config
+    # command is incrementally re-runnable (FR-043). Each project's ids land under
+    # its own key, so distinct projects never share a namespace (FR-044).
+    $localf = Join-Path $configdir 'config.local.yml'
+    $existing = if (Test-Path -LiteralPath $localf) {
+        (ConvertFrom-JiraConfigYaml -Path $localf) | ConvertFrom-Json -Depth 100
+    } else { [pscustomobject]@{} }
+
+    # API reads: discover each project and (re)build its resolved-id entry, seeded
+    # from the existing table so unconfigured-but-previously-bound projects survive.
+    # Enumerate properties directly (never `.PSObject.Properties.Name` — that throws
+    # under StrictMode when the object is empty, e.g. a first run with no local file).
     $resolved = [ordered]@{}
+    if ($existing -is [System.Management.Automation.PSCustomObject]) {
+        foreach ($prop in $existing.PSObject.Properties) {
+            if ($prop.Name -eq 'resolved_ids' -and $null -ne $prop.Value) {
+                foreach ($e in $prop.Value.PSObject.Properties) { $resolved[$e.Name] = $e.Value }
+            }
+        }
+    }
     $nproj = 0
     $projects = @()
     if ($cfgObj.PSObject.Properties.Name -contains 'projects') { $projects = @($cfgObj.projects) }
@@ -148,10 +169,6 @@ function Invoke-JiraConfig {
 
     # Merge the resolved-id table into the machine-owned local layer, preserving
     # the operator's site_alias / overrides, and emit deterministic canonical YAML.
-    $localf = Join-Path $configdir 'config.local.yml'
-    $existing = if (Test-Path -LiteralPath $localf) {
-        (ConvertFrom-JiraConfigYaml -Path $localf) | ConvertFrom-Json -Depth 100
-    } else { [pscustomobject]@{} }
     $existingMap = [ordered]@{}
     if ($existing -is [System.Management.Automation.PSCustomObject]) {
         foreach ($prop in $existing.PSObject.Properties) { $existingMap[$prop.Name] = $prop.Value }
@@ -187,11 +204,26 @@ function Invoke-JiraConfig {
         default { $readmeStatus }
     }
 
-    # Build the three-effect summary (FR-054), byte-identical to the Bash port.
-    # Discovery and README write this phase; hook registration (T085) lands later.
+    # Hooks effect (US9, T085): register the after_* lifecycle hooks idempotently in
+    # .specify/extensions.yml (FR-054) — the same self-healing write reachable from a
+    # run via reconcile --repair-hooks. The path derives from the config dir's parent
+    # (.specify), overridable via SPEC_KIT_JIRA_EXTENSIONS_YML.
+    $extPath = if ($env:SPEC_KIT_JIRA_EXTENSIONS_YML) { $env:SPEC_KIT_JIRA_EXTENSIONS_YML } else { Join-Path (Split-Path -Parent $configdir) 'extensions.yml' }
+    $hooksResult = Set-JiraHookRegistration -Path $extPath -DryRun ([bool]$dryRun)
+    $hooksStatus = $hooksResult.Status
+    $hooksDetail = switch ($hooksStatus) {
+        'created' { 'after_* lifecycle hooks registered' }
+        'repaired' { 'missing lifecycle hooks repaired' }
+        'unchanged' { 'lifecycle hooks already registered' }
+        'refused' { 'extensions.yml markers malformed; hooks not registered' }
+        default { $hooksStatus }
+    }
+
+    # Build the three-effect summary (FR-054), byte-identical to the Bash port:
+    # discovery, hooks, and README each reported as a distinct section.
     $effects = [ordered]@{
         discovery = [ordered]@{ status = $discStatus; detail = "$nproj project(s) discovered" }
-        hooks     = [ordered]@{ status = 'skipped'; detail = 'hook registration wired in a later increment' }
+        hooks     = [ordered]@{ status = $hooksStatus; detail = $hooksDetail }
         readme    = [ordered]@{ status = $readmeStatus; detail = $readmeDetail }
     }
     $summaryObj = [ordered]@{

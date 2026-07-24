@@ -130,4 +130,52 @@ function Build-JiraNeutralDocument {
     return [pscustomobject]@{ Valid = $true; Document = $json }
 }
 
-Export-ModuleMember -Function Test-JiraInterchange, Build-JiraNeutralDocument
+function Resolve-JiraRouting {
+    <#
+    .SYNOPSIS
+      Resolve the ONE project a spec reconciles against (US8, FR 041, FR 042).
+      Mirror of routing_resolve. Inputs: the spec folder's basename, the labels
+      declared in the spec (a JSON array), and the team config's `routing` rules
+      plus `routing_default`. First matching rule wins; a rule matches only when
+      EVERY condition it declares holds. An unmatched spec falls back to
+      routing_default; no match with no default is refused with exit 4. PURE: no
+      Jira reads or writes. Returns { ExitCode; ProjectKey } (the asymmetric-shape
+      convention shared with the sink client).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $FolderName,
+        [Parameter(Mandatory)] [string] $LabelsJson,
+        [Parameter(Mandatory)] [string] $RoutingConfigJson
+    )
+    $cfg = $RoutingConfigJson | ConvertFrom-Json -Depth 100
+    $labels = @($LabelsJson | ConvertFrom-Json -Depth 100)
+
+    $rules = @()
+    if ((Test-JiraInterchangeProp $cfg 'routing')) { $rules = @($cfg.routing) }
+
+    foreach ($rule in $rules) {
+        $m = Get-JiraInterchangeProp $rule 'match'
+        if ($m -isnot [System.Management.Automation.PSCustomObject]) { continue }
+        $hasPrefix = Test-JiraInterchangeProp $m 'folder_prefix'
+        $hasLabel = Test-JiraInterchangeProp $m 'spec_label'
+        if (-not $hasPrefix -and -not $hasLabel) { continue }
+
+        $ok = $true
+        if ($hasPrefix -and -not $FolderName.StartsWith([string]$m.folder_prefix, [System.StringComparison]::Ordinal)) { $ok = $false }
+        if ($hasLabel -and ($labels -notcontains [string]$m.spec_label)) { $ok = $false }
+        if ($ok) {
+            return [pscustomobject]@{ ExitCode = 0; ProjectKey = [string](Get-JiraInterchangeProp $rule 'project') }
+        }
+    }
+
+    $default = [string](Get-JiraInterchangeProp $cfg 'routing_default')
+    if (-not [string]::IsNullOrEmpty($default)) {
+        return [pscustomobject]@{ ExitCode = 0; ProjectKey = $default }
+    }
+
+    [Console]::Error.WriteLine('routing: no routing rule matched and no routing_default is configured')
+    return [pscustomobject]@{ ExitCode = 4; ProjectKey = '' }
+}
+
+Export-ModuleMember -Function Test-JiraInterchange, Build-JiraNeutralDocument, Resolve-JiraRouting

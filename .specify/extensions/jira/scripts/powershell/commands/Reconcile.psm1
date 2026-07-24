@@ -15,6 +15,7 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../engine/Parse.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../engine/Interchange.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/PlanApply.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force # hook health + repair (US9)
 
 $script:ReconcileExitConfig = 4
 
@@ -54,6 +55,7 @@ function Invoke-JiraReconcile {
     $json = $state['json'] -eq 'true'
     $dryRun = $state['dry_run'] -eq 'true'
     $onDrift = if ($state.ContainsKey('on_drift') -and $state['on_drift']) { $state['on_drift'] } else { 'abort' }
+    $repairHooks = $state['repair_hooks'] -eq 'true'
 
     # The spec file is the first positional argument.
     $specFile = ''
@@ -135,6 +137,21 @@ function Invoke-JiraReconcile {
         $rc = Invoke-JiraApplyWriteSet -ActionsJson $actionsJson
     }
 
+    # US9 self-healing: --repair-hooks performs the one-command hook repair reachable
+    # from any run (FR-047); every run then reports hook health in the summary. The
+    # path is relative to the repository root (cwd), overridable for tests.
+    $extPath = if ($env:SPEC_KIT_JIRA_EXTENSIONS_YML) { $env:SPEC_KIT_JIRA_EXTENSIONS_YML } else { '.specify/extensions.yml' }
+    if ($repairHooks) { [void](Set-JiraHookRegistration -Path $extPath -DryRun ([bool]$dryRun)) }
+    $hooksHealth = Get-JiraHookHealth -Path $extPath | ConvertFrom-Json -Depth 100
+
+    # FR-046: in hook context a bridge failure NEVER fails the host command — after
+    # surfacing a single actionable WARNING the exit is downgraded to 0, so the mirror
+    # can fail without ever affecting the spec-kit command that triggered it.
+    if ($env:SPEC_KIT_JIRA_HOOK_CONTEXT -and $rc -ne 0) {
+        [Console]::Error.WriteLine("WARNING: the Jira mirror did not complete (exit $rc); the host command is unaffected. Run reconcile --repair-hooks or /speckit.jira.config to recover.")
+        $rc = 0
+    }
+
     # Report the action set with the base URL stripped to a host-relative path:
     # the site host is a coordinate that must never appear in output
     # (Constitution IV), and it keeps the summary stable across the mock port.
@@ -158,6 +175,7 @@ function Invoke-JiraReconcile {
         $summaryObj['warnings'] = @($warnsJson | ConvertFrom-Json -Depth 100)
         $summaryObj['notes'] = @($notesJson | ConvertFrom-Json -Depth 100)
     }
+    $summaryObj['hooks'] = $hooksHealth
     $summaryObj['exit_code'] = $rc
     $summary = ConvertTo-JiraJsonValue $summaryObj
 

@@ -11,6 +11,8 @@
 [[ -n ${_JIRA_ENGINE_INTERCHANGE:-} ]] && return 0
 _JIRA_ENGINE_INTERCHANGE=1
 
+: "${EXIT_CONFIG:=4}" # engine stays standalone-testable without lib/cli.sh
+
 _interchange_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${_interchange_dir}/../lib/output.sh" # json_canonical only — lib/, never sink/
@@ -92,4 +94,40 @@ interchange_build() {
     return 1
   fi
   printf '%s' "${doc}"
+}
+
+# routing_resolve <folder-name> <labels-json> <routing-config-json> — resolve the
+# ONE project a spec reconciles against (US8, FR 041, FR 042). Inputs: the spec
+# folder's basename (tested against each rule's folder_prefix), the labels declared
+# in the spec (a JSON array, tested against each rule's spec_label), and the team
+# config's `routing` rules plus `routing_default`. First matching rule wins; a rule
+# matches only when EVERY condition it declares holds (a rule with no condition is
+# skipped). An unmatched spec falls back to routing_default; a spec that matches
+# nothing with no default is refused with EXIT_CONFIG (zero writes downstream).
+# PURE: no Jira reads or writes. Prints the resolved project key on stdout.
+routing_resolve() {
+  local folder="$1" labels="$2" cfg="$3" key
+  key="$(jq -r --arg folder "${folder}" --argjson labels "${labels}" '
+    (.routing // []) as $rules
+    | ( first(
+          $rules[]
+          | .match as $m
+          | select(($m | type) == "object")
+          | select(($m | has("folder_prefix")) or ($m | has("spec_label")))
+          | select(
+              (if ($m | has("folder_prefix")) then ($folder | startswith($m.folder_prefix)) else true end)
+              and
+              (if ($m | has("spec_label")) then (($labels | index($m.spec_label)) != null) else true end)
+            )
+          | .project
+        ) // null
+      ) as $matched
+    | ( $matched // .routing_default // "" )
+  ' <<< "${cfg}")"
+
+  if [[ -z "${key}" ]]; then
+    printf 'routing: no routing rule matched and no routing_default is configured\n' >&2
+    return "${EXIT_CONFIG}"
+  fi
+  printf '%s' "${key}"
 }

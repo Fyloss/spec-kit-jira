@@ -280,13 +280,13 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 8 ⚠️
 
-- [ ] T076 [P] [US8] Routing by folder-prefix / spec-label / configured default; mixed company+team-managed each with its own discovery + mapping (FR-041, FR-042) in `tests/bash/engine/test_routing.bats`, `tests/powershell/engine/Routing.Tests.ps1`, and `tests/conformance/scenarios/us8-mixed-routing.json`
-- [ ] T077 [P] [US8] Config incrementally re-runnable — adding a project binds only that one, existing mappings untouched (FR-043); per-project identity scope, no collision (FR-044) in `tests/bash/commands/test_config_incremental.bats` and `tests/powershell/commands/Config.Incremental.Tests.ps1`
+- [X] T076 [P] [US8] Routing by folder-prefix / spec-label / configured default; mixed company+team-managed each with its own discovery + mapping (FR-041, FR-042) in `tests/bash/engine/test_routing.bats`, `tests/powershell/engine/Routing.Tests.ps1`, and `tests/conformance/scenarios/us8-mixed-routing.json`
+- [X] T077 [P] [US8] Config incrementally re-runnable — adding a project binds only that one, existing mappings untouched (FR-043); per-project identity scope, no collision (FR-044) in `tests/bash/commands/test_config_incremental.bats` and `tests/powershell/commands/Config.Incremental.Tests.ps1`
 
 ### Implementation for User Story 8
 
-- [ ] T078 [US8] Implement routing resolution (engine, from config `routing[]` / `routing_default` rules) in `.specify/extensions/jira/scripts/bash/engine/interchange.sh` and `.specify/extensions/jira/scripts/powershell/engine/Interchange.psm1`
-- [ ] T079 [US8] Implement multi-project iteration + incremental re-bind in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
+- [X] T078 [US8] Implement routing resolution (engine, from config `routing[]` / `routing_default` rules) in `.specify/extensions/jira/scripts/bash/engine/interchange.sh` and `.specify/extensions/jira/scripts/powershell/engine/Interchange.psm1`
+- [X] T079 [US8] Implement multi-project iteration + incremental re-bind in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
 
 **Checkpoint**: One repository reconciles many specs to distinct projects of mixed styles without collision.
 
@@ -300,15 +300,15 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 9 ⚠️
 
-- [ ] T080 [P] [US9] Idempotent `after_*` registration in `.specify/extensions.yml` (specify/clarify/plan/tasks/implement/analyze); re-run produces no duplicates (FR-045, FR-047) in `tests/bash/hooks/test_register_hooks.bats`, `tests/powershell/hooks/RegisterHooks.Tests.ps1`, and `tests/conformance/scenarios/us9-hook-registration.json`
-- [ ] T081 [P] [US9] Bridge failure in a hook → ≤1 WARNING, host exit unaffected (FR-046); disabled hook stays disabled across upgrade/reinstall/repair (FR-048, SC-008) in `tests/bash/hooks/test_hook_resilience.bats` and `tests/powershell/hooks/HookResilience.Tests.ps1`
-- [ ] T082 [P] [US9] Hook health checked + reported in every run summary; `--repair-hooks` one-command repair (FR-047) in `tests/bash/commands/test_hook_health.bats` and `tests/powershell/commands/HookHealth.Tests.ps1`
+- [X] T080 [P] [US9] Idempotent `after_*` registration in `.specify/extensions.yml` (specify/clarify/plan/tasks/implement/analyze); re-run produces no duplicates (FR-045, FR-047) in `tests/bash/hooks/test_register_hooks.bats`, `tests/powershell/hooks/RegisterHooks.Tests.ps1`, and `tests/conformance/scenarios/us9-hook-registration.json`
+- [X] T081 [P] [US9] Bridge failure in a hook → ≤1 WARNING, host exit unaffected (FR-046); disabled hook stays disabled across upgrade/reinstall/repair (FR-048, SC-008) in `tests/bash/hooks/test_hook_resilience.bats` and `tests/powershell/hooks/HookResilience.Tests.ps1`
+- [X] T082 [P] [US9] Hook health checked + reported in every run summary; `--repair-hooks` one-command repair (FR-047) in `tests/bash/commands/test_hook_health.bats` and `tests/powershell/commands/HookHealth.Tests.ps1`
 
 ### Implementation for User Story 9
 
-- [ ] T083 [US9] Implement idempotent `after_*` hook registration (set-not-append, respect `enabled: false`) in `.specify/extensions/jira/scripts/bash/hooks/register_hooks.sh` and `.specify/extensions/jira/scripts/powershell/hooks/RegisterHooks.psm1`
-- [ ] T084 [US9] Implement hook-context exit downgrade to a single WARNING + hook-health reporting + `--repair-hooks` flag in `.specify/extensions/jira/scripts/bash/commands/reconcile.sh`, `.specify/extensions/jira/scripts/powershell/commands/Reconcile.psm1`, and the CLI layer
-- [ ] T085 [US9] Wire hook registration as the config command's second reported effect (FR-054) in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
+- [X] T083 [US9] Implement idempotent `after_*` hook registration (set-not-append, respect `enabled: false`) in `.specify/extensions/jira/scripts/bash/hooks/register_hooks.sh` and `.specify/extensions/jira/scripts/powershell/hooks/RegisterHooks.psm1`
+- [X] T084 [US9] Implement hook-context exit downgrade to a single WARNING + hook-health reporting + `--repair-hooks` flag in `.specify/extensions/jira/scripts/bash/commands/reconcile.sh`, `.specify/extensions/jira/scripts/powershell/commands/Reconcile.psm1`, and the CLI layer
+- [X] T085 [US9] Wire hook registration as the config command's second reported effect (FR-054) in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
 
 **Checkpoint**: All P2 stories complete — trustworthy, self-healing automatic mirroring.
 

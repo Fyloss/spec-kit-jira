@@ -35,6 +35,8 @@ source "${_cmd_config_dir}/../lib/config.sh"
 source "${_cmd_config_dir}/../sink/jira/discovery.sh"
 # shellcheck source=/dev/null
 source "${_cmd_config_dir}/../hooks/readme_block.sh"
+# shellcheck source=/dev/null
+source "${_cmd_config_dir}/../hooks/register_hooks.sh"
 
 : "${EXIT_CONFIG:=4}"
 : "${JIRA_CONFIG_DIR:=.specify/jira}"
@@ -128,12 +130,21 @@ cmd_config() {
   local cfg
   cfg="$(config_load "${configdir}")" || return $?
 
-  # API reads: discover each project's metadata (US2) and build the resolved-id
-  # table. Discovery is deterministic, so an unchanged project yields identical
+  # Read the machine-owned local layer up front: its prior resolved-id table seeds
+  # this run so re-running only (re)binds the currently configured projects while
+  # every previously-bound project's mapping is preserved untouched — the config
+  # command is incrementally re-runnable (FR-043). Each project's ids land under
+  # its own key, so distinct projects never share a namespace (FR-044).
+  local localf="${configdir}/config.local.yml" existing="{}"
+  [[ -f "${localf}" ]] && existing="$(config_yaml_to_json "${localf}")"
+
+  # API reads: discover each project's metadata (US2) and (re)build its resolved-id
+  # entry. Discovery is deterministic, so an unchanged project yields identical
   # bytes on every run (FR-003).
   local keys
   keys="$(jq -r '.projects[]?.key // empty' <<< "${cfg}")"
-  local resolved="{}" nproj=0 pkey binding rids
+  local resolved nproj=0 pkey binding rids
+  resolved="$(jq -c '.resolved_ids // {}' <<< "${existing}")"
   while IFS= read -r pkey; do
     [[ -z "${pkey}" ]] && continue
     binding="$(discover_binding "${pkey}")" || return $?
@@ -144,8 +155,6 @@ cmd_config() {
 
   # Merge the resolved-id table into the machine-owned local layer, preserving
   # the operator's site_alias / overrides, and emit deterministic canonical YAML.
-  local localf="${configdir}/config.local.yml" existing="{}"
-  [[ -f "${localf}" ]] && existing="$(config_yaml_to_json "${localf}")"
   local newlocal yaml
   newlocal="$(jq -cS --argjson r "${resolved}" '. + {resolved_ids: $r}' <<< "${existing}")"
   yaml="$(printf '%s' "${newlocal}" | config_to_yaml)"
@@ -175,16 +184,31 @@ cmd_config() {
     *) readme_detail="${readme_status}" ;;
   esac
 
-  # Build the three-effect summary (FR-054). Discovery and README write this
-  # phase; hook registration (T085) is wired in a later increment — reported here
-  # as a distinct section so the summary structure is stable across increments.
+  # Hooks effect (US9, T085): register the after_* lifecycle hooks idempotently in
+  # .specify/extensions.yml (FR-054) — the same self-healing write reachable from a
+  # run via reconcile --repair-hooks. The path derives from the config dir's parent
+  # (.specify), overridable via SPEC_KIT_JIRA_EXTENSIONS_YML.
+  local ext_path hooks_status hooks_detail
+  ext_path="${SPEC_KIT_JIRA_EXTENSIONS_YML:-$(dirname "${configdir}")/extensions.yml}"
+  hooks_status="$(register_hooks_write "${ext_path}" "${dry_run}")" || hooks_status="refused"
+  case "${hooks_status}" in
+    created) hooks_detail="after_* lifecycle hooks registered" ;;
+    repaired) hooks_detail="missing lifecycle hooks repaired" ;;
+    unchanged) hooks_detail="lifecycle hooks already registered" ;;
+    refused) hooks_detail="extensions.yml markers malformed; hooks not registered" ;;
+    *) hooks_detail="${hooks_status}" ;;
+  esac
+
+  # Build the three-effect summary (FR-054): discovery, hooks, and README are each
+  # reported as a distinct section so the operator sees exactly what was written.
   local effects
   effects="$(jq -cn \
     --arg ds "${disc_status}" --arg dd "${nproj} project(s) discovered" \
+    --arg hs "${hooks_status}" --arg hd "${hooks_detail}" \
     --arg rs "${readme_status}" --arg rd "${readme_detail}" '
     {
       discovery: {status: $ds, detail: $dd},
-      hooks:     {status: "skipped", detail: "hook registration wired in a later increment"},
+      hooks:     {status: $hs, detail: $hd},
       readme:    {status: $rs, detail: $rd}
     }')"
 
