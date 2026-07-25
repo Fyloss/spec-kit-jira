@@ -2,7 +2,7 @@
 # Mirror of tests/bash/lib/test_output.bats. Cross-port byte-parity proven in bats.
 
 BeforeAll {
-    $LibDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/lib'
+    $LibDir = Join-Path $PSScriptRoot '../../../scripts/powershell/lib'
     Import-Module (Join-Path $LibDir 'Output.psm1') -Force
 }
 

@@ -85,10 +85,12 @@ specs/001-jira-reconcile-engine/
 
 ### Source Code (repository root)
 
-The extension is a Spec Kit extension: its runtime scripts, templates, and version metadata live **exclusively** under `.specify/extensions/jira/` (FR-055); the only files written elsewhere are the agent command files (outside `.specify/`), the hook entries in `.specify/extensions.yml`, the team config under `.specify/jira/`, and the managed README block. The two ports mirror each other module-for-module, with a shared engine/sink separation enforced by CI greps.
+> **Layout amendment (2026-07-25, Phase 16)**: this SOURCE repository now follows the official Spec Kit extension layout (github/spec-kit `extensions/EXTENSION-DEVELOPMENT-GUIDE.md`): the manifest (`extension.yml`), `commands/`, `scripts/`, and `templates/` live at the repository **root**, and `specify extension add` creates `.specify/extensions/jira/` in the CONSUMING repository automatically (dev-only material excluded by the root `.extensionignore`). The original decision to develop at the install path is superseded; the tree below is retained with its original `.specify/extensions/jira/` prefix as the **installed** (consumer-side) layout, which is unchanged — strip the prefix to get the source layout. FR-055's consumer-side ownership rules are untouched.
+
+The extension is a Spec Kit extension: once installed, its runtime scripts, templates, and version metadata live **exclusively** under `.specify/extensions/jira/` (FR-055); the only files written elsewhere are the agent command files (outside `.specify/`), the hook entries in `.specify/extensions.yml`, the team config under `.specify/jira/`, and the managed README block. The two ports mirror each other module-for-module, with a shared engine/sink separation enforced by CI greps.
 
 ```text
-.specify/extensions/jira/
+.specify/extensions/jira/        # ← consumer-side; in THIS repo the content sits at the root
 ├── extension.yml                 # Extension metadata (id, catalog name, version) — the SINGLE source of truth for the version (FR-021/022); no other version string in the tree, grep-enforced by SC-006
 ├── CHANGELOG.md                  # SemVer changelog (Constitution XII)
 │

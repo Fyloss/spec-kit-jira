@@ -10,8 +10,8 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  HOOK_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/hooks"
-  PS_HOOK="${ROOT}/.specify/extensions/jira/scripts/powershell/hooks"
+  HOOK_DIR="${ROOT}/scripts/bash/hooks"
+  PS_HOOK="${ROOT}/scripts/powershell/hooks"
   # shellcheck source=/dev/null
   source "${HOOK_DIR}/register_hooks.sh"
   WORK="$(mktemp -d)"

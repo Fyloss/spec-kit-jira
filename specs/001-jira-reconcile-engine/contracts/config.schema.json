@@ -9,7 +9,7 @@
   "properties": {
     "version_compat": {
       "type": "string",
-      "description": "Advisory: extension version range the config was authored against. Read-only; the authoritative version is .specify/extensions/jira/VERSION (FR-021)."
+      "description": "Advisory: extension version range the config was authored against. Read-only; the authoritative version is the manifest's extension.version field in .specify/extensions/jira/extension.yml (FR-021)."
     },
     "projects": {
       "type": "array",

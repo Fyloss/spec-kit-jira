@@ -3,7 +3,7 @@
 # in the bats test; here we assert the port's own behaviour (FR-013–FR-018).
 
 BeforeAll {
-    $EngineDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/engine'
+    $EngineDir = Join-Path $PSScriptRoot '../../../scripts/powershell/engine'
     Import-Module (Join-Path $EngineDir 'Parse.psm1') -Force
 }
 

@@ -43,10 +43,10 @@ mkdir -p "${OUTDIR}"
 
 case "${PORT}" in
   bash)
-    ENTRY="${SPEC_KIT_JIRA_ENTRY_BASH:-${REPO_ROOT}/.specify/extensions/jira/scripts/bash/spec-kit-jira.sh}"
+    ENTRY="${SPEC_KIT_JIRA_ENTRY_BASH:-${REPO_ROOT}/scripts/bash/spec-kit-jira.sh}"
     ;;
   powershell)
-    ENTRY="${SPEC_KIT_JIRA_ENTRY_PWSH:-${REPO_ROOT}/.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1}"
+    ENTRY="${SPEC_KIT_JIRA_ENTRY_PWSH:-${REPO_ROOT}/scripts/powershell/spec-kit-jira.ps1}"
     ;;
   *)
     echo "unknown port: ${PORT} (expected bash|powershell)" >&2

@@ -4,7 +4,7 @@
 
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
-    $CmdDir = Join-Path $Root '.specify/extensions/jira/scripts/powershell/commands'
+    $CmdDir = Join-Path $Root 'scripts/powershell/commands'
     $script:MockDir = Join-Path $Root 'tests/conformance/mock-jira'
     Import-Module (Join-Path $CmdDir 'Mention.psm1') -Force
     Import-Module (Join-Path $MockDir 'Mock.psm1') -Force

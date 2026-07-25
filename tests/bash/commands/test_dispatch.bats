@@ -7,7 +7,7 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  ENTRY="${ROOT}/.specify/extensions/jira/scripts/bash/spec-kit-jira.sh"
+  ENTRY="${ROOT}/scripts/bash/spec-kit-jira.sh"
   STUBDIR="$(mktemp -d)"
   cat > "${STUBDIR}/config.sh" << 'EOF'
 cmd_config() { echo "config-ran args=$*"; return 0; }

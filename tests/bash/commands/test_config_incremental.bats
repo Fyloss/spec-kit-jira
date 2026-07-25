@@ -9,8 +9,8 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  CMD_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/commands"
-  PS_CMD="${ROOT}/.specify/extensions/jira/scripts/powershell/commands"
+  CMD_DIR="${ROOT}/scripts/bash/commands"
+  PS_CMD="${ROOT}/scripts/powershell/commands"
   MOCK="${ROOT}/tests/conformance/mock-jira"
   # shellcheck source=/dev/null
   source "${MOCK}/lib.sh"

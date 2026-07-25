@@ -1,0 +1,645 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="236" errors="0" failures="0" not-run="0" inconclusive="0" ignored="0" skipped="0" invalid="0" date="2026-07-25" time="15:26:39">
+  <environment platform="Darwin" user-domain="" nunit-version="2.5.8.0" clr-version="9.0.6" cwd="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira" os-version="25.5.0" user="sebastienthibaud" machine-name="mac.home" />
+  <culture-info current-culture="fr-FR" current-uiculture="fr-FR" />
+  <test-suite type="TestFixture" name="Pester" executed="True" result="Success" success="True" time="16.6245" asserts="0" description="Pester">
+    <results>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/Adf.Tests.ps1" executed="True" result="Success" success="True" time="0.3666" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/Adf.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="ConvertTo-JiraAdfDocument" executed="True" result="Success" success="True" time="0.1523" asserts="0" description="ConvertTo-JiraAdfDocument">
+            <results>
+              <test-case description="renders a valid ADF doc envelope" name="ConvertTo-JiraAdfDocument.renders a valid ADF doc envelope" time="0.077" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="renders description blocks as paragraph nodes" name="ConvertTo-JiraAdfDocument.renders description blocks as paragraph nodes" time="0.0145" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="renders acceptance criteria into a dedicated panel (FR-015)" name="ConvertTo-JiraAdfDocument.renders acceptance criteria into a dedicated panel (FR-015)" time="0.0207" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="renders a distinct Design section (FR-016)" name="ConvertTo-JiraAdfDocument.renders a distinct Design section (FR-016)" time="0.0149" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="omits the panel when there is no acceptance criteria" name="ConvertTo-JiraAdfDocument.omits the panel when there is no acceptance criteria" time="0.006" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="ConvertTo-JiraManagedAdfDocument (US7)" executed="True" result="Success" success="True" time="0.2219" asserts="0" description="ConvertTo-JiraManagedAdfDocument (US7)">
+            <results>
+              <test-case description="renders the whole description as the managed section for a bridge-created ticket (FR-040)" name="ConvertTo-JiraManagedAdfDocument (US7).renders the whole description as the managed section for a bridge-created ticket (FR-040)" time="0.0076" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="preserves the human prefix verbatim above a delimited managed panel (FR-038)" name="ConvertTo-JiraManagedAdfDocument (US7).preserves the human prefix verbatim above a delimited managed panel (FR-038)" time="0.024" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reproduces the description byte-for-byte when the managed content is unchanged (idempotent)" name="ConvertTo-JiraManagedAdfDocument (US7).reproduces the description byte-for-byte when the managed content is unchanged (idempotent)" time="0.0354" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/Client.Tests.ps1" executed="True" result="Success" success="True" time="1.6989" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/Client.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Jira REST transport" executed="True" result="Success" success="True" time="1.6708" asserts="0" description="Jira REST transport">
+            <results>
+              <test-case description="GET returns exit code 0 and the response body on success" name="Jira REST transport.GET returns exit code 0 and the response body on success" time="0.2906" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="POST returns exit code 0 and the created-issue body (201)" name="Jira REST transport.POST returns exit code 0 and the created-issue body (201)" time="0.2354" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="401 maps to the auth exit code (3), zero body" name="Jira REST transport.401 maps to the auth exit code (3), zero body" time="0.2278" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="404 maps to the fail-closed exit code (2), zero body" name="Jira REST transport.404 maps to the fail-closed exit code (2), zero body" time="0.223" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="a dropped connection (network fault) maps to fail-closed (2)" name="Jira REST transport.a dropped connection (network fault) maps to fail-closed (2)" time="0.2213" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="429 retries honouring Retry-After then exhausts to fail-closed (2)" name="Jira REST transport.429 retries honouring Retry-After then exhausts to fail-closed (2)" time="0.2287" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never emits the token on the verbose stream (NFR-3, SC-007)" name="Jira REST transport.never emits the token on the verbose stream (NFR-3, SC-007)" time="0.2415" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/Discovery.Company.Tests.ps1" executed="True" result="Success" success="True" time="1.2712" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/Discovery.Company.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Company-managed discovery" executed="True" result="Success" success="True" time="1.2577" asserts="0" description="Company-managed discovery">
+            <results>
+              <test-case description="detects the classic project style as company_managed" name="Company-managed discovery.detects the classic project style as company_managed" time="0.2783" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="issues the style call first, then the per-style discovery calls" name="Company-managed discovery.issues the style call first, then the per-style discovery calls" time="0.2529" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="discovers issue types with hierarchy levels" name="Company-managed discovery.discovers issue types with hierarchy levels" time="0.2591" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="ranks the project own estimation field and finds the flagged field" name="Company-managed discovery.ranks the project own estimation field and finds the flagged field" time="0.2504" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="fail-closes (exit 2, empty) on a 404 read" name="Company-managed discovery.fail-closes (exit 2, empty) on a 404 read" time="0.2152" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/Discovery.Flagged.Tests.ps1" executed="True" result="Success" success="True" time="0.0282" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/Discovery.Flagged.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-JiraDiscoveryFlaggedField" executed="True" result="Success" success="True" time="0.0153" asserts="0" description="Get-JiraDiscoveryFlaggedField">
+            <results>
+              <test-case description="resolves by NAME on an English site" name="Get-JiraDiscoveryFlaggedField.resolves by NAME on an English site" time="0.0025" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="resolves by SHAPE on a localized site — FR-036 safety stays active" name="Get-JiraDiscoveryFlaggedField.resolves by SHAPE on a localized site — FR-036 safety stays active" time="0.0068" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="resolves an ambiguous shape with no name match to null (precision over recall)" name="Get-JiraDiscoveryFlaggedField.resolves an ambiguous shape with no name match to null (precision over recall)" time="0.0029" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="resolves to null when no candidate exists at all" name="Get-JiraDiscoveryFlaggedField.resolves to null when no candidate exists at all" time="0.0015" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/Discovery.Team.Tests.ps1" executed="True" result="Success" success="True" time="0.7356" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/Discovery.Team.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Team-managed discovery" executed="True" result="Success" success="True" time="0.7229" asserts="0" description="Team-managed discovery">
+            <results>
+              <test-case description="detects the next-gen project style as team_managed" name="Team-managed discovery.detects the next-gen project style as team_managed" time="0.2384" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="limits the hierarchy to Epic (parent) / Sub-task (child)" name="Team-managed discovery.limits the hierarchy to Epic (parent) / Sub-task (child)" time="0.2407" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="ranks the project OWN estimation field, never the global Story Points" name="Team-managed discovery.ranks the project OWN estimation field, never the global Story Points" time="0.2425" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/FailClosed.Tests.ps1" executed="True" result="Success" success="True" time="1.1138" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/FailClosed.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Fail-closed writes" executed="True" result="Success" success="True" time="1.0922" asserts="0" description="Fail-closed writes">
+            <results>
+              <test-case description="a 401 write fails closed with the auth exit code (3)" name="Fail-closed writes.a 401 write fails closed with the auth exit code (3)" time="0.2284" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="a 404 write fails closed (2)" name="Fail-closed writes.a 404 write fails closed (2)" time="0.2115" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="a dropped connection fails closed (2)" name="Fail-closed writes.a dropped connection fails closed (2)" time="0.2125" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="an exhausted 429 fails closed (2)" name="Fail-closed writes.an exhausted 429 fails closed (2)" time="0.2178" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="a fault aborts the remaining writes — the second action is never attempted" name="Fail-closed writes.a fault aborts the remaining writes — the second action is never attempted" time="0.2204" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/Identity.Tests.ps1" executed="True" result="Success" success="True" time="0.2634" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/Identity.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-JiraIdentityMarker" executed="True" result="Success" success="True" time="0.0125" asserts="0" description="Get-JiraIdentityMarker">
+            <results>
+              <test-case description="records origin and the spec ref" name="Get-JiraIdentityMarker.records origin and the spec ref" time="0.0111" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-JiraIdentityClaimedByOther" executed="True" result="Success" success="True" time="0.0173" asserts="0" description="Test-JiraIdentityClaimedByOther">
+            <results>
+              <test-case description="is true for a different spec, false for the same" name="Test-JiraIdentityClaimedByOther.is true for a different spec, false for the same" time="0.0036" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-JiraIdentity / Set-JiraIdentity" executed="True" result="Success" success="True" time="0.2497" asserts="0" description="Get-JiraIdentity / Set-JiraIdentity">
+            <results>
+              <test-case description="reads an unclaimed ticket as empty (404 is not a failure)" name="Get-JiraIdentity / Set-JiraIdentity.reads an unclaimed ticket as empty (404 is not a failure)" time="0.0439" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="stamps the marker via an entity property (PUT)" name="Get-JiraIdentity / Set-JiraIdentity.stamps the marker via an entity property (PUT)" time="0.0062" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/LifecycleSafety.Tests.ps1" executed="True" result="Success" success="True" time="0.0501" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/LifecycleSafety.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-JiraLifecyclePlan" executed="True" result="Success" success="True" time="0.0368" asserts="0" description="Get-JiraLifecyclePlan">
+            <results>
+              <test-case description="withholds a post-scope regression by default, content still reconciles (FR-035)" name="Get-JiraLifecyclePlan.withholds a post-scope regression by default, content still reconciles (FR-035)" time="0.022" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="pulls a regressed post-scope ticket backward with --on-drift=proceed (FR-035)" name="Get-JiraLifecyclePlan.pulls a regressed post-scope ticket backward with --on-drift=proceed (FR-035)" time="0.0038" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="withholds a Flagged ticket transition, surfaces the flag, never mutates it (FR-036)" name="Get-JiraLifecyclePlan.withholds a Flagged ticket transition, surfaces the flag, never mutates it (FR-036)" time="0.0035" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never mutates human links; a transition past open blockers adds an info note (FR-037)" name="Get-JiraLifecyclePlan.never mutates human links; a transition past open blockers adds an info note (FR-037)" time="0.0063" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/PlanApply.Content.Tests.ps1" executed="True" result="Success" success="True" time="0.0709" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/PlanApply.Content.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-JiraPlanWriteSet" executed="True" result="Success" success="True" time="0.0492" asserts="0" description="Get-JiraPlanWriteSet">
+            <results>
+              <test-case description="maps the P1 priority to the project priority id on create (FR-017)" name="Get-JiraPlanWriteSet.maps the P1 priority to the project priority id on create (FR-017)" time="0.0182" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="writes the estimation on create to the discovered field (FR-018)" name="Get-JiraPlanWriteSet.writes the estimation on create to the discovered field (FR-018)" time="0.0091" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="renders the ADF panel into the created description" name="Get-JiraPlanWriteSet.renders the ADF panel into the created description" time="0.0087" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never re-sends the estimation field on update (FR-018)" name="Get-JiraPlanWriteSet.never re-sends the estimation field on update (FR-018)" time="0.0118" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/PlanApply.HumanContent.Tests.ps1" executed="True" result="Success" success="True" time="0.0517" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/PlanApply.HumanContent.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-JiraPlanWriteSet (US7 human origin)" executed="True" result="Success" success="True" time="0.0196" asserts="0" description="Get-JiraPlanWriteSet (US7 human origin)">
+            <results>
+              <test-case description="preserves the human prefix and drops the stale managed body (FR-038)" name="Get-JiraPlanWriteSet (US7 human origin).preserves the human prefix and drops the stale managed body (FR-038)" time="0.015" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps the whole-description behaviour when no origin is given" name="Get-JiraPlanWriteSet (US7 human origin).keeps the whole-description behaviour when no origin is given" time="0.0034" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-JiraManagedDescriptionStatus (FR-039)" executed="True" result="Success" success="True" time="0.0398" asserts="0" description="Get-JiraManagedDescriptionStatus (FR-039)">
+            <results>
+              <test-case description="reports unchanged when only the human prose above the panel differs" name="Get-JiraManagedDescriptionStatus (FR-039).reports unchanged when only the human prose above the panel differs" time="0.0116" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports changed when the managed body differs" name="Get-JiraManagedDescriptionStatus (FR-039).reports changed when the managed body differs" time="0.0073" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/PrivacyGuard.Block.Tests.ps1" executed="True" result="Success" success="True" time="0.4535" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/PrivacyGuard.Block.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Privacy guard BLOCK tier" executed="True" result="Success" success="True" time="0.0134" asserts="0" description="Privacy guard BLOCK tier">
+            <results>
+              <test-case description="blocks on an ATATT token prefix (exit 9)" name="Privacy guard BLOCK tier.blocks on an ATATT token prefix (exit 9)" time="0.0052" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="blocks on a real *.atlassian.net host (exit 9)" name="Privacy guard BLOCK tier.blocks on a real *.atlassian.net host (exit 9)" time="0.0013" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="blocks on an exact known coordinate (exit 9)" name="Privacy guard BLOCK tier.blocks on an exact known coordinate (exit 9)" time="0.0042" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="passes ordinary content — precision over recall (exit 0)" name="Privacy guard BLOCK tier.passes ordinary content — precision over recall (exit 0)" time="0.0012" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Privacy guard fail-open regressions (case bypass + allowlist shredding)" executed="True" result="Success" success="True" time="0.0257" asserts="0" description="Privacy guard fail-open regressions (case bypass + allowlist shredding)">
+            <results>
+              <test-case description="blocks a MiXeD-case Atlassian host — DNS hosts are case-insensitive (FR-052)" name="Privacy guard fail-open regressions (case bypass + allowlist shredding).blocks a MiXeD-case Atlassian host — DNS hosts are case-insensitive (FR-052)" time="0.0012" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="an allowlist entry overlapping the token shape never disables token detection (FR-052)" name="Privacy guard fail-open regressions (case bypass + allowlist shredding).an allowlist entry overlapping the token shape never disables token detection (FR-052)" time="0.0024" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="an allowlist entry matching a SUBSTRING of a real host never neutralises it (FR-052)" name="Privacy guard fail-open regressions (case bypass + allowlist shredding).an allowlist entry matching a SUBSTRING of a real host never neutralises it (FR-052)" time="0.0012" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="an allowlist entry overlapping a known coordinate never disables its detection (FR-052)" name="Privacy guard fail-open regressions (case bypass + allowlist shredding).an allowlist entry overlapping a known coordinate never disables its detection (FR-052)" time="0.0012" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="an allowlisted domain still exempts its own hosts, any case (FR-053 preserved)" name="Privacy guard fail-open regressions (case bypass + allowlist shredding).an allowlisted domain still exempts its own hosts, any case (FR-053 preserved)" time="0.0012" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps case-variant known coordinates DISTINCT and sorted like jq unique (NFR-1)" name="Privacy guard fail-open regressions (case bypass + allowlist shredding).keeps case-variant known coordinates DISTINCT and sorted like jq unique (NFR-1)" time="0.0038" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Privacy guard as the mandatory pre-write gate" executed="True" result="Success" success="True" time="0.4339" asserts="0" description="Privacy guard as the mandatory pre-write gate">
+            <results>
+              <test-case description="blocks before any write and performs ZERO writes (exit 9)" name="Privacy guard as the mandatory pre-write gate.blocks before any write and performs ZERO writes (exit 9)" time="0.1846" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="lets a clean write through (no gap for legitimate writes)" name="Privacy guard as the mandatory pre-write gate.lets a clean write through (no gap for legitimate writes)" time="0.2221" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/PrivacyGuard.Warn.Tests.ps1" executed="True" result="Success" success="True" time="0.1921" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/PrivacyGuard.Warn.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Privacy guard WARN tier and allowlist" executed="True" result="Success" success="True" time="0.1844" asserts="0" description="Privacy guard WARN tier and allowlist">
+            <results>
+              <test-case description="warns on a generic email but does not block (FR-053)" name="Privacy guard WARN tier and allowlist.warns on a generic email but does not block (FR-053)" time="0.0026" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="warns on a generic UUID but does not block (FR-053)" name="Privacy guard WARN tier and allowlist.warns on a generic UUID but does not block (FR-053)" time="0.0017" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="produces neither block nor warning on an allowlisted Atlassian host (FR-053)" name="Privacy guard WARN tier and allowlist.produces neither block nor warning on an allowlisted Atlassian host (FR-053)" time="0.0013" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="still blocks a NON-allowlisted Atlassian host — US11 preserved (FR-052)" name="Privacy guard WARN tier and allowlist.still blocks a NON-allowlisted Atlassian host — US11 preserved (FR-052)" time="0.0032" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="excludes .extensionignore paths from parse + scan (FR-053)" name="Privacy guard WARN tier and allowlist.excludes .extensionignore paths from parse + scan (FR-053)" time="0.0613" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="merges .extensionignore and config allowlist (FR-053)" name="Privacy guard WARN tier and allowlist.merges .extensionignore and config allowlist (FR-053)" time="0.0576" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="de-duplicates the allowlist ORDINALLY, keeping case variants, sorted like jq unique (NFR-1)" name="Privacy guard WARN tier and allowlist.de-duplicates the allowlist ORDINALLY, keeping case variants, sorted like jq unique (NFR-1)" time="0.0533" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/StatusClassification.Tests.ps1" executed="True" result="Success" success="True" time="0.0288" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/sink/StatusClassification.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Status classification" executed="True" result="Success" success="True" time="0.0194" asserts="0" description="Status classification">
+            <results>
+              <test-case description="seeds category-only classification when the operator maps nothing" name="Status classification.seeds category-only classification when the operator maps nothing" time="0.0051" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="promotes an operator-mapped status to mapped (many-to-one), overriding the done seed" name="Status classification.promotes an operator-mapped status to mapped (many-to-one), overriding the done seed" time="0.0058" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="marks an operator-designated stop state as halted" name="Status classification.marks an operator-designated stop state as halted" time="0.0025" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="collapses a many-to-one phase-&gt;status map to distinct targets" name="Status classification.collapses a many-to-one phase-&gt;status map to distinct targets" time="0.0048" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/hooks/HookResilience.Tests.ps1" executed="True" result="Success" success="True" time="0.3996" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/hooks/HookResilience.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Hook resilience" executed="True" result="Success" success="True" time="0.3716" asserts="0" description="Hook resilience">
+            <results>
+              <test-case description="fails a bridge error outside hook context (baseline)" name="Hook resilience.fails a bridge error outside hook context (baseline)" time="0.1381" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never fails the host in hook context (FR-046)" name="Hook resilience.never fails the host in hook context (FR-046)" time="0.092" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps an operator-disabled hook disabled across repeated repair (FR-048, SC-008)" name="Hook resilience.keeps an operator-disabled hook disabled across repeated repair (FR-048, SC-008)" time="0.1402" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/hooks/RegisterHooks.Tests.ps1" executed="True" result="Success" success="True" time="0.5616" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/hooks/RegisterHooks.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="after_* hook registration" executed="True" result="Success" success="True" time="0.5527" asserts="0" description="after_* hook registration">
+            <results>
+              <test-case description="creates an absent extensions.yml with all six lifecycle hooks (FR-045)" name="after_* hook registration.creates an absent extensions.yml with all six lifecycle hooks (FR-045)" time="0.0721" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="adds no duplicates and reports unchanged on a re-run (FR-047)" name="after_* hook registration.adds no duplicates and reports unchanged on a re-run (FR-047)" time="0.0891" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="repairs a missing hook without touching the others (FR-047)" name="after_* hook registration.repairs a missing hook without touching the others (FR-047)" time="0.0947" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps an operator-disabled hook disabled across repair (FR-048)" name="after_* hook registration.keeps an operator-disabled hook disabled across repair (FR-048)" time="0.0835" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports present/missing in the contract shape (FR-047, run-summary.schema.json)" name="after_* hook registration.reports present/missing in the contract shape (FR-047, run-summary.schema.json)" time="0.0819" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="lists an operator-disabled hook under disabled — neither present nor missing (FR-048)" name="after_* hook registration.lists an operator-disabled hook under disabled — neither present nor missing (FR-048)" time="0.0786" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports every hook missing for an absent file" name="after_* hook registration.reports every hook missing for an absent file" time="0.0513" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/Cli.Tests.ps1" executed="True" result="Success" success="True" time="0.0314" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/Cli.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-JiraExitCode" executed="True" result="Success" success="True" time="0.0062" asserts="0" description="Get-JiraExitCode">
+            <results>
+              <test-case description="maps the table to 0/1/2/3/4/5/9" name="Get-JiraExitCode.maps the table to 0/1/2/3/4/5/9" time="0.0052" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Invoke-JiraCliParse" executed="True" result="Success" success="True" time="0.015" asserts="0" description="Invoke-JiraCliParse">
+            <results>
+              <test-case description="parses a bare command with defaults" name="Invoke-JiraCliParse.parses a bare command with defaults" time="0.0014" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="parses --dry-run and --json" name="Invoke-JiraCliParse.parses --dry-run and --json" time="0.0009" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="treats an invalid --on-drift value as a usage error" name="Invoke-JiraCliParse.treats an invalid --on-drift value as a usage error" time="0.0015" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="treats an unknown flag as a usage error" name="Invoke-JiraCliParse.treats an unknown flag as a usage error" time="0.0008" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="carries the mention issue-key argument" name="Invoke-JiraCliParse.carries the mention issue-key argument" time="0.003" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/Config.Tests.ps1" executed="True" result="Success" success="True" time="0.7911" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/Config.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-JiraExtensionVersion" executed="True" result="Success" success="True" time="0.0054" asserts="0" description="Get-JiraExtensionVersion">
+            <results>
+              <test-case description="reads the version field from extension.yml (single source)" name="Get-JiraExtensionVersion.reads the version field from extension.yml (single source)" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Assert-JiraSingleVersionSource" executed="True" result="Success" success="True" time="0.107" asserts="0" description="Assert-JiraSingleVersionSource">
+            <results>
+              <test-case description="rejects a stray version marker (exit 4)" name="Assert-JiraSingleVersionSource.rejects a stray version marker (exit 4)" time="0.0493" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="passes when no stray marker exists" name="Assert-JiraSingleVersionSource.passes when no stray marker exists" time="0.0514" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="ConvertFrom-JiraConfigYaml" executed="True" result="Success" success="True" time="0.2116" asserts="0" description="ConvertFrom-JiraConfigYaml">
+            <results>
+              <test-case description="parses mappings, sequences, and quoted scalars into canonical JSON" name="ConvertFrom-JiraConfigYaml.parses mappings, sequences, and quoted scalars into canonical JSON" time="0.0522" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="coerces true/false to JSON booleans" name="ConvertFrom-JiraConfigYaml.coerces true/false to JSON booleans" time="0.0513" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Import-JiraConfig" executed="True" result="Success" success="True" time="0.7808" asserts="0" description="Import-JiraConfig">
+            <results>
+              <test-case description="accepts a valid team config (exit 0)" name="Import-JiraConfig.accepts a valid team config (exit 0)" time="0.0584" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="merges config.local overrides over the team config" name="Import-JiraConfig.merges config.local overrides over the team config" time="0.0516" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="fails when config.yml is absent (exit 4)" name="Import-JiraConfig.fails when config.yml is absent (exit 4)" time="0.0531" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects an ATATT token shape and never echoes the secret (exit 4)" name="Import-JiraConfig.rejects an ATATT token shape and never echoes the secret (exit 4)" time="0.0507" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a real *.atlassian.net host in the local layer (exit 4)" name="Import-JiraConfig.rejects a real *.atlassian.net host in the local layer (exit 4)" time="0.052" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does NOT scan privacy.allowlist for atlassian hosts (FR-053)" name="Import-JiraConfig.does NOT scan privacy.allowlist for atlassian hosts (FR-053)" time="0.0505" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a missing routing_default (exit 4)" name="Import-JiraConfig.rejects a missing routing_default (exit 4)" time="0.0507" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="requires link_type when task_strategy is linked_story (exit 4)" name="Import-JiraConfig.requires link_type when task_strategy is linked_story (exit 4)" time="0.0483" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a case-variant project style like the Bash port — &quot;Company_Managed&quot; is invalid (NFR-1)" name="Import-JiraConfig.rejects a case-variant project style like the Bash port — &quot;Company_Managed&quot; is invalid (NFR-1)" time="0.0494" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps sibling projects when a local override touches only one of them" name="Import-JiraConfig.keeps sibling projects when a local override touches only one of them" time="0.0532" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects an unknown top-level key (exit 4)" name="Import-JiraConfig.rejects an unknown top-level key (exit 4)" time="0.0502" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/Credentials.Tests.ps1" executed="True" result="Success" success="True" time="0.6125" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/Credentials.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Credentials" executed="True" result="Success" success="True" time="0.6033" asserts="0" description="Credentials">
+            <results>
+              <test-suite type="TestFixture" name="Credentials.Resolve-JiraToken" executed="True" result="Success" success="True" time="0.5395" asserts="0" description="Credentials.Resolve-JiraToken">
+                <results>
+                  <test-case description="resolves the token from the environment first" name="Credentials.Resolve-JiraToken.resolves the token from the environment first" time="0.0562" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="falls back to the gitignored .env when env and secret manager are empty" name="Credentials.Resolve-JiraToken.falls back to the gitignored .env when env and secret manager are empty" time="0.0631" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="environment token wins over the .env file" name="Credentials.Resolve-JiraToken.environment token wins over the .env file" time="0.0599" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="reads an 'export JIRA_API_TOKEN=...' line in .env (dotenv convention)" name="Credentials.Resolve-JiraToken.reads an 'export JIRA_API_TOKEN=...' line in .env (dotenv convention)" time="0.0628" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="strips surrounding quotes from the .env value (dotenv convention)" name="Credentials.Resolve-JiraToken.strips surrounding quotes from the .env value (dotenv convention)" time="0.0592" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="strips the carriage return from a Windows-authored (CRLF) .env" name="Credentials.Resolve-JiraToken.strips the carriage return from a Windows-authored (CRLF) .env" time="0.0606" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="secret manager (mockable) sits between env and .env" name="Credentials.Resolve-JiraToken.secret manager (mockable) sits between env and .env" time="0.059" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="returns null when no source provides a token" name="Credentials.Resolve-JiraToken.returns null when no source provides a token" time="0.0585" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="never emits the token on the verbose stream (SC-007)" name="Credentials.Resolve-JiraToken.never emits the token on the verbose stream (SC-007)" time="0.0591" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Credentials.Get-JiraAuthHeader" executed="True" result="Success" success="True" time="0.6025" asserts="0" description="Credentials.Get-JiraAuthHeader">
+                <results>
+                  <test-case description="builds a Basic base64 header that decodes to email:token, raw token absent" name="Credentials.Get-JiraAuthHeader.builds a Basic base64 header that decodes to email:token, raw token absent" time="0.0621" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/Output.Tests.ps1" executed="True" result="Success" success="True" time="0.0197" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/Output.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="New-JiraSummaryJson" executed="True" result="Success" success="True" time="0.0084" asserts="0" description="New-JiraSummaryJson">
+            <results>
+              <test-case description="emits canonical JSON with required keys" name="New-JiraSummaryJson.emits canonical JSON with required keys" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="sorts keys canonically (command first)" name="New-JiraSummaryJson.sorts keys canonically (command first)" time="0.001" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="ConvertTo-JiraSummaryProse" executed="True" result="Success" success="True" time="0.0139" asserts="0" description="ConvertTo-JiraSummaryProse">
+            <results>
+              <test-case description="shows counts and exit" name="ConvertTo-JiraSummaryProse.shows counts and exit" time="0.0034" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="marks a dry-run in the prose" name="ConvertTo-JiraSummaryProse.marks a dry-run in the prose" time="0.0013" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/Prereq.Tests.ps1" executed="True" result="Success" success="True" time="0.024" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/Prereq.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Test-JiraPrereq" executed="True" result="Success" success="True" time="0.0155" asserts="0" description="Test-JiraPrereq">
+            <results>
+              <test-case description="returns 0 on a fully-provisioned host" name="Test-JiraPrereq.returns 0 on a fully-provisioned host" time="0.011" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns 5 when the PowerShell major version is below 7" name="Test-JiraPrereq.returns 5 when the PowerShell major version is below 7" time="0.0014" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="names pwsh 7 explicitly on an old PowerShell" name="Test-JiraPrereq.names pwsh 7 explicitly on an old PowerShell" time="0.0008" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns 5 when a required command is missing" name="Test-JiraPrereq.returns 5 when a required command is missing" time="0.0007" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="names the missing command in the diagnostic" name="Test-JiraPrereq.names the missing command in the diagnostic" time="0.0006" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/Serialize.Tests.ps1" executed="True" result="Success" success="True" time="0.0283" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/Serialize.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="ConvertTo-JiraCanonicalJson" executed="True" result="Success" success="True" time="0.0121" asserts="0" description="ConvertTo-JiraCanonicalJson">
+            <results>
+              <test-case description="sorts object keys and compacts" name="ConvertTo-JiraCanonicalJson.sorts object keys and compacts" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="preserves raw UTF-8" name="ConvertTo-JiraCanonicalJson.preserves raw UTF-8" time="0.0012" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="escapes quote, backslash, and newline" name="ConvertTo-JiraCanonicalJson.escapes quote, backslash, and newline" time="0.0007" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="sorts nested keys and preserves array order" name="ConvertTo-JiraCanonicalJson.sorts nested keys and preserves array order" time="0.0036" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="emits no trailing newline" name="ConvertTo-JiraCanonicalJson.emits no trailing newline" time="0.0008" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="ConvertTo-JiraUriComponent" executed="True" result="Success" success="True" time="0.0181" asserts="0" description="ConvertTo-JiraUriComponent">
+            <results>
+              <test-case description="applies @uri then %20-&gt;+" name="ConvertTo-JiraUriComponent.applies @uri then %20-&gt;+" time="0.0028" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="uppercases hex and leaves unreserved chars" name="ConvertTo-JiraUriComponent.uppercases hex and leaves unreserved chars" time="0.0007" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/TokenLeak.Tests.ps1" executed="True" result="Success" success="True" time="0.7453" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/lib/TokenLeak.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Credential leak guard (SC-007)" executed="True" result="Success" success="True" time="0.7397" asserts="0" description="Credential leak guard (SC-007)">
+            <results>
+              <test-case description="never surfaces the token in a full reconcile at max verbosity (SC-007)" name="Credential leak guard (SC-007).never surfaces the token in a full reconcile at max verbosity (SC-007)" time="0.7388" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Config.Determinism.Tests.ps1" executed="True" result="Success" success="True" time="1.073" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Config.Determinism.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Config ceremony determinism" executed="True" result="Success" success="True" time="1.0561" asserts="0" description="Config ceremony determinism">
+            <results>
+              <test-case description="emits a valid machine-readable run summary with --json (FR-002)" name="Config ceremony determinism.emits a valid machine-readable run summary with --json (FR-002)" time="0.3467" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="writes a byte-identical config.local.yml on two runs (FR-003)" name="Config ceremony determinism.writes a byte-identical config.local.yml on two runs (FR-003)" time="0.3723" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="preserves the discovered ids by logical name and the operator local layer" name="Config ceremony determinism.preserves the discovered ids by logical name and the operator local layer" time="0.3335" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Config.Incremental.Tests.ps1" executed="True" result="Success" success="True" time="0.6806" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Config.Incremental.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Config incremental re-bind" executed="True" result="Success" success="True" time="0.6695" asserts="0" description="Config incremental re-bind">
+            <results>
+              <test-case description="adds a project without touching an existing mapping (FR-043)" name="Config incremental re-bind.adds a project without touching an existing mapping (FR-043)" time="0.3528" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="scopes each project under its own key so two projects never collide (FR-044)" name="Config incremental re-bind.scopes each project under its own key so two projects never collide (FR-044)" time="0.3157" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Config.Refusal.Tests.ps1" executed="True" result="Success" success="True" time="0.0207" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Config.Refusal.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Config-time mapping refusal" executed="True" result="Success" success="True" time="0.0107" asserts="0" description="Config-time mapping refusal">
+            <results>
+              <test-case description="refuses a team-managed level above Epic with exit 4" name="Config-time mapping refusal.refuses a team-managed level above Epic with exit 4" time="0.0035" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="accepts a valid team-managed Epic/Story hierarchy" name="Config-time mapping refusal.accepts a valid team-managed Epic/Story hierarchy" time="0.0009" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not restrict a company-managed multi-level hierarchy" name="Config-time mapping refusal.does not restrict a company-managed multi-level hierarchy" time="0.0006" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="persists epic/task strategy and link type by logical name" name="Config-time mapping refusal.persists epic/task strategy and link type by logical name" time="0.0025" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="refuses linked_story without a link type (exit 4)" name="Config-time mapping refusal.refuses linked_story without a link type (exit 4)" time="0.0007" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Config.ThreeEffects.Tests.ps1" executed="True" result="Success" success="True" time="0.6616" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Config.ThreeEffects.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Config three-effect reporting" executed="True" result="Success" success="True" time="0.6534" asserts="0" description="Config three-effect reporting">
+            <results>
+              <test-case description="reports discovery, hooks, and readme effects separately in --json" name="Config three-effect reporting.reports discovery, hooks, and readme effects separately in --json" time="0.3218" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="names each of the three effects in the prose summary" name="Config three-effect reporting.names each of the three effects in the prose summary" time="0.329" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Dispatch.Tests.ps1" executed="True" result="Success" success="True" time="1.7712" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Dispatch.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Dispatcher" executed="True" result="Success" success="True" time="1.7166" asserts="0" description="Dispatcher">
+            <results>
+              <test-case description="prerequisite failure exits 5 before any command runs (NFR-4)" name="Dispatcher.prerequisite failure exits 5 before any command runs (NFR-4)" time="0.218" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="--help exits 0 and prints usage to stdout" name="Dispatcher.--help exits 0 and prints usage to stdout" time="0.2017" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="no command is a usage error (exit 1)" name="Dispatcher.no command is a usage error (exit 1)" time="0.2002" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="an unknown flag is a usage error (exit 1)" name="Dispatcher.an unknown flag is a usage error (exit 1)" time="0.2083" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="an unrecognised command is a usage error (exit 1)" name="Dispatcher.an unrecognised command is a usage error (exit 1)" time="0.213" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="routes config to its Invoke-JiraConfig entry, passing options through" name="Dispatcher.routes config to its Invoke-JiraConfig entry, passing options through" time="0.2277" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="routes reconcile to its Invoke-JiraReconcile entry" name="Dispatcher.routes reconcile to its Invoke-JiraReconcile entry" time="0.2225" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="a routed but unbuilt command is a usage error (exit 1)" name="Dispatcher.a routed but unbuilt command is a usage error (exit 1)" time="0.2241" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/HookHealth.Tests.ps1" executed="True" result="Success" success="True" time="0.3044" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/HookHealth.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Hook health reporting" executed="True" result="Success" success="True" time="0.2925" asserts="0" description="Hook health reporting">
+            <results>
+              <test-case description="reports hook health in every run summary, in the contract shape (FR-047)" name="Hook health reporting.reports hook health in every run summary, in the contract shape (FR-047)" time="0.071" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="carries NO key outside the published run-summary contract" name="Hook health reporting.carries NO key outside the published run-summary contract" time="0.0664" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="previews a dry-run --repair-hooks without writing (FR-047)" name="Hook health reporting.previews a dry-run --repair-hooks without writing (FR-047)" time="0.0688" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="registers hooks with --repair-hooks and then reports healthy (FR-047)" name="Hook health reporting.registers hooks with --repair-hooks and then reports healthy (FR-047)" time="0.0854" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Mention.Tests.ps1" executed="True" result="Success" success="True" time="0.6791" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Mention.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Mentioned-ticket editing" executed="True" result="Success" success="True" time="0.6691" asserts="0" description="Mentioned-ticket editing">
+            <results>
+              <test-case description="stamps identity, updates only that ticket, and logs the mutation (FR-049)" name="Mentioned-ticket editing.stamps identity, updates only that ticket, and logs the mutation (FR-049)" time="0.249" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="makes zero writes and refuses a ticket claimed by another spec (FR-051)" name="Mentioned-ticket editing.makes zero writes and refuses a ticket claimed by another spec (FR-051)" time="0.2349" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="requires an issue key argument" name="Mentioned-ticket editing.requires an issue key argument" time="0.1842" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Reconcile.Tests.ps1" executed="True" result="Success" success="True" time="0.0983" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/commands/Reconcile.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Invoke-JiraReconcile (dry-run)" executed="True" result="Success" success="True" time="0.081" asserts="0" description="Invoke-JiraReconcile (dry-run)">
+            <results>
+              <test-case description="plans a create with the story title and a rich ADF description" name="Invoke-JiraReconcile (dry-run).plans a create with the story title and a rich ADF description" time="0.0236" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="yields a non-empty description for a spec with no ## Summary (SC-002)" name="Invoke-JiraReconcile (dry-run).yields a non-empty description for a spec with no ## Summary (SC-002)" time="0.0103" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never re-sends the estimation on update (FR-018)" name="Invoke-JiraReconcile (dry-run).never re-sends the estimation on update (FR-018)" time="0.0172" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports host-relative action urls (no coordinate leaks)" name="Invoke-JiraReconcile (dry-run).reports host-relative action urls (no coordinate leaks)" time="0.0162" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="maps an invalid SPEC_KIT_JIRA_LIFECYCLE to exit 4 with an actionable error (FR-032)" name="Invoke-JiraReconcile (dry-run).maps an invalid SPEC_KIT_JIRA_LIFECYCLE to exit 4 with an actionable error (FR-032)" time="0.0126" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/Drift.Tests.ps1" executed="True" result="Success" success="True" time="0.0197" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/Drift.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-JiraDriftDecision" executed="True" result="Success" success="True" time="0.014" asserts="0" description="Get-JiraDriftDecision">
+            <results>
+              <test-case description="halts all writes and surfaces two remediations for a halted status (FR-034)" name="Get-JiraDriftDecision.halts all writes and surfaces two remediations for a halted status (FR-034)" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="withholds an unknown status transition and suggests classifying it (FR-034)" name="Get-JiraDriftDecision.withholds an unknown status transition and suggests classifying it (FR-034)" time="0.0012" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="treats an aligned post-scope status as no drift (FR-034)" name="Get-JiraDriftDecision.treats an aligned post-scope status as no drift (FR-034)" time="0.0009" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="aborts a regressed disk phase against a post-scope ticket by default (FR-035)" name="Get-JiraDriftDecision.aborts a regressed disk phase against a post-scope ticket by default (FR-035)" time="0.001" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="pulls a post-scope ticket backward with --on-drift=proceed (FR-035)" name="Get-JiraDriftDecision.pulls a post-scope ticket backward with --on-drift=proceed (FR-035)" time="0.0009" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="withholds and names a mapped ticket advanced Jira-side, never silent (FR-031)" name="Get-JiraDriftDecision.withholds and names a mapped ticket advanced Jira-side, never silent (FR-031)" time="0.0023" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="pulls a mapped ticket back with --on-drift=proceed (FR-031)" name="Get-JiraDriftDecision.pulls a mapped ticket back with --on-drift=proceed (FR-031)" time="0.0007" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="transitions a mapped forward move cleanly with no warning" name="Get-JiraDriftDecision.transitions a mapped forward move cleanly with no warning" time="0.0014" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/Idempotency.Tests.ps1" executed="True" result="Success" success="True" time="0.0244" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/Idempotency.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Test-JiraIdempotentEqual" executed="True" result="Success" success="True" time="0.0053" asserts="0" description="Test-JiraIdempotentEqual">
+            <results>
+              <test-case description="is ordinal byte equality" name="Test-JiraIdempotentEqual.is ordinal byte equality" time="0.0046" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-JiraIdempotentFieldStatus" executed="True" result="Success" success="True" time="0.0095" asserts="0" description="Get-JiraIdempotentFieldStatus">
+            <results>
+              <test-case description="is unchanged when every desired key already matches (key-order independent)" name="Get-JiraIdempotentFieldStatus.is unchanged when every desired key already matches (key-order independent)" time="0.0023" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is changed when any desired value differs" name="Get-JiraIdempotentFieldStatus.is changed when any desired value differs" time="0.0007" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is changed when a desired key is absent from current" name="Get-JiraIdempotentFieldStatus.is changed when a desired key is absent from current" time="0.0006" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-JiraIdempotentManagedStatus" executed="True" result="Success" success="True" time="0.0174" asserts="0" description="Get-JiraIdempotentManagedStatus">
+            <results>
+              <test-case description="is unchanged when the splice is a no-op" name="Get-JiraIdempotentManagedStatus.is unchanged when the splice is a no-op" time="0.0017" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is changed when the block body differs" name="Get-JiraIdempotentManagedStatus.is changed when the block body differs" time="0.0029" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="refuses malformed markers with exit 4 and no status" name="Get-JiraIdempotentManagedStatus.refuses malformed markers with exit 4 and no status" time="0.0026" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/Interchange.Tests.ps1" executed="True" result="Success" success="True" time="0.0213" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/Interchange.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Test-JiraInterchange" executed="True" result="Success" success="True" time="0.0147" asserts="0" description="Test-JiraInterchange">
+            <results>
+              <test-case description="accepts a well-formed document" name="Test-JiraInterchange.accepts a well-formed document" time="0.0011" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a wrong schema_version" name="Test-JiraInterchange.rejects a wrong schema_version" time="0.0037" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a malformed spec_slug" name="Test-JiraInterchange.rejects a malformed spec_slug" time="0.0014" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects an invalid project_key" name="Test-JiraInterchange.rejects an invalid project_key" time="0.0014" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects an empty stories array" name="Test-JiraInterchange.rejects an empty stories array" time="0.0011" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects invalid JSON input" name="Test-JiraInterchange.rejects invalid JSON input" time="0.001" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a case-variant priority_logical like the Bash port — &quot;p1&quot; is not &quot;P1&quot; (NFR-1)" name="Test-JiraInterchange.rejects a case-variant priority_logical like the Bash port — &quot;p1&quot; is not &quot;P1&quot; (NFR-1)" time="0.0026" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a case-variant epic.strategy like the Bash port — &quot;Per_repo&quot; is not &quot;per_repo&quot; (NFR-1)" name="Test-JiraInterchange.rejects a case-variant epic.strategy like the Bash port — &quot;Per_repo&quot; is not &quot;per_repo&quot; (NFR-1)" time="0.0012" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/ManagedPanel.Tests.ps1" executed="True" result="Success" success="True" time="0.0147" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/ManagedPanel.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Managed-panel split" executed="True" result="Success" success="True" time="0.009" asserts="0" description="Managed-panel split">
+            <results>
+              <test-case description="splits an existing description into human prefix and managed section at the marker" name="Managed-panel split.splits an existing description into human prefix and managed section at the marker" time="0.0063" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="treats the whole array as human prefix when no marker is present" name="Managed-panel split.treats the whole array as human prefix when no marker is present" time="0.0012" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="yields an empty prefix and no managed section for an empty description" name="Managed-panel split.yields an empty prefix and no managed section for an empty description" time="0.0008" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/Parse.TitleDesc.Tests.ps1" executed="True" result="Success" success="True" time="0.0353" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/Parse.TitleDesc.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-JiraParsedTitle" executed="True" result="Success" success="True" time="0.0091" asserts="0" description="Get-JiraParsedTitle">
+            <results>
+              <test-case description="prefers an explicit Title: line" name="Get-JiraParsedTitle.prefers an explicit Title: line" time="0.0006" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="falls back to the first H1" name="Get-JiraParsedTitle.falls back to the first H1" time="0.0005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="falls back to a user-story section title" name="Get-JiraParsedTitle.falls back to a user-story section title" time="0.0012" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="falls back to the first non-empty paragraph" name="Get-JiraParsedTitle.falls back to the first non-empty paragraph" time="0.0009" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="falls back to the humanised folder slug last" name="Get-JiraParsedTitle.falls back to the humanised folder slug last" time="0.0019" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never derives the title from a ## Summary" name="Get-JiraParsedTitle.never derives the title from a ## Summary" time="0.0029" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-JiraParsedDescription" executed="True" result="Success" success="True" time="0.0126" asserts="0" description="Get-JiraParsedDescription">
+            <results>
+              <test-case description="is a non-empty structured block tree" name="Get-JiraParsedDescription.is a non-empty structured block tree" time="0.0012" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is never empty even with no prose and no ## Summary" name="Get-JiraParsedDescription.is never empty even with no prose and no ## Summary" time="0.0016" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-JiraParsedAcceptance" executed="True" result="Success" success="True" time="0.0192" asserts="0" description="Get-JiraParsedAcceptance">
+            <results>
+              <test-case description="extracts a one-clause-per-line scenario" name="Get-JiraParsedAcceptance.extracts a one-clause-per-line scenario" time="0.0013" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="extracts an inline scenario" name="Get-JiraParsedAcceptance.extracts an inline scenario" time="0.001" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps a Given clause containing the word 'when' intact in an inline triple" name="Get-JiraParsedAcceptance.keeps a Given clause containing the word 'when' intact in an inline triple" time="0.0027" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="yields an empty array when no Gherkin" name="Get-JiraParsedAcceptance.yields an empty array when no Gherkin" time="0.0008" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-JiraParsedDesign" executed="True" result="Success" success="True" time="0.0209" asserts="0" description="Get-JiraParsedDesign">
+            <results>
+              <test-case description="extracts a Figma link and UX guidance" name="Get-JiraParsedDesign.extracts a Figma link and UX guidance" time="0.0011" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-JiraParsedPriority / Estimation" executed="True" result="Success" success="True" time="0.0251" asserts="0" description="Get-JiraParsedPriority / Estimation">
+            <results>
+              <test-case description="extracts P1" name="Get-JiraParsedPriority / Estimation.extracts P1" time="0.0006" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="defaults to P2" name="Get-JiraParsedPriority / Estimation.defaults to P2" time="0.0005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="extracts an estimation number" name="Get-JiraParsedPriority / Estimation.extracts an estimation number" time="0.0019" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is null when undeclared" name="Get-JiraParsedPriority / Estimation.is null when undeclared" time="0.0005" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/ReadmeEdgecases.Tests.ps1" executed="True" result="Success" success="True" time="0.3221" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/ReadmeEdgecases.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Managed-section edge cases" executed="True" result="Success" success="True" time="0.3111" asserts="0" description="Managed-section edge cases">
+            <results>
+              <test-case description="appends an absent block once, preserving the original bytes as a prefix" name="Managed-section edge cases.appends an absent block once, preserving the original bytes as a prefix" time="0.0434" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="refuses a start marker without an end marker (exit 4, no content)" name="Managed-section edge cases.refuses a start marker without an end marker (exit 4, no content)" time="0.0437" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="refuses an end marker without a start marker (exit 4)" name="Managed-section edge cases.refuses an end marker without a start marker (exit 4)" time="0.044" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="refuses duplicated begin markers (exit 4)" name="Managed-section edge cases.refuses duplicated begin markers (exit 4)" time="0.0446" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="refuses an end marker preceding a begin marker (exit 4)" name="Managed-section edge cases.refuses an end marker preceding a begin marker (exit 4)" time="0.0442" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="creates an absent README with only the block" name="Managed-section edge cases.creates an absent README with only the block" time="0.0462" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="refuses a malformed README and writes nothing (exit 4)" name="Managed-section edge cases.refuses a malformed README and writes nothing (exit 4)" time="0.0441" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/ReadmeIdempotent.Tests.ps1" executed="True" result="Success" success="True" time="0.2312" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/ReadmeIdempotent.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="README-block idempotency" executed="True" result="Success" success="True" time="0.2246" asserts="0" description="README-block idempotency">
+            <results>
+              <test-case description="reports unchanged and rewrites nothing on a second run" name="README-block idempotency.reports unchanged and rewrites nothing on a second run" time="0.0434" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="regenerates a hand-edited block and reports it written" name="README-block idempotency.regenerates a hand-edited block and reports it written" time="0.0444" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="dry-run reports the status without writing the file" name="README-block idempotency.dry-run reports the status without writing the file" time="0.0449" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="byte-preserves content outside a present block across an update" name="README-block idempotency.byte-preserves content outside a present block across an update" time="0.0457" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="renders the version-marked block from the single source" name="README-block idempotency.renders the version-marked block from the single source" time="0.0452" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/ReadmeSplice.Tests.ps1" executed="True" result="Success" success="True" time="0.0115" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/ReadmeSplice.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Managed-section splice" executed="True" result="Success" success="True" time="0.0067" asserts="0" description="Managed-section splice">
+            <results>
+              <test-case description="replaces only the content between markers, preserving bytes outside (LF)" name="Managed-section splice.replaces only the content between markers, preserving bytes outside (LF)" time="0.003" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="adopts the host CRLF line ending and preserves the outer CRLF bytes" name="Managed-section splice.adopts the host CRLF line ending and preserves the outer CRLF bytes" time="0.0008" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects CRLF for a predominantly CRLF host" name="Managed-section splice.detects CRLF for a predominantly CRLF host" time="0.0006" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects LF for an LF host" name="Managed-section splice.detects LF for an LF host" time="0.0006" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="creates a new block terminated with LF for an empty host" name="Managed-section splice.creates a new block terminated with LF for an empty host" time="0.0008" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/Routing.Tests.ps1" executed="True" result="Success" success="True" time="0.0226" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/engine/Routing.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Resolve-JiraRouting" executed="True" result="Success" success="True" time="0.0176" asserts="0" description="Resolve-JiraRouting">
+            <results>
+              <test-case description="routes a spec by folder prefix (FR-041)" name="Resolve-JiraRouting.routes a spec by folder prefix (FR-041)" time="0.0063" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="routes a spec by declared label (FR-041)" name="Resolve-JiraRouting.routes a spec by declared label (FR-041)" time="0.0015" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="lets the first matching rule win (FR-041)" name="Resolve-JiraRouting.lets the first matching rule win (FR-041)" time="0.0008" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="matches a multi-condition rule only when every condition holds (FR-041)" name="Resolve-JiraRouting.matches a multi-condition rule only when every condition holds (FR-041)" time="0.0008" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="skips a multi-condition rule when only one condition holds" name="Resolve-JiraRouting.skips a multi-condition rule when only one condition holds" time="0.0011" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="falls back to routing_default for an unmatched spec (FR-041)" name="Resolve-JiraRouting.falls back to routing_default for an unmatched spec (FR-041)" time="0.0033" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="refuses a no-match spec with no routing_default (FR-041)" name="Resolve-JiraRouting.refuses a no-match spec with no routing_default (FR-041)" time="0.0011" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="routes everything to a bare routing_default (FR-042)" name="Resolve-JiraRouting.routes everything to a bare routing_default (FR-042)" time="0.0009" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="matches labels CASE-SENSITIVELY like the Bash port — &quot;Infra&quot; is not &quot;infra&quot; (NFR-1)" name="Resolve-JiraRouting.matches labels CASE-SENSITIVELY like the Bash port — &quot;Infra&quot; is not &quot;infra&quot; (NFR-1)" time="0.001" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/conformance/Mock.Tests.ps1" executed="True" result="Success" success="True" time="1.0944" asserts="0" description="/Users/sebastienthibaud/Documents/Dev/fyloss/spec-kit-jira/tests/powershell/conformance/Mock.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Mocked Jira double" executed="True" result="Success" success="True" time="1.0875" asserts="0" description="Mocked Jira double">
+            <results>
+              <test-case description="serves company-managed project discovery" name="Mocked Jira double.serves company-managed project discovery" time="0.2165" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="serves team-managed project discovery down the next-gen path" name="Mocked Jira double.serves team-managed project discovery down the next-gen path" time="0.2149" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="injects a 401 for the AUTH project" name="Mocked Jira double.injects a 401 for the AUTH project" time="0.2167" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="injects a network fault by dropping the connection" name="Mocked Jira double.injects a network fault by dropping the connection" time="0.2222" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="records the API call sequence" name="Mocked Jira double.records the API call sequence" time="0.2162" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+    </results>
+  </test-suite>
+</test-results>

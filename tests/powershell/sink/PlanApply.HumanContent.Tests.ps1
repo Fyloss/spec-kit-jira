@@ -3,7 +3,7 @@
 # proven in bats; here the port's behaviour is asserted directly.
 
 BeforeAll {
-    $SinkDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/sink/jira'
+    $SinkDir = Join-Path $PSScriptRoot '../../../scripts/powershell/sink/jira'
     # PlanApply imports Adf with -Force internally, which re-scopes Adf out of the
     # session; import the directly-called Adf LAST so Get-JiraManagedMarker resolves.
     Import-Module (Join-Path $SinkDir 'PlanApply.psm1') -Force

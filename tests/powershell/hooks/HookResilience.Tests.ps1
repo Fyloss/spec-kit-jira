@@ -4,12 +4,12 @@
 
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
-    $CmdDir = Join-Path $Root '.specify/extensions/jira/scripts/powershell/commands'
-    $HookDir = Join-Path $Root '.specify/extensions/jira/scripts/powershell/hooks'
+    $CmdDir = Join-Path $Root 'scripts/powershell/commands'
+    $HookDir = Join-Path $Root 'scripts/powershell/hooks'
     Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
     Import-Module (Join-Path $HookDir 'RegisterHooks.psm1') -Force
-    Import-Module (Join-Path $Root '.specify/extensions/jira/scripts/powershell/lib/Config.psm1') -Force
-    Import-Module (Join-Path $Root '.specify/extensions/jira/scripts/powershell/lib/Output.psm1') -Force
+    Import-Module (Join-Path $Root 'scripts/powershell/lib/Config.psm1') -Force
+    Import-Module (Join-Path $Root 'scripts/powershell/lib/Output.psm1') -Force
 
     function Invoke-ReconcileCode([string[]] $ArgList) {
         # Swallow the summary and return only the exit code. The param must NOT be

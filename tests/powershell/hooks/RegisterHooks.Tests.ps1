@@ -4,12 +4,12 @@
 
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
-    $HookDir = Join-Path $Root '.specify/extensions/jira/scripts/powershell/hooks'
+    $HookDir = Join-Path $Root 'scripts/powershell/hooks'
     Import-Module (Join-Path $HookDir 'RegisterHooks.psm1') -Force
-    Import-Module (Join-Path $Root '.specify/extensions/jira/scripts/powershell/lib/Config.psm1') -Force
+    Import-Module (Join-Path $Root 'scripts/powershell/lib/Config.psm1') -Force
     # Import the modules we call DIRECTLY last so their exports are not re-scoped by
     # RegisterHooks' internal -Force imports (the nested-import re-scope trap).
-    Import-Module (Join-Path $Root '.specify/extensions/jira/scripts/powershell/lib/Output.psm1') -Force
+    Import-Module (Join-Path $Root 'scripts/powershell/lib/Output.psm1') -Force
 }
 
 Describe 'after_* hook registration' {

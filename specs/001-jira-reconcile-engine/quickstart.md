@@ -15,7 +15,8 @@ Credentials (live/dogfood scenarios only) resolve via **env → OS secret manage
 
 ```bash
 # Bash port prerequisite check (must name macOS bash 3.2 explicitly and exit 5 if unmet — NFR-4/SC via exit code 5)
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+# (source-repo path; in a consuming repo the entry lives under .specify/extensions/jira/)
+scripts/bash/spec-kit-jira.sh --help
 ```
 
 ## Scenario A — Deterministic config (US1, SC-004)
@@ -51,10 +52,10 @@ spec-kit-jira reconcile --dry-run
 ```bash
 spec-kit-jira config
 grep -R --exclude-dir=.git -nE '(^|/)VERSION|v?[0-9]+\.[0-9]+\.[0-9]+' \
-  . ':!.specify/extensions/jira/**'                 # expect: no version string outside the single source (SC-006)
+  . ':!extension.yml' ':!CHANGELOG.md'              # expect: no version string outside the single source (SC-006)
 # Attempt a credential-shaped value in either YAML layer -> schema rejects it (exit 4, FR-023)
 ```
-**Expected**: `config.yml` at the repo root contains zero credentials; personal overrides live in gitignored `config.local.yml`; the only version string is `.specify/extensions/jira/VERSION` (FR-021/022). Reinstalling the extension destroys neither `config.yml` nor the hooks (SC-008).
+**Expected**: `config.yml` at the repo root contains zero credentials; personal overrides live in gitignored `config.local.yml`; the only version source is the manifest's `extension.version` field in `extension.yml` (FR-021/022). Reinstalling the extension destroys neither `config.yml` nor the hooks (SC-008).
 
 ## Scenario E — Managed README block, byte-exact & CRLF-safe (US5, SC-005)
 

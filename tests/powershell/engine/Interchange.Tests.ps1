@@ -2,7 +2,7 @@
 # Mirror of tests/bash/engine/test_interchange.bats. Cross-port agreement proven in bats.
 
 BeforeAll {
-    $EngineDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/engine'
+    $EngineDir = Join-Path $PSScriptRoot '../../../scripts/powershell/engine'
     Import-Module (Join-Path $EngineDir 'Interchange.psm1') -Force
     $ValidPath = Join-Path $PSScriptRoot '../../conformance/fixtures/neutral-valid.json'
     $script:Valid = Get-Content -Raw $ValidPath

@@ -4,8 +4,8 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  LIB_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/lib"
-  PS_LIB="${ROOT}/.specify/extensions/jira/scripts/powershell/lib"
+  LIB_DIR="${ROOT}/scripts/bash/lib"
+  PS_LIB="${ROOT}/scripts/powershell/lib"
   # shellcheck source=/dev/null
   source "${LIB_DIR}/output.sh"
 }

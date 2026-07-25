@@ -11,8 +11,8 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  SINK_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/sink/jira"
-  PS_SINK="${ROOT}/.specify/extensions/jira/scripts/powershell/sink/jira"
+  SINK_DIR="${ROOT}/scripts/bash/sink/jira"
+  PS_SINK="${ROOT}/scripts/powershell/sink/jira"
   # shellcheck source=/dev/null
   source "${SINK_DIR}/discovery.sh"
 
@@ -52,7 +52,7 @@ setup() {
   b="$(discovery_flagged_field "${LOCALIZED}")"
   p="$(pwsh -NoProfile -Command "
     Import-Module '${PS_SINK}/Discovery.psm1' -Force
-    Import-Module '${ROOT}/.specify/extensions/jira/scripts/powershell/lib/Output.psm1' -Force
+    Import-Module '${ROOT}/scripts/powershell/lib/Output.psm1' -Force
     \$f = Get-JiraDiscoveryFlaggedField -FieldsJson '${LOCALIZED}'
     [Console]::Out.Write((ConvertTo-JiraJsonValue \$f))
   ")"

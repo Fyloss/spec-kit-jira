@@ -6,7 +6,7 @@
 
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
-    $Engine = Join-Path $Root '.specify/extensions/jira/scripts/powershell/engine'
+    $Engine = Join-Path $Root 'scripts/powershell/engine'
     Import-Module (Join-Path $Engine 'ManagedSection.psm1') -Force
     $script:Marker = 'Synced from spec-kit — do not edit below this line'
     $script:HumanDesc = @'

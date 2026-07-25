@@ -8,8 +8,8 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  CMD_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/commands"
-  PS_CMD="${ROOT}/.specify/extensions/jira/scripts/powershell/commands"
+  CMD_DIR="${ROOT}/scripts/bash/commands"
+  PS_CMD="${ROOT}/scripts/powershell/commands"
   # shellcheck source=/dev/null
   source "${CMD_DIR}/reconcile.sh"
   export SPEC_KIT_JIRA_BASE_URL="https://mock"
@@ -64,7 +64,7 @@ setup() {
   # Through the REAL dispatcher (live `set -euo pipefail`): an unguarded jq
   # failure used to kill the process with a raw exit code and no error message.
   SPEC_KIT_JIRA_LIFECYCLE='{not json' \
-    run bash "${ROOT}/.specify/extensions/jira/scripts/bash/spec-kit-jira.sh" reconcile --dry-run --json "${SPEC_WITH}"
+    run bash "${ROOT}/scripts/bash/spec-kit-jira.sh" reconcile --dry-run --json "${SPEC_WITH}"
   [ "$status" -eq 4 ]
   [[ "$output" == *"SPEC_KIT_JIRA_LIFECYCLE"* ]]
 }

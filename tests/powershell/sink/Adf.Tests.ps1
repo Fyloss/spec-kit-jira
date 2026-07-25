@@ -2,7 +2,7 @@
 # Cross-port byte-parity is proven in bats; here we assert the port's behaviour.
 
 BeforeAll {
-    $SinkDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/sink/jira'
+    $SinkDir = Join-Path $PSScriptRoot '../../../scripts/powershell/sink/jira'
     Import-Module (Join-Path $SinkDir 'Adf.psm1') -Force
     $script:Content = @'
 {

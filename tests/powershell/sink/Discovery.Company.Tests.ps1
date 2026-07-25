@@ -4,7 +4,7 @@
 # the Bash port (NFR-1).
 
 BeforeAll {
-    $SinkDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/sink/jira'
+    $SinkDir = Join-Path $PSScriptRoot '../../../scripts/powershell/sink/jira'
     Import-Module (Join-Path $SinkDir 'Discovery.psm1') -Force
     $MockDir = Join-Path $PSScriptRoot '../../conformance/mock-jira'
     Import-Module (Join-Path $MockDir 'Mock.psm1') -Force

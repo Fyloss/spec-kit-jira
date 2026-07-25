@@ -3,7 +3,7 @@
 # byte agreement is proven in bats; here we assert the fold semantics.
 
 BeforeAll {
-    $SinkDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/sink/jira'
+    $SinkDir = Join-Path $PSScriptRoot '../../../scripts/powershell/sink/jira'
     Import-Module (Join-Path $SinkDir 'PlanApply.psm1') -Force
     $script:Doc = '{"stories":[{"local_id":"s1"}]}'
     $script:Actions = '[{"method":"PUT","url":"http://h/rest/api/3/issue/K-1","body":{"fields":{"summary":"New"}}}]'

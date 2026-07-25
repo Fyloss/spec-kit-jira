@@ -4,8 +4,8 @@
 
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
-    $Engine = Join-Path $Root '.specify/extensions/jira/scripts/powershell/engine'
-    $Hooks = Join-Path $Root '.specify/extensions/jira/scripts/powershell/hooks'
+    $Engine = Join-Path $Root 'scripts/powershell/engine'
+    $Hooks = Join-Path $Root 'scripts/powershell/hooks'
     # Import ReadmeBlock first: it internally re-imports ManagedSection -Force, so
     # ManagedSection must be imported LAST to keep its functions callable directly.
     Import-Module (Join-Path $Hooks 'ReadmeBlock.psm1') -Force
@@ -15,9 +15,9 @@ BeforeAll {
     $script:Block = "<!-- x:begin v1 -->`nMANAGED LINE A`n<!-- x:end v1 -->"
     # The version is read from the single source (extension.yml), never hardcoded in
     # a test — the version literal must live only in extension.yml (SC-006/FR-022).
-    $ExtYml = Join-Path $Root '.specify/extensions/jira/extension.yml'
+    $ExtYml = Join-Path $Root 'extension.yml'
     $script:VersionRx = [regex]::Escape(
-        (Select-String -LiteralPath $ExtYml -Pattern '^version:\s*(.+)$').Matches[0].Groups[1].Value.Trim())
+        (Select-String -LiteralPath $ExtYml -Pattern '^\s+version:\s*(.+)$').Matches[0].Groups[1].Value.Trim())
 }
 
 Describe 'Managed-section edge cases' {

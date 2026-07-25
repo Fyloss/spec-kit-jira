@@ -33,8 +33,17 @@ credential-shaped values in either YAML layer are rejected at config time (exit 
 
 ## Install & configure
 
-1. Add the extension under `.specify/extensions/jira/` (it never writes into Spec
-   Kit core's `.specify/scripts/` or `.specify/templates/`, FR-055/SC-009).
+1. Install the extension with the official Spec Kit command — it creates
+   `.specify/extensions/jira/` in your repository automatically (and never
+   writes into Spec Kit core's `.specify/scripts/` or `.specify/templates/`,
+   FR-055/SC-009):
+
+   ```sh
+   specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/archive/refs/heads/main.zip
+   # or, while developing the extension itself:
+   specify extension add --dev /path/to/spec-kit-jira
+   ```
+
 2. Run the deterministic install ceremony:
 
    ```

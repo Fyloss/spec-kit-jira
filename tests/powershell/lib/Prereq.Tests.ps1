@@ -3,7 +3,7 @@
 # exit-equivalent; diagnostics go to the warning stream.
 
 BeforeAll {
-    $LibDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/lib'
+    $LibDir = Join-Path $PSScriptRoot '../../../scripts/powershell/lib'
     Import-Module (Join-Path $LibDir 'Prereq.psm1') -Force
 }
 

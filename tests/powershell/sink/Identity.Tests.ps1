@@ -2,7 +2,7 @@
 # tests/bash/sink/test_identity.bats. Cross-port parity is proven in bats.
 
 BeforeAll {
-    $SinkDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/sink/jira'
+    $SinkDir = Join-Path $PSScriptRoot '../../../scripts/powershell/sink/jira'
     $Mock = Join-Path $PSScriptRoot '../../conformance/mock-jira'
     Import-Module (Join-Path $Mock 'Mock.psm1') -Force
     Import-Module (Join-Path $SinkDir 'Identity.psm1') -Force

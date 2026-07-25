@@ -8,8 +8,8 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  ENGINE="${ROOT}/.specify/extensions/jira/scripts/bash/engine"
-  HOOKS="${ROOT}/.specify/extensions/jira/scripts/bash/hooks"
+  ENGINE="${ROOT}/scripts/bash/engine"
+  HOOKS="${ROOT}/scripts/bash/hooks"
   # shellcheck source=/dev/null
   source "${HOOKS}/readme_block.sh"   # brings the engine splice in too
   BEGIN='<!-- x:begin'
@@ -18,7 +18,7 @@ setup() {
   WORK="$(mktemp -d)"
   # The version is read from the single source (extension.yml), never hardcoded in
   # a test — the version literal must live only in extension.yml (SC-006/FR-022).
-  VERSION="$(sed -n 's/^version:[[:space:]]*//p' "${ROOT}/.specify/extensions/jira/extension.yml" | head -n1)"
+  VERSION="$(sed -n 's/^[[:space:]]\{1,\}version:[[:space:]]*//p' "${ROOT}/extension.yml" | head -n1)"
   # A small synthetic template keeps writer assertions stable; the version comes
   # from that real single source.
   printf '<!-- spec-kit-jira:begin v{{VERSION}} -->\nMANAGED v{{VERSION}}\n<!-- spec-kit-jira:end v{{VERSION}} -->\n' > "${WORK}/tmpl"

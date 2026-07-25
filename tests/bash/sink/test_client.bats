@@ -6,7 +6,7 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  SINK_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/sink/jira"
+  SINK_DIR="${ROOT}/scripts/bash/sink/jira"
   MOCK="${ROOT}/tests/conformance/mock-jira"
   # shellcheck source=/dev/null
   source "${MOCK}/lib.sh"

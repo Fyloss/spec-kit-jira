@@ -191,7 +191,7 @@ Structured report; prose by default, `--json` opt-in. Schema: `contracts/run-sum
 
 ## 11. Version Source (cross-cutting)
 
-The **single** source of truth: `.specify/extensions/jira/VERSION`. Every consumer (config command, README block markers, run summary, upgrade check) reads it from there. **No** `.specify/jira/VERSION` file and **no** other hand-maintained version string anywhere in the consuming repo (FR-021, FR-022, SC-006). *(Implementation note: the pre-existing `.gitignore` line for `.specify/jira/VERSION.local` is removed, since it implies a forbidden marker.)*
+The **single** source of truth: the manifest's `extension.version` field in `extension.yml` (installed at `.specify/extensions/jira/extension.yml` in the consuming repo). Every consumer (config command, README block markers, run summary, upgrade check) reads it from there. **No** `VERSION` file and **no** other hand-maintained version string anywhere in the consuming repo (FR-021, FR-022, SC-006). *(Implementation note: the pre-existing `.gitignore` line for `.specify/jira/VERSION.local` is removed, since it implies a forbidden marker.)*
 
 ---
 

@@ -47,8 +47,11 @@ function Get-JiraExtensionVersion {
         [Console]::Error.WriteLine("config: extension metadata not found: $yml")
         return $script:ExitConfig
     }
+    # The official manifest schema nests the field under the `extension:` block
+    # (indented), so only an INDENTED `version:` matches — the top-level
+    # `schema_version:` and `requires.speckit_version:` never can.
     foreach ($line in Get-Content -LiteralPath $yml) {
-        if ($line -match '^version:\s*(.*)$') {
+        if ($line -cmatch '^\s+version:\s*(.*)$') {
             $value = $Matches[1].Trim()
             if ($value.Length -ge 2 -and $value[0] -eq '"' -and $value[-1] -eq '"') { $value = $value.Substring(1, $value.Length - 2) }
             elseif ($value.Length -ge 2 -and $value[0] -eq "'" -and $value[-1] -eq "'") { $value = $value.Substring(1, $value.Length - 2) }

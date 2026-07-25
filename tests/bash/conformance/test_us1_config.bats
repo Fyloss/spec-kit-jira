@@ -42,7 +42,7 @@ teardown() {
   [ "$(cat "${TMP}/out-bash/exit")" = "0" ]
   local localf="${TMP}/out-bash/workdir/.specify/jira/config.local.yml"
   # The resolved-id table lands in the gitignored local layer.
-  source "${ROOT}/.specify/extensions/jira/scripts/bash/lib/config.sh"
+  source "${ROOT}/scripts/bash/lib/config.sh"
   run jq -e '.resolved_ids.COMP.issue_types.Initiative == "10100"' <<< "$(config_yaml_to_json "${localf}")"
   [ "$status" -eq 0 ]
   # The committed config.yml must be untouched by the run.
@@ -61,7 +61,7 @@ teardown() {
   mock_start "${MOCK_CFG}"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   export JIRA_EMAIL="user@example.com" JIRA_API_TOKEN="RAWSECRETXYZ" JIRA_NO_SLEEP=1
-  ENTRY="${ROOT}/.specify/extensions/jira/scripts/bash/spec-kit-jira.sh"
+  ENTRY="${ROOT}/scripts/bash/spec-kit-jira.sh"
 
   ( cd "${WD}" && bash "${ENTRY}" config --json ) > "${TMP}/run1" 2>/dev/null
   cp "${WD}/.specify/jira/config.local.yml" "${TMP}/local1"

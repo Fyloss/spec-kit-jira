@@ -38,7 +38,7 @@ _config_extension_yml() {
   if [[ -n "${SPEC_KIT_JIRA_EXTENSION_YML:-}" ]]; then
     printf '%s' "${SPEC_KIT_JIRA_EXTENSION_YML}"
   else
-    # lib/ -> bash/ -> scripts/ -> jira/extension.yml
+    # lib/ -> bash/ -> scripts/ -> <extension root>/extension.yml
     printf '%s' "${_CONFIG_LIB_DIR}/../../../extension.yml"
   fi
 }
@@ -53,14 +53,17 @@ config_extension_version() {
     printf 'config: extension metadata not found: %s\n' "${yml}" >&2
     return "${EXIT_CONFIG}"
   fi
+  # The official manifest schema nests the field under the `extension:` block
+  # (indented), so only an INDENTED `version:` matches — the top-level
+  # `schema_version:` and `requires.speckit_version:` never can.
   local line
-  line="$(grep -E '^version:[[:space:]]*' "${yml}" | head -n1)"
+  line="$(grep -E '^[[:space:]]+version:[[:space:]]*' "${yml}" | head -n1)"
   if [[ -z "${line}" ]]; then
     printf 'config: no version field in %s\n' "${yml}" >&2
     return "${EXIT_CONFIG}"
   fi
   # Strip the key and any surrounding whitespace/quotes.
-  local value="${line#version:}"
+  local value="${line#*version:}"
   value="${value#"${value%%[![:space:]]*}"}"   # ltrim
   value="${value%"${value##*[![:space:]]}"}"    # rtrim
   value="${value#\"}"; value="${value%\"}"

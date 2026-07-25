@@ -4,8 +4,8 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  ENGINE_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/engine"
-  PS_ENGINE="${ROOT}/.specify/extensions/jira/scripts/powershell/engine"
+  ENGINE_DIR="${ROOT}/scripts/bash/engine"
+  PS_ENGINE="${ROOT}/scripts/powershell/engine"
   VALID="${ROOT}/tests/conformance/fixtures/neutral-valid.json"
   # shellcheck source=/dev/null
   source "${ENGINE_DIR}/interchange.sh"

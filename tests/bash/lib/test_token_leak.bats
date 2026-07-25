@@ -7,8 +7,8 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  ENTRY_BASH="${ROOT}/.specify/extensions/jira/scripts/bash/spec-kit-jira.sh"
-  ENTRY_PWSH="${ROOT}/.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1"
+  ENTRY_BASH="${ROOT}/scripts/bash/spec-kit-jira.sh"
+  ENTRY_PWSH="${ROOT}/scripts/powershell/spec-kit-jira.ps1"
   MOCK="${ROOT}/tests/conformance/mock-jira"
   # shellcheck source=/dev/null
   source "${MOCK}/lib.sh"

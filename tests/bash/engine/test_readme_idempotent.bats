@@ -7,12 +7,12 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  HOOKS="${ROOT}/.specify/extensions/jira/scripts/bash/hooks"
+  HOOKS="${ROOT}/scripts/bash/hooks"
   # shellcheck source=/dev/null
   source "${HOOKS}/readme_block.sh"
   # The version is read from the single source (extension.yml), never hardcoded in
   # a test — the version literal must live only in extension.yml (SC-006/FR-022).
-  VERSION="$(sed -n 's/^version:[[:space:]]*//p' "${ROOT}/.specify/extensions/jira/extension.yml" | head -n1)"
+  VERSION="$(sed -n 's/^[[:space:]]\{1,\}version:[[:space:]]*//p' "${ROOT}/extension.yml" | head -n1)"
   WORK="$(mktemp -d)"
   printf '<!-- spec-kit-jira:begin v{{VERSION}} -->\nMANAGED v{{VERSION}}\n<!-- spec-kit-jira:end v{{VERSION}} -->\n' > "${WORK}/tmpl"
   export SPEC_KIT_JIRA_README_TEMPLATE="${WORK}/tmpl"

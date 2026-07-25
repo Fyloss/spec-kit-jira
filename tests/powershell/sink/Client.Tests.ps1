@@ -3,7 +3,7 @@
 # credential-safe header — the same observable contract as the Bash port.
 
 BeforeAll {
-    $SinkDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/sink/jira'
+    $SinkDir = Join-Path $PSScriptRoot '../../../scripts/powershell/sink/jira'
     Import-Module (Join-Path $SinkDir 'Client.psm1') -Force
     $MockDir = Join-Path $PSScriptRoot '../../conformance/mock-jira'
     Import-Module (Join-Path $MockDir 'Mock.psm1') -Force

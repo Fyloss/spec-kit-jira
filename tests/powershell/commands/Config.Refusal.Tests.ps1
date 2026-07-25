@@ -4,7 +4,7 @@
 # unrestricted; strategies persist by logical name. Lives in commands/Config.psm1.
 
 BeforeAll {
-    $CmdDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/commands'
+    $CmdDir = Join-Path $PSScriptRoot '../../../scripts/powershell/commands'
     Import-Module (Join-Path $CmdDir 'Config.psm1') -Force
     $script:TeamBinding = '{"style":"team_managed","issue_types":[{"logical_name":"Epic","id":"10200","subtask":false,"hierarchy_level":1},{"logical_name":"Story","id":"10201","subtask":false,"hierarchy_level":0},{"logical_name":"Sub-task","id":"10202","subtask":true,"hierarchy_level":-1}]}'
     $script:CompanyBinding = '{"style":"company_managed","issue_types":[{"logical_name":"Initiative","id":"10100","subtask":false,"hierarchy_level":2},{"logical_name":"Deliverable","id":"10101","subtask":false,"hierarchy_level":1},{"logical_name":"Story","id":"10102","subtask":false,"hierarchy_level":0}]}'

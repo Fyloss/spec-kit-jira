@@ -7,7 +7,7 @@
 
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
-    $Sink = Join-Path $Root '.specify/extensions/jira/scripts/powershell/sink/jira'
+    $Sink = Join-Path $Root 'scripts/powershell/sink/jira'
     $script:Mock = Join-Path $Root 'tests/conformance/mock-jira'
     # Import PlanApply first: it re-imports PrivacyGuard -Force into its own module
     # scope, so import PrivacyGuard LAST to keep its functions in the test session.

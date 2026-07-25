@@ -11,10 +11,10 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  SINK_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/sink/jira"
-  CMD_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/commands"
-  PS_SINK="${ROOT}/.specify/extensions/jira/scripts/powershell/sink/jira"
-  PS_CMD="${ROOT}/.specify/extensions/jira/scripts/powershell/commands"
+  SINK_DIR="${ROOT}/scripts/bash/sink/jira"
+  CMD_DIR="${ROOT}/scripts/bash/commands"
+  PS_SINK="${ROOT}/scripts/powershell/sink/jira"
+  PS_CMD="${ROOT}/scripts/powershell/commands"
   MOCK="${ROOT}/tests/conformance/mock-jira"
   # shellcheck source=/dev/null
   source "${MOCK}/lib.sh"

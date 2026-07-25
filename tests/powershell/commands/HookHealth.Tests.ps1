@@ -4,7 +4,7 @@
 
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
-    $CmdDir = Join-Path $Root '.specify/extensions/jira/scripts/powershell/commands'
+    $CmdDir = Join-Path $Root 'scripts/powershell/commands'
     Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
 
     function Invoke-ReconcileSummary([string[]] $ArgList) {

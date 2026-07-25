@@ -16,8 +16,8 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  ENGINE_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/engine"
-  PS_ENGINE="${ROOT}/.specify/extensions/jira/scripts/powershell/engine"
+  ENGINE_DIR="${ROOT}/scripts/bash/engine"
+  PS_ENGINE="${ROOT}/scripts/powershell/engine"
   # shellcheck source=/dev/null
   source "${ENGINE_DIR}/drift.sh"
   ORDER='["To Do","In Progress","In Review","Done"]'

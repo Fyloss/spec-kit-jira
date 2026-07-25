@@ -36,13 +36,13 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 **Purpose**: Create the twin-port skeleton, version single-source, test tree, lint config, and CI shell.
 
-- [X] T001 Create the twin-port directory skeleton: `.specify/extensions/jira/scripts/bash/{lib,engine,sink/jira,commands,hooks}/` and `.specify/extensions/jira/scripts/powershell/{lib,engine,sink/jira,commands,hooks}/` and `.specify/extensions/jira/templates/`
-- [X] T002 [P] Create the extension metadata `.specify/extensions/jira/extension.yml` (id, catalog name, and the `version` field — the SINGLE source of truth for the version, the only place the version literal appears in the tree, FR-021/022) and `.specify/extensions/jira/CHANGELOG.md` (SemVer, initial entry)
-- [X] T003 [P] Create the test tree: `tests/bash/{lib,engine,sink,commands}/`, `tests/powershell/{lib,engine,sink,commands}/`, `tests/conformance/{scenarios,fixtures,mock-jira}/`, `tests/live/`
-- [X] T004 [P] Add Bash lint/format config at repo root: `.shellcheckrc` and shfmt settings in `.editorconfig`
-- [X] T005 [P] Add PowerShell lint config `PSScriptAnalyzerSettings.psd1` at repo root
-- [X] T006 [P] Update `.gitignore`: remove the stale `.specify/jira/VERSION.local` line (FR-022 forbids any hand-maintained version marker). Note: `.specify/jira/config.local.yml` and `.specify/jira/.env` are already gitignored — verify they remain present (do not re-add duplicates)
-- [X] T007 [P] Create the self-documenting `.specify/extensions/jira/templates/config.yml.template` (business-language keys + comments, Constitution XVI) and `.specify/extensions/jira/templates/readme-block.template`
+- [x] T001 Create the twin-port directory skeleton: `.specify/extensions/jira/scripts/bash/{lib,engine,sink/jira,commands,hooks}/` and `.specify/extensions/jira/scripts/powershell/{lib,engine,sink/jira,commands,hooks}/` and `.specify/extensions/jira/templates/`
+- [x] T002 [P] Create the extension metadata `.specify/extensions/jira/extension.yml` (id, catalog name, and the `version` field — the SINGLE source of truth for the version, the only place the version literal appears in the tree, FR-021/022) and `.specify/extensions/jira/CHANGELOG.md` (SemVer, initial entry)
+- [x] T003 [P] Create the test tree: `tests/bash/{lib,engine,sink,commands}/`, `tests/powershell/{lib,engine,sink,commands}/`, `tests/conformance/{scenarios,fixtures,mock-jira}/`, `tests/live/`
+- [x] T004 [P] Add Bash lint/format config at repo root: `.shellcheckrc` and shfmt settings in `.editorconfig`
+- [x] T005 [P] Add PowerShell lint config `PSScriptAnalyzerSettings.psd1` at repo root
+- [x] T006 [P] Update `.gitignore`: remove the stale `.specify/jira/VERSION.local` line (FR-022 forbids any hand-maintained version marker). Note: `.specify/jira/config.local.yml` and `.specify/jira/.env` are already gitignored — verify they remain present (do not re-add duplicates)
+- [x] T007 [P] Create the self-documenting `.specify/extensions/jira/templates/config.yml.template` (business-language keys + comments, Constitution XVI) and `.specify/extensions/jira/templates/readme-block.template`
 
 **Checkpoint**: Skeleton, version source, and test tree exist — foundational work can begin.
 
@@ -56,35 +56,35 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Test infrastructure
 
-- [X] T008 [P] Build the mocked Jira double (company-managed + team-managed discovery responses, and 401 / 404 / 429-exhausted / network fault injection) in `tests/conformance/mock-jira/`
-- [X] T009 Implement the conformance harness `tests/conformance/run-scenario.sh` (signature `run-scenario <scenario.json> <bash|powershell> [outdir]`) that runs a port against a scenario and captures stdout, exit code, written files, and Jira API call sequence for byte-identical comparison (NFR-1)
+- [x] T008 [P] Build the mocked Jira double (company-managed + team-managed discovery responses, and 401 / 404 / 429-exhausted / network fault injection) in `tests/conformance/mock-jira/`
+- [x] T009 Implement the conformance harness `tests/conformance/run-scenario.sh` (signature `run-scenario <scenario.json> <bash|powershell> [outdir]`) that runs a port against a scenario and captures stdout, exit code, written files, and Jira API call sequence for byte-identical comparison (NFR-1)
 
 ### Port infrastructure — `lib/` (no domain knowledge)
 
-- [X] T010 [P] Prereq-check tests (bash ≥ 4 with macOS 3.2 named explicitly, curl/jq/git present; pwsh 7+) asserting exit code 5 in `tests/bash/lib/test_prereq.bats` and `tests/powershell/lib/Prereq.Tests.ps1`
-- [X] T011 Implement prerequisite checks (exit 5 before any Jira interaction, NFR-4) in `.specify/extensions/jira/scripts/bash/lib/prereq.sh` and `.specify/extensions/jira/scripts/powershell/lib/Prereq.psm1`
-- [X] T012 [P] Canonical-serializer parity tests (stable key ordering, UTF-8, explicit line-ending control, `jq` ↔ `ConvertTo-Json` byte-parity incl. `@uri` `%20`→`+` rule, research §11) in `tests/bash/lib/test_serialize.bats`, `tests/powershell/lib/Serialize.Tests.ps1`, and a conformance scenario
-- [X] T013 Implement the canonical serializer (shared by config/output/interchange) in `.specify/extensions/jira/scripts/bash/lib/output.sh` and `.specify/extensions/jira/scripts/powershell/lib/Output.psm1`
-- [X] T014 [P] CLI arg-parsing and exit-code-table tests (`--dry-run`/`--json`/`--on-drift`/`--verbose`/`--help`; codes 0/1/2/3/4/5/9 per contracts/cli-contract.md) in `tests/bash/lib/test_cli.bats` and `tests/powershell/lib/Cli.Tests.ps1`
-- [X] T015 Implement CLI arg parsing + the shared exit-code table in `.specify/extensions/jira/scripts/bash/lib/cli.sh` and `.specify/extensions/jira/scripts/powershell/lib/Cli.psm1`
-- [X] T016 [P] Run-summary rendering tests (prose default + `--json` validated against `contracts/run-summary.schema.json`, WARNING channel) in `tests/bash/lib/test_output.bats` and `tests/powershell/lib/Output.Tests.ps1`
-- [X] T017 Implement run-summary rendering (prose + `--json`, WARNING channel) in `.specify/extensions/jira/scripts/bash/lib/output.sh` and `.specify/extensions/jira/scripts/powershell/lib/Output.psm1`
-- [X] T018 [P] Credential-resolution tests — **eliminatory NFR-3**: env → OS secret manager → gitignored `.env`; assert the resolved token NEVER appears in argv, logs, errors, or under `set -x` / `-Verbose` (SC-007) in `tests/bash/lib/test_credentials.bats` and `tests/powershell/lib/Credentials.Tests.ps1`
-- [X] T019 Implement credential resolution in `.specify/extensions/jira/scripts/bash/lib/credentials.sh` (Authorization header via `curl --config` on stdin, never `-H` argv) and `.specify/extensions/jira/scripts/powershell/lib/Credentials.psm1` (token stays in-process)
+- [x] T010 [P] Prereq-check tests (bash ≥ 4 with macOS 3.2 named explicitly, curl/jq/git present; pwsh 7+) asserting exit code 5 in `tests/bash/lib/test_prereq.bats` and `tests/powershell/lib/Prereq.Tests.ps1`
+- [x] T011 Implement prerequisite checks (exit 5 before any Jira interaction, NFR-4) in `.specify/extensions/jira/scripts/bash/lib/prereq.sh` and `.specify/extensions/jira/scripts/powershell/lib/Prereq.psm1`
+- [x] T012 [P] Canonical-serializer parity tests (stable key ordering, UTF-8, explicit line-ending control, `jq` ↔ `ConvertTo-Json` byte-parity incl. `@uri` `%20`→`+` rule, research §11) in `tests/bash/lib/test_serialize.bats`, `tests/powershell/lib/Serialize.Tests.ps1`, and a conformance scenario
+- [x] T013 Implement the canonical serializer (shared by config/output/interchange) in `.specify/extensions/jira/scripts/bash/lib/output.sh` and `.specify/extensions/jira/scripts/powershell/lib/Output.psm1`
+- [x] T014 [P] CLI arg-parsing and exit-code-table tests (`--dry-run`/`--json`/`--on-drift`/`--verbose`/`--help`; codes 0/1/2/3/4/5/9 per contracts/cli-contract.md) in `tests/bash/lib/test_cli.bats` and `tests/powershell/lib/Cli.Tests.ps1`
+- [x] T015 Implement CLI arg parsing + the shared exit-code table in `.specify/extensions/jira/scripts/bash/lib/cli.sh` and `.specify/extensions/jira/scripts/powershell/lib/Cli.psm1`
+- [x] T016 [P] Run-summary rendering tests (prose default + `--json` validated against `contracts/run-summary.schema.json`, WARNING channel) in `tests/bash/lib/test_output.bats` and `tests/powershell/lib/Output.Tests.ps1`
+- [x] T017 Implement run-summary rendering (prose + `--json`, WARNING channel) in `.specify/extensions/jira/scripts/bash/lib/output.sh` and `.specify/extensions/jira/scripts/powershell/lib/Output.psm1`
+- [x] T018 [P] Credential-resolution tests — **eliminatory NFR-3**: env → OS secret manager → gitignored `.env`; assert the resolved token NEVER appears in argv, logs, errors, or under `set -x` / `-Verbose` (SC-007) in `tests/bash/lib/test_credentials.bats` and `tests/powershell/lib/Credentials.Tests.ps1`
+- [x] T019 Implement credential resolution in `.specify/extensions/jira/scripts/bash/lib/credentials.sh` (Authorization header via `curl --config` on stdin, never `-H` argv) and `.specify/extensions/jira/scripts/powershell/lib/Credentials.psm1` (token stays in-process)
 
 ### Engine↔sink interface plumbing
 
-- [X] T020 [P] Neutral-interchange schema-validation tests (valid + invalid docs against `contracts/neutral-interchange.schema.json`; validation failure ⇒ zero writes + error) in `tests/bash/engine/test_interchange.bats` and `tests/powershell/engine/Interchange.Tests.ps1`
-- [X] T021 Implement the neutral-document schema validator (validate before any write, Constitution VIII) in `.specify/extensions/jira/scripts/bash/engine/interchange.sh` and `.specify/extensions/jira/scripts/powershell/engine/Interchange.psm1`
-- [X] T022 [P] Sink REST-transport tests (retry/backoff honouring `Retry-After` on 429, exit-code mapping 2/3, credential-safe header) against the mocked double in `tests/bash/sink/test_client.bats` and `tests/powershell/sink/Client.Tests.ps1`
-- [X] T023 Implement the REST v3 transport (retry/backoff, exit-code mapping, credential-safe header from T019) in `.specify/extensions/jira/scripts/bash/sink/jira/client.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Client.psm1`
-- [X] T024 Implement the entry-point dispatcher (routes `config`/`reconcile`/`mention`, runs prereq checks first) in `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` and `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1`
+- [x] T020 [P] Neutral-interchange schema-validation tests (valid + invalid docs against `contracts/neutral-interchange.schema.json`; validation failure ⇒ zero writes + error) in `tests/bash/engine/test_interchange.bats` and `tests/powershell/engine/Interchange.Tests.ps1`
+- [x] T021 Implement the neutral-document schema validator (validate before any write, Constitution VIII) in `.specify/extensions/jira/scripts/bash/engine/interchange.sh` and `.specify/extensions/jira/scripts/powershell/engine/Interchange.psm1`
+- [x] T022 [P] Sink REST-transport tests (retry/backoff honouring `Retry-After` on 429, exit-code mapping 2/3, credential-safe header) against the mocked double in `tests/bash/sink/test_client.bats` and `tests/powershell/sink/Client.Tests.ps1`
+- [x] T023 Implement the REST v3 transport (retry/backoff, exit-code mapping, credential-safe header from T019) in `.specify/extensions/jira/scripts/bash/sink/jira/client.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Client.psm1`
+- [x] T024 Implement the entry-point dispatcher (routes `config`/`reconcile`/`mention`, runs prereq checks first) in `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` and `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1`
 
 ### CI enforcement gates
 
-- [X] T025 [P] CI: three-OS matrix (ubuntu / macos / windows) running bats + Pester unit suites and the conformance corpus in `.github/workflows/ci.yml`
-- [X] T026 [P] CI: engine/sink boundary greps — #1 no `engine/` script sources/imports `sink/`; #2 no `engine/` script contains any Atlassian identifier (issue-key regex, `atlassian.net`, `createmeta`, ADF node names, field ids); grep builds the vendor token from split literals — in `.github/workflows/boundary.yml`
-- [X] T027 [P] CI: coverage gate (kcov Bash ≥ 80% PRIMARY with traceability FALLBACK, Pester CodeCoverage ≥ 80%), module-parity check (same leaf set modulo `.sh`↔`.psm1`), and version-string grep (SC-006: no version string outside `.specify/extensions/jira/`; and within that folder the version literal appears only in the `version` field of `extension.yml`, never duplicated elsewhere, per FR-021/022) in `.github/workflows/gates.yml`
+- [x] T025 [P] CI: three-OS matrix (ubuntu / macos / windows) running bats + Pester unit suites and the conformance corpus in `.github/workflows/ci.yml`
+- [x] T026 [P] CI: engine/sink boundary greps — #1 no `engine/` script sources/imports `sink/`; #2 no `engine/` script contains any Atlassian identifier (issue-key regex, `atlassian.net`, `createmeta`, ADF node names, field ids); grep builds the vendor token from split literals — in `.github/workflows/boundary.yml`
+- [x] T027 [P] CI: coverage gate (kcov Bash ≥ 80% PRIMARY with traceability FALLBACK, Pester CodeCoverage ≥ 80%), module-parity check (same leaf set modulo `.sh`↔`.psm1`), and version-string grep (SC-006: no version string outside `.specify/extensions/jira/`; and within that folder the version literal appears only in the `version` field of `extension.yml`, never duplicated elsewhere, per FR-021/022) in `.github/workflows/gates.yml`
 
 **Checkpoint**: Infrastructure ready — user story implementation can begin.
 
@@ -100,14 +100,14 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 4 ⚠️
 
-- [X] T028 [P] [US4] Config-schema tests: credential-shaped values rejected in both layers (FR-023, exit 4); `config.yml`/`config.local.yml` split; no version marker outside the extension (SC-006) in `tests/bash/lib/test_config.bats` and `tests/powershell/lib/Config.Tests.ps1`
-- [X] T029 [P] [US4] Reinstall/upgrade preservation conformance scenario (config.yml + config.local.yml survive intact, FR-020) in `tests/conformance/scenarios/us4-reinstall-preserves-config.json`
+- [x] T028 [P] [US4] Config-schema tests: credential-shaped values rejected in both layers (FR-023, exit 4); `config.yml`/`config.local.yml` split; no version marker outside the extension (SC-006) in `tests/bash/lib/test_config.bats` and `tests/powershell/lib/Config.Tests.ps1`
+- [x] T029 [P] [US4] Reinstall/upgrade preservation conformance scenario (config.yml + config.local.yml survive intact, FR-020) in `tests/conformance/scenarios/us4-reinstall-preserves-config.json`
 
 ### Implementation for User Story 4
 
-- [X] T030 [US4] Implement config load/merge (`config.yml` + `config.local.yml`) and schema validation against `contracts/config.schema.json` / `contracts/config.local.schema.json` in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
-- [X] T031 [US4] Implement credential-shape rejection (ATATT prefix, real `*.atlassian.net`, email/token shapes) in both YAML layers with exit code 4 in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
-- [X] T032 [US4] Implement the single-source version reader (reads the `version` field of `.specify/extensions/jira/extension.yml`; asserts absence of `.specify/jira/VERSION` and any other hand-maintained version marker) consumed by config command, README markers, run summary, and upgrade check in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
+- [x] T030 [US4] Implement config load/merge (`config.yml` + `config.local.yml`) and schema validation against `contracts/config.schema.json` / `contracts/config.local.schema.json` in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
+- [x] T031 [US4] Implement credential-shape rejection (ATATT prefix, real `*.atlassian.net`, email/token shapes) in both YAML layers with exit code 4 in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
+- [x] T032 [US4] Implement the single-source version reader (reads the `version` field of `.specify/extensions/jira/extension.yml`; asserts absence of `.specify/jira/VERSION` and any other hand-maintained version marker) consumed by config command, README markers, run summary, and upgrade check in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
 
 **Checkpoint**: Config storage, credential rejection, and version single-sourcing work independently.
 
@@ -121,17 +121,17 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 2 ⚠️
 
-- [X] T033 [P] [US2] Style-detection + company-managed discovery (scheme-based endpoints, research §1/§2) against the mocked double in `tests/bash/sink/test_discovery_company.bats`, `tests/powershell/sink/Discovery.Company.Tests.ps1`, and `tests/conformance/scenarios/us2-company-managed-discovery.json`
-- [X] T034 [P] [US2] Team-managed discovery (project-scoped, research §3): estimation-field heuristic ranking + operator confirmation (never the global Story Points field, no literal name), hierarchy limited to Epic/Sub-task in `tests/bash/sink/test_discovery_team.bats`, `tests/powershell/sink/Discovery.Team.Tests.ps1`, and `tests/conformance/scenarios/us2-team-managed-discovery.json`
-- [X] T035 [P] [US2] Status classification into `mapped`/`post-scope`/`halted`/`unknown` (statusCategory-seeded + operator, research §4) and many-to-one phase→status mapping; assert no built-in "ideal" status/phase default table is shipped and the operator's configured workflow is authoritative (FR-012) in `tests/bash/sink/test_status_classification.bats` and `tests/powershell/sink/StatusClassification.Tests.ps1`
-- [X] T036 [P] [US2] Config-time refusal of a team-managed level-above-Epic (FR-007, exit 4 naming limitation + style) in `tests/bash/commands/test_config_refusal.bats` and `tests/powershell/commands/Config.Refusal.Tests.ps1`
+- [x] T033 [P] [US2] Style-detection + company-managed discovery (scheme-based endpoints, research §1/§2) against the mocked double in `tests/bash/sink/test_discovery_company.bats`, `tests/powershell/sink/Discovery.Company.Tests.ps1`, and `tests/conformance/scenarios/us2-company-managed-discovery.json`
+- [x] T034 [P] [US2] Team-managed discovery (project-scoped, research §3): estimation-field heuristic ranking + operator confirmation (never the global Story Points field, no literal name), hierarchy limited to Epic/Sub-task in `tests/bash/sink/test_discovery_team.bats`, `tests/powershell/sink/Discovery.Team.Tests.ps1`, and `tests/conformance/scenarios/us2-team-managed-discovery.json`
+- [x] T035 [P] [US2] Status classification into `mapped`/`post-scope`/`halted`/`unknown` (statusCategory-seeded + operator, research §4) and many-to-one phase→status mapping; assert no built-in "ideal" status/phase default table is shipped and the operator's configured workflow is authoritative (FR-012) in `tests/bash/sink/test_status_classification.bats` and `tests/powershell/sink/StatusClassification.Tests.ps1`
+- [x] T036 [P] [US2] Config-time refusal of a team-managed level-above-Epic (FR-007, exit 4 naming limitation + style) in `tests/bash/commands/test_config_refusal.bats` and `tests/powershell/commands/Config.Refusal.Tests.ps1`
 
 ### Implementation for User Story 2
 
-- [X] T037 [US2] Implement `discover_binding` — style detected first, per-style discovery of issue types / statuses+categories / priorities / fields / flagged field (research §1/§2/§3/§15) in `.specify/extensions/jira/scripts/bash/sink/jira/discovery.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Discovery.psm1`
-- [X] T038 [US2] Implement the estimation-field discovery heuristic (rank candidates by documented signals, propose but never assume the conventional name) in `.specify/extensions/jira/scripts/bash/sink/jira/discovery.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Discovery.psm1`
-- [X] T039 [US2] Implement status classification + many-to-one phase→status persistence into config in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
-- [X] T040 [US2] Implement mapping validation (refuse team-managed level-above-Epic at config time, exit 4) and persist `epic_strategy` / `task_strategy` / `link_type` by logical name in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
+- [x] T037 [US2] Implement `discover_binding` — style detected first, per-style discovery of issue types / statuses+categories / priorities / fields / flagged field (research §1/§2/§3/§15) in `.specify/extensions/jira/scripts/bash/sink/jira/discovery.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Discovery.psm1`
+- [x] T038 [US2] Implement the estimation-field discovery heuristic (rank candidates by documented signals, propose but never assume the conventional name) in `.specify/extensions/jira/scripts/bash/sink/jira/discovery.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Discovery.psm1`
+- [x] T039 [US2] Implement status classification + many-to-one phase→status persistence into config in `.specify/extensions/jira/scripts/bash/lib/config.sh` and `.specify/extensions/jira/scripts/powershell/lib/Config.psm1`
+- [x] T040 [US2] Implement mapping validation (refuse team-managed level-above-Epic at config time, exit 4) and persist `epic_strategy` / `task_strategy` / `link_type` by logical name in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
 
 **Checkpoint**: Discovery + mapping work for both project styles, verified against both fixtures.
 
@@ -147,17 +147,17 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 1 ⚠️
 
-- [X] T041 [P] [US1] Byte-identical re-run (FR-003, SC-004) + both-ports-identical `config.yml` in `tests/conformance/scenarios/us1-config-idempotent.json`
-- [X] T042 [P] [US1] Every step is API-read / config-read / closed enumerated question with machine-readable key/value or JSON output (FR-001, FR-002) in `tests/bash/commands/test_config_determinism.bats` and `tests/powershell/commands/Config.Determinism.Tests.ps1`
-- [X] T043 [P] [US1] Run summary reports the three effects (discovery / hooks / README) separately (FR-054) in `tests/bash/commands/test_config_three_effects.bats` and `tests/powershell/commands/Config.ThreeEffects.Tests.ps1`. **Scope note**: at this phase only the discovery effect is wired, so this task asserts the summary *structure* (all three effects reported as distinct sections). The assertion that the hooks and README effects actually *perform their writes* is completed when T065 (README wiring, Phase 8) and T085 (hook wiring, Phase 12) land — extend this scenario there rather than duplicating it.
+- [x] T041 [P] [US1] Byte-identical re-run (FR-003, SC-004) + both-ports-identical `config.yml` in `tests/conformance/scenarios/us1-config-idempotent.json`
+- [x] T042 [P] [US1] Every step is API-read / config-read / closed enumerated question with machine-readable key/value or JSON output (FR-001, FR-002) in `tests/bash/commands/test_config_determinism.bats` and `tests/powershell/commands/Config.Determinism.Tests.ps1`
+- [x] T043 [P] [US1] Run summary reports the three effects (discovery / hooks / README) separately (FR-054) in `tests/bash/commands/test_config_three_effects.bats` and `tests/powershell/commands/Config.ThreeEffects.Tests.ps1`. **Scope note**: at this phase only the discovery effect is wired, so this task asserts the summary _structure_ (all three effects reported as distinct sections). The assertion that the hooks and README effects actually _perform their writes_ is completed when T065 (README wiring, Phase 8) and T085 (hook wiring, Phase 12) land — extend this scenario there rather than duplicating it.
 
 ### Implementation for User Story 1
 
-- [X] T044 [US1] Implement the config-command orchestration (discovery → persist config with deterministic canonical serialisation → three-effect summary) in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
-- [X] T045 [US1] Author the agent command file with the exact, ordered, model-independent algorithm (closed enumerated questions only, no inferred keys/fields) in `commands/speckit.jira.config.md`
-- [X] T046 [US1] Implement three-effect run-summary reporting (discovery / hooks / README reported separately) in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
+- [x] T044 [US1] Implement the config-command orchestration (discovery → persist config with deterministic canonical serialisation → three-effect summary) in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
+- [x] T045 [US1] Author the agent command file with the exact, ordered, model-independent algorithm (closed enumerated questions only, no inferred keys/fields) in `commands/speckit.jira.config.md`
+- [x] T046 [US1] Implement three-effect run-summary reporting (discovery / hooks / README reported separately) in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
 
-**Checkpoint 🎯 MVP**: The config command produces a byte-identical, deterministic `config.yml` on both ports — the feature's entry point is usable. The discovery effect and the three-effect summary *structure* are validated here; US1's full Independent Test ("one run performs all three effects") is only satisfiable once the README effect (T065, Phase 8) and the hook effect (T085, Phase 12) are wired — the three-effect assertion is completed at Phase 12, not here.
+**Checkpoint 🎯 MVP**: The config command produces a byte-identical, deterministic `config.yml` on both ports — the feature's entry point is usable. The discovery effect and the three-effect summary _structure_ are validated here; US1's full Independent Test ("one run performs all three effects") is only satisfiable once the README effect (T065, Phase 8) and the hook effect (T085, Phase 12) are wired — the three-effect assertion is completed at Phase 12, not here.
 
 ---
 
@@ -171,12 +171,12 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 11 ⚠️
 
-- [X] T047 [P] [US11] BLOCK-tier tests: known site/project coordinate, ATATT prefix, real `*.atlassian.net` host → exit 9 + zero writes (FR-052) in `tests/bash/sink/test_privacy_block.bats`, `tests/powershell/sink/PrivacyGuard.Block.Tests.ps1`, and `tests/conformance/scenarios/us11-block-tier.json`
+- [x] T047 [P] [US11] BLOCK-tier tests: known site/project coordinate, ATATT prefix, real `*.atlassian.net` host → exit 9 + zero writes (FR-052) in `tests/bash/sink/test_privacy_block.bats`, `tests/powershell/sink/PrivacyGuard.Block.Tests.ps1`, and `tests/conformance/scenarios/us11-block-tier.json`
 
 ### Implementation for User Story 11
 
-- [X] T048 [US11] Implement the privacy guard BLOCK tier (exact-match detection, dedicated exit 9, precision over recall) in `.specify/extensions/jira/scripts/bash/sink/jira/privacy_guard.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PrivacyGuard.psm1`
-- [X] T049 [US11] Wire the BLOCK guard as the mandatory pre-write gate in the apply path (every write, no gap) in `.specify/extensions/jira/scripts/bash/sink/jira/plan_apply.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PlanApply.psm1`
+- [x] T048 [US11] Implement the privacy guard BLOCK tier (exact-match detection, dedicated exit 9, precision over recall) in `.specify/extensions/jira/scripts/bash/sink/jira/privacy_guard.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PrivacyGuard.psm1`
+- [x] T049 [US11] Wire the BLOCK guard as the mandatory pre-write gate in the apply path (every write, no gap) in `.specify/extensions/jira/scripts/bash/sink/jira/plan_apply.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PlanApply.psm1`
 
 **Checkpoint**: No write can occur without passing the BLOCK guard.
 
@@ -190,19 +190,19 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 3 ⚠️
 
-- [X] T050 [P] [US3] Title-ladder + never-empty description incl. no-`## Summary` specs (FR-013, FR-014, SC-002) in `tests/bash/engine/test_parse_title_desc.bats` and `tests/powershell/engine/Parse.TitleDesc.Tests.ps1`
-- [X] T051 [P] [US3] Gherkin → panel and Figma/UX → distinct Design section (FR-015, FR-016) in `tests/bash/sink/test_adf.bats` and `tests/powershell/sink/Adf.Tests.ps1`
-- [X] T052 [P] [US3] Priority P1/P2/P3 → project priority by logical name; estimation written on create only, never re-sent on update (FR-017, FR-018) in `tests/bash/sink/test_plan_apply_content.bats` and `tests/powershell/sink/PlanApply.Content.Tests.ps1`
-- [X] T053 [P] [US3] Action-set parity: neutral doc built + schema-validated before write, both ports emit an identical create/update action set in `tests/conformance/scenarios/us3-ticket-content.json`
+- [x] T050 [P] [US3] Title-ladder + never-empty description incl. no-`## Summary` specs (FR-013, FR-014, SC-002) in `tests/bash/engine/test_parse_title_desc.bats` and `tests/powershell/engine/Parse.TitleDesc.Tests.ps1`
+- [x] T051 [P] [US3] Gherkin → panel and Figma/UX → distinct Design section (FR-015, FR-016) in `tests/bash/sink/test_adf.bats` and `tests/powershell/sink/Adf.Tests.ps1`
+- [x] T052 [P] [US3] Priority P1/P2/P3 → project priority by logical name; estimation written on create only, never re-sent on update (FR-017, FR-018) in `tests/bash/sink/test_plan_apply_content.bats` and `tests/powershell/sink/PlanApply.Content.Tests.ps1`
+- [x] T053 [P] [US3] Action-set parity: neutral doc built + schema-validated before write, both ports emit an identical create/update action set in `tests/conformance/scenarios/us3-ticket-content.json`
 
 ### Implementation for User Story 3
 
-- [X] T054 [US3] Implement the engine parser (title ladder, description synthesis, Gherkin, Design, priority, estimation, user_stories, tasks — zero Jira identifiers) in `.specify/extensions/jira/scripts/bash/engine/parse.sh` and `.specify/extensions/jira/scripts/powershell/engine/Parse.psm1`
-- [X] T055 [US3] Implement neutral-doc assembly + validation (build from parse output, validate via T021) in `.specify/extensions/jira/scripts/bash/engine/interchange.sh` and `.specify/extensions/jira/scripts/powershell/engine/Interchange.psm1`
-- [X] T056 [US3] Implement neutral-blocks → ADF rendering (panels for Gherkin, heading+section for Design) in `.specify/extensions/jira/scripts/bash/sink/jira/adf.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Adf.psm1`
-- [X] T057 [US3] Implement the ticket identity marker (entity property read/write, origin, per-project scope, research §5) in `.specify/extensions/jira/scripts/bash/sink/jira/identity.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Identity.psm1`
-- [X] T058 [US3] Implement `plan_writes` + `apply_writes` (resolve logical→id, ordered create/update/transition/comment/link/label action set, estimation create-only) in `.specify/extensions/jira/scripts/bash/sink/jira/plan_apply.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PlanApply.psm1`
-- [X] T059 [US3] Implement the `reconcile` command wiring engine → sink → summary (BLOCK guard from US11) in `.specify/extensions/jira/scripts/bash/commands/reconcile.sh` and `.specify/extensions/jira/scripts/powershell/commands/Reconcile.psm1`
+- [x] T054 [US3] Implement the engine parser (title ladder, description synthesis, Gherkin, Design, priority, estimation, user_stories, tasks — zero Jira identifiers) in `.specify/extensions/jira/scripts/bash/engine/parse.sh` and `.specify/extensions/jira/scripts/powershell/engine/Parse.psm1`
+- [x] T055 [US3] Implement neutral-doc assembly + validation (build from parse output, validate via T021) in `.specify/extensions/jira/scripts/bash/engine/interchange.sh` and `.specify/extensions/jira/scripts/powershell/engine/Interchange.psm1`
+- [x] T056 [US3] Implement neutral-blocks → ADF rendering (panels for Gherkin, heading+section for Design) in `.specify/extensions/jira/scripts/bash/sink/jira/adf.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Adf.psm1`
+- [x] T057 [US3] Implement the ticket identity marker (entity property read/write, origin, per-project scope, research §5) in `.specify/extensions/jira/scripts/bash/sink/jira/identity.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Identity.psm1`
+- [x] T058 [US3] Implement `plan_writes` + `apply_writes` (resolve logical→id, ordered create/update/transition/comment/link/label action set, estimation create-only) in `.specify/extensions/jira/scripts/bash/sink/jira/plan_apply.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PlanApply.psm1`
+- [x] T059 [US3] Implement the `reconcile` command wiring engine → sink → summary (BLOCK guard from US11) in `.specify/extensions/jira/scripts/bash/commands/reconcile.sh` and `.specify/extensions/jira/scripts/powershell/commands/Reconcile.psm1`
 
 **Checkpoint**: Reconcile creates and updates rich, non-empty tickets from a spec corpus.
 
@@ -216,15 +216,15 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 5 ⚠️
 
-- [X] T060 [P] [US5] Replace only between markers; preserve every byte outside (CRLF-safe); adopt host dominant line-ending; new README uses LF; byte-identical block across ports (FR-025, SC-005) in `tests/bash/engine/test_readme_splice.bats`, `tests/powershell/engine/ReadmeSplice.Tests.ps1`, and `tests/conformance/scenarios/us5-readme-block.json`
-- [X] T061 [P] [US5] Absent block appended once at documented position; absent README created with only the block; malformed markers (start-without-end/nested/duplicated) → zero writes + located error exit 4 (FR-026, FR-027) in `tests/bash/engine/test_readme_edgecases.bats` and `tests/powershell/engine/ReadmeEdgecases.Tests.ps1`
-- [X] T062 [P] [US5] Idempotent (unchanged version + content → zero rewrite, zero-change report); hand-edited block regenerated + summary states replaced (FR-028, FR-029) in `tests/bash/engine/test_readme_idempotent.bats` and `tests/powershell/engine/ReadmeIdempotent.Tests.ps1`
+- [x] T060 [P] [US5] Replace only between markers; preserve every byte outside (CRLF-safe); adopt host dominant line-ending; new README uses LF; byte-identical block across ports (FR-025, SC-005) in `tests/bash/engine/test_readme_splice.bats`, `tests/powershell/engine/ReadmeSplice.Tests.ps1`, and `tests/conformance/scenarios/us5-readme-block.json`
+- [x] T061 [P] [US5] Absent block appended once at documented position; absent README created with only the block; malformed markers (start-without-end/nested/duplicated) → zero writes + located error exit 4 (FR-026, FR-027) in `tests/bash/engine/test_readme_edgecases.bats` and `tests/powershell/engine/ReadmeEdgecases.Tests.ps1`
+- [x] T062 [P] [US5] Idempotent (unchanged version + content → zero rewrite, zero-change report); hand-edited block regenerated + summary states replaced (FR-028, FR-029) in `tests/bash/engine/test_readme_idempotent.bats` and `tests/powershell/engine/ReadmeIdempotent.Tests.ps1`
 
 ### Implementation for User Story 5
 
-- [X] T063 [US5] Implement the README byte-splice + dominant line-ending detection + malformed-marker refusal (engine owns the byte manipulation) in `.specify/extensions/jira/scripts/bash/engine/managed_section.sh` and `.specify/extensions/jira/scripts/powershell/engine/ManagedSection.psm1`
-- [X] T064 [US5] Implement the version-marked README-block writer (markers from the single version source, FR-024) in `.specify/extensions/jira/scripts/bash/hooks/readme_block.sh` and `.specify/extensions/jira/scripts/powershell/hooks/ReadmeBlock.psm1`
-- [X] T065 [US5] Wire the README-block writer as the config command's third reported effect in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
+- [x] T063 [US5] Implement the README byte-splice + dominant line-ending detection + malformed-marker refusal (engine owns the byte manipulation) in `.specify/extensions/jira/scripts/bash/engine/managed_section.sh` and `.specify/extensions/jira/scripts/powershell/engine/ManagedSection.psm1`
+- [x] T064 [US5] Implement the version-marked README-block writer (markers from the single version source, FR-024) in `.specify/extensions/jira/scripts/bash/hooks/readme_block.sh` and `.specify/extensions/jira/scripts/powershell/hooks/ReadmeBlock.psm1`
+- [x] T065 [US5] Wire the README-block writer as the config command's third reported effect in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
 
 **Checkpoint**: All P1 stories complete — deterministic config, dual-style discovery, BLOCK guard, rich tickets, managed README block.
 
@@ -238,17 +238,17 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 6 ⚠️
 
-- [X] T066 [P] [US6] Unchanged corpus → zero writes of every kind (create/update/transition/comment/link/label) (FR-030, SC-001) in `tests/conformance/scenarios/us6-zero-churn.json`
-- [X] T067 [P] [US6] Fault injection (401/network/404/429-exhausted) → zero writes for the affected spec + monotonic exit codes 2/3 (FR-032) in `tests/bash/sink/test_fail_closed.bats`, `tests/powershell/sink/FailClosed.Tests.ps1`, and `tests/conformance/scenarios/us6-fail-closed.json`
-- [X] T068 [P] [US6] Status-category drift: post-scope never backward; unknown → named + suggest classify; halted → stop all writes + two remediations; mapped advanced Jira-side → named warning, never silent overwrite (FR-031, FR-034) in `tests/bash/engine/test_drift.bats` and `tests/powershell/engine/Drift.Tests.ps1`
-- [X] T069 [P] [US6] Post-scope regression aborts transition unless `--on-drift=proceed` (FR-035); Flagged withholds transitions, flag surfaced, never set/removed (FR-036); human links never modified, blockers info-note (FR-037) in `tests/bash/sink/test_lifecycle_safety.bats` and `tests/powershell/sink/LifecycleSafety.Tests.ps1`
-- [X] T070 [P] [US6] `--dry-run` report equals the real run's action set (FR-033) in `tests/conformance/scenarios/us6-dry-run.json`
+- [x] T066 [P] [US6] Unchanged corpus → zero writes of every kind (create/update/transition/comment/link/label) (FR-030, SC-001) in `tests/conformance/scenarios/us6-zero-churn.json`
+- [x] T067 [P] [US6] Fault injection (401/network/404/429-exhausted) → zero writes for the affected spec + monotonic exit codes 2/3 (FR-032) in `tests/bash/sink/test_fail_closed.bats`, `tests/powershell/sink/FailClosed.Tests.ps1`, and `tests/conformance/scenarios/us6-fail-closed.json`
+- [x] T068 [P] [US6] Status-category drift: post-scope never backward; unknown → named + suggest classify; halted → stop all writes + two remediations; mapped advanced Jira-side → named warning, never silent overwrite (FR-031, FR-034) in `tests/bash/engine/test_drift.bats` and `tests/powershell/engine/Drift.Tests.ps1`
+- [x] T069 [P] [US6] Post-scope regression aborts transition unless `--on-drift=proceed` (FR-035); Flagged withholds transitions, flag surfaced, never set/removed (FR-036); human links never modified, blockers info-note (FR-037) in `tests/bash/sink/test_lifecycle_safety.bats` and `tests/powershell/sink/LifecycleSafety.Tests.ps1`
+- [x] T070 [P] [US6] `--dry-run` report equals the real run's action set (FR-033) in `tests/conformance/scenarios/us6-dry-run.json`
 
 ### Implementation for User Story 6
 
-- [X] T071 [US6] Implement status-category-aware drift classification (pure functions, no Jira calls) in `.specify/extensions/jira/scripts/bash/engine/drift.sh` and `.specify/extensions/jira/scripts/powershell/engine/Drift.psm1`
-- [X] T072 [US6] Implement the managed-section idempotency diff + zero-churn decision (pure functions) in `.specify/extensions/jira/scripts/bash/engine/idempotency.sh` and `.specify/extensions/jira/scripts/powershell/engine/Idempotency.psm1`
-- [X] T073 [US6] Implement `--on-drift` handling, Flagged-transition withholding, human-link preservation, and the `--dry-run` twin in `.specify/extensions/jira/scripts/bash/sink/jira/plan_apply.sh`, `.specify/extensions/jira/scripts/powershell/sink/jira/PlanApply.psm1`, and the reconcile command
+- [x] T071 [US6] Implement status-category-aware drift classification (pure functions, no Jira calls) in `.specify/extensions/jira/scripts/bash/engine/drift.sh` and `.specify/extensions/jira/scripts/powershell/engine/Drift.psm1`
+- [x] T072 [US6] Implement the managed-section idempotency diff + zero-churn decision (pure functions) in `.specify/extensions/jira/scripts/bash/engine/idempotency.sh` and `.specify/extensions/jira/scripts/powershell/engine/Idempotency.psm1`
+- [x] T073 [US6] Implement `--on-drift` handling, Flagged-transition withholding, human-link preservation, and the `--dry-run` twin in `.specify/extensions/jira/scripts/bash/sink/jira/plan_apply.sh`, `.specify/extensions/jira/scripts/powershell/sink/jira/PlanApply.psm1`, and the reconcile command
 
 **Checkpoint**: Reconcile is idempotent, drift-aware, fail-closed, and dry-run-predictable.
 
@@ -262,11 +262,11 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 7 ⚠️
 
-- [X] T074 [P] [US7] Human-origin: write only inside the panel, preserve human lines verbatim incl. after later edit; diff on managed section only; bridge-created whole-description no delimiters; discriminator is recorded origin (FR-038, FR-039, FR-040) in `tests/bash/engine/test_managed_panel.bats`, `tests/powershell/engine/ManagedPanel.Tests.ps1`, and `tests/conformance/scenarios/us7-human-content.json`
+- [x] T074 [P] [US7] Human-origin: write only inside the panel, preserve human lines verbatim incl. after later edit; diff on managed section only; bridge-created whole-description no delimiters; discriminator is recorded origin (FR-038, FR-039, FR-040) in `tests/bash/engine/test_managed_panel.bats`, `tests/powershell/engine/ManagedPanel.Tests.ps1`, and `tests/conformance/scenarios/us7-human-content.json`
 
 ### Implementation for User Story 7
 
-- [X] T075 [US7] Implement origin-discriminated managed-panel splice for Jira descriptions (preserve human lines above the panel; whole-description for bridge-created) in `.specify/extensions/jira/scripts/bash/engine/managed_section.sh` and `.specify/extensions/jira/scripts/powershell/engine/ManagedSection.psm1`, wired into ADF render + plan_apply
+- [x] T075 [US7] Implement origin-discriminated managed-panel splice for Jira descriptions (preserve human lines above the panel; whole-description for bridge-created) in `.specify/extensions/jira/scripts/bash/engine/managed_section.sh` and `.specify/extensions/jira/scripts/powershell/engine/ManagedSection.psm1`, wired into ADF render + plan_apply
 
 **Checkpoint**: Human-authored description content is provably never overwritten.
 
@@ -280,13 +280,13 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 8 ⚠️
 
-- [X] T076 [P] [US8] Routing by folder-prefix / spec-label / configured default; mixed company+team-managed each with its own discovery + mapping (FR-041, FR-042) in `tests/bash/engine/test_routing.bats`, `tests/powershell/engine/Routing.Tests.ps1`, and `tests/conformance/scenarios/us8-mixed-routing.json`
-- [X] T077 [P] [US8] Config incrementally re-runnable — adding a project binds only that one, existing mappings untouched (FR-043); per-project identity scope, no collision (FR-044) in `tests/bash/commands/test_config_incremental.bats` and `tests/powershell/commands/Config.Incremental.Tests.ps1`
+- [x] T076 [P] [US8] Routing by folder-prefix / spec-label / configured default; mixed company+team-managed each with its own discovery + mapping (FR-041, FR-042) in `tests/bash/engine/test_routing.bats`, `tests/powershell/engine/Routing.Tests.ps1`, and `tests/conformance/scenarios/us8-mixed-routing.json`
+- [x] T077 [P] [US8] Config incrementally re-runnable — adding a project binds only that one, existing mappings untouched (FR-043); per-project identity scope, no collision (FR-044) in `tests/bash/commands/test_config_incremental.bats` and `tests/powershell/commands/Config.Incremental.Tests.ps1`
 
 ### Implementation for User Story 8
 
-- [X] T078 [US8] Implement routing resolution (engine, from config `routing[]` / `routing_default` rules) in `.specify/extensions/jira/scripts/bash/engine/interchange.sh` and `.specify/extensions/jira/scripts/powershell/engine/Interchange.psm1`
-- [X] T079 [US8] Implement multi-project iteration + incremental re-bind in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
+- [x] T078 [US8] Implement routing resolution (engine, from config `routing[]` / `routing_default` rules) in `.specify/extensions/jira/scripts/bash/engine/interchange.sh` and `.specify/extensions/jira/scripts/powershell/engine/Interchange.psm1`
+- [x] T079 [US8] Implement multi-project iteration + incremental re-bind in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
 
 **Checkpoint**: One repository reconciles many specs to distinct projects of mixed styles without collision.
 
@@ -300,15 +300,15 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 9 ⚠️
 
-- [X] T080 [P] [US9] Idempotent `after_*` registration in `.specify/extensions.yml` (specify/clarify/plan/tasks/implement/analyze); re-run produces no duplicates (FR-045, FR-047) in `tests/bash/hooks/test_register_hooks.bats`, `tests/powershell/hooks/RegisterHooks.Tests.ps1`, and `tests/conformance/scenarios/us9-hook-registration.json`
-- [X] T081 [P] [US9] Bridge failure in a hook → ≤1 WARNING, host exit unaffected (FR-046); disabled hook stays disabled across upgrade/reinstall/repair (FR-048, SC-008) in `tests/bash/hooks/test_hook_resilience.bats` and `tests/powershell/hooks/HookResilience.Tests.ps1`
-- [X] T082 [P] [US9] Hook health checked + reported in every run summary; `--repair-hooks` one-command repair (FR-047) in `tests/bash/commands/test_hook_health.bats` and `tests/powershell/commands/HookHealth.Tests.ps1`
+- [x] T080 [P] [US9] Idempotent `after_*` registration in `.specify/extensions.yml` (specify/clarify/plan/tasks/implement/analyze); re-run produces no duplicates (FR-045, FR-047) in `tests/bash/hooks/test_register_hooks.bats`, `tests/powershell/hooks/RegisterHooks.Tests.ps1`, and `tests/conformance/scenarios/us9-hook-registration.json`
+- [x] T081 [P] [US9] Bridge failure in a hook → ≤1 WARNING, host exit unaffected (FR-046); disabled hook stays disabled across upgrade/reinstall/repair (FR-048, SC-008) in `tests/bash/hooks/test_hook_resilience.bats` and `tests/powershell/hooks/HookResilience.Tests.ps1`
+- [x] T082 [P] [US9] Hook health checked + reported in every run summary; `--repair-hooks` one-command repair (FR-047) in `tests/bash/commands/test_hook_health.bats` and `tests/powershell/commands/HookHealth.Tests.ps1`
 
 ### Implementation for User Story 9
 
-- [X] T083 [US9] Implement idempotent `after_*` hook registration (set-not-append, respect `enabled: false`) in `.specify/extensions/jira/scripts/bash/hooks/register_hooks.sh` and `.specify/extensions/jira/scripts/powershell/hooks/RegisterHooks.psm1`
-- [X] T084 [US9] Implement hook-context exit downgrade to a single WARNING + hook-health reporting + `--repair-hooks` flag in `.specify/extensions/jira/scripts/bash/commands/reconcile.sh`, `.specify/extensions/jira/scripts/powershell/commands/Reconcile.psm1`, and the CLI layer
-- [X] T085 [US9] Wire hook registration as the config command's second reported effect (FR-054) in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
+- [x] T083 [US9] Implement idempotent `after_*` hook registration (set-not-append, respect `enabled: false`) in `.specify/extensions/jira/scripts/bash/hooks/register_hooks.sh` and `.specify/extensions/jira/scripts/powershell/hooks/RegisterHooks.psm1`
+- [x] T084 [US9] Implement hook-context exit downgrade to a single WARNING + hook-health reporting + `--repair-hooks` flag in `.specify/extensions/jira/scripts/bash/commands/reconcile.sh`, `.specify/extensions/jira/scripts/powershell/commands/Reconcile.psm1`, and the CLI layer
+- [x] T085 [US9] Wire hook registration as the config command's second reported effect (FR-054) in `.specify/extensions/jira/scripts/bash/commands/config.sh` and `.specify/extensions/jira/scripts/powershell/commands/Config.psm1`
 
 **Checkpoint**: All P2 stories complete — trustworthy, self-healing automatic mirroring.
 
@@ -322,12 +322,12 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 10 ⚠️
 
-- [X] T086 [P] [US10] Read-only fetch (content/AC/priority/labels/status/flag/links, Confluence title+url only, parent context, sibling one-liners) (FR-050); claimed-by-other → zero writes + actionable refusal offering reopen or new-linked (FR-051) in `tests/bash/commands/test_mention.bats`, `tests/powershell/commands/Mention.Tests.ps1`, and `tests/conformance/scenarios/us10-mention.json`
+- [x] T086 [P] [US10] Read-only fetch (content/AC/priority/labels/status/flag/links, Confluence title+url only, parent context, sibling one-liners) (FR-050); claimed-by-other → zero writes + actionable refusal offering reopen or new-linked (FR-051) in `tests/bash/commands/test_mention.bats`, `tests/powershell/commands/Mention.Tests.ps1`, and `tests/conformance/scenarios/us10-mention.json`
 
 ### Implementation for User Story 10
 
-- [X] T087 [US10] Implement `fetch_mentioned` (read-only; Confluence page content NOT fetched) in `.specify/extensions/jira/scripts/bash/sink/jira/discovery.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Discovery.psm1`
-- [X] T088 [US10] Implement the `mention` command (stamp identity, update only that ticket, log every mutation, refuse on claimed-by-other) in `.specify/extensions/jira/scripts/bash/commands/mention.sh` and `.specify/extensions/jira/scripts/powershell/commands/Mention.psm1`
+- [x] T087 [US10] Implement `fetch_mentioned` (read-only; Confluence page content NOT fetched) in `.specify/extensions/jira/scripts/bash/sink/jira/discovery.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/Discovery.psm1`
+- [x] T088 [US10] Implement the `mention` command (stamp identity, update only that ticket, log every mutation, refuse on claimed-by-other) in `.specify/extensions/jira/scripts/bash/commands/mention.sh` and `.specify/extensions/jira/scripts/powershell/commands/Mention.psm1`
 
 **Checkpoint**: Mentioned-ticket read/edit flow works with identity safety.
 
@@ -341,11 +341,11 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 ### Tests for User Story 12 ⚠️
 
-- [X] T089 [P] [US12] Generic shapes warn but don't block; allowlisted Confluence/domain → neither block nor warning; `.extensionignore` paths excluded from parse + scan; allowlisted content never BLOCK-false-positives (FR-053) in `tests/bash/sink/test_privacy_warn.bats`, `tests/powershell/sink/PrivacyGuard.Warn.Tests.ps1`, and `tests/conformance/scenarios/us12-warn-allowlist.json`
+- [x] T089 [P] [US12] Generic shapes warn but don't block; allowlisted Confluence/domain → neither block nor warning; `.extensionignore` paths excluded from parse + scan; allowlisted content never BLOCK-false-positives (FR-053) in `tests/bash/sink/test_privacy_warn.bats`, `tests/powershell/sink/PrivacyGuard.Warn.Tests.ps1`, and `tests/conformance/scenarios/us12-warn-allowlist.json`
 
 ### Implementation for User Story 12
 
-- [X] T090 [US12] Implement the WARN tier + allowlist (`.extensionignore` + `config.privacy.allowlist`) + parse/scan exclusion in `.specify/extensions/jira/scripts/bash/sink/jira/privacy_guard.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PrivacyGuard.psm1`
+- [x] T090 [US12] Implement the WARN tier + allowlist (`.extensionignore` + `config.privacy.allowlist`) + parse/scan exclusion in `.specify/extensions/jira/scripts/bash/sink/jira/privacy_guard.sh` and `.specify/extensions/jira/scripts/powershell/sink/jira/PrivacyGuard.psm1`
 
 **Checkpoint**: All twelve user stories complete.
 
@@ -355,13 +355,26 @@ description: "Task list for Jira Reconcile Engine (Twin Bash / PowerShell Ports)
 
 **Purpose**: Live verification, governance, docs, and final gate confirmation across all stories.
 
-- [X] T091 [P] Implement the opt-in live zero-churn suite (real instance, non-blocking on fork PRs) verifying SC-001 and SC-008 in `tests/live/`
-- [X] T092 [P] Add dedicated SC-007 tests: the resolved token never appears in argv, logs, errors, or traces at maximum verbosity on either port in `tests/bash/lib/test_token_leak.bats` and `tests/powershell/lib/TokenLeak.Tests.ps1`
-- [X] T093 [P] Add the SC-009 test: `git diff` over `.specify/scripts/` and `.specify/templates/` is empty after a full install + config run in `tests/conformance/scenarios/sc009-core-untouched.json`
-- [X] T094 [P] Finalize `.specify/extensions/jira/CHANGELOG.md` (SemVer) and the README managed-block template body; verify the catalog id (Constitution XII) in `.specify/extensions/jira/extension.yml`
-- [X] T095 Run the quickstart.md end-to-end validation (every scenario mapped to its SC-00x) per `specs/001-jira-reconcile-engine/quickstart.md`
-- [X] T096 [P] Write install/prerequisite docs (bash ≥ 4 with macOS 3.2 named, pwsh 7+, curl/jq/git; NFR-4) in the README managed block and `.specify/extensions/jira/` docs
-- [X] T097 Confirm the final gates green: coverage ≥ 80% both ports (kcov + Pester), critical paths near 100%, module-parity check, engine/sink greps, and version-string grep (SC-006)
+- [x] T091 [P] Implement the opt-in live zero-churn suite (real instance, non-blocking on fork PRs) verifying SC-001 and SC-008 in `tests/live/`
+- [x] T092 [P] Add dedicated SC-007 tests: the resolved token never appears in argv, logs, errors, or traces at maximum verbosity on either port in `tests/bash/lib/test_token_leak.bats` and `tests/powershell/lib/TokenLeak.Tests.ps1`
+- [x] T093 [P] Add the SC-009 test: `git diff` over `.specify/scripts/` and `.specify/templates/` is empty after a full install + config run in `tests/conformance/scenarios/sc009-core-untouched.json`
+- [x] T094 [P] Finalize `.specify/extensions/jira/CHANGELOG.md` (SemVer) and the README managed-block template body; verify the catalog id (Constitution XII) in `.specify/extensions/jira/extension.yml`
+- [x] T095 Run the quickstart.md end-to-end validation (every scenario mapped to its SC-00x) per `specs/001-jira-reconcile-engine/quickstart.md`
+- [x] T096 [P] Write install/prerequisite docs (bash ≥ 4 with macOS 3.2 named, pwsh 7+, curl/jq/git; NFR-4) in the README managed block and `.specify/extensions/jira/` docs
+- [x] T097 Confirm the final gates green: coverage ≥ 80% both ports (kcov + Pester), critical paths near 100%, module-parity check, engine/sink greps, and version-string grep (SC-006)
+
+---
+
+## Phase 16: Official extension source layout (post-review rework, 2026-07-25)
+
+**Purpose**: Align the SOURCE repository with the official Spec Kit extension layout (github/spec-kit `extensions/EXTENSION-DEVELOPMENT-GUIDE.md` + `extensions/template`): the manifest and extension content live at the repository ROOT, and `specify extension add` creates `.specify/extensions/jira/` in the CONSUMER automatically. The previous develop-at-install-path layout (plan.md's original Structure Decision) is superseded; FR-055's consumer-side ownership rules are unchanged. The proof of the move is the full suite: every test, gate, and conformance scenario must stay green with the new paths.
+
+- [x] T098 Move the extension source from `.specify/extensions/jira/` to the repository root (`extension.yml`, `CHANGELOG.md`, `INSTALL.md`, `scripts/`, `templates/`; `commands/` already at root) — self-relative paths inside `scripts/` are unchanged by construction
+- [x] T099 Upgrade `extension.yml` to the official manifest schema (`schema_version`, `extension:` block, `requires.speckit_version`, `provides.commands`, author/repository/license) and adapt the single-source version readers (`config_extension_version`, `Get-JiraExtensionVersion`) plus the tests that derive the version from the manifest
+- [x] T100 Add the root `.extensionignore` (official install-time copy exclusion) so `specify extension add` never copies dev-only material (`tests/`, `specs/`, `.specify/`, `.github/`, `.claude/`, lint configs, coverage artifacts) into a consumer
+- [x] T101 Update every dev-tree path reference: bats/Pester suites, `tests/conformance/run-scenario.sh` entry-point defaults, `.github/workflows/boundary.yml` and `gates.yml` (consumer-side paths in `commands/speckit.jira.config.md` and the conformance fixtures stay `.specify/extensions/jira/…`)
+- [x] T102 Update the documentation: root `README.md` becomes the extension README, `INSTALL.md` documents the official `specify extension add` flow, plan.md's Structure Decision records the layout amendment, CHANGELOG entry added
+- [x] T103 Re-verify everything green after the move: full bats + Pester suites, all conformance scenarios byte-identical, shellcheck, PSScriptAnalyzer, engine-boundary greps, module-parity and version-string gates
 
 ---
 

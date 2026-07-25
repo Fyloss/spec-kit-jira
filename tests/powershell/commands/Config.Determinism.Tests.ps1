@@ -6,11 +6,11 @@
 
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
-    $CmdDir = Join-Path $Root '.specify/extensions/jira/scripts/powershell/commands'
+    $CmdDir = Join-Path $Root 'scripts/powershell/commands'
     $script:Mock = Join-Path $Root 'tests/conformance/mock-jira'
     $script:Fixture = Join-Path $Root 'tests/conformance/fixtures/repo-with-config'
     Import-Module (Join-Path $CmdDir 'Config.psm1') -Force
-    Import-Module (Join-Path $Root '.specify/extensions/jira/scripts/powershell/lib/Config.psm1') -Force
+    Import-Module (Join-Path $Root 'scripts/powershell/lib/Config.psm1') -Force
     Import-Module (Join-Path $Mock 'Mock.psm1') -Force
     $env:JIRA_EMAIL = 'user@example.com'
     $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'

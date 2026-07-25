@@ -3,7 +3,7 @@
 # Bash port (jq -cS) also produces; cross-port byte-parity is proven in the bats suite.
 
 BeforeAll {
-    $LibDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/lib'
+    $LibDir = Join-Path $PSScriptRoot '../../../scripts/powershell/lib'
     Import-Module (Join-Path $LibDir 'Output.psm1') -Force
 }
 

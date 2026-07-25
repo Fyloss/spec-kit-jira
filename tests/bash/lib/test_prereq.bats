@@ -3,7 +3,7 @@
 # The check MUST exit 5 before any Jira interaction.
 
 setup() {
-  LIB_DIR="${BATS_TEST_DIRNAME}/../../../.specify/extensions/jira/scripts/bash/lib"
+  LIB_DIR="${BATS_TEST_DIRNAME}/../../../scripts/bash/lib"
   # shellcheck source=/dev/null
   source "${LIB_DIR}/prereq.sh"
 }

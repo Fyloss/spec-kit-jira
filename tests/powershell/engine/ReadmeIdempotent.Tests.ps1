@@ -3,13 +3,13 @@
 
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
-    $Hooks = Join-Path $Root '.specify/extensions/jira/scripts/powershell/hooks'
+    $Hooks = Join-Path $Root 'scripts/powershell/hooks'
     Import-Module (Join-Path $Hooks 'ReadmeBlock.psm1') -Force
     # The version is read from the single source (extension.yml), never hardcoded in
     # a test — the version literal must live only in extension.yml (SC-006/FR-022).
-    $ExtYml = Join-Path $Root '.specify/extensions/jira/extension.yml'
+    $ExtYml = Join-Path $Root 'extension.yml'
     $script:VersionRx = [regex]::Escape(
-        (Select-String -LiteralPath $ExtYml -Pattern '^version:\s*(.+)$').Matches[0].Groups[1].Value.Trim())
+        (Select-String -LiteralPath $ExtYml -Pattern '^\s+version:\s*(.+)$').Matches[0].Groups[1].Value.Trim())
 }
 
 Describe 'README-block idempotency' {

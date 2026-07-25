@@ -2,7 +2,7 @@
 # Mirror of tests/bash/lib/test_credentials.bats.
 
 BeforeAll {
-    $LibDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/lib'
+    $LibDir = Join-Path $PSScriptRoot '../../../scripts/powershell/lib'
     Import-Module (Join-Path $LibDir 'Credentials.psm1') -Force
 }
 

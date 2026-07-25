@@ -26,7 +26,7 @@ require_live() {
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../.."
-  CMD_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/commands"
+  CMD_DIR="${ROOT}/scripts/bash/commands"
   WORK="$(mktemp -d)"
   SPEC="${WORK}/spec.md"
   printf '%s\n' \

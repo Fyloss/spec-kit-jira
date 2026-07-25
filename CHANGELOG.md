@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The SOURCE repository now follows the official Spec Kit extension layout:
+  `extension.yml` (official manifest schema with the nested `extension:` block),
+  `commands/`, `scripts/`, and `templates/` live at the repository root, and
+  `specify extension add` creates `.specify/extensions/jira/` in the consuming
+  repository automatically; development-only material (`tests/`, `specs/`,
+  `.specify/`, `.github/`, lint configs) is excluded from installation by
+  `.extensionignore`. The installed (consumer-side) layout is unchanged.
+
 ### Fixed
 
 - Privacy guard fail-open defects: the allowlist now exempts individual matches

@@ -3,9 +3,9 @@
 # output and the version reader is proven in the bats suite.
 
 BeforeAll {
-    $LibDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/lib'
+    $LibDir = Join-Path $PSScriptRoot '../../../scripts/powershell/lib'
     Import-Module (Join-Path $LibDir 'Config.psm1') -Force
-    $script:ExtYml = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/extension.yml'
+    $script:ExtYml = Join-Path $PSScriptRoot '../../../extension.yml'
 
     function New-TempConfigDir {
         $d = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
@@ -40,7 +40,7 @@ privacy:
 
 Describe 'Get-JiraExtensionVersion' {
     It 'reads the version field from extension.yml (single source)' {
-        $expected = (Select-String -Path $script:ExtYml -Pattern '^version:\s*(.+)$').Matches[0].Groups[1].Value.Trim()
+        $expected = (Select-String -Path $script:ExtYml -Pattern '^\s+version:\s*(.+)$').Matches[0].Groups[1].Value.Trim()
         Get-JiraExtensionVersion | Should -Be $expected
     }
 }

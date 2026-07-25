@@ -9,8 +9,8 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  CMD_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/commands"
-  HOOK_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/hooks"
+  CMD_DIR="${ROOT}/scripts/bash/commands"
+  HOOK_DIR="${ROOT}/scripts/bash/hooks"
   # shellcheck source=/dev/null
   source "${CMD_DIR}/reconcile.sh"
   # shellcheck source=/dev/null
@@ -75,7 +75,7 @@ teardown() {
 
 @test "the PowerShell port downgrades a hook-context failure identically (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
-  local PS_CMD="${ROOT}/.specify/extensions/jira/scripts/powershell/commands"
+  local PS_CMD="${ROOT}/scripts/powershell/commands"
   local status_ps
   status_ps="$(SPEC_KIT_JIRA_BASE_URL="http://127.0.0.1:1" SPEC_KIT_JIRA_SPEC_SLUG="001-feature" \
     SPEC_KIT_JIRA_PROJECT_KEY="PROJ" SPEC_KIT_JIRA_EXTENSIONS_YML="${SPEC_KIT_JIRA_EXTENSIONS_YML}" \

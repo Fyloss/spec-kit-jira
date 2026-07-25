@@ -11,8 +11,8 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  ENGINE="${ROOT}/.specify/extensions/jira/scripts/bash/engine"
-  PS_ENGINE="${ROOT}/.specify/extensions/jira/scripts/powershell/engine"
+  ENGINE="${ROOT}/scripts/bash/engine"
+  PS_ENGINE="${ROOT}/scripts/powershell/engine"
   # shellcheck source=/dev/null
   source "${ENGINE}/managed_section.sh"
   BEGIN='<!-- x:begin'

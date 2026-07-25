@@ -3,7 +3,7 @@
 # in bats; here we assert the decision semantics (FR-031, FR-034, FR-035).
 
 BeforeAll {
-    $EngineDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/engine'
+    $EngineDir = Join-Path $PSScriptRoot '../../../scripts/powershell/engine'
     Import-Module (Join-Path $EngineDir 'Drift.psm1') -Force
     $script:Order = '["To Do","In Progress","In Review","Done"]'
     function Invoke-Drift([string] $Cur, [string] $Cat, [string] $Tgt, [string] $OnDrift = 'abort') {

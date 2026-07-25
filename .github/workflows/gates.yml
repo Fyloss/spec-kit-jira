@@ -5,8 +5,8 @@
 #     kcov cannot measure; PowerShell statement coverage >= 80% via Pester.
 #   * Module parity: the two ports mirror module-for-module (same leaf set modulo
 #     .sh <-> .psm1/.ps1, case-insensitive).
-#   * Version string: the version literal lives ONLY in extension.yml's `version`
-#     field — never in a script and never outside .specify/extensions/jira/.
+#   * Version string: the version literal lives ONLY in the root extension.yml's
+#     `version` field — never in a script and nowhere else but CHANGELOG.md.
 name: Gates
 
 on:
@@ -18,9 +18,8 @@ permissions:
   contents: read
 
 env:
-  BASH_SCRIPTS: .specify/extensions/jira/scripts/bash
-  PWSH_SCRIPTS: .specify/extensions/jira/scripts/powershell
-  EXT_DIR: .specify/extensions/jira
+  BASH_SCRIPTS: scripts/bash
+  PWSH_SCRIPTS: scripts/powershell
 
 jobs:
   coverage-bash:
@@ -124,10 +123,12 @@ jobs:
       - name: The version literal appears only in extension.yml's version field
         run: |
           set -euo pipefail
-          version="$(sed -n 's/^version:[[:space:]]*//p' "${EXT_DIR}/extension.yml" | head -n1)"
+          # The manifest follows the official spec-kit extension schema: the
+          # version lives in the nested `extension:` block (indented), so the
+          # top-level schema_version / requires.speckit_version never match.
+          version="$(sed -n 's/^[[:space:]]\{1,\}version:[[:space:]]*//p' extension.yml | head -n1)"
           [ -n "${version}" ] || { echo "::error::no version field in extension.yml"; exit 1; }
           esc="$(printf '%s' "${version}" | sed 's/\./\\./g')"
-          extesc="$(printf '%s' "${EXT_DIR}" | sed 's/\./\\./g')"
           violations=0
 
           # (a) No script anywhere carries the version literal (FR-021).
@@ -136,25 +137,16 @@ jobs:
             violations=1
           fi
 
-          # (b) The version literal must not appear anywhere outside the extension
-          #     folder (SC-006). Path-precise exclusion of the extension itself, the
-          #     design specs, and the CI definitions (basename excludes would also
-          #     drop the consuming repo's .specify/jira/ config dir).
+          # (b) Repo-wide, the literal is confined to the manifest (the source of
+          #     truth) and CHANGELOG.md (the human changelog) — nowhere else
+          #     (SC-006, FR-022). The design specs, CI definitions, and dev-only
+          #     metadata are path-precise exclusions.
           leaks="$(grep -rnE "${esc}" . --exclude-dir=.git 2> /dev/null \
-            | grep -vE "^(\./)?(${extesc}/|specs/|\.github/)" || true)"
+            | grep -vE "^(\./)?(extension\.yml|CHANGELOG\.md):" \
+            | grep -vE "^(\./)?(specs/|\.github/|\.claude/|\.tokensave/|\.specify/)" || true)"
           if [ -n "${leaks}" ]; then
-            echo "::error::version literal leaks outside ${EXT_DIR} (SC-006):"
+            echo "::error::version literal leaks outside extension.yml/CHANGELOG.md (SC-006):"
             echo "${leaks}"
-            violations=1
-          fi
-
-          # (c) Inside the extension folder the literal is confined to
-          #     extension.yml (the source of truth) and CHANGELOG.md (the human
-          #     changelog); it must appear nowhere else there (FR-022).
-          stray="$(grep -rlnE "${esc}" "${EXT_DIR}" \
-            | grep -vE "/(extension\.yml|CHANGELOG\.md)$" || true)"
-          if [ -n "${stray}" ]; then
-            echo "::error::version literal duplicated inside ${EXT_DIR}: ${stray}"
             violations=1
           fi
 

@@ -1,0 +1,15 @@
+# Official spec-kit install-time copy exclusion (gitignore syntax): everything
+# listed here is development-only material that `specify extension add` must
+# NEVER copy into a consuming repository's `.specify/extensions/jira/`.
+# (This file itself is always excluded automatically.)
+tests/
+specs/
+.specify/
+.github/
+.claude/
+.tokensave/
+.editorconfig
+.gitignore
+.shellcheckrc
+PSScriptAnalyzerSettings.psd1
+coverage.xml

@@ -8,8 +8,8 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  SINK_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/sink/jira"
-  PS_SINK="${ROOT}/.specify/extensions/jira/scripts/powershell/sink/jira"
+  SINK_DIR="${ROOT}/scripts/bash/sink/jira"
+  PS_SINK="${ROOT}/scripts/powershell/sink/jira"
   MOCK="${ROOT}/tests/conformance/mock-jira"
   # shellcheck source=/dev/null
   source "${MOCK}/lib.sh"

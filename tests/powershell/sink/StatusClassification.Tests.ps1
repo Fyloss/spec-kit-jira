@@ -4,7 +4,7 @@
 # (FR-011/FR-034/FR-012). Lives in lib/Config.psm1.
 
 BeforeAll {
-    $LibDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/lib'
+    $LibDir = Join-Path $PSScriptRoot '../../../scripts/powershell/lib'
     Import-Module (Join-Path $LibDir 'Config.psm1') -Force
     $script:Statuses = '[{"name":"To Do","status_category":"new"},{"name":"In Progress","status_category":"indeterminate"},{"name":"In Review","status_category":"indeterminate"},{"name":"Done","status_category":"done"},{"name":"Cancelled","status_category":"done"}]'
 }

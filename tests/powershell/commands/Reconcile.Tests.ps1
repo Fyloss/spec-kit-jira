@@ -2,7 +2,7 @@
 # tests/bash/commands/test_reconcile.bats. Cross-port parity is proven in bats.
 
 BeforeAll {
-    $CmdDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/commands'
+    $CmdDir = Join-Path $PSScriptRoot '../../../scripts/powershell/commands'
     Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
 
     $env:SPEC_KIT_JIRA_BASE_URL = 'https://mock'

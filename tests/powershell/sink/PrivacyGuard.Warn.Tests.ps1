@@ -4,7 +4,7 @@
 
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
-    $SinkDir = Join-Path $Root '.specify/extensions/jira/scripts/powershell/sink/jira'
+    $SinkDir = Join-Path $Root 'scripts/powershell/sink/jira'
     Import-Module (Join-Path $SinkDir 'PrivacyGuard.psm1') -Force
 }
 

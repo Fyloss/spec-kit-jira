@@ -4,7 +4,7 @@
 # entry. Command modules are stubbed via SPEC_KIT_JIRA_COMMANDS_DIR.
 
 BeforeAll {
-    $script:Entry = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1'
+    $script:Entry = Join-Path $PSScriptRoot '../../../scripts/powershell/spec-kit-jira.ps1'
     $script:StubDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
     New-Item -ItemType Directory -Path $script:StubDir | Out-Null
     # Command contract: write user output via [Console] streams (straight to the

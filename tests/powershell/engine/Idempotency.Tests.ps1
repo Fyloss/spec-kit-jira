@@ -3,7 +3,7 @@
 # proven in bats; here we assert the decision semantics (FR-030).
 
 BeforeAll {
-    $EngineDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/engine'
+    $EngineDir = Join-Path $PSScriptRoot '../../../scripts/powershell/engine'
     Import-Module (Join-Path $EngineDir 'Idempotency.psm1') -Force
     $script:Begin = '<!-- x:begin -->'
     $script:End = '<!-- x:end -->'

@@ -5,7 +5,7 @@
 
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
-    $Sink = Join-Path $Root '.specify/extensions/jira/scripts/powershell/sink/jira'
+    $Sink = Join-Path $Root 'scripts/powershell/sink/jira'
     Import-Module (Join-Path $Sink 'Discovery.psm1') -Force
 
     $script:English = '[{"fieldId":"customfield_20044","name":"Impediment","schema":{"type":"array","custom":"com.atlassian.jira.plugin.system.customfieldtypes:multicheckboxes"}},{"fieldId":"customfield_20011","name":"T-Shirt Estimate","schema":{"type":"number"}}]'

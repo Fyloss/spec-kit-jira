@@ -2,7 +2,7 @@
 # tests/bash/sink/test_plan_apply_content.bats. Cross-port parity proven in bats.
 
 BeforeAll {
-    $SinkDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/sink/jira'
+    $SinkDir = Join-Path $PSScriptRoot '../../../scripts/powershell/sink/jira'
     Import-Module (Join-Path $SinkDir 'PlanApply.psm1') -Force
     $script:Doc = '{"stories":[{"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},"acceptance_criteria":[{"given":["g"],"when":["w"],"then":["t"]}],"priority_logical":"P1","estimation":5}]}'
     $script:CtxCreate = '{"base_url":"https://mock","story_type_id":"10002","priority_ids":{"P1":"1","P2":"2","P3":"3"},"estimation_field_id":"customfield_30044","tickets":{}}'

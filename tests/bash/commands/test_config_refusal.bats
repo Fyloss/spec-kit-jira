@@ -11,8 +11,8 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  CMD_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/commands"
-  PS_CMD="${ROOT}/.specify/extensions/jira/scripts/powershell/commands"
+  CMD_DIR="${ROOT}/scripts/bash/commands"
+  PS_CMD="${ROOT}/scripts/powershell/commands"
   # shellcheck source=/dev/null
   source "${CMD_DIR}/config.sh"
   TEAM_BINDING='{"style":"team_managed","issue_types":[{"logical_name":"Epic","id":"10200","subtask":false,"hierarchy_level":1},{"logical_name":"Story","id":"10201","subtask":false,"hierarchy_level":0},{"logical_name":"Sub-task","id":"10202","subtask":true,"hierarchy_level":-1}]}'

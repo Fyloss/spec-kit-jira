@@ -12,7 +12,7 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  SINK_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/sink/jira"
+  SINK_DIR="${ROOT}/scripts/bash/sink/jira"
   # shellcheck source=/dev/null
   source "${SINK_DIR}/plan_apply.sh"
   DOC='{"stories":[{"local_id":"s1"}]}'
@@ -67,7 +67,7 @@ setup() {
 }
 
 @test "the PowerShell port folds the lifecycle rules byte-identically (NFR-1)" {
-  local ps_abs; ps_abs="$(cd "${ROOT}/.specify/extensions/jira/scripts/powershell/sink/jira" && pwd)"
+  local ps_abs; ps_abs="$(cd "${ROOT}/scripts/powershell/sink/jira" && pwd)"
   local lc
   lc="$(jq -cn '{order:["To Do","In Progress","Done"], base_url:"http://h",
     tickets:{s1:{key:"K-1", status:"To Do", category:"mapped", target:"In Progress", transition_id:"21", blockers:["K-9"]}}}')"

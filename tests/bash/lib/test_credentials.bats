@@ -5,7 +5,7 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  LIB_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/lib"
+  LIB_DIR="${ROOT}/scripts/bash/lib"
   # shellcheck source=/dev/null
   source "${LIB_DIR}/credentials.sh"
   TMPDIR_T="$(mktemp -d)"
@@ -71,7 +71,7 @@ teardown() {
   ps="$(pwsh -NoProfile -Command "
     \$env:JIRA_CONFIG_DIR = '${TMPDIR_T}'
     \$env:JIRA_API_TOKEN = ''
-    Import-Module '${ROOT}/.specify/extensions/jira/scripts/powershell/lib/Credentials.psm1' -Force
+    Import-Module '${ROOT}/scripts/powershell/lib/Credentials.psm1' -Force
     [Console]::Out.Write((Resolve-JiraToken))
   ")"
   [ "$ps" = "file-token" ]

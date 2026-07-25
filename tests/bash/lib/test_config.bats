@@ -8,9 +8,9 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  LIB_DIR="${ROOT}/.specify/extensions/jira/scripts/bash/lib"
-  PS_LIB="${ROOT}/.specify/extensions/jira/scripts/powershell/lib"
-  EXT_YML="${ROOT}/.specify/extensions/jira/extension.yml"
+  LIB_DIR="${ROOT}/scripts/bash/lib"
+  PS_LIB="${ROOT}/scripts/powershell/lib"
+  EXT_YML="${ROOT}/extension.yml"
   # shellcheck source=/dev/null
   source "${LIB_DIR}/config.sh"
   DIR="$(mktemp -d)"
@@ -53,7 +53,7 @@ YAML
   run config_extension_version
   [ "$status" -eq 0 ]
   # Must equal the literal in extension.yml — the single source of truth.
-  expected="$(grep -E '^version:' "${EXT_YML}" | sed -E 's/^version:[[:space:]]*//')"
+  expected="$(grep -E '^[[:space:]]+version:' "${EXT_YML}" | head -n1 | sed -E 's/^[[:space:]]+version:[[:space:]]*//')"
   [ "$output" = "${expected}" ]
 }
 

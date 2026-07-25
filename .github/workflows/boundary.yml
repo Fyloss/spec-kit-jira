@@ -31,8 +31,8 @@ jobs:
           # Match real source/import statements referencing sink/ on NON-comment
           # lines (leading '#' is excluded so boundary-describing comments pass).
           for dir in \
-            .specify/extensions/jira/scripts/bash/engine \
-            .specify/extensions/jira/scripts/powershell/engine; do
+            scripts/bash/engine \
+            scripts/powershell/engine; do
             [ -d "${dir}" ] || continue
             if grep -rnE '^[[:space:]]*[^#[:space:]].*((source|^[[:space:]]*\.)[[:space:]].*sink/|Import-Module[^#]*sink)' "${dir}"; then
               echo "::error::an engine/ script sources or imports sink/ (Constitution VIII)"
@@ -58,8 +58,8 @@ jobs:
           )
           violations=0
           for dir in \
-            .specify/extensions/jira/scripts/bash/engine \
-            .specify/extensions/jira/scripts/powershell/engine; do
+            scripts/bash/engine \
+            scripts/powershell/engine; do
             [ -d "${dir}" ] || continue
             for pat in "${patterns[@]}"; do
               if grep -rnE "${pat}" "${dir}"; then

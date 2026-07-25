@@ -3,7 +3,7 @@
 # proven in bats; here we assert the resolution semantics (FR-041, FR-042).
 
 BeforeAll {
-    $EngineDir = Join-Path $PSScriptRoot '../../../.specify/extensions/jira/scripts/powershell/engine'
+    $EngineDir = Join-Path $PSScriptRoot '../../../scripts/powershell/engine'
     Import-Module (Join-Path $EngineDir 'Interchange.psm1') -Force
     $script:Cfg = @'
 {
