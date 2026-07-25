@@ -119,6 +119,34 @@ YAML
   [ "$status" -eq 4 ]
 }
 
+@test "config_load keeps sibling projects when a local override touches only one" {
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+  - key: OPS
+    style: team_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+routing_default: PROJ
+YAML
+  cat > "${DIR}/config.local.yml" <<'YAML'
+overrides:
+  projects:
+    - key: PROJ
+      epic_strategy: per_feature
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.projects | length' <<< "${output}")" -eq 2 ]
+  [ "$(jq -r '.projects[0].key' <<< "${output}")" = "PROJ" ]
+  [ "$(jq -r '.projects[0].epic_strategy' <<< "${output}")" = "per_feature" ]
+  [ "$(jq -r '.projects[0].style' <<< "${output}")" = "company_managed" ]
+  [ "$(jq -r '.projects[1].key' <<< "${output}")" = "OPS" ]
+}
+
 # --- Credential-shape rejection (FR-023, exit 4) -----------------------------
 
 @test "config_load rejects an ATATT token shape in the team layer (exit 4)" {

@@ -65,24 +65,39 @@ Describe 'after_* hook registration' {
         $json.hooks.after_implement[0].enabled | Should -BeFalse
     }
 
-    It 'reports healthy when complete and degraded with the missing event named (FR-047)' {
+    It 'reports present/missing in the contract shape (FR-047, run-summary.schema.json)' {
         [void](Set-JiraHookRegistration -Path $Ext)
         $h = Get-JiraHookHealth -Path $Ext | ConvertFrom-Json
-        $h.status | Should -Be 'healthy'
+        @($h.present).Count | Should -Be 6
         @($h.missing).Count | Should -Be 0
+        @($h.disabled).Count | Should -Be 0
+        $h.PSObject.Properties.Name | Should -Not -Contain 'repair_hint'
 
         $obj = ConvertFrom-JiraConfigYaml -Path $Ext | ConvertFrom-Json
         $obj.hooks.PSObject.Properties.Remove('after_analyze')
         $yaml = ConvertTo-JiraConfigYaml -Json (ConvertTo-JiraJsonValue $obj)
         [System.IO.File]::WriteAllText($Ext, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
         $h = Get-JiraHookHealth -Path $Ext | ConvertFrom-Json
-        $h.status | Should -Be 'degraded'
         $h.missing[0] | Should -Be 'after_analyze'
+        @($h.present).Count | Should -Be 5
+        $h.repair_hint | Should -Match 'repair-hooks'
+    }
+
+    It 'lists an operator-disabled hook under disabled — neither present nor missing (FR-048)' {
+        [void](Set-JiraHookRegistration -Path $Ext)
+        $obj = ConvertFrom-JiraConfigYaml -Path $Ext | ConvertFrom-Json
+        $obj.hooks.after_implement[0].enabled = $false
+        $yaml = ConvertTo-JiraConfigYaml -Json (ConvertTo-JiraJsonValue $obj)
+        [System.IO.File]::WriteAllText($Ext, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
+        $h = Get-JiraHookHealth -Path $Ext | ConvertFrom-Json
+        $h.disabled[0] | Should -Be 'after_implement'
+        @($h.present).Count | Should -Be 5
+        @($h.missing).Count | Should -Be 0
     }
 
     It 'reports every hook missing for an absent file' {
         $h = Get-JiraHookHealth -Path (Join-Path $Work 'nope.yml') | ConvertFrom-Json
-        $h.status | Should -Be 'degraded'
         @($h.missing).Count | Should -Be 6
+        @($h.present).Count | Should -Be 0
     }
 }

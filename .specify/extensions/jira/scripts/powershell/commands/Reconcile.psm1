@@ -83,8 +83,15 @@ function Invoke-JiraReconcile {
     $specText = Get-Content -Raw -LiteralPath $specFile
     if ($null -eq $specText) { $specText = '' }
 
-    # ENGINE: parse the spec into neutral content, then assemble + validate.
-    $parse = Get-JiraParsedSpec -Text $specText -FolderSlug $slug
+    # ENGINE: parse the spec into neutral content, then assemble + validate. Every
+    # step is GUARDED so a failure surfaces the mapped error path — never a raw
+    # unhandled exception (FR-032: mapped exits, zero writes; mirrors the Bash
+    # port's guarded substitutions).
+    try { $parse = Get-JiraParsedSpec -Text $specText -FolderSlug $slug }
+    catch {
+        [Console]::Error.WriteLine('reconcile: the specification could not be parsed (zero writes)')
+        return $script:ReconcileExitConfig
+    }
     $specRef = [ordered]@{ repo = $repo; spec_slug = $slug; folder = $folder }
     $ctx = ConvertTo-JiraJsonValue ([ordered]@{ spec_ref = $specRef; project_key = $projectKey; epic_strategy = $epicStrategy })
     $built = Build-JiraNeutralDocument -ParseJson $parse -ContextJson $ctx
@@ -95,7 +102,11 @@ function Invoke-JiraReconcile {
 
     # SINK: plan the ordered action set (the --dry-run report is exactly this set).
     $planCtx = Get-JiraReconcilePlanContext -BaseUrl $base
-    $actionsJson = Get-JiraPlanWriteSet -NeutralDocJson $built.Document -PlanContextJson $planCtx
+    try { $actionsJson = Get-JiraPlanWriteSet -NeutralDocJson $built.Document -PlanContextJson $planCtx }
+    catch {
+        [Console]::Error.WriteLine('reconcile: the write plan could not be assembled (zero writes)')
+        return $script:ReconcileExitConfig
+    }
 
     # US6 lifecycle safety: when the current-Jira facts are supplied (the seam the
     # config/discovery integration fills from a fail-closed read), fold in
@@ -107,7 +118,11 @@ function Invoke-JiraReconcile {
     $hasLifecycle = $false
     if ($env:SPEC_KIT_JIRA_LIFECYCLE) {
         $hasLifecycle = $true
-        $lcObj = $env:SPEC_KIT_JIRA_LIFECYCLE | ConvertFrom-Json -Depth 100
+        try { $lcObj = $env:SPEC_KIT_JIRA_LIFECYCLE | ConvertFrom-Json -Depth 100 }
+        catch {
+            [Console]::Error.WriteLine('reconcile: SPEC_KIT_JIRA_LIFECYCLE is not valid JSON (zero writes)')
+            return $script:ReconcileExitConfig
+        }
         $lcMap = [ordered]@{}
         if ($lcObj -is [System.Management.Automation.PSCustomObject]) {
             foreach ($p in $lcObj.PSObject.Properties) { $lcMap[$p.Name] = $p.Value }
@@ -115,7 +130,11 @@ function Invoke-JiraReconcile {
         $lcMap['base_url'] = $base
         $lcMap['on_drift'] = $onDrift
         $lcJson = ConvertTo-JiraJsonValue $lcMap
-        $lresult = Get-JiraLifecyclePlan -ContentActionsJson $actionsJson -NeutralDocJson $built.Document -LifecycleContextJson $lcJson | ConvertFrom-Json -Depth 100
+        try { $lresult = Get-JiraLifecyclePlan -ContentActionsJson $actionsJson -NeutralDocJson $built.Document -LifecycleContextJson $lcJson | ConvertFrom-Json -Depth 100 }
+        catch {
+            [Console]::Error.WriteLine('reconcile: the lifecycle plan could not be assembled (zero writes)')
+            return $script:ReconcileExitConfig
+        }
         $actionsJson = ConvertTo-JiraJsonValue $lresult.actions
         $warnsJson = ConvertTo-JiraJsonValue $lresult.warnings
         $notesJson = ConvertTo-JiraJsonValue $lresult.notes
@@ -175,7 +194,7 @@ function Invoke-JiraReconcile {
         $summaryObj['warnings'] = @($warnsJson | ConvertFrom-Json -Depth 100)
         $summaryObj['notes'] = @($notesJson | ConvertFrom-Json -Depth 100)
     }
-    $summaryObj['hooks'] = $hooksHealth
+    $summaryObj['hook_health'] = $hooksHealth
     $summaryObj['exit_code'] = $rc
     $summary = ConvertTo-JiraJsonValue $summaryObj
 

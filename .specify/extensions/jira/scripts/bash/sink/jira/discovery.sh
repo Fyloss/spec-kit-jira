@@ -34,6 +34,25 @@ source "${_discovery_dir}/../../lib/output.sh"
 # shellcheck source=/dev/null
 source "${_discovery_dir}/client.sh"
 
+# discovery_flagged_field <project-fields-json> — resolve the project's
+# Flagged/impediment field, the input of flagged-withholding lifecycle safety
+# (FR-036). LOCALE-INDEPENDENT: the English name (`Impediment`/`Flagged`) is only
+# a first-chance match; a localized or renamed site resolves by SHAPE — the
+# Flagged field is an array-of-options checkbox custom field — and only an
+# unambiguous single shape candidate is accepted (precision over recall).
+# Prints the canonical {logical_name,id} object, or null.
+discovery_flagged_field() {
+  local fields="${1:-[]}"
+  jq -cn --argjson fields "${fields}" '
+    ([ $fields[] | select((.name // "") | test("impediment|flag"; "i"))
+       | {logical_name: .name, id: .fieldId} ]) as $byname
+    | ([ $fields[] | select(((.schema.type // "") == "array")
+           and ((.schema.custom // "") | test("multicheckboxes|gh-flagged"; "i")))
+       | {logical_name: .name, id: .fieldId} ]) as $byshape
+    | ($byname[0] // (if ($byshape | length) == 1 then $byshape[0] else null end))
+  ' | json_canonical
+}
+
 # _disc_style <project-json> — map the detected style to its logical value
 # (research §1): next-gen / simplified -> team_managed, classic -> company_managed,
 # neither present -> company_managed (the superset path degrades gracefully).
@@ -88,6 +107,10 @@ discover_binding() {
   local fields
   fields="$(jira_request GET "${api}/field")" || return $?
 
+  # The flagged field resolves by name, then by shape (locale-independent).
+  local flagged
+  flagged="$(discovery_flagged_field "$(jq -c '.fields // []' <<< "${meta}")")"
+
   # Assemble the neutral binding. Arrays keep discovered order; json_canonical
   # sorts object keys so both ports converge to identical bytes (research §11).
   jq -n \
@@ -96,7 +119,8 @@ discover_binding() {
     --argjson meta "${meta}" \
     --argjson statuses "${statuses}" \
     --argjson priorities "${priorities}" \
-    --argjson fields "${fields}" '
+    --argjson fields "${fields}" \
+    --argjson flagged "${flagged}" '
     {
       style: $style,
       issue_types: [ $itypes.issueTypes[]
@@ -113,9 +137,7 @@ discover_binding() {
                   + (if ((.schema.custom // "") | test("float|gh-sprint|story-point"; "i")) then 2 else 0 end)
                   + (if (.name | test("estimat|point|effort|story"; "i")) then 1 else 0 end) ) } ]
         | sort_by([(-.score), .id]) ),
-      flagged_field: ( [ $meta.fields[]
-        | select(.name | test("impediment|flag"; "i"))
-        | {logical_name: .name, id: .fieldId} ] | (.[0] // null) )
+      flagged_field: $flagged
     }' | json_canonical
 }
 

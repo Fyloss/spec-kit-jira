@@ -41,6 +41,42 @@ teardown() {
   [ "$output" = "keychain-token" ]
 }
 
+@test "reads an 'export JIRA_API_TOKEN=...' line in .env (dotenv convention)" {
+  printf 'export JIRA_API_TOKEN=file-token\n' > "${TMPDIR_T}/.env"
+  run cred_resolve_token
+  [ "$status" -eq 0 ]
+  [ "$output" = "file-token" ]
+}
+
+@test "strips surrounding quotes from the .env value (dotenv convention)" {
+  printf 'JIRA_API_TOKEN="file-token"\n' > "${TMPDIR_T}/.env"
+  run cred_resolve_token
+  [ "$output" = "file-token" ]
+  printf "JIRA_API_TOKEN='file-token'\n" > "${TMPDIR_T}/.env"
+  run cred_resolve_token
+  [ "$output" = "file-token" ]
+}
+
+@test "strips the carriage return from a Windows-authored (CRLF) .env" {
+  printf 'JIRA_API_TOKEN=file-token\r\n' > "${TMPDIR_T}/.env"
+  run cred_resolve_token
+  [ "$output" = "file-token" ]
+}
+
+@test "the PowerShell port reads export/quoted/CRLF .env lines identically (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  printf 'export JIRA_API_TOKEN="file-token"\r\n' > "${TMPDIR_T}/.env"
+  run cred_resolve_token
+  [ "$output" = "file-token" ]
+  ps="$(pwsh -NoProfile -Command "
+    \$env:JIRA_CONFIG_DIR = '${TMPDIR_T}'
+    \$env:JIRA_API_TOKEN = ''
+    Import-Module '${ROOT}/.specify/extensions/jira/scripts/powershell/lib/Credentials.psm1' -Force
+    [Console]::Out.Write((Resolve-JiraToken))
+  ")"
+  [ "$ps" = "file-token" ]
+}
+
 @test "returns non-zero when no source provides a token" {
   run cred_resolve_token
   [ "$status" -ne 0 ]

@@ -52,4 +52,14 @@ Describe 'Privacy guard WARN tier and allowlist' {
         $allow | Should -Contain 'extra.example.org'
         Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
     }
+
+    It 'de-duplicates the allowlist ORDINALLY, keeping case variants, sorted like jq unique (NFR-1)' {
+        $work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+        New-Item -ItemType Directory -Path $work -Force | Out-Null
+        $ignore = Join-Path $work '.extensionignore'
+        @('b', 'A') -join "`n" | Set-Content -LiteralPath $ignore
+        Get-JiraPrivacyAllowlist -IgnorePath $ignore -ConfigAllowlistJson '["PROJ-Secret","proj-secret"]' |
+            Should -Be '["A","PROJ-Secret","b","proj-secret"]'
+        Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+    }
 }

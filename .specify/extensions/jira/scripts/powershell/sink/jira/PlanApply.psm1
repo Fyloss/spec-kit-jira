@@ -241,12 +241,13 @@ function Get-JiraApplyKnownCoordinate {
     param([string] $ExtraJson = '[]')
     $base = if ($env:SPEC_KIT_JIRA_BASE_URL) { $env:SPEC_KIT_JIRA_BASE_URL } else { '' }
     $host0 = $base -replace '^[a-zA-Z]+://', '' -replace '/.*$', '' -replace ':[0-9]+$', ''
-    $coords = [System.Collections.Generic.List[string]]::new()
-    foreach ($e in @($ExtraJson | ConvertFrom-Json -Depth 100)) { $coords.Add([string]$e) }
-    if (-not [string]::IsNullOrEmpty($host0)) { $coords.Add($host0) }
-    $unique = [System.Collections.Generic.List[string]]::new()
-    foreach ($c in ($coords | Sort-Object -Unique)) { $unique.Add($c) }
-    return (ConvertTo-Json -InputObject $unique.ToArray() -Compress -Depth 5)
+    # De-duplicate + sort ORDINALLY and case-sensitively, matching jq `unique`
+    # (Sort-Object -Unique would COLLAPSE case-variant coordinates, dropping them
+    # from the BLOCK set), and serialise through the canonical serialiser.
+    $set = [System.Collections.Generic.SortedSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($e in @($ExtraJson | ConvertFrom-Json -Depth 100)) { [void]$set.Add([string]$e) }
+    if (-not [string]::IsNullOrEmpty($host0)) { [void]$set.Add($host0) }
+    return (ConvertTo-JiraJsonValue @($set))
 }
 
 function Invoke-JiraApplyWriteSet {

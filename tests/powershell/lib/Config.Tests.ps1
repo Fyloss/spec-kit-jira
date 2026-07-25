@@ -154,6 +154,31 @@ Describe 'Import-JiraConfig' {
         Remove-Item -Recurse -Force $d
     }
 
+    It 'rejects a case-variant project style like the Bash port — "Company_Managed" is invalid (NFR-1)' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: Company_Managed`n    epic_strategy: per_repo`n    task_strategy: subtask`nrouting_default: PROJ`n" -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'style'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'keeps sibling projects when a local override touches only one of them' {
+        $d = New-TempConfigDir
+        $team = "projects:`n  - key: PROJ`n    style: company_managed`n    epic_strategy: per_repo`n    task_strategy: subtask`n  - key: OPS`n    style: team_managed`n    epic_strategy: per_repo`n    task_strategy: subtask`nrouting_default: PROJ`n"
+        Set-Content -Path (Join-Path $d 'config.yml') -Value $team -NoNewline
+        Set-Content -Path (Join-Path $d 'config.local.yml') -Value "overrides:`n  projects:`n    - key: PROJ`n      epic_strategy: per_feature`n" -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 0
+        $merged = $r.Json | ConvertFrom-Json
+        @($merged.projects).Count | Should -Be 2
+        @($merged.projects)[0].key | Should -Be 'PROJ'
+        @($merged.projects)[0].epic_strategy | Should -Be 'per_feature'
+        @($merged.projects)[0].style | Should -Be 'company_managed'
+        @($merged.projects)[1].key | Should -Be 'OPS'
+        Remove-Item -Recurse -Force $d
+    }
+
     It 'rejects an unknown top-level key (exit 4)' {
         $d = New-TempConfigDir
         Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nmystery: value`n") -NoNewline

@@ -23,12 +23,23 @@ function Get-JiraSecretManagerToken {
 }
 
 function Get-JiraEnvFileToken {
+    # Follows the dotenv conventions a user will actually write: an optional
+    # `export ` prefix, one pair of surrounding quotes, and CRLF line endings —
+    # none of which may leak into the token (a corrupted token turns into an
+    # unexplained 401). Mirror of _cred_from_env_file.
     $envFile = Join-Path (Get-JiraConfigDir) '.env'
     if (-not (Test-Path -LiteralPath $envFile)) { return $null }
     foreach ($line in Get-Content -LiteralPath $envFile) {
-        if ($line -like 'JIRA_API_TOKEN=*') {
-            return $line.Substring('JIRA_API_TOKEN='.Length)
+        $t = ([string]$line).TrimEnd("`r").TrimStart()
+        $t = $t -creplace '^export\s+', ''
+        if (-not $t.StartsWith('JIRA_API_TOKEN=')) { continue }
+        $val = $t.Substring('JIRA_API_TOKEN='.Length)
+        if ($val.Length -ge 2 -and
+            (($val.StartsWith('"') -and $val.EndsWith('"')) -or
+             ($val.StartsWith("'") -and $val.EndsWith("'")))) {
+            $val = $val.Substring(1, $val.Length - 2)
         }
+        return $val
     }
     return $null
 }

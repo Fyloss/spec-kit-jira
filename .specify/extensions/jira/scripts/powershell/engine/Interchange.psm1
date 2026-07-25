@@ -71,7 +71,7 @@ function Test-JiraInterchange {
     }
     else {
         if ([string]::IsNullOrEmpty([string](Get-JiraInterchangeProp $epic 'title'))) { $errors.Add('epic.title is required') }
-        if (@('per_repo', 'per_feature') -notcontains (Get-JiraInterchangeProp $epic 'strategy')) { $errors.Add('epic.strategy is invalid') }
+        if (@('per_repo', 'per_feature') -cnotcontains (Get-JiraInterchangeProp $epic 'strategy')) { $errors.Add('epic.strategy is invalid') }
         if ((Get-JiraArrayCount (Get-JiraInterchangeProp $epic 'description') 'blocks') -lt 1) { $errors.Add('epic.description.blocks must be non-empty') }
     }
 
@@ -82,7 +82,7 @@ function Test-JiraInterchange {
         foreach ($s in @($d.stories)) {
             if ([string]::IsNullOrEmpty([string](Get-JiraInterchangeProp $s 'local_id'))) { $errors.Add('story.local_id is required') }
             if ([string]::IsNullOrEmpty([string](Get-JiraInterchangeProp $s 'title'))) { $errors.Add('story.title is required') }
-            if (@('P1', 'P2', 'P3') -notcontains (Get-JiraInterchangeProp $s 'priority_logical')) { $errors.Add('story.priority_logical is invalid') }
+            if (@('P1', 'P2', 'P3') -cnotcontains (Get-JiraInterchangeProp $s 'priority_logical')) { $errors.Add('story.priority_logical is invalid') }
             if ((Get-JiraArrayCount (Get-JiraInterchangeProp $s 'description') 'blocks') -lt 1) { $errors.Add('story.description.blocks must be non-empty') }
         }
     }
@@ -163,7 +163,15 @@ function Resolve-JiraRouting {
 
         $ok = $true
         if ($hasPrefix -and -not $FolderName.StartsWith([string]$m.folder_prefix, [System.StringComparison]::Ordinal)) { $ok = $false }
-        if ($hasLabel -and ($labels -notcontains [string]$m.spec_label)) { $ok = $false }
+        if ($hasLabel) {
+            # Ordinal, CASE-SENSITIVE label match — the Bash twin uses jq index(),
+            # so "Backend" must not satisfy a "backend" rule (NFR 1).
+            $labelHit = $false
+            foreach ($l in $labels) {
+                if ([string]::Equals([string]$l, [string]$m.spec_label, [System.StringComparison]::Ordinal)) { $labelHit = $true; break }
+            }
+            if (-not $labelHit) { $ok = $false }
+        }
         if ($ok) {
             return [pscustomobject]@{ ExitCode = 0; ProjectKey = [string](Get-JiraInterchangeProp $rule 'project') }
         }

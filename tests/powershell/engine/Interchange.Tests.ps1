@@ -40,4 +40,16 @@ Describe 'Test-JiraInterchange' {
     It 'rejects invalid JSON input' {
         Test-JiraInterchange 'not json' 2>$null | Should -BeFalse
     }
+
+    It 'rejects a case-variant priority_logical like the Bash port — "p1" is not "P1" (NFR-1)' {
+        $bad = ($script:Valid | ConvertFrom-Json)
+        $bad.stories[0].priority_logical = 'p1'
+        Test-JiraInterchange ($bad | ConvertTo-Json -Depth 100) 2>$null | Should -BeFalse
+    }
+
+    It 'rejects a case-variant epic.strategy like the Bash port — "Per_repo" is not "per_repo" (NFR-1)' {
+        $bad = ($script:Valid | ConvertFrom-Json)
+        $bad.epic.strategy = 'Per_repo'
+        Test-JiraInterchange ($bad | ConvertTo-Json -Depth 100) 2>$null | Should -BeFalse
+    }
 }

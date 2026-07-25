@@ -16,8 +16,11 @@
 #
 # ALLOWLIST (FR-053): Confluence links and domains declared in `.extensionignore`
 # (gitignore syntax) or the config's `privacy.allowlist` produce NEITHER a block
-# NOR a warning — the allowlisted substrings are neutralised before either tier
-# scans, so an allowlisted Confluence host on `*.atlassian.net` never false-blocks.
+# NOR a warning. The exemption is evaluated PER MATCH — the payload is never
+# rewritten — so an allowlist entry can only neutralise the exact text it covers
+# (the match appears inside an allowlisted link, or the entry is a domain the
+# match belongs to at a label boundary). A broad or overlapping entry can never
+# disable detection of unrelated tokens, hosts, or coordinates (fail-closed).
 # `.extensionignore` paths are excluded from both parsing and scanning.
 #
 # The offending value is NEVER echoed (NFR-3) — errors name only the shape.
@@ -29,33 +32,57 @@ _privacy_guard_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${_privacy_guard_dir}/../../lib/cli.sh"
 
-# _privacy_sanitize <payload> <allowlist-json> — remove every allowlisted entry
-# (fixed-string) from a working copy of the payload so neither tier scans it.
-_privacy_sanitize() {
-  local payload="$1" allow="${2:-[]}" e
+# _privacy_match_allowed <match> <allowlist-json> [ci:true|false] — return 0 when
+# an allowlist entry covers the matched text (FR-053): the whole match appears
+# inside the entry (an allowlisted link/coordinate), or the entry is a DOMAIN the
+# match belongs to at a label boundary (`.entry` / `@entry` suffix). Evaluated per
+# match — the payload is never rewritten — so an overlapping entry can never
+# disable detection of unrelated secrets (fail-closed).
+_privacy_match_allowed() {
+  local m="$1" allow="${2:-[]}" ci="${3:-false}" e mm ee
+  [[ -z "${m}" ]] && return 1
   while IFS= read -r e; do
     [[ -z "${e}" ]] && continue
-    payload="${payload//"${e}"/}"
+    mm="${m}" ee="${e}"
+    if [[ "${ci}" == "true" ]]; then
+      mm="${mm,,}" ee="${ee,,}"
+    fi
+    [[ "${ee}" == *"${mm}"* ]] && return 0
+    [[ "${mm}" == *".${ee}" || "${mm}" == *"@${ee}" ]] && return 0
   done < <(jq -r '.[]?' <<< "${allow}" 2> /dev/null)
-  printf '%s' "${payload}"
+  return 1
+}
+
+# _privacy_regex_hit <payload> <ere> <allowlist-json> [ci:true|false] — return 0
+# when the payload carries at least one match of the shape that is NOT covered by
+# the allowlist.
+_privacy_regex_hit() {
+  local payload="$1" re="$2" allow="${3:-[]}" ci="${4:-false}" m
+  local -a grep_opts=(-oE)
+  [[ "${ci}" == "true" ]] && grep_opts=(-oiE)
+  while IFS= read -r m; do
+    [[ -z "${m}" ]] && continue
+    _privacy_match_allowed "${m}" "${allow}" "${ci}" || return 0
+  done < <(grep "${grep_opts[@]}" -- "${re}" <<< "${payload}" 2> /dev/null)
+  return 1
 }
 
 # privacy_guard_reason <payload> [known-coords-json] [allowlist-json] — print the
 # BLOCK reason for a write payload (empty when clear). The value is never included.
-# Allowlisted substrings are neutralised before the scan (FR-053).
+# The allowlist exempts individual matches only (FR-053).
 privacy_guard_reason() {
-  local payload="$1" coords="${2:-[]}" allow="${3:-[]}" scan
-  scan="$(_privacy_sanitize "${payload}" "${allow}")"
+  local payload="$1" coords="${2:-[]}" allow="${3:-[]}"
 
   # (1) ATATT token prefix — require token characters after the prefix so the bare
   #     word "ATATT" in prose does not false-positive (precision over recall).
-  if grep -qE 'ATATT[A-Za-z0-9._=+/-]{2,}' <<< "${scan}"; then
+  if _privacy_regex_hit "${payload}" 'ATATT[A-Za-z0-9._=+/-]{2,}' "${allow}"; then
     printf 'Atlassian API token (ATATT prefix)'
     return 0
   fi
 
-  # (2) Real *.atlassian.net host (case-sensitive lowercase, as hosts are).
-  if grep -qE '[a-z0-9][a-z0-9-]*\.atlassian\.net' <<< "${scan}"; then
+  # (2) Real *.atlassian.net host — matched case-insensitively: DNS hosts are
+  #     case-insensitive, so a MiXeD-case spelling must not bypass the guard.
+  if _privacy_regex_hit "${payload}" '[a-z0-9][a-z0-9-]*\.atlassian\.net' "${allow}" true; then
     printf 'Atlassian Cloud host'
     return 0
   fi
@@ -64,7 +91,7 @@ privacy_guard_reason() {
   local c
   while IFS= read -r c; do
     [[ -z "${c}" ]] && continue
-    if grep -qF -- "${c}" <<< "${scan}"; then
+    if grep -qF -- "${c}" <<< "${payload}" && ! _privacy_match_allowed "${c}" "${allow}"; then
       printf 'known coordinate'
       return 0
     fi
@@ -73,20 +100,19 @@ privacy_guard_reason() {
   return 0
 }
 
-# privacy_guard_warn_reason <payload> [allowlist-json] — print the WARN reason for a
-# generic shape (empty when clear). Allowlisted substrings are neutralised first
+# privacy_guard_warn_reason <payload> [allowlist-json] — print the WARN reason for
+# a generic shape (empty when clear). The allowlist exempts individual matches
 # (FR-053). WARN never gates a write; the caller surfaces it in the run summary.
 privacy_guard_warn_reason() {
-  local payload="$1" allow="${2:-[]}" scan
-  scan="$(_privacy_sanitize "${payload}" "${allow}")"
+  local payload="$1" allow="${2:-[]}"
 
   # Email address — a generic contact shape, never a coordinate.
-  if grep -qE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' <<< "${scan}"; then
+  if _privacy_regex_hit "${payload}" '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' "${allow}" true; then
     printf 'email address'
     return 0
   fi
   # UUID — a generic identifier shape.
-  if grep -qE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' <<< "${scan}"; then
+  if _privacy_regex_hit "${payload}" '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "${allow}" true; then
     printf 'UUID'
     return 0
   fi

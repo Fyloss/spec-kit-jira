@@ -37,15 +37,33 @@ _cred_from_secret_manager() {
 }
 
 # _cred_from_env_file — read JIRA_API_TOKEN from the gitignored .env, if present.
+# Follows the dotenv conventions a user will actually write: an optional
+# `export ` prefix, one pair of surrounding quotes, and CRLF line endings from a
+# Windows-authored file — none of which may leak into the token (a corrupted
+# token turns into an unexplained 401).
 _cred_from_env_file() {
   local env_file="${JIRA_CONFIG_DIR}/.env"
   [[ -f "${env_file}" ]] || return 0
   # Extract the value without sourcing (avoid executing arbitrary content).
-  local line
+  local line t val
   while IFS= read -r line || [[ -n "${line}" ]]; do
-    case "${line}" in
+    t="${line%$'\r'}"
+    t="${t#"${t%%[![:space:]]*}"}"
+    case "${t}" in
+      export[[:space:]]*)
+        t="${t#export}"
+        t="${t#"${t%%[![:space:]]*}"}"
+        ;;
+    esac
+    case "${t}" in
       JIRA_API_TOKEN=*)
-        printf '%s' "${line#JIRA_API_TOKEN=}"
+        val="${t#JIRA_API_TOKEN=}"
+        if [[ ${#val} -ge 2 && "${val}" == \"*\" ]]; then
+          val="${val#\"}" val="${val%\"}"
+        elif [[ ${#val} -ge 2 && "${val}" == \'*\' ]]; then
+          val="${val#\'}" val="${val%\'}"
+        fi
+        printf '%s' "${val}"
         return 0
         ;;
     esac

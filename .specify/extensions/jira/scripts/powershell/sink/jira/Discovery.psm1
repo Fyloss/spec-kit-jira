@@ -152,13 +152,8 @@ function Get-JiraDiscoveryBindingResult {
     }
     $sortedCands = @($cands | Sort-Object @{ Expression = { $_.score }; Descending = $true }, @{ Expression = { [string] $_.id }; Descending = $false })
 
-    $flagged = $null
-    foreach ($f in $meta.fields) {
-        if ([string] $f.name -imatch 'impediment|flag') {
-            $flagged = [ordered]@{ logical_name = $f.name; id = $f.fieldId }
-            break
-        }
-    }
+    # The flagged field resolves by name, then by shape (locale-independent).
+    $flagged = Get-JiraDiscoveryFlaggedField -FieldsJson (ConvertTo-JiraJsonValue @($meta.fields))
 
     $binding = [ordered]@{
         style                 = $style
@@ -171,6 +166,38 @@ function Get-JiraDiscoveryBindingResult {
     }
 
     return [pscustomobject]@{ ExitCode = 0; Binding = (ConvertTo-JiraJsonValue $binding) }
+}
+
+function Get-JiraDiscoveryFlaggedField {
+    <#
+    .SYNOPSIS
+      Resolve the project's Flagged/impediment field, the input of
+      flagged-withholding lifecycle safety (FR-036). LOCALE-INDEPENDENT: the
+      English name (`Impediment`/`Flagged`) is only a first-chance match; a
+      localized or renamed site resolves by SHAPE — the Flagged field is an
+      array-of-options checkbox custom field — and only an unambiguous single
+      shape candidate is accepted (precision over recall). Returns the
+      {logical_name,id} map, or $null. Mirror of discovery_flagged_field.
+    #>
+    [CmdletBinding()]
+    param([string] $FieldsJson = '[]')
+    $fields = @($FieldsJson | ConvertFrom-Json -Depth 100)
+
+    foreach ($f in $fields) {
+        if ([string](Get-DiscProp $f 'name') -imatch 'impediment|flag') {
+            return [ordered]@{ logical_name = $f.name; id = $f.fieldId }
+        }
+    }
+
+    $shape = [System.Collections.Generic.List[object]]::new()
+    foreach ($f in $fields) {
+        $schema = Get-DiscProp $f 'schema'
+        if (-not [string]::Equals([string](Get-DiscProp $schema 'type'), 'array', [System.StringComparison]::Ordinal)) { continue }
+        if ([string](Get-DiscProp $schema 'custom') -inotmatch 'multicheckboxes|gh-flagged') { continue }
+        $shape.Add([ordered]@{ logical_name = $f.name; id = $f.fieldId })
+    }
+    if ($shape.Count -eq 1) { return $shape[0] }
+    return $null
 }
 
 function Get-JiraDiscoveryBinding {
@@ -369,4 +396,4 @@ function Get-JiraMentionedFetch {
 }
 
 Export-ModuleMember -Function Get-JiraDiscoveryBinding, Get-JiraDiscoveryBindingResult, `
-    Get-JiraMentionedFetch, Get-JiraMentionedFetchResult
+    Get-JiraDiscoveryFlaggedField, Get-JiraMentionedFetch, Get-JiraMentionedFetchResult

@@ -51,6 +51,33 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+# --- Fail-open regressions: case bypass + allowlist shredding ----------------
+
+@test "blocks a MiXeD-case Atlassian host — DNS hosts are case-insensitive (FR-052)" {
+  run privacy_guard_scan 'see https://Acme.Atlassian.Net/browse/PROJ-1'
+  [ "$status" -eq 9 ]
+}
+
+@test "an allowlist entry overlapping the token shape never disables token detection (FR-052)" {
+  run privacy_guard_scan 'see token ATATT3xFfGF0abcdef for access' '[]' '["ATAT"]'
+  [ "$status" -eq 9 ]
+}
+
+@test "an allowlist entry matching a SUBSTRING of a real host never neutralises it (FR-052)" {
+  run privacy_guard_scan 'leak acme-corp.atlassian.net' '[]' '["corp.atlassian.net"]'
+  [ "$status" -eq 9 ]
+}
+
+@test "an allowlist entry overlapping a known coordinate never disables its detection (FR-052)" {
+  run privacy_guard_scan 'internal ref ACME-PROD site' '["ACME-PROD site"]' '["ACME"]'
+  [ "$status" -eq 9 ]
+}
+
+@test "an allowlisted domain still exempts its own hosts, any case (FR-053 preserved)" {
+  run privacy_guard_scan 'see OurCo.Atlassian.Net/wiki/spaces/OPS' '[]' '["ourco.atlassian.net"]'
+  [ "$status" -eq 0 ]
+}
+
 # --- Apply path: the mandatory pre-write gate (zero writes on block) ---------
 
 @test "apply_writes blocks before any write and performs ZERO writes (exit 9)" {

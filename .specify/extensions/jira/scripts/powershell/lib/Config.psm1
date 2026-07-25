@@ -382,7 +382,7 @@ function Test-JiraTeamConfig {
     $allowedTop = @('version_compat', 'projects', 'routing', 'routing_default', 'privacy')
     if ($Object -is [System.Collections.IDictionary]) {
         foreach ($k in ($Object.Keys | Sort-Object { [string]$_ } -Culture Ordinal)) {
-            if ($allowedTop -notcontains [string]$k) { $errs.Add("unknown top-level key: $k") }
+            if ($allowedTop -cnotcontains [string]$k) { $errs.Add("unknown top-level key: $k") }
         }
     }
 
@@ -392,11 +392,11 @@ function Test-JiraTeamConfig {
             $key = Get-CfgProp $p 'key'
             if (($key -isnot [string]) -or ($key -cnotmatch '^[A-Z][A-Z0-9_]+$')) { $errs.Add("projects[$i].key is not a valid project key") }
             $style = Get-CfgProp $p 'style'
-            if (@('company_managed', 'team_managed') -notcontains $style) { $errs.Add("projects[$i].style is invalid") }
+            if (@('company_managed', 'team_managed') -cnotcontains $style) { $errs.Add("projects[$i].style is invalid") }
             $es = Get-CfgProp $p 'epic_strategy'
-            if (@('per_repo', 'per_feature') -notcontains $es) { $errs.Add("projects[$i].epic_strategy is invalid") }
+            if (@('per_repo', 'per_feature') -cnotcontains $es) { $errs.Add("projects[$i].epic_strategy is invalid") }
             $ts = Get-CfgProp $p 'task_strategy'
-            if (@('subtask', 'linked_story') -notcontains $ts) { $errs.Add("projects[$i].task_strategy is invalid") }
+            if (@('subtask', 'linked_story') -cnotcontains $ts) { $errs.Add("projects[$i].task_strategy is invalid") }
             $lt = Get-CfgProp $p 'link_type'
             if ($ts -eq 'linked_story' -and [string]::IsNullOrEmpty([string]$lt)) { $errs.Add("projects[$i].link_type is required when task_strategy=linked_story") }
             $i++
@@ -412,7 +412,7 @@ function Test-JiraLocalConfig {
     $allowed = @('site_alias', 'resolved_ids', 'overrides')
     if ($Object -is [System.Collections.IDictionary]) {
         foreach ($k in ($Object.Keys | Sort-Object { [string]$_ } -Culture Ordinal)) {
-            if ($allowed -notcontains [string]$k) { $errs.Add("unknown config.local key: $k") }
+            if ($allowed -cnotcontains [string]$k) { $errs.Add("unknown config.local key: $k") }
         }
     }
     return $errs.ToArray()
@@ -422,9 +422,38 @@ function Test-JiraLocalConfig {
 # Load / merge orchestration (T030)
 # =============================================================================
 
+function Merge-CfgProjectList {
+    # Merge the local `projects` override into the team list PER ENTRY, BY KEY —
+    # a wholesale array replacement would silently DROP every project the local
+    # override does not repeat. Unmatched team entries survive; unmatched
+    # override entries are appended in their own order. Mirror of the jq merge
+    # in config_load.
+    param($TeamList, $OverrideList)
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($p in @($TeamList)) {
+        $pk = [string](Get-CfgProp $p 'key')
+        $ov = $null
+        foreach ($o in @($OverrideList)) {
+            if ([string]::Equals([string](Get-CfgProp $o 'key'), $pk, [System.StringComparison]::Ordinal)) { $ov = $o; break }
+        }
+        if ($null -eq $ov) { $out.Add($p) } else { $out.Add((Merge-CfgObject $p $ov)) }
+    }
+    foreach ($o in @($OverrideList)) {
+        $ok = [string](Get-CfgProp $o 'key')
+        $seen = $false
+        foreach ($p in @($TeamList)) {
+            if ([string]::Equals([string](Get-CfgProp $p 'key'), $ok, [System.StringComparison]::Ordinal)) { $seen = $true; break }
+        }
+        if (-not $seen) { $out.Add($o) }
+    }
+    return $out.ToArray()
+}
+
 function Merge-CfgObject {
     # Recursive object merge mirroring jq's `*`: for keys in both where both are
-    # objects, merge recursively; otherwise the right value wins.
+    # objects, merge recursively; otherwise the right value wins — except the
+    # top-level `projects` arrays, which merge per-entry by key (see
+    # Merge-CfgProjectList).
     param($Left, $Right)
     if ($Left -is [System.Collections.IDictionary] -and $Right -is [System.Collections.IDictionary]) {
         $out = [ordered]@{}
@@ -433,6 +462,10 @@ function Merge-CfgObject {
             $ks = [string]$k
             if ($out.Contains($ks) -and ($out[$ks] -is [System.Collections.IDictionary]) -and ($Right[$k] -is [System.Collections.IDictionary])) {
                 $out[$ks] = Merge-CfgObject $out[$ks] $Right[$k]
+            }
+            elseif ([string]::Equals($ks, 'projects', [System.StringComparison]::Ordinal) -and $out.Contains($ks) -and
+                ($out[$ks] -is [System.Collections.IList]) -and ($Right[$k] -is [System.Collections.IList])) {
+                $out[$ks] = Merge-CfgProjectList $out[$ks] $Right[$k]
             }
             else { $out[$ks] = $Right[$k] }
         }

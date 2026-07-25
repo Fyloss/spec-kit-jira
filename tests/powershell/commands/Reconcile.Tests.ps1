@@ -60,4 +60,13 @@ Describe 'Invoke-JiraReconcile (dry-run)' {
         $out = Invoke-Captured @('reconcile', '--dry-run', '--json', $script:SpecWith) | ConvertFrom-Json
         $out.actions[0].url | Should -Be '/rest/api/3/issue'
     }
+
+    It 'maps an invalid SPEC_KIT_JIRA_LIFECYCLE to exit 4 with an actionable error (FR-032)' {
+        $env:SPEC_KIT_JIRA_LIFECYCLE = '{not json'
+        try {
+            $null = Invoke-Captured @('reconcile', '--dry-run', '--json', $script:SpecWith) 2>$null
+            $script:code | Should -Be 4
+        }
+        finally { $env:SPEC_KIT_JIRA_LIFECYCLE = $null }
+    }
 }

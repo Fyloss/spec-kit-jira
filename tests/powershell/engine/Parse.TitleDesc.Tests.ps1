@@ -54,6 +54,12 @@ Describe 'Get-JiraParsedAcceptance' {
         @($a).Count | Should -Be 1
         $a[0].then[0] | Should -Be 'it opens'
     }
+    It "keeps a Given clause containing the word 'when' intact in an inline triple" {
+        $a = Get-JiraParsedAcceptance -Text 'Given the user logs in when prompted, When they click, Then it opens' | ConvertFrom-Json
+        $a[0].given[0] | Should -Be 'the user logs in when prompted'
+        $a[0].when[0] | Should -Be 'they click'
+        $a[0].then[0] | Should -Be 'it opens'
+    }
     It 'yields an empty array when no Gherkin' {
         Get-JiraParsedAcceptance -Text 'just prose' | Should -Be '[]'
     }

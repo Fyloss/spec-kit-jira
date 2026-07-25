@@ -43,21 +43,32 @@ Describe 'Hook health reporting' {
         Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
     }
 
-    It 'reports hook health in every run summary (FR-047)' {
+    It 'reports hook health in every run summary, in the contract shape (FR-047)' {
         $obj = Invoke-ReconcileSummary @('reconcile', '--dry-run', '--json', $Spec) | ConvertFrom-Json
-        $obj.hooks.status | Should -Be 'degraded'
-        @($obj.hooks.missing).Count | Should -Be 6
+        @($obj.hook_health.missing).Count | Should -Be 6
+        @($obj.hook_health.present).Count | Should -Be 0
+        @($obj.hook_health.disabled).Count | Should -Be 0
+        $obj.hook_health.repair_hint | Should -Match 'repair-hooks'
+    }
+
+    It 'carries NO key outside the published run-summary contract' {
+        $obj = Invoke-ReconcileSummary @('reconcile', '--dry-run', '--json', $Spec) | ConvertFrom-Json
+        $allowed = @('schema_version', 'command', 'dry_run', 'counts', 'effects', 'drift', 'flags',
+            'blockers', 'hook_health', 'mutations', 'actions', 'warnings', 'notes', 'exit_code')
+        foreach ($k in $obj.PSObject.Properties.Name) { $allowed | Should -Contain $k }
     }
 
     It 'previews a dry-run --repair-hooks without writing (FR-047)' {
         $obj = Invoke-ReconcileSummary @('reconcile', '--repair-hooks', '--dry-run', '--json', $Spec) | ConvertFrom-Json
         Test-Path -LiteralPath $env:SPEC_KIT_JIRA_EXTENSIONS_YML | Should -BeFalse
-        $obj.hooks.status | Should -Be 'degraded'
+        @($obj.hook_health.missing).Count | Should -Be 6
     }
 
     It 'registers hooks with --repair-hooks and then reports healthy (FR-047)' {
         $obj = Invoke-ReconcileSummary @('reconcile', '--repair-hooks', '--json', $Spec) | ConvertFrom-Json
         Test-Path -LiteralPath $env:SPEC_KIT_JIRA_EXTENSIONS_YML | Should -BeTrue
-        $obj.hooks.status | Should -Be 'healthy'
+        @($obj.hook_health.present).Count | Should -Be 6
+        @($obj.hook_health.missing).Count | Should -Be 0
+        $obj.hook_health.PSObject.Properties.Name | Should -Not -Contain 'repair_hint'
     }
 }

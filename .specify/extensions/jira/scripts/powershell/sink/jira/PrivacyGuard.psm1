@@ -5,34 +5,56 @@
 # on the ATATT token prefix, a real *.atlassian.net host, or a known site/project
 # coordinate. WARN (FR-053) — surfaced, never gating — on generic shapes (emails,
 # UUIDs). ALLOWLIST (FR-053): Confluence links/domains from `.extensionignore`
-# (gitignore syntax) or `config.privacy.allowlist` are neutralised before either
-# tier scans, so an allowlisted host never false-blocks; `.extensionignore` paths
-# are excluded from parsing and scanning. The offending value is never echoed
-# (NFR-3). Behaves identically to the Bash port (NFR-1).
+# (gitignore syntax) or `config.privacy.allowlist` exempt INDIVIDUAL matches only
+# (the match appears inside an allowlisted link, or the entry is a domain the
+# match belongs to at a label boundary) — the payload is never rewritten, so a
+# broad or overlapping entry can never disable detection of unrelated secrets
+# (fail-closed); `.extensionignore` paths are excluded from parsing and scanning.
+# The offending value is never echoed (NFR-3). Behaves identically to the Bash
+# port (NFR-1).
 
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot '../../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../../lib/Output.psm1') -Force
 
-function Get-JiraPrivacySanitized {
-    # Remove every allowlisted entry (fixed-string) from a working copy of the
-    # payload so neither tier scans it. Mirror of _privacy_sanitize.
-    param([string] $Payload, [string] $AllowlistJson = '[]')
-    $allow = @($AllowlistJson | ConvertFrom-Json -Depth 100)
-    foreach ($e in $allow) {
+function Test-JiraPrivacyMatchAllowed {
+    # True when an allowlist entry covers the matched text (FR-053): the whole
+    # match appears inside the entry, or the entry is a DOMAIN the match belongs
+    # to at a label boundary (`.entry` / `@entry` suffix). Mirror of
+    # _privacy_match_allowed.
+    param([string] $Match, [string] $AllowlistJson = '[]', [bool] $CaseInsensitive = $false)
+    if ([string]::IsNullOrEmpty($Match)) { return $false }
+    $cmp = if ($CaseInsensitive) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+    foreach ($e in @($AllowlistJson | ConvertFrom-Json -Depth 100)) {
         $es = [string] $e
-        if ($es -ne '') { $Payload = $Payload.Replace($es, '') }
+        if ($es -eq '') { continue }
+        if ($es.IndexOf($Match, $cmp) -ge 0) { return $true }
+        if ($Match.EndsWith(".$es", $cmp) -or $Match.EndsWith("@$es", $cmp)) { return $true }
     }
-    return $Payload
+    return $false
+}
+
+function Test-JiraPrivacyRegexHit {
+    # True when the payload carries at least one match of the shape that is NOT
+    # covered by the allowlist. Mirror of _privacy_regex_hit.
+    param([string] $Payload, [string] $Pattern, [string] $AllowlistJson = '[]', [bool] $CaseInsensitive = $false)
+    $opts = if ($CaseInsensitive) { [System.Text.RegularExpressions.RegexOptions]::IgnoreCase }
+    else { [System.Text.RegularExpressions.RegexOptions]::None }
+    foreach ($m in [regex]::Matches($Payload, $Pattern, $opts)) {
+        if (-not (Test-JiraPrivacyMatchAllowed -Match $m.Value -AllowlistJson $AllowlistJson -CaseInsensitive $CaseInsensitive)) {
+            return $true
+        }
+    }
+    return $false
 }
 
 function Get-JiraPrivacyBlockReason {
     <#
     .SYNOPSIS
       Return the BLOCK reason for a write payload (empty when clear). The value is
-      never included. Allowlisted substrings are neutralised first (FR-053). Mirror
-      of privacy_guard_reason.
+      never included. The allowlist exempts individual matches only (FR-053).
+      Mirror of privacy_guard_reason.
     #>
     [CmdletBinding()]
     param(
@@ -40,20 +62,26 @@ function Get-JiraPrivacyBlockReason {
         [string] $KnownCoordinatesJson = '[]',
         [string] $AllowlistJson = '[]'
     )
-    $scan = Get-JiraPrivacySanitized -Payload $Payload -AllowlistJson $AllowlistJson
-
     # (1) ATATT token prefix — require token characters after the prefix so the
     #     bare word "ATATT" in prose does not false-positive.
-    if ($scan -cmatch 'ATATT[A-Za-z0-9._=+/-]{2,}') { return 'Atlassian API token (ATATT prefix)' }
+    if (Test-JiraPrivacyRegexHit -Payload $Payload -Pattern 'ATATT[A-Za-z0-9._=+/-]{2,}' -AllowlistJson $AllowlistJson) {
+        return 'Atlassian API token (ATATT prefix)'
+    }
 
-    # (2) Real *.atlassian.net host (case-sensitive lowercase).
-    if ($scan -cmatch '[a-z0-9][a-z0-9-]*\.atlassian\.net') { return 'Atlassian Cloud host' }
+    # (2) Real *.atlassian.net host — matched case-insensitively: DNS hosts are
+    #     case-insensitive, so a MiXeD-case spelling must not bypass the guard.
+    if (Test-JiraPrivacyRegexHit -Payload $Payload -Pattern '[a-z0-9][a-z0-9-]*\.atlassian\.net' -AllowlistJson $AllowlistJson -CaseInsensitive $true) {
+        return 'Atlassian Cloud host'
+    }
 
     # (3) Exact match of a known coordinate (fixed-string, precision).
     $coords = @($KnownCoordinatesJson | ConvertFrom-Json -Depth 100)
     foreach ($c in $coords) {
         $cs = [string] $c
-        if (-not [string]::IsNullOrEmpty($cs) -and $scan.Contains($cs)) { return 'known coordinate' }
+        if ([string]::IsNullOrEmpty($cs)) { continue }
+        if ($Payload.Contains($cs) -and -not (Test-JiraPrivacyMatchAllowed -Match $cs -AllowlistJson $AllowlistJson)) {
+            return 'known coordinate'
+        }
     }
 
     return ''
@@ -83,8 +111,8 @@ function Test-JiraPrivacyBlock {
 function Get-JiraPrivacyWarnReason {
     <#
     .SYNOPSIS
-      Return the WARN reason for a generic shape (empty when clear). Allowlisted
-      substrings are neutralised first (FR-053). WARN never gates a write. Mirror of
+      Return the WARN reason for a generic shape (empty when clear). The allowlist
+      exempts individual matches only (FR-053). WARN never gates a write. Mirror of
       privacy_guard_warn_reason.
     #>
     [CmdletBinding()]
@@ -92,10 +120,12 @@ function Get-JiraPrivacyWarnReason {
         [Parameter(Mandatory)] [AllowEmptyString()] [string] $Payload,
         [string] $AllowlistJson = '[]'
     )
-    $scan = Get-JiraPrivacySanitized -Payload $Payload -AllowlistJson $AllowlistJson
-
-    if ($scan -match '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}') { return 'email address' }
-    if ($scan -match '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}') { return 'UUID' }
+    if (Test-JiraPrivacyRegexHit -Payload $Payload -Pattern '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' -AllowlistJson $AllowlistJson -CaseInsensitive $true) {
+        return 'email address'
+    }
+    if (Test-JiraPrivacyRegexHit -Payload $Payload -Pattern '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' -AllowlistJson $AllowlistJson -CaseInsensitive $true) {
+        return 'UUID'
+    }
     return ''
 }
 
@@ -117,8 +147,14 @@ function Get-JiraPrivacyAllowlist {
         }
     }
     $cfg = @($ConfigAllowlistJson | ConvertFrom-Json -Depth 100)
-    $merged = @($lines + @($cfg | ForEach-Object { [string] $_ }) | Where-Object { $_ -ne '' } | Sort-Object -Unique)
-    return (ConvertTo-JiraJsonValue $merged)
+    # De-duplicate + sort ORDINALLY and case-sensitively, matching jq `unique`
+    # (Sort-Object -Unique is culture-sensitive and case-insensitive: it would
+    # both diverge from the Bash port and COLLAPSE case-variant entries).
+    $set = [System.Collections.Generic.SortedSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($x in @($lines + @($cfg | ForEach-Object { [string] $_ }))) {
+        if ($x -ne '') { [void]$set.Add($x) }
+    }
+    return (ConvertTo-JiraJsonValue @($set))
 }
 
 function Test-JiraPrivacyPathExcluded {
@@ -150,4 +186,4 @@ function Test-JiraPrivacyPathExcluded {
 
 Export-ModuleMember -Function Get-JiraPrivacyBlockReason, Test-JiraPrivacyBlock, `
     Get-JiraPrivacyWarnReason, Get-JiraPrivacyAllowlist, Test-JiraPrivacyPathExcluded, `
-    Get-JiraPrivacySanitized
+    Test-JiraPrivacyMatchAllowed

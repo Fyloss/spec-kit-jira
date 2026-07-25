@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Privacy guard fail-open defects: the allowlist now exempts individual matches
+  only (the payload is never rewritten, so an overlapping entry can never disable
+  detection of unrelated tokens, hosts, or coordinates), `*.atlassian.net` hosts
+  are matched case-insensitively, and the PowerShell port de-duplicates known
+  coordinates and allowlist entries ordinally like `jq unique` — case variants
+  are kept distinct (FR-052, FR-053).
+- Cross-port parity: PowerShell enum, label, and config-key comparisons are now
+  case-sensitive like the Bash port, so routing and validation decisions no
+  longer diverge between ports (NFR-1).
+- Flagged/impediment field discovery is locale-independent: the English name is
+  only a first-chance match; a localized site resolves the field by shape, so
+  flagged-withholding lifecycle safety stays active (FR-036).
+- A `config.local.yml` override touching one project no longer drops the other
+  projects from the merged configuration (`projects` merges per entry, by key).
+- `reconcile` guards every pipeline step: a malformed spec or an invalid
+  `SPEC_KIT_JIRA_LIFECYCLE` value now exits with the documented configuration
+  code and an actionable error instead of a raw interpreter failure (FR-032).
+- `.env` token parsing follows dotenv conventions (`export ` prefix, surrounding
+  quotes, CRLF), so a conventional file no longer yields a corrupted token and
+  an unexplained authentication failure.
+- An inline Given/When/Then triple whose Given clause contains the word "when"
+  now splits at the explicit clause boundaries and survives intact (FR-015).
+- The `--json` run summary now conforms to `run-summary.schema.json`: hook
+  health is reported under `hook_health` as `{present, missing, disabled,
+  repair_hint?}`, and the contract documents the `actions`, `warnings`, and
+  `notes` fields the summary carries (FR-033, FR-047).
+
 ### Added
 
 - Deterministic, model-independent `config` install ceremony: byte-identical

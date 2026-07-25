@@ -65,26 +65,36 @@ _register_hooks_merge() {
 }
 
 # register_hooks_health <extensions-yml-path> — READ-ONLY hook-health check for the
-# run summary (FR-047). Prints a canonical object
-#   { status: "healthy"|"degraded"|"refused", missing: [event...], detail }
+# run summary (FR-047). Prints the canonical hook_health object of
+# run-summary.schema.json:
+#   { present: [event...], missing: [event...], disabled: [event...], repair_hint? }
 # `missing` lists lifecycle events with no reconcile hook at all; an operator-
-# disabled hook counts as present (never "missing"), so it is never re-added.
+# disabled hook is listed under `disabled` (never "missing"), so it is never
+# re-added (FR-048). `repair_hint` names the one-command repair and appears only
+# when a hook is missing. A malformed file reports every event missing and
+# returns EXIT_CONFIG.
 register_hooks_health() {
   local path="$1" existing="{}" events
+  events="$(_register_hooks_events_json)"
   if [[ -f "${path}" ]]; then
     if ! existing="$(config_yaml_to_json "${path}" 2> /dev/null)"; then
-      printf '{"detail":"extensions.yml is not valid YAML","missing":[],"status":"refused"}'
+      jq -cn --argjson events "${events}" \
+        '{present: [], missing: $events, disabled: [],
+          repair_hint: "extensions.yml is not valid YAML — fix it, then run /speckit.jira.config or reconcile --repair-hooks"}' \
+        | json_canonical
       return "${EXIT_CONFIG}"
     fi
   fi
-  events="$(_register_hooks_events_json)"
   jq -c --argjson events "${events}" --arg cmd "${HOOK_COMMAND}" '
-    . as $root
-    | [ $events[] | select( ((($root.hooks // {})[.] // []) | any(.command == $cmd)) | not ) ] as $missing
-    | {status: (if ($missing | length) == 0 then "healthy" else "degraded" end),
-       missing: $missing,
-       detail: (if ($missing | length) == 0 then "all lifecycle hooks registered"
-                else "\($missing | length) lifecycle hook(s) missing — run /speckit.jira.config or reconcile --repair-hooks" end)}
+    (.hooks // {}) as $h
+    | reduce $events[] as $e ({present: [], missing: [], disabled: []};
+        (($h[$e] // []) | map(select(.command == $cmd))) as $ours
+        | if ($ours | length) == 0 then .missing += [$e]
+          elif any($ours[]; .enabled != false) then .present += [$e]
+          else .disabled += [$e] end)
+    | . + (if (.missing | length) > 0
+           then {repair_hint: "run /speckit.jira.config or reconcile --repair-hooks"}
+           else {} end)
   ' <<< "${existing}" | json_canonical
 }
 

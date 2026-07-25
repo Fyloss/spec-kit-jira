@@ -179,15 +179,26 @@ parse_acceptance_criteria() {
     t="$(_parse_trim "$(_parse_strip_marker "${t}")")"
     [[ -z "${t}" ]] && continue
 
-    # Inline triple on a single line.
+    # Inline triple on a single line. Prefer explicit clause boundaries
+    # (", When" / ", Then") so a Given clause that itself contains the word
+    # "when" survives intact; only a delimiter-free line falls back to the
+    # first-keyword split. The regex lives in a variable (the reliable way to
+    # feed ERE to bash =~).
     if [[ "${t}" =~ [Gg]iven[[:space:]] ]] && [[ "${t}" =~ [Ww]hen[[:space:]] ]] && [[ "${t}" =~ [Tt]hen[[:space:]] ]]; then
       _parse_ac_flush
       local rest gv wv tv
-      rest="${t#*[Gg]iven }"
-      gv="${rest%%[Ww]hen *}"
-      rest="${rest#*[Ww]hen }"
-      wv="${rest%%[Tt]hen *}"
-      tv="${rest#*[Tt]hen }"
+      local trip_re='[Gg]iven[[:space:]]+(.+)[,;][[:space:]]*[Ww]hen[[:space:]]+(.+)[,;][[:space:]]*[Tt]hen[[:space:]]+(.+)$'
+      if [[ "${t}" =~ ${trip_re} ]]; then
+        gv="${BASH_REMATCH[1]}"
+        wv="${BASH_REMATCH[2]}"
+        tv="${BASH_REMATCH[3]}"
+      else
+        rest="${t#*[Gg]iven }"
+        gv="${rest%%[Ww]hen *}"
+        rest="${rest#*[Ww]hen }"
+        wv="${rest%%[Tt]hen *}"
+        tv="${rest#*[Tt]hen }"
+      fi
       given="$(jq -cn --arg v "$(_parse_trim "${gv}")" '[$v]')"
       when="$(jq -cn --arg v "$(_parse_trim "${wv}")" '[$v]')"
       then="$(jq -cn --arg v "$(_parse_trim "${tv}")" '[$v]')"

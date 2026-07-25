@@ -65,4 +65,10 @@ Describe 'Resolve-JiraRouting' {
         $r.ExitCode | Should -Be 0
         $r.ProjectKey | Should -Be 'SOLO'
     }
+
+    It 'matches labels CASE-SENSITIVELY like the Bash port — "Infra" is not "infra" (NFR-1)' {
+        $r = Invoke-Routing '001-networking' '["Infra"]'
+        $r.ExitCode | Should -Be 0
+        $r.ProjectKey | Should -Be 'COMP'
+    }
 }

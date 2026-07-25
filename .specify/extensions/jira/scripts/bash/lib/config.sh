@@ -441,8 +441,23 @@ config_load() {
     local_json="$(config_yaml_to_json "${local_f}")" || return "${EXIT_CONFIG}"
     printf '%s' "${local_json}" | _cfg_credential_errors | _cfg_report_errors "credential" "${local_f}" || return "${EXIT_CONFIG}"
     printf '%s' "${local_json}" | _cfg_schema_errors "${_CFG_LOCAL_ERRORS_JQ}" | _cfg_report_errors "schema" "${local_f}" || return "${EXIT_CONFIG}"
-    # Recursive object merge of the local `overrides` over the team config.
-    merged="$(jq -cSn --argjson t "${team_json}" --argjson l "${local_json}" '$t * ($l.overrides // {})')"
+    # Recursive object merge of the local `overrides` over the team config. jq's
+    # `*` replaces ARRAYS wholesale, which would silently DROP every project the
+    # local override does not repeat — so `projects` is merged per-entry BY KEY:
+    # each override entry deep-merges into the team entry with the same key,
+    # unmatched team entries survive, and unmatched override entries are appended.
+    merged="$(jq -cSn --argjson t "${team_json}" --argjson l "${local_json}" '
+      ($l.overrides // {}) as $o
+      | ($t * $o)
+      | if ($o | has("projects")) and (($t.projects? | type) == "array") and (($o.projects | type) == "array")
+        then .projects = (
+          ($t.projects | map(.key)) as $keys
+          | ($t.projects
+             | map(. as $p | (first($o.projects[] | select(.key == $p.key)) // null) as $ov
+                   | if $ov == null then $p else $p * $ov end))
+            + ($o.projects | map(select((.key as $k | $keys | index($k)) == null)))
+        )
+        else . end')"
   fi
 
   printf '%s' "${merged}"

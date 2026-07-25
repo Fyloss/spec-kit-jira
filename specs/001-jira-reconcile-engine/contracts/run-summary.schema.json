@@ -22,6 +22,30 @@
         "errors": { "type": "integer", "minimum": 0 }
       }
     },
+    "actions": {
+      "type": "array",
+      "description": "The ordered write-action set of a reconcile run; the --dry-run report equals the real run's set exactly (FR-033). URLs are host-relative — the site host is a coordinate that never appears in output (Constitution IV).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["method", "url"],
+        "properties": {
+          "method": { "type": "string" },
+          "url": { "type": "string" },
+          "body": { "type": "object" }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Human-readable lifecycle-safety warnings (withheld transitions, drift); present only when lifecycle facts were supplied.",
+      "items": { "type": "string" }
+    },
+    "notes": {
+      "type": "array",
+      "description": "Non-gating informational notes (e.g. open blocking links named per FR-037); present only when lifecycle facts were supplied.",
+      "items": { "type": "string" }
+    },
     "effects": {
       "type": "object",
       "description": "The three effects of a /speckit.jira.config run, reported SEPARATELY (FR-054).",

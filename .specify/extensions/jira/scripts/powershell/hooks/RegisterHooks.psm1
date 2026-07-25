@@ -82,11 +82,13 @@ function Get-JiraHookProp {
 function Get-JiraHookHealth {
     <#
     .SYNOPSIS
-      READ-ONLY hook-health check for the run summary (FR-047). Returns the canonical
-      object { status; missing; detail }. `missing` lists lifecycle events with no
-      reconcile hook at all; an operator-disabled hook counts as present, so it is
-      never re-added. A malformed file yields status "refused". Mirror of
-      register_hooks_health.
+      READ-ONLY hook-health check for the run summary (FR-047). Returns the
+      canonical hook_health object of run-summary.schema.json:
+      { present; missing; disabled; repair_hint? }. `missing` lists lifecycle
+      events with no reconcile hook at all; an operator-disabled hook is listed
+      under `disabled` (never "missing"), so it is never re-added (FR-048).
+      `repair_hint` appears only when a hook is missing. A malformed file reports
+      every event missing. Mirror of register_hooks_health.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Path)
@@ -95,27 +97,37 @@ function Get-JiraHookHealth {
     if (Test-Path -LiteralPath $Path) {
         try { $existingJson = ConvertFrom-JiraConfigYaml -Path $Path }
         catch {
-            return (ConvertTo-JiraJsonValue ([ordered]@{ detail = 'extensions.yml is not valid YAML'; missing = @(); status = 'refused' }))
+            return (ConvertTo-JiraJsonValue ([ordered]@{
+                        present     = @()
+                        missing     = @($script:HookEvents)
+                        disabled    = @()
+                        repair_hint = 'extensions.yml is not valid YAML — fix it, then run /speckit.jira.config or reconcile --repair-hooks'
+                    }))
         }
     }
     $root = $existingJson | ConvertFrom-Json -Depth 100
     $hooks = Get-JiraHookProp $root 'hooks'
 
+    $present = [System.Collections.Generic.List[string]]::new()
     $missing = [System.Collections.Generic.List[string]]::new()
+    $disabled = [System.Collections.Generic.List[string]]::new()
     foreach ($e in $script:HookEvents) {
-        $entries = @(Get-JiraHookProp $hooks $e)
-        $present = $false
-        foreach ($x in $entries) {
-            if ((Get-JiraHookProp $x 'command') -eq $script:HookCommand) { $present = $true; break }
+        $ours = [System.Collections.Generic.List[object]]::new()
+        foreach ($x in @(Get-JiraHookProp $hooks $e)) {
+            if ((Get-JiraHookProp $x 'command') -eq $script:HookCommand) { $ours.Add($x) }
         }
-        if (-not $present) { $missing.Add($e) }
+        if ($ours.Count -eq 0) { $missing.Add($e); continue }
+        $enabled = $false
+        foreach ($x in $ours) {
+            $en = Get-JiraHookProp $x 'enabled'
+            if (-not ($en -is [bool] -and $en -eq $false)) { $enabled = $true; break }
+        }
+        if ($enabled) { $present.Add($e) } else { $disabled.Add($e) }
     }
 
-    $status = if ($missing.Count -eq 0) { 'healthy' } else { 'degraded' }
-    $detail = if ($missing.Count -eq 0) { 'all lifecycle hooks registered' }
-    else { "$($missing.Count) lifecycle hook(s) missing — run /speckit.jira.config or reconcile --repair-hooks" }
-
-    return (ConvertTo-JiraJsonValue ([ordered]@{ status = $status; missing = $missing.ToArray(); detail = $detail }))
+    $out = [ordered]@{ present = $present.ToArray(); missing = $missing.ToArray(); disabled = $disabled.ToArray() }
+    if ($missing.Count -gt 0) { $out['repair_hint'] = 'run /speckit.jira.config or reconcile --repair-hooks' }
+    return (ConvertTo-JiraJsonValue $out)
 }
 
 function Set-JiraHookRegistration {

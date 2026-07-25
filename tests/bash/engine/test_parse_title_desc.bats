@@ -81,6 +81,14 @@ setup() {
   [ "$(printf '%s' "$output" | jq -r '.[0].then[0]')" = "widgets load" ]
 }
 
+@test "an inline triple keeps a Given clause containing the word 'when' intact" {
+  run bash -c "printf '%s\n' 'Given the user logs in when prompted, When they click, Then it opens' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].given[0]' <<< "$output")" = "the user logs in when prompted" ]
+  [ "$(jq -r '.[0].when[0]' <<< "$output")" = "they click" ]
+  [ "$(jq -r '.[0].then[0]' <<< "$output")" = "it opens" ]
+}
+
 @test "extracts an inline Given/When/Then scenario on one line" {
   run bash -c "printf '%s\n' 'Given a user When they click Then it opens' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
   [ "$(printf '%s' "$output" | jq 'length')" -eq 1 ]

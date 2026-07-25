@@ -94,26 +94,41 @@ teardown() {
   [ "$(jq -r '.hooks.after_plan | map(select(.command=="speckit.jira.reconcile")) | length' <<< "$json")" -eq 1 ]
 }
 
-@test "health reports healthy when all hooks are registered, degraded when one is missing (FR-047)" {
+@test "health reports present/missing in the contract shape (FR-047, run-summary.schema.json)" {
   register_hooks_write "${EXT}" > /dev/null
   local h
   h="$(register_hooks_health "${EXT}")"
-  [ "$(jq -r '.status' <<< "$h")" = "healthy" ]
+  [ "$(jq -r '.present | length' <<< "$h")" -eq 6 ]
   [ "$(jq -r '.missing | length' <<< "$h")" -eq 0 ]
+  [ "$(jq -r '.disabled | length' <<< "$h")" -eq 0 ]
+  [ "$(jq -r 'has("repair_hint")' <<< "$h")" = "false" ]
 
   local trimmed
   trimmed="$(config_yaml_to_json "${EXT}" | jq -c 'del(.hooks.after_analyze)')"
   printf '%s' "$trimmed" | config_to_yaml > "${EXT}"
   h="$(register_hooks_health "${EXT}")"
-  [ "$(jq -r '.status' <<< "$h")" = "degraded" ]
   [ "$(jq -r '.missing[0]' <<< "$h")" = "after_analyze" ]
+  [ "$(jq -r '.present | length' <<< "$h")" -eq 5 ]
+  [[ "$(jq -r '.repair_hint' <<< "$h")" == *"repair-hooks"* ]]
+}
+
+@test "health lists an operator-disabled hook under disabled — neither present nor missing (FR-048)" {
+  register_hooks_write "${EXT}" > /dev/null
+  local disabled
+  disabled="$(config_yaml_to_json "${EXT}" | jq -c '.hooks.after_implement[0].enabled = false')"
+  printf '%s' "$disabled" | config_to_yaml > "${EXT}"
+  local h
+  h="$(register_hooks_health "${EXT}")"
+  [ "$(jq -r '.disabled[0]' <<< "$h")" = "after_implement" ]
+  [ "$(jq -r '.present | length' <<< "$h")" -eq 5 ]
+  [ "$(jq -r '.missing | length' <<< "$h")" -eq 0 ]
 }
 
 @test "health on an absent file reports every hook missing" {
   local h
   h="$(register_hooks_health "${WORK}/nope.yml")"
-  [ "$(jq -r '.status' <<< "$h")" = "degraded" ]
   [ "$(jq -r '.missing | length' <<< "$h")" -eq 6 ]
+  [ "$(jq -r '.present | length' <<< "$h")" -eq 0 ]
 }
 
 @test "the PowerShell port registers a byte-identical extensions.yml (NFR-1)" {

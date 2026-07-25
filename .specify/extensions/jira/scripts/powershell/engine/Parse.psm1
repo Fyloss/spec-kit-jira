@@ -160,7 +160,11 @@ function Get-JiraParsedAcceptance {
 
         if (($t -cmatch '[Gg]iven\s') -and ($t -cmatch '[Ww]hen\s') -and ($t -cmatch '[Tt]hen\s')) {
             & $flush
-            $m = [regex]::Match($t, '[Gg]iven\s+(.*?)\s+[Ww]hen\s+(.*?)\s+[Tt]hen\s+(.+)')
+            # Prefer explicit clause boundaries (", When" / ", Then") so a Given
+            # clause that itself contains the word "when" survives intact; only a
+            # delimiter-free line falls back to the first-keyword split.
+            $m = [regex]::Match($t, '[Gg]iven\s+(.+)[,;]\s*[Ww]hen\s+(.+)[,;]\s*[Tt]hen\s+(.+)$')
+            if (-not $m.Success) { $m = [regex]::Match($t, '[Gg]iven\s+(.*?)\s+[Ww]hen\s+(.*?)\s+[Tt]hen\s+(.+)') }
             if ($m.Success) {
                 $given.Add($m.Groups[1].Value.Trim())
                 $when.Add($m.Groups[2].Value.Trim())

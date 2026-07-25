@@ -38,12 +38,23 @@ teardown() {
   rm -rf "${WORK}"
 }
 
-@test "every run reports hook health in the summary (FR-047)" {
+@test "every run reports hook health in the summary, in the contract shape (FR-047)" {
   run cmd_reconcile reconcile --dry-run --json "${SPEC}"
   [ "$status" -eq 0 ]
-  # No extensions.yml yet: health is degraded and lists all six lifecycle events.
-  [ "$(jq -r '.hooks.status' <<< "$output")" = "degraded" ]
-  [ "$(jq -r '.hooks.missing | length' <<< "$output")" -eq 6 ]
+  # No extensions.yml yet: all six lifecycle events are missing, none present,
+  # and the one-command repair hint is surfaced (run-summary.schema.json).
+  [ "$(jq -r '.hook_health.missing | length' <<< "$output")" -eq 6 ]
+  [ "$(jq -r '.hook_health.present | length' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.hook_health.disabled | length' <<< "$output")" -eq 0 ]
+  [[ "$(jq -r '.hook_health.repair_hint' <<< "$output")" == *"repair-hooks"* ]]
+}
+
+@test "the --json summary carries NO key outside the published run-summary contract" {
+  run cmd_reconcile reconcile --dry-run --json "${SPEC}"
+  [ "$status" -eq 0 ]
+  # run-summary.schema.json declares additionalProperties:false — every top-level
+  # key must be one the contract names (the old ad-hoc `hooks` key is gone).
+  [ "$(jq -r '[keys[] | select(IN("schema_version","command","dry_run","counts","effects","drift","flags","blockers","hook_health","mutations","actions","warnings","notes","exit_code") | not)] | length' <<< "$output")" -eq 0 ]
 }
 
 @test "--repair-hooks registers the hooks and the same run then reports healthy (FR-047)" {
@@ -51,14 +62,15 @@ teardown() {
   # A dry-run repair previews only — the file is not written, health still degraded.
   [ "$status" -eq 0 ]
   [ ! -f "${SPEC_KIT_JIRA_EXTENSIONS_YML}" ]
-  [ "$(jq -r '.hooks.status' <<< "$output")" = "degraded" ]
+  [ "$(jq -r '.hook_health.missing | length' <<< "$output")" -eq 6 ]
 
   # A real --repair-hooks run writes the file and the same run reports healthy. The
   # mirror write itself fails-closed against the unreachable base, but the repair is
   # independent of the mirror's result, so the hooks are registered regardless.
   run cmd_reconcile reconcile --repair-hooks --json "${SPEC}"
   [ -f "${SPEC_KIT_JIRA_EXTENSIONS_YML}" ]
-  [ "$(jq -r '.hooks.status' <<< "$(grep '^{' <<< "$output")")" = "healthy" ]
+  [ "$(jq -r '.hook_health.present | length' <<< "$(grep '^{' <<< "$output")")" -eq 6 ]
+  [ "$(jq -r '.hook_health | has("repair_hint")' <<< "$(grep '^{' <<< "$output")")" = "false" ]
 }
 
 @test "the PowerShell port reports an identical hook-health summary (NFR-1)" {

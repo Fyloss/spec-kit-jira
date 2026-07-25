@@ -39,6 +39,23 @@ Describe 'Credentials' {
         Resolve-JiraToken | Should -Be 'env-token'
     }
 
+    It "reads an 'export JIRA_API_TOKEN=...' line in .env (dotenv convention)" {
+        Set-Content -Path (Join-Path $script:TmpDir '.env') -Value 'export JIRA_API_TOKEN=file-token'
+        Resolve-JiraToken | Should -Be 'file-token'
+    }
+
+    It 'strips surrounding quotes from the .env value (dotenv convention)' {
+        Set-Content -Path (Join-Path $script:TmpDir '.env') -Value 'JIRA_API_TOKEN="file-token"'
+        Resolve-JiraToken | Should -Be 'file-token'
+        Set-Content -Path (Join-Path $script:TmpDir '.env') -Value "JIRA_API_TOKEN='file-token'"
+        Resolve-JiraToken | Should -Be 'file-token'
+    }
+
+    It 'strips the carriage return from a Windows-authored (CRLF) .env' {
+        [System.IO.File]::WriteAllText((Join-Path $script:TmpDir '.env'), "JIRA_API_TOKEN=file-token`r`n")
+        Resolve-JiraToken | Should -Be 'file-token'
+    }
+
     It 'secret manager (mockable) sits between env and .env' {
         Set-Content -Path (Join-Path $script:TmpDir '.env') -Value 'JIRA_API_TOKEN=file-token'
         $env:_CRED_SECRET_TOKEN = 'keychain-token'

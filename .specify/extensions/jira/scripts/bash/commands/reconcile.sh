@@ -96,8 +96,14 @@ cmd_reconcile() {
   spec_ref="$(jq -cn --arg r "${repo}" --arg s "${slug}" --arg f "${folder}" \
     '{repo:$r, spec_slug:$s, folder:$f}')"
 
-  # ENGINE: parse the spec into neutral content, then assemble + validate.
-  parse="$(parse_spec "${slug}" < "${spec_file}")"
+  # ENGINE: parse the spec into neutral content, then assemble + validate. Every
+  # substitution is GUARDED: under the dispatcher's live `set -euo pipefail` an
+  # unguarded failure would kill the process with a raw exit code, skipping the
+  # mapped error path (FR-032: mapped exits, zero writes).
+  if ! parse="$(parse_spec "${slug}" < "${spec_file}")"; then
+    printf 'reconcile: the specification could not be parsed (zero writes)\n' >&2
+    return "${EXIT_CONFIG}"
+  fi
   ctx="$(jq -cn --argjson sr "${spec_ref}" --arg pk "${project_key}" --arg es "${epic_strategy}" \
     '{spec_ref:$sr, project_key:$pk, epic_strategy:$es}')"
   if ! doc="$(interchange_build "${parse}" "${ctx}")"; then
@@ -108,7 +114,10 @@ cmd_reconcile() {
   # SINK: plan the ordered action set (the --dry-run report is exactly this set).
   local plan_ctx actions
   plan_ctx="$(_reconcile_plan_context "${base}")"
-  actions="$(plan_writes "${doc}" "${plan_ctx}")"
+  if ! actions="$(plan_writes "${doc}" "${plan_ctx}")"; then
+    printf 'reconcile: the write plan could not be assembled (zero writes)\n' >&2
+    return "${EXIT_CONFIG}"
+  fi
 
   # US6 lifecycle safety: when the current-Jira facts are supplied (the seam the
   # config/discovery integration fills from a fail-closed read), fold in zero-churn
@@ -119,9 +128,15 @@ cmd_reconcile() {
   local lifecycle="${SPEC_KIT_JIRA_LIFECYCLE:-}"
   if [[ -n "${lifecycle}" ]]; then
     has_lifecycle="true"
-    lifecycle="$(jq -c --arg b "${base}" --arg od "${on_drift}" '. + {base_url:$b, on_drift:$od}' <<< "${lifecycle}")"
+    if ! lifecycle="$(jq -c --arg b "${base}" --arg od "${on_drift}" '. + {base_url:$b, on_drift:$od}' <<< "${lifecycle}" 2> /dev/null)"; then
+      printf 'reconcile: SPEC_KIT_JIRA_LIFECYCLE is not valid JSON (zero writes)\n' >&2
+      return "${EXIT_CONFIG}"
+    fi
     local lresult
-    lresult="$(plan_lifecycle "${actions}" "${doc}" "${lifecycle}")"
+    if ! lresult="$(plan_lifecycle "${actions}" "${doc}" "${lifecycle}")"; then
+      printf 'reconcile: the lifecycle plan could not be assembled (zero writes)\n' >&2
+      return "${EXIT_CONFIG}"
+    fi
     actions="$(jq -c '.actions' <<< "${lresult}")"
     warns="$(jq -c '.warnings' <<< "${lresult}")"
     notes="$(jq -c '.notes' <<< "${lresult}")"
@@ -149,7 +164,7 @@ cmd_reconcile() {
     register_hooks_write "${ext_path}" "${dry_run}" > /dev/null || true
   fi
   hooks_health="$(register_hooks_health "${ext_path}")" || true
-  [[ -z "${hooks_health}" ]] && hooks_health='{}'
+  [[ -z "${hooks_health}" ]] && hooks_health='{"disabled":[],"missing":[],"present":[]}'
 
   # FR-046: in hook context a bridge failure NEVER fails the host command — after
   # surfacing a single actionable WARNING the exit is downgraded to 0, so the mirror
@@ -177,7 +192,7 @@ cmd_reconcile() {
      counts:{created:$c, updated:$u, skipped:0, warnings:$wc, errors:0},
      actions:$actions}
     + (if $hl then {warnings:$w, notes:$no} else {} end)
-    + {hooks:$hooks, exit_code:$x}' | json_canonical)"
+    + {hook_health:$hooks, exit_code:$x}' | json_canonical)"
 
   if [[ "${json}" == "true" ]]; then
     printf '%s\n' "${summary}"

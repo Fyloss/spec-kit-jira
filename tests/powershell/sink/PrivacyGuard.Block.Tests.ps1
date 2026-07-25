@@ -34,6 +34,29 @@ Describe 'Privacy guard BLOCK tier' {
     }
 }
 
+Describe 'Privacy guard fail-open regressions (case bypass + allowlist shredding)' {
+    It 'blocks a MiXeD-case Atlassian host — DNS hosts are case-insensitive (FR-052)' {
+        Test-JiraPrivacyBlock -Payload 'see https://Acme.Atlassian.Net/browse/PROJ-1' | Should -Be 9
+    }
+    It 'an allowlist entry overlapping the token shape never disables token detection (FR-052)' {
+        Test-JiraPrivacyBlock -Payload 'see token ATATT3xFfGF0abcdef for access' -AllowlistJson '["ATAT"]' | Should -Be 9
+    }
+    It 'an allowlist entry matching a SUBSTRING of a real host never neutralises it (FR-052)' {
+        Test-JiraPrivacyBlock -Payload 'leak acme-corp.atlassian.net' -AllowlistJson '["corp.atlassian.net"]' | Should -Be 9
+    }
+    It 'an allowlist entry overlapping a known coordinate never disables its detection (FR-052)' {
+        Test-JiraPrivacyBlock -Payload 'internal ref ACME-PROD site' -KnownCoordinatesJson '["ACME-PROD site"]' -AllowlistJson '["ACME"]' | Should -Be 9
+    }
+    It 'an allowlisted domain still exempts its own hosts, any case (FR-053 preserved)' {
+        Test-JiraPrivacyBlock -Payload 'see OurCo.Atlassian.Net/wiki/spaces/OPS' -AllowlistJson '["ourco.atlassian.net"]' | Should -Be 0
+    }
+    It 'keeps case-variant known coordinates DISTINCT and sorted like jq unique (NFR-1)' {
+        $env:SPEC_KIT_JIRA_BASE_URL = ''
+        Get-JiraApplyKnownCoordinate -ExtraJson '["PROJ-Secret","proj-secret","B","a"]' |
+            Should -Be '["B","PROJ-Secret","a","proj-secret"]'
+    }
+}
+
 Describe 'Privacy guard as the mandatory pre-write gate' {
     BeforeEach {
         $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
