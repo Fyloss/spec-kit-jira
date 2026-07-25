@@ -48,7 +48,13 @@ jobs:
           out="coverage/bash"
           mkdir -p "${out}"
           rc=0
-          kcov --include-path="${PWD}/${BASH_SCRIPTS}" "${out}" bats -r tests/bash || rc=$?
+          # kcov-excl markers bracket lines its tracer structurally cannot hit:
+          # multi-line jq string literals (counted as statements by kcov's line
+          # parser) and the xtrace-suspended credential/transport machinery
+          # (NFR-3: secrets must never reach a trace).
+          kcov --include-path="${PWD}/${BASH_SCRIPTS}" \
+            --exclude-region='kcov-excl-start:kcov-excl-stop' \
+            "${out}" bats -r tests/bash || rc=$?
           if [ "${rc}" -ne 0 ]; then
             # kcov's xtrace instrumentation can abort bats itself; only a
             # plain-run failure is a genuine suite failure.

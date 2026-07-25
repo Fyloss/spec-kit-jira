@@ -48,6 +48,8 @@ source "${_drift_dir}/../lib/output.sh"
 # the transition proceeds only when the two positions are comparable).
 drift_evaluate() {
   local input="$1"
+  # kcov-excl-start — multi-line jq literal: kcov counts string continuation
+  # lines as unhittable statements
   jq -n --argjson in "${input}" '
     ($in.current_status // "")   as $cur
     | ($in.current_category // "unknown") as $cat
@@ -94,4 +96,5 @@ drift_evaluate() {
           end)
        end)
   ' | json_canonical
+  # kcov-excl-stop
 }

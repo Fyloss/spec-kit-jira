@@ -43,6 +43,7 @@ source "${_discovery_dir}/client.sh"
 # Prints the canonical {logical_name,id} object, or null.
 discovery_flagged_field() {
   local fields="${1:-[]}"
+  # kcov-excl-start — jq literal (string lines are not statements)
   jq -cn --argjson fields "${fields}" '
     ([ $fields[] | select((.name // "") | test("impediment|flag"; "i"))
        | {logical_name: .name, id: .fieldId} ]) as $byname
@@ -51,6 +52,7 @@ discovery_flagged_field() {
        | {logical_name: .name, id: .fieldId} ]) as $byshape
     | ($byname[0] // (if ($byshape | length) == 1 then $byshape[0] else null end))
   ' | json_canonical
+  # kcov-excl-stop
 }
 
 # _disc_style <project-json> — map the detected style to its logical value
@@ -113,6 +115,7 @@ discover_binding() {
 
   # Assemble the neutral binding. Arrays keep discovered order; json_canonical
   # sorts object keys so both ports converge to identical bytes (research §11).
+  # kcov-excl-start — jq literal (string lines are not statements)
   jq -n \
     --arg style "${style}" \
     --argjson itypes "${itypes}" \
@@ -139,6 +142,7 @@ discover_binding() {
         | sort_by([(-.score), .id]) ),
       flagged_field: $flagged
     }' | json_canonical
+  # kcov-excl-stop
 }
 
 # fetch_mentioned <issue_key> — READ-ONLY fetch of a mentioned ticket (US10, T087;
@@ -181,6 +185,7 @@ fetch_mentioned() {
     [[ -z "${sib}" ]] && sib='{"issues":[]}'
   fi
 
+  # kcov-excl-start — jq literal (string lines are not statements)
   jq -n \
     --argjson issue "${issue}" \
     --argjson remote "${remote}" \
@@ -220,4 +225,5 @@ fetch_mentioned() {
                             else {key: .key, title: .fields.summary, status: .fields.status.name} end ),
         siblings: ( [ $sib.issues[]? | {key: .key, title: .fields.summary, status: .fields.status.name} ] )
       }' | json_canonical
+  # kcov-excl-stop
 }

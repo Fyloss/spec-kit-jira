@@ -29,6 +29,7 @@ source "${_adf_dir}/../../engine/managed_section.sh"
 # nodes. panel_ref blocks are dropped here: the sink appends the acceptance and
 # design sections deterministically after the description body.
 _adf_blocks_to_nodes() {
+  # kcov-excl-start — jq literal (string lines are not statements)
   jq -c '[ .[] |
     if .type == "heading" then
       {type:"heading", attrs:{level:(.level // 3)}, content:[{type:"text", text:(.text // "")}]}
@@ -39,11 +40,13 @@ _adf_blocks_to_nodes() {
     elif .type == "code" then
       {type:"codeBlock", content:(if (.text // "") == "" then [] else [{type:"text", text:.text}] end)}
     else empty end ]' <<< "$1"
+  # kcov-excl-stop
 }
 
 # _adf_gherkin_panel <ac-json> — a dedicated info panel carrying each scenario's
 # Given/When/Then clauses as paragraphs (FR-015). Empty when there is no AC.
 _adf_gherkin_panel() {
+  # kcov-excl-start — jq literal (string lines are not statements)
   jq -c '
     if length == 0 then empty else
     {type:"panel", attrs:{panelType:"info"},
@@ -52,12 +55,14 @@ _adf_gherkin_panel() {
        ( (.when  // [])[] | {type:"paragraph", content:[{type:"text", text:("When " + .)}]}),
        ( (.then  // [])[] | {type:"paragraph", content:[{type:"text", text:("Then " + .)}]}) ]}
     end' <<< "$1"
+  # kcov-excl-stop
 }
 
 # _adf_design_nodes <design-json> — a distinct Design section (FR-016): a level-3
 # "Design" heading followed by a bullet list of guidance lines and Figma links.
 # Empty when there is no design content.
 _adf_design_nodes() {
+  # kcov-excl-start — jq literal (string lines are not statements)
   jq -c '
     if length == 0 then empty else
     ( {type:"heading", attrs:{level:3}, content:[{type:"text", text:"Design"}]},
@@ -66,6 +71,7 @@ _adf_design_nodes() {
          (if .kind == "figma_link" then ((.label // "Figma") + ": " + .value) else .value end) as $line
          | {type:"listItem", content:[{type:"paragraph", content:[{type:"text", text:$line}]}]} ]} )
     end' <<< "$1"
+  # kcov-excl-stop
 }
 
 # _adf_content_nodes <content-json> — the managed content-node array for a story:
@@ -83,6 +89,7 @@ _adf_content_nodes() {
   panel="$(_adf_gherkin_panel "${ac}")"
   design_nodes="$(_adf_design_nodes "${design}")"
 
+  # kcov-excl-start — jq literal (string lines are not statements)
   jq -cn \
     --argjson body "${body}" \
     --argjson panel "${panel:-null}" \
@@ -91,6 +98,7 @@ _adf_content_nodes() {
     + (if $panel == null then []
        else [ {type:"heading", attrs:{level:3}, content:[{type:"text", text:"Acceptance Criteria"}]}, $panel ] end)
     + $design'
+  # kcov-excl-stop
 }
 
 # adf_render_description <content-json> — render a story's neutral content into a

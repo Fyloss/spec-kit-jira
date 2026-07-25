@@ -33,6 +33,9 @@ source "${_client_dir}/../../lib/credentials.sh"
 JIRA_LAST_STATUS=0
 export JIRA_LAST_STATUS
 
+# kcov-excl-start — jira_request suspends xtrace for its whole duration
+# (NFR-3 / SC-007: the credential must never be traced), so kcov's tracer
+# cannot observe this machinery; the transport suites exercise it end-to-end.
 # _jira_sleep <seconds> — real backoff sleep, suppressed in tests via JIRA_NO_SLEEP.
 _jira_sleep() {
   [[ -n "${JIRA_NO_SLEEP:-}" ]] && return 0
@@ -136,3 +139,4 @@ jira_request() {
   [[ "${_xt}" == 1 ]] && set -x
   return "${rc}"
 }
+# kcov-excl-stop

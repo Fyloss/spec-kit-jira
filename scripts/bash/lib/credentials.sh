@@ -20,6 +20,9 @@ _JIRA_LIB_CREDENTIALS=1
 # `set -x` never traces a secret. The guard stays down through the printf and the
 # final emptiness test; xtrace is only restored once no token value remains live.
 
+# kcov-excl-start — every token-handling function below runs with xtrace
+# suspended (NFR-3 / SC-007), so kcov's tracer cannot observe these lines;
+# the credential suites exercise all three resolution sources.
 # _cred_from_secret_manager — query the OS secret manager. Test-overridable via
 # _CRED_SECRET_TOKEN. Returns empty (non-fatal) when unavailable.
 _cred_from_secret_manager() {
@@ -104,3 +107,4 @@ cred_curl_config() {
   [[ "${_xt}" == 1 ]] && set -x
   return "${rc}"
 }
+# kcov-excl-stop

@@ -276,6 +276,7 @@ config_yaml_to_json() {
 # object keys, `- ` sequences). Kept as a single self-recursive function because
 # jq forbids mutual recursion between separate defs.
 # shellcheck disable=SC2016  # `\(...)`-free; single-quoted jq program
+# kcov-excl-start — jq literal (string lines are not statements)
 _CFG_YAML_EMIT_JQ='
 def yscalar:
   if type=="string" then "\"" + . + "\""
@@ -299,6 +300,7 @@ def yemit(ind):
     ) | join("\n"))
   else . end;
 yemit("")'
+# kcov-excl-stop
 
 # config_to_yaml — read a JSON value on stdin, print its canonical YAML on stdout
 # (no trailing newline; the caller adds exactly one when writing the file).
@@ -314,6 +316,7 @@ config_to_yaml() {
 # credential-shaped string value found (excluding privacy.allowlist, FR-053).
 # The value itself is NEVER printed (NFR-3) — only its path and the matched shape.
 _cfg_credential_errors() {
+  # kcov-excl-start — jq literal (string lines are not statements)
   jq -r '
     def disppath:
       reduce .[] as $p (""; . + (if ($p|type)=="number" then "[\($p)]"
@@ -327,6 +330,7 @@ _cfg_credential_errors() {
           else empty end )
     ] | .[]
   ' 2> /dev/null
+  # kcov-excl-stop
 }
 
 # =============================================================================
@@ -345,6 +349,7 @@ config_classify_statuses() {
   local statuses="$1" psmap="${2:-}" halted="${3:-}"
   [[ -z "${psmap}" ]] && psmap='{}'
   [[ -z "${halted}" ]] && halted='[]'
+  # kcov-excl-start — jq literal (string lines are not statements)
   jq -n --argjson st "${statuses}" --argjson pm "${psmap}" --argjson hd "${halted}" '
     ($pm | [.[]]) as $targets
     | reduce $st[] as $s ({};
@@ -354,6 +359,7 @@ config_classify_statuses() {
           elif ($s.status_category == "done") then "post-scope"
           else "unknown" end))
   ' | json_canonical
+  # kcov-excl-stop
 }
 
 # config_phase_status_targets <phase-status-map-json> — the DISTINCT statuses a
@@ -370,6 +376,7 @@ config_phase_status_targets() {
 # =============================================================================
 
 # shellcheck disable=SC2016  # `\(...)` is jq string interpolation, not shell expansion
+# kcov-excl-start — jq literal (string lines are not statements)
 _CFG_TEAM_ERRORS_JQ='
 def projkey: test("^[A-Z][A-Z0-9_]+$");
 [
@@ -388,13 +395,16 @@ def projkey: test("^[A-Z][A-Z0-9_]+$");
          then "projects[\($i)].link_type is required when task_strategy=linked_story" else empty end)
       ][] ) )
 ] | flatten'
+# kcov-excl-stop
 
 # shellcheck disable=SC2016  # `\(...)` is jq string interpolation, not shell expansion
+# kcov-excl-start — jq literal (string lines are not statements)
 _CFG_LOCAL_ERRORS_JQ='
 [
   (keys_unsorted[] | select(IN("site_alias","resolved_ids","overrides")|not)
    | "unknown config.local key: \(.)")
 ] | flatten'
+# kcov-excl-stop
 
 # _cfg_schema_errors <jq-program> — read JSON on stdin, print each error line.
 _cfg_schema_errors() {
@@ -449,6 +459,7 @@ config_load() {
     # local override does not repeat — so `projects` is merged per-entry BY KEY:
     # each override entry deep-merges into the team entry with the same key,
     # unmatched team entries survive, and unmatched override entries are appended.
+    # kcov-excl-start — jq literal (string lines are not statements)
     merged="$(jq -cSn --argjson t "${team_json}" --argjson l "${local_json}" '
       ($l.overrides // {}) as $o
       | ($t * $o)
@@ -461,6 +472,7 @@ config_load() {
             + ($o.projects | map(select((.key as $k | $keys | index($k)) == null)))
         )
         else . end')"
+    # kcov-excl-stop
   fi
 
   printf '%s' "${merged}"

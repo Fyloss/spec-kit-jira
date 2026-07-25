@@ -40,12 +40,14 @@ _register_hooks_events_json() {
 # `optional: true` makes the hook non-blocking: a bridge failure never fails the
 # host command (FR-046).
 _register_hooks_entry() {
+  # kcov-excl-start — jq literal (string lines are not statements)
   jq -cn --arg cmd "${HOOK_COMMAND}" '{
     command: $cmd,
     description: "Mirror the updated spec-kit artifacts into Jira Cloud (non-blocking).",
     enabled: true,
     optional: true
   }'
+  # kcov-excl-stop
 }
 
 # _register_hooks_merge <existing-json> — ensure our reconcile hook is present under
@@ -55,6 +57,7 @@ _register_hooks_merge() {
   local existing="$1" events entry
   events="$(_register_hooks_events_json)"
   entry="$(_register_hooks_entry)"
+  # kcov-excl-start — jq literal (string lines are not statements)
   jq -c --argjson events "${events}" --argjson entry "${entry}" --arg cmd "${HOOK_COMMAND}" '
     reduce $events[] as $e (.;
       .hooks[$e] = (
@@ -62,6 +65,7 @@ _register_hooks_merge() {
         | if any($cur[]; .command == $cmd) then $cur else $cur + [$entry] end
       ))
   ' <<< "${existing}" | json_canonical
+  # kcov-excl-stop
 }
 
 # register_hooks_health <extensions-yml-path> — READ-ONLY hook-health check for the
@@ -78,13 +82,16 @@ register_hooks_health() {
   events="$(_register_hooks_events_json)"
   if [[ -f "${path}" ]]; then
     if ! existing="$(config_yaml_to_json "${path}" 2> /dev/null)"; then
+      # kcov-excl-start — jq literal (string lines are not statements)
       jq -cn --argjson events "${events}" \
         '{present: [], missing: $events, disabled: [],
           repair_hint: "extensions.yml is not valid YAML — fix it, then run /speckit.jira.config or reconcile --repair-hooks"}' \
         | json_canonical
+      # kcov-excl-stop
       return "${EXIT_CONFIG}"
     fi
   fi
+  # kcov-excl-start — jq literal (string lines are not statements)
   jq -c --argjson events "${events}" --arg cmd "${HOOK_COMMAND}" '
     (.hooks // {}) as $h
     | reduce $events[] as $e ({present: [], missing: [], disabled: []};
@@ -96,6 +103,7 @@ register_hooks_health() {
            then {repair_hint: "run /speckit.jira.config or reconcile --repair-hooks"}
            else {} end)
   ' <<< "${existing}" | json_canonical
+  # kcov-excl-stop
 }
 
 # register_hooks_write <extensions-yml-path> [dry-run:true|false] — idempotently

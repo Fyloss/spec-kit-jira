@@ -19,6 +19,7 @@ source "${_interchange_dir}/../lib/output.sh" # json_canonical only — lib/, ne
 
 # The validation program: emits a JSON array of human-readable error strings
 # (empty array => valid). Kept as a jq program so the rules are declarative.
+# kcov-excl-start — jq literal (string lines are not statements)
 _INTERCHANGE_ERRORS_JQ='
 [
   (if (.schema_version != "1.0") then "schema_version must be \"1.0\"" else empty end),
@@ -45,6 +46,7 @@ _INTERCHANGE_ERRORS_JQ='
      (.stories[] | if ((.description.blocks // []) | length) < 1 then "story.description.blocks must be non-empty" else empty end)
    end)
 ]'
+# kcov-excl-stop
 
 # interchange_validate — read a neutral document on stdin; return 0 if valid,
 # non-zero (with errors on stderr) otherwise. A failure means ZERO writes.
@@ -76,6 +78,7 @@ interchange_validate() {
 interchange_build() {
   local parse="$1" ctx="$2" doc
 
+  # kcov-excl-start — jq literal (string lines are not statements)
   doc="$(jq -cn \
     --argjson parse "${parse}" --argjson ctx "${ctx}" '
     {
@@ -89,6 +92,7 @@ interchange_build() {
       },
       stories: ($parse.stories // [])
     }' | json_canonical)"
+  # kcov-excl-stop
 
   if ! printf '%s' "${doc}" | interchange_validate; then
     return 1
@@ -107,6 +111,7 @@ interchange_build() {
 # PURE: no Jira reads or writes. Prints the resolved project key on stdout.
 routing_resolve() {
   local folder="$1" labels="$2" cfg="$3" key
+  # kcov-excl-start — jq literal (string lines are not statements)
   key="$(jq -r --arg folder "${folder}" --argjson labels "${labels}" '
     (.routing // []) as $rules
     | ( first(
@@ -124,6 +129,7 @@ routing_resolve() {
       ) as $matched
     | ( $matched // .routing_default // "" )
   ' <<< "${cfg}")"
+  # kcov-excl-stop
 
   if [[ -z "${key}" ]]; then
     printf 'routing: no routing rule matched and no routing_default is configured\n' >&2
