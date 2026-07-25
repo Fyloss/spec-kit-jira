@@ -60,17 +60,33 @@ jobs:
           report="$(find "${out}" -path '*kcov-merged*' -name 'coverage.json' | head -n1)"
           [ -n "${report}" ] || report="$(find "${out}" -name 'coverage.json' | head -n1)"
           # An explicit if — `[ -n ... ] && ...` would abort the step under
-          # `set -e` when no report exists, skipping the rescue handover.
+          # `set -e` when no report exists, skipping the rescue handover. A
+          # malformed/truncated report counts as "could not measure" too.
           files=0
           if [ -n "${report}" ]; then
-            files="$(jq '.files | length' "${report}")"
+            files="$(jq '.files | length' "${report}" 2> /dev/null || echo 0)"
           fi
+          {
+            echo "## Bash kcov diagnostics"
+            echo '```'
+            echo "report=${report:-<none>} bytes=$(wc -c < "${report}" 2> /dev/null || echo 0) files=${files}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
           if [ "${files}" -eq 0 ]; then
             echo "kcov produced no measurable report — using the traceability fallback"
             echo "rescue=true" >> "${GITHUB_OUTPUT}"
             exit 42
           fi
           pct="$(jq -r '.percent_covered' "${report}")"
+          {
+            echo "Bash statement coverage: **${pct}%** (gate: 80%)"
+            echo ""
+            echo "Least-covered files:"
+            echo '```'
+            jq -r '.files[] | "\(.percent_covered // .percent)\t\(.file)"' "${report}" \
+              | sort -n | head -30 || true
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
           echo "Bash statement coverage: ${pct}%"
           awk -v p="${pct}" 'BEGIN { exit (p+0 >= 80) ? 0 : 1 }' \
             || { echo "::error::Bash coverage ${pct}% is below the 80% gate"; exit 1; }
@@ -92,6 +108,13 @@ jobs:
             fi
           done < <(find "${BASH_SCRIPTS}" -name '*.sh')
           exit "${missing}"
+      - name: Upload kcov output (diagnostics)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bash-kcov-coverage
+          path: coverage/bash
+          if-no-files-found: ignore
 
   coverage-pwsh:
     name: PowerShell coverage >= 80% (Pester)
