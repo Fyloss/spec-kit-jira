@@ -35,7 +35,10 @@ jobs:
 
       - name: Install Bash toolchain (macOS)
         if: runner.os == 'macOS'
-        run: brew install bats-core jq shellcheck
+        # The runner image only ships Apple's Bash 3.2, which the port refuses
+        # by design (prereq_check requires Bash >= 4); brew's bash lands in
+        # /opt/homebrew/bin, ahead of /bin in the image PATH.
+        run: brew install bats-core jq shellcheck bash
 
       - name: Run bats (Bash port — POSIX hosts only)
         if: runner.os != 'Windows'
