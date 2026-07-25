@@ -59,8 +59,12 @@ jobs:
           fi
           report="$(find "${out}" -path '*kcov-merged*' -name 'coverage.json' | head -n1)"
           [ -n "${report}" ] || report="$(find "${out}" -name 'coverage.json' | head -n1)"
+          # An explicit if — `[ -n ... ] && ...` would abort the step under
+          # `set -e` when no report exists, skipping the rescue handover.
           files=0
-          [ -n "${report}" ] && files="$(jq '.files | length' "${report}")"
+          if [ -n "${report}" ]; then
+            files="$(jq '.files | length' "${report}")"
+          fi
           if [ "${files}" -eq 0 ]; then
             echo "kcov produced no measurable report — using the traceability fallback"
             echo "rescue=true" >> "${GITHUB_OUTPUT}"
