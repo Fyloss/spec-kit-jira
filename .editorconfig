@@ -1,0 +1,28 @@
+# EditorConfig — https://editorconfig.org
+# Also carries the shfmt settings for the Bash port (shfmt reads .editorconfig).
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# shfmt settings for the Bash port.
+[*.sh]
+# shfmt: -i 2 -ci -sr
+indent_size = 2
+# Indent switch cases.
+switch_case_indent = true
+# Redirect operators followed by a space.
+space_redirects = true
+# Binary ops (&&, |) may start a line.
+binary_next_line = true
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false

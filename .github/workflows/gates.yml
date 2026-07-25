@@ -1,0 +1,222 @@
+# T027 — CI: blocking merge gates (Constitution XIII, FR-021/022, SC-006).
+#
+#   * Coverage: Bash statement coverage >= 80% via kcov (PRIMARY), with a
+#     traceability FALLBACK (every shipped script has a referencing test) when
+#     kcov cannot measure; PowerShell statement coverage >= 80% via Pester.
+#   * Module parity: the two ports mirror module-for-module (same leaf set modulo
+#     .sh <-> .psm1/.ps1, case-insensitive).
+#   * Version string: the version literal lives ONLY in the root extension.yml's
+#     `version` field — never in a script and nowhere else but CHANGELOG.md.
+name: Gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# One live run per branch: a new push cancels the superseded run so stale
+# commits never hold the runner queue (macOS runners are scarce).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BASH_SCRIPTS: scripts/bash
+  PWSH_SCRIPTS: scripts/powershell
+
+jobs:
+  coverage-bash:
+    name: Bash coverage >= 80% (kcov primary, traceability fallback)
+    # Pinned to 22.04: kcov (the PRIMARY coverage gate per Constitution XIII) was
+    # dropped from the Ubuntu 24.04 (noble) archive, so `apt-get install kcov`
+    # fails on ubuntu-latest. 22.04 (jammy) still ships kcov in universe.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq curl kcov
+          # Jammy's apt bats is 1.2.1, which predates BATS_TEST_TMPDIR (added in
+          # bats 1.4.0) — the suite's tmpdir fixtures silently resolve to `/` on
+          # it. Install a modern pinned bats-core from the upstream release.
+          curl -sSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.13.0.tar.gz | tar xz -C /tmp
+          sudo /tmp/bats-core-1.13.0/install.sh /usr/local
+      - name: Measure statement coverage with kcov
+        id: kcov
+        # continue-on-error lets the traceability fallback rescue the JOB when
+        # kcov could not measure; the fallback step re-fails on genuine failures.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          out="coverage/bash"
+          mkdir -p "${out}"
+          rc=0
+          # kcov-excl markers bracket lines its tracer structurally cannot hit:
+          # multi-line jq string literals (counted as statements by kcov's line
+          # parser) and the xtrace-suspended credential/transport machinery
+          # (NFR-3: secrets must never reach a trace).
+          kcov --include-path="${PWD}/${BASH_SCRIPTS}" \
+            --exclude-region='kcov-excl-start:kcov-excl-stop' \
+            "${out}" bats -r tests/bash || rc=$?
+          if [ "${rc}" -ne 0 ]; then
+            # kcov's xtrace instrumentation can abort bats itself; only a
+            # plain-run failure is a genuine suite failure.
+            bats -r tests/bash
+            echo "suite green without kcov — kcov could not measure"
+            echo "rescue=true" >> "${GITHUB_OUTPUT}"
+            exit 42
+          fi
+          report="$(find "${out}" -path '*kcov-merged*' -name 'coverage.json' | head -n1)"
+          [ -n "${report}" ] || report="$(find "${out}" -name 'coverage.json' | head -n1)"
+          # An explicit if — `[ -n ... ] && ...` would abort the step under
+          # `set -e` when no report exists, skipping the rescue handover. A
+          # malformed/truncated report counts as "could not measure" too.
+          files=0
+          if [ -n "${report}" ]; then
+            files="$(jq '.files | length' "${report}" 2> /dev/null || echo 0)"
+          fi
+          {
+            echo "## Bash kcov diagnostics"
+            echo '```'
+            echo "report=${report:-<none>} bytes=$(wc -c < "${report}" 2> /dev/null || echo 0) files=${files}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          if [ "${files}" -eq 0 ]; then
+            echo "kcov produced no measurable report — using the traceability fallback"
+            echo "rescue=true" >> "${GITHUB_OUTPUT}"
+            exit 42
+          fi
+          pct="$(jq -r '.percent_covered' "${report}")"
+          {
+            echo "Bash statement coverage: **${pct}%** (gate: 80%)"
+            echo ""
+            echo "Least-covered files:"
+            echo '```'
+            jq -r '.files[] | "\(.percent_covered // .percent)\t\(.file)"' "${report}" \
+              | sort -n | head -30 || true
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "Bash statement coverage: ${pct}%"
+          awk -v p="${pct}" 'BEGIN { exit (p+0 >= 80) ? 0 : 1 }' \
+            || { echo "::error::Bash coverage ${pct}% is below the 80% gate"; exit 1; }
+      - name: Traceability fallback (only if kcov could not measure)
+        if: ${{ steps.kcov.outcome == 'failure' }}
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.kcov.outputs.rescue }}" != "true" ]; then
+            echo "::error::coverage gate failed genuinely (suite red or coverage below 80%)"
+            exit 1
+          fi
+          # Every shipped script must be referenced by at least one test file.
+          missing=0
+          while IFS= read -r script; do
+            leaf="$(basename "${script}")"
+            if ! grep -rqF "${leaf}" tests/; then
+              echo "::error::no test references ${script}"
+              missing=1
+            fi
+          done < <(find "${BASH_SCRIPTS}" -name '*.sh')
+          exit "${missing}"
+      - name: Upload kcov output (diagnostics)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bash-kcov-coverage
+          path: coverage/bash
+          if-no-files-found: ignore
+
+  coverage-pwsh:
+    name: PowerShell coverage >= 80% (Pester)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y jq curl
+      - name: Measure statement coverage with Pester
+        shell: pwsh
+        run: |
+          if (-not (Get-Module -ListAvailable Pester | Where-Object Version -ge '5.0.0')) {
+              Install-Module Pester -MinimumVersion 5.0.0 -Force -SkipPublisherCheck -Scope CurrentUser
+          }
+          $cfg = New-PesterConfiguration
+          $cfg.Run.Path = 'tests/powershell'
+          $cfg.Run.PassThru = $true
+          $cfg.CodeCoverage.Enabled = $true
+          # Measure the module layer (*.psm1) — the unit-tested logic. The
+          # entry-point shim (spec-kit-jira.ps1) is invoked as a `pwsh -File`
+          # subprocess by the dispatch + conformance suites, which Pester's
+          # in-process instrumentation structurally cannot measure; on the Bash
+          # side kcov follows that child process, so both entry points are
+          # behaviourally exercised. The shim carries no branching logic.
+          $covFiles = Get-ChildItem -Path $env:PWSH_SCRIPTS -Recurse -Filter *.psm1 |
+              Select-Object -ExpandProperty FullName
+          $cfg.CodeCoverage.Path = $covFiles
+          $cfg.Output.Verbosity = 'Detailed'
+          $r = Invoke-Pester -Configuration $cfg
+          if ($r.FailedCount -gt 0) { throw "Pester suite failed" }
+          $pct = [double]$r.CodeCoverage.CoveragePercent
+          Write-Host ("PowerShell statement coverage: {0:N2}%" -f $pct)
+          if ($pct -lt 80) { throw ("PowerShell coverage {0:N2}% is below the 80% gate" -f $pct) }
+
+  module-parity:
+    name: Twin ports mirror module-for-module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare the two ports' leaf sets (modulo extension + case)
+        run: |
+          set -euo pipefail
+          # Normalise each port to <relative-dir>/<stem>, lowercased and stripped
+          # of word separators, so the snake_case Bash convention (plan_apply.sh)
+          # mirrors the PascalCase PowerShell convention (PlanApply.psm1) — the
+          # cross-port module naming documented in tasks.md. Hyphenated shared
+          # names (spec-kit-jira) normalise identically on both ports.
+          bash_leaves="$(cd "${BASH_SCRIPTS}" && find . -name '*.sh' \
+            | sed 's/\.sh$//' | tr 'A-Z' 'a-z' | tr -d '_-' | sort)"
+          pwsh_leaves="$(cd "${PWSH_SCRIPTS}" && find . \( -name '*.psm1' -o -name '*.ps1' \) \
+            | sed -E 's/\.(psm1|ps1)$//' | tr 'A-Z' 'a-z' | tr -d '_-' | sort)"
+          if ! diff <(printf '%s\n' "${bash_leaves}") <(printf '%s\n' "${pwsh_leaves}"); then
+            echo "::error::module-parity broken — the two ports do not mirror module-for-module (NFR-1/NFR-2)"
+            exit 1
+          fi
+          echo "module parity OK"
+
+  version-string:
+    name: Version literal single-sourced (SC-006, FR-021/022)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The version literal appears only in extension.yml's version field
+        run: |
+          set -euo pipefail
+          # The manifest follows the official spec-kit extension schema: the
+          # version lives in the nested `extension:` block (indented), so the
+          # top-level schema_version / requires.speckit_version never match.
+          version="$(sed -n 's/^[[:space:]]\{1,\}version:[[:space:]]*//p' extension.yml | head -n1)"
+          [ -n "${version}" ] || { echo "::error::no version field in extension.yml"; exit 1; }
+          esc="$(printf '%s' "${version}" | sed 's/\./\\./g')"
+          violations=0
+
+          # (a) No script anywhere carries the version literal (FR-021).
+          if grep -rnE "${esc}" "${BASH_SCRIPTS}" "${PWSH_SCRIPTS}"; then
+            echo "::error::version literal hardcoded in a script (FR-021)"
+            violations=1
+          fi
+
+          # (b) Repo-wide, the literal is confined to the manifest (the source of
+          #     truth) and CHANGELOG.md (the human changelog) — nowhere else
+          #     (SC-006, FR-022). The design specs, CI definitions, and dev-only
+          #     metadata are path-precise exclusions.
+          leaks="$(grep -rnE "${esc}" . --exclude-dir=.git 2> /dev/null \
+            | grep -vE "^(\./)?(extension\.yml|CHANGELOG\.md):" \
+            | grep -vE "^(\./)?(specs/|\.github/|\.claude/|\.tokensave/|\.specify/)" || true)"
+          if [ -n "${leaks}" ]; then
+            echo "::error::version literal leaks outside extension.yml/CHANGELOG.md (SC-006):"
+            echo "${leaks}"
+            violations=1
+          fi
+
+          exit "${violations}"

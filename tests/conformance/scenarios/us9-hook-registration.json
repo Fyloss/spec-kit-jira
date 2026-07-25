@@ -1,0 +1,12 @@
+{
+  "name": "us9-hook-registration",
+  "description": "The config command registers the six after_* lifecycle hooks idempotently in .specify/extensions.yml as the second of its three effects (FR-045, FR-054). The post-run workdir snapshot must carry a byte-identical extensions.yml on both ports, and the --json summary's effects.hooks section must match (NFR-1). Idempotency and disabled-hook preservation are asserted directly in tests/bash/hooks/test_register_hooks.bats; this golden scenario proves the config-command wiring writes identically end-to-end.",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-config",
+  "argv": ["config", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1"
+  }
+}

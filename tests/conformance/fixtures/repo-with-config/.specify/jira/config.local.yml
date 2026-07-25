@@ -1,0 +1,5 @@
+# Personal, gitignored overrides. Never committed; never destroyed by a
+# reinstall or upgrade of the extension (FR-020).
+site_alias: prod
+overrides:
+  routing_default: COMP

@@ -1,0 +1,13 @@
+[
+  {
+    "id": "10102",
+    "name": "Story",
+    "statuses": [
+      { "id": "1", "name": "Backlog", "statusCategory": { "id": 2, "key": "new" } },
+      { "id": "2", "name": "Building", "statusCategory": { "id": 4, "key": "indeterminate" } },
+      { "id": "3", "name": "In Review", "statusCategory": { "id": 4, "key": "indeterminate" } },
+      { "id": "4", "name": "Shipped", "statusCategory": { "id": 3, "key": "done" } },
+      { "id": "5", "name": "Abandoned", "statusCategory": { "id": 3, "key": "done" } }
+    ]
+  }
+]

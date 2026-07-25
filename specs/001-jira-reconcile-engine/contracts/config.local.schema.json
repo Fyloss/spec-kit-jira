@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-kit-jira/contracts/config.local.schema.json",
+  "title": "Local Binding (config.local.yml)",
+  "description": "Gitignored personal overrides and instance-specific resolved ids at .specify/jira/config.local.yml. NEVER contains a credential (secrets resolve only via NFR-3). Validation MUST reject any credential-shaped value (FR-023): ATATT prefix, a real *.atlassian.net host, email/token shapes. The real site URL is a coordinate and is NOT stored here; only a non-secret alias is. Never destroyed by reinstall/upgrade (FR-020). Presented as JSON Schema; the on-disk file is YAML.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "site_alias": {
+      "type": "string",
+      "description": "A non-secret human alias for the instance (e.g. 'prod'). The real site URL is resolved at runtime and never persisted here."
+    },
+    "resolved_ids": {
+      "type": "object",
+      "description": "Instance-specific id resolutions cached locally when the team chooses not to commit them.",
+      "additionalProperties": { "type": "string" }
+    },
+    "overrides": {
+      "type": "object",
+      "description": "Per-user overrides of team config fields. Same schema constraints as the corresponding config.yml fields.",
+      "additionalProperties": true
+    }
+  }
+}

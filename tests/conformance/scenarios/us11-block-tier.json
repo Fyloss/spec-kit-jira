@@ -1,0 +1,14 @@
+{
+  "name": "us11-block-tier",
+  "description": "Privacy guard BLOCK tier (FR-052, Constitution IV). Before every write the guard blocks on an ATATT token prefix, a real *.atlassian.net host, or an exact known coordinate — zero writes, dedicated exit 9. The guard and its mandatory pre-write gate (apply_writes) are proven now, cross-port, in tests/bash/sink/test_privacy_block.bats and tests/powershell/sink/PrivacyGuard.Block.Tests.ps1 (exit 9 + zero recorded calls). This golden scenario is wired end-to-end through the reconcile command in US3 (T059), where a spec whose content carries a blocking shape must produce exit 9 and a byte-identical zero-write capture on both ports. Until then it runs as a benign config read.",
+  "mock": {
+    "projects": { "COMP": "company" }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-config",
+  "argv": ["config", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1"
+  }
+}

@@ -1,6 +1,36 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 1.0.0 → 1.0.1 (PATCH — clarifications making existing enforcement
+mechanically verifiable in the ratified script-native design; no principle added,
+removed, renumbered, or materially expanded.)
+Modified principles:
+  VI. macOS / Linux / Windows Portability — clarified: names the macOS Bash 3.2
+      prerequisite explicitly in the body and extends the enforcement test to require
+      the installation documentation to state each implementation's minimum interpreter
+      version and that macOS's OS-shipped Bash does not qualify.
+  VIII. Neutral Engine / Jira Sink, Separated by an Interface — enforcement test
+      restated in script terms: replaces the compiled-language "package/import" wording
+      with a script-native CI-greppable test (no engine script sources/dot-sources or
+      Import-Modules a sink file; no engine script contains an Atlassian-specific
+      identifier). The two body bullets and the principle's intent are unchanged.
+Rationale: make ratified enforcement mechanically verifiable in the Bash/PowerShell
+design and surface the macOS Bash prerequisite as documentation. No guarantee is
+weakened: Principle VIII's zero-Jira-knowledge-in-the-engine intent and Principle VI's
+no-build/no-download rule both stand unchanged.
+Added sections: none
+Removed sections: none
+Templates: re-verified — no template changes required
+  - ✅ .specify/templates/plan-template.md — no reference to the old Principle VIII
+    enforcement wording; testing line remains a generic multi-language placeholder
+  - ✅ .specify/templates/spec-template.md — Constitution Check rows reference principle
+    titles only, unchanged by this amendment
+  - ✅ .specify/templates/tasks-template.md — no reference to the old wording
+  - ✅ .specify/templates/checklist-template.md — no changes required
+Follow-up TODOs: none
+
+Prior report (1.0.0)
+--------------------
 Version change: (none) → 1.0.0 (INITIAL — first ratification of the
 spec-kit-jira constitution. The project starts from scratch as a script-native
 extension: a Bash implementation for macOS/Linux and a PowerShell 7+
@@ -192,13 +222,20 @@ single portable runtime.
 - The Bash implementation MUST declare its minimum Bash version and check it as an
   explicit prerequisite before any other action; the PowerShell implementation MUST
   declare and check PowerShell 7+ the same way. A host below the declared minimum
-  fails up front with a named prerequisite error, never mid-operation.
+  fails up front with a named prerequisite error, never mid-operation. Installing a
+  shell interpreter that meets the declared minimum is a documented, one-time
+  environment prerequisite, not a build or download step of the extension: macOS ships
+  Bash 3.2, below the declared minimum, so macOS users MUST install a qualifying Bash
+  (or run the PowerShell implementation); this prerequisite MUST be stated in the
+  installation documentation, not merely reported at first failure.
 
 **Enforcement test**: any behavior present in one implementation and absent or
 divergent in the other, or any conformance scenario passing on one implementation and
 failing on the other, is a failing gate; a run on a host below the declared minimum
 shell version must fail before any Jira interaction with a named, remediable error;
-the three-OS matrix green is a merge gate.
+the installation documentation states each implementation's minimum interpreter version
+and, for macOS, that the OS-shipped Bash does not qualify; the three-OS matrix green is
+a merge gate.
 
 ### VII. No Hard-Coded Assumptions About the Jira Workflow
 
@@ -223,9 +260,14 @@ status name, field id) in engine code is a review rejection.
 - The internal interchange format is a neutral document that MUST be validated against
   a schema before any write.
 
-**Enforcement test**: the engine package has no import of, or reference to, the Jira
-sink or any Atlassian concept; schema validation failures block the write and surface
-as errors.
+**Enforcement test**: no engine script sources or imports any sink file — a CI check
+greps every engine script for `source`/`.` (Bash) and `Import-Module`/dot-sourcing
+(PowerShell) statements referencing the sink directory and fails the build on any match;
+no engine script contains any Atlassian-specific identifier (issue key patterns,
+`atlassian.net`, `createmeta`, ADF node names, Jira field ids or type names) — a second
+CI grep enforces this; the engine communicates with the sink exclusively by passing the
+neutral interchange document across the documented interface. Schema validation failures
+block the write and surface as errors.
 
 ### IX. Two-Tier Privacy Guard, With an Allowlist
 
@@ -415,4 +457,4 @@ whose review requires verbal explanations to be understood fails this principle.
 - Every PR review verifies compliance with all sixteen principles; any deviation MUST
   be justified in the plan's "Complexity Tracking" section or the PR is rejected.
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-07-23
+**Version**: 1.0.1 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-07-23

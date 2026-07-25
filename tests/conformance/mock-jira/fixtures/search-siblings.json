@@ -1,0 +1,7 @@
+{
+  "total": 2,
+  "issues": [
+    { "key": "MENT-1", "fields": { "summary": "Adjust the onboarding checklist", "status": { "name": "In Progress" } } },
+    { "key": "MENT-2", "fields": { "summary": "Trim the welcome email", "status": { "name": "To Do" } } }
+  ]
+}

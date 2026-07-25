@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-kit-jira/contracts/config.schema.json",
+  "title": "Team Config (config.yml)",
+  "description": "Committable, credential-free team configuration at .specify/jira/config.yml (repo root, never in the extension folder). Business-language keys (Constitution XVI). Validation MUST reject any credential-shaped value (FR-023): the ATATT token prefix, a real *.atlassian.net host, or an email/token shape in any string value. Presented as JSON Schema; the on-disk file is YAML.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["projects", "routing_default"],
+  "properties": {
+    "version_compat": {
+      "type": "string",
+      "description": "Advisory: extension version range the config was authored against. Read-only; the authoritative version is the manifest's extension.version field in .specify/extensions/jira/extension.yml (FR-021)."
+    },
+    "projects": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/project" }
+    },
+    "routing": {
+      "type": "array",
+      "description": "Ordered rules mapping specs/<pattern> to a project (FR-041). First match wins.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["project"],
+        "properties": {
+          "match": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "folder_prefix": { "type": "string", "description": "e.g. 'billing-' matches specs/billing-*" },
+              "spec_label": { "type": "string", "description": "A label declared inside the spec." }
+            }
+          },
+          "project": { "$ref": "#/$defs/projectKey" }
+        }
+      }
+    },
+    "routing_default": { "$ref": "#/$defs/projectKey" },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowlist": {
+          "type": "array",
+          "description": "Domains/hosts that produce neither block nor warning (FR-053). Documentation Atlassian/Confluence hosts belong here.",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "projectKey": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]+$",
+      "description": "A Jira project key. Public within the org, therefore permitted in the committable config."
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "style", "epic_strategy", "task_strategy"],
+      "properties": {
+        "key": { "$ref": "#/$defs/projectKey" },
+        "style": {
+          "enum": ["company_managed", "team_managed"],
+          "description": "Detected from project.style/simplified and persisted by logical value (FR-004)."
+        },
+        "epic_strategy": {
+          "enum": ["per_repo", "per_feature"],
+          "description": "Chosen explicitly (FR-008)."
+        },
+        "task_strategy": {
+          "enum": ["subtask", "linked_story"],
+          "description": "Chosen explicitly, never guessed (FR-009)."
+        },
+        "link_type": {
+          "type": "string",
+          "description": "Logical link-type name. REQUIRED iff task_strategy = linked_story."
+        },
+        "hierarchy": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Logical level names, top-down. For team_managed projects a level above Epic is rejected at config time (FR-007)."
+        },
+        "issue_types": {
+          "type": "object",
+          "description": "Map logical name -> resolved Jira id. No literal Atlassian default appears in scripts (FR-010).",
+          "additionalProperties": { "type": "string" }
+        },
+        "phase_status_map": {
+          "type": "object",
+          "description": "Map spec phase -> status (many-to-one). Two consecutive phases on one status produce no transition (FR-011).",
+          "additionalProperties": { "type": "string" }
+        },
+        "status_classification": {
+          "type": "object",
+          "description": "Map status -> exactly one category, per project (FR-011, FR-034).",
+          "additionalProperties": { "enum": ["mapped", "post-scope", "halted", "unknown"] }
+        },
+        "priority_map": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Map P1|P2|P3 -> priority logical name (FR-017).",
+          "propertyNames": { "enum": ["P1", "P2", "P3"] }
+        },
+        "estimation_field": {
+          "type": "string",
+          "description": "Operator-confirmed discovered estimation field (logical descriptor). For team_managed it is the project's own field, never the global Story Points custom field (FR-006, FR-018)."
+        },
+        "generation": {
+          "type": "object",
+          "description": "Content-generation options; each key MUST be tied to an FR and exercised by a test (Constitution XV).",
+          "additionalProperties": false,
+          "properties": {
+            "design_section": { "type": "boolean", "default": true, "description": "Emit the Design section from Figma links/UX guidance (FR-016)." }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "task_strategy": { "const": "linked_story" } } },
+          "then": { "required": ["link_type"] }
+        }
+      ]
+    }
+  }
+}

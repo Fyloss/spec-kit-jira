@@ -1,0 +1,77 @@
+# T026 — CI: engine/sink boundary enforcement (Constitution VIII).
+#
+# Two grep gates over the engine (neutral) layer:
+#   #1  No engine/ script sources or imports anything under sink/.
+#   #2  No engine/ script contains any Atlassian identifier (issue-key regex,
+#       vendor host, createmeta, custom-field ids, ADF node names).
+#
+# The vendor host token is assembled from split literals so this workflow file
+# itself carries no whole Atlassian identifier that a scan could trip over.
+name: Boundary
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# One live run per branch: a new push cancels the superseded run so stale
+# commits never hold the runner queue (macOS runners are scarce).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine-sink-boundary:
+    name: engine/ carries zero Jira knowledge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gate #1 — no engine/ script sources or imports sink/
+        run: |
+          set -euo pipefail
+          violations=0
+          # Match real source/import statements referencing sink/ on NON-comment
+          # lines (leading '#' is excluded so boundary-describing comments pass).
+          for dir in \
+            scripts/bash/engine \
+            scripts/powershell/engine; do
+            [ -d "${dir}" ] || continue
+            if grep -rnE '^[[:space:]]*[^#[:space:]].*((source|\.)[[:space:]].*sink/|Import-Module[^#]*sink)' "${dir}"; then
+              echo "::error::an engine/ script sources or imports sink/ (Constitution VIII)"
+              violations=1
+            fi
+          done
+          exit "${violations}"
+
+      - name: Gate #2 — no engine/ script contains an Atlassian identifier
+        run: |
+          set -euo pipefail
+          # Assemble the vendor host token from split literals.
+          vendor="atlas""sian"
+          # Forbidden identifier patterns in the neutral engine layer.
+          patterns=(
+            "${vendor}\.net"
+            "${vendor}"
+            "createmeta"
+            "customfield_[0-9]+"
+            "[A-Z]{2,}-[0-9]+"               # Jira issue-key shape (>=2 letters)
+            "mediaSingle"                    # ADF node name
+            "bodiedExtension"                # ADF node name
+          )
+          violations=0
+          for dir in \
+            scripts/bash/engine \
+            scripts/powershell/engine; do
+            [ -d "${dir}" ] || continue
+            for pat in "${patterns[@]}"; do
+              if grep -rnE "${pat}" "${dir}"; then
+                echo "::error::engine/ script contains a forbidden Atlassian identifier matching /${pat}/"
+                violations=1
+              fi
+            done
+          done
+          exit "${violations}"

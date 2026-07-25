@@ -1,0 +1,28 @@
+{
+  "name": "us6-fail-closed",
+  "description": "US6 fail-closed writes (FR-032). The plan is a CREATE, but the Jira endpoint returns 401 (an auth failure). The transport maps it to the documented, monotonically escalating auth exit code (3), the create is NOT applied, and no further writes are attempted for the spec. Both ports fail closed identically (NFR-1): same exit code, same single rejected call.",
+  "mock": {
+    "projects": {
+      "PROJ": "company"
+    },
+    "fault": {
+      "status": 401
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-spec",
+  "argv": [
+    "reconcile",
+    "--json",
+    "specs/001-feature/spec.md"
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "JIRA_MAX_ATTEMPTS": "3",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-feature",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_PROJECT_KEY": "PROJ",
+    "SPEC_KIT_JIRA_PLAN_CONTEXT": "{\"story_type_id\":\"10002\",\"priority_ids\":{\"P1\":\"1\",\"P2\":\"2\",\"P3\":\"3\"},\"estimation_field_id\":\"customfield_30044\"}"
+  }
+}

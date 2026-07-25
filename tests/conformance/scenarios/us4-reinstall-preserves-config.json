@@ -1,0 +1,9 @@
+{
+  "name": "us4-reinstall-preserves-config",
+  "description": "FR-020: a committed config.yml and a gitignored config.local.yml survive an extension invocation byte-for-byte. Reinstalling/upgrading the extension is only a file copy; no script path may touch .specify/jira/. Here a benign `config --help` invocation runs on both ports; the post-run repository tree is diffed for port parity, and the two config layers must be byte-identical to the fixture originals (asserted by tests/bash/conformance/test_us4_preserve.bats). Once the config command lands (US1) this scenario also covers the full re-run path.",
+  "mock": {
+    "projects": { "COMP": "company" }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-config",
+  "argv": ["config", "--help"]
+}

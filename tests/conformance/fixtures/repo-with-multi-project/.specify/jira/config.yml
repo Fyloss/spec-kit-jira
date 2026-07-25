@@ -1,0 +1,19 @@
+# Team config: two projects of mixed styles routed on one repository (US8).
+# Business-language keys; see the extension README for the full reference.
+projects:
+  - key: COMP
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+  - key: TEAM
+    style: team_managed
+    epic_strategy: per_feature
+    task_strategy: subtask
+routing:
+  - match:
+      folder_prefix: "billing-"
+    project: COMP
+  - match:
+      spec_label: "infra"
+    project: TEAM
+routing_default: COMP

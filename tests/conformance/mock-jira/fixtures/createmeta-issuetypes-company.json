@@ -1,0 +1,9 @@
+{
+  "issueTypes": [
+    { "id": "10100", "name": "Initiative", "subtask": false, "hierarchyLevel": 2 },
+    { "id": "10101", "name": "Deliverable", "subtask": false, "hierarchyLevel": 1 },
+    { "id": "10102", "name": "Story", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10103", "name": "Defect", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10104", "name": "Sub-task", "subtask": true, "hierarchyLevel": -1 }
+  ]
+}

@@ -1,0 +1,12 @@
+[
+  {
+    "id": "10201",
+    "name": "Story",
+    "statuses": [
+      { "id": "11", "name": "To Do", "statusCategory": { "id": 2, "key": "new" } },
+      { "id": "12", "name": "In Progress", "statusCategory": { "id": 4, "key": "indeterminate" } },
+      { "id": "13", "name": "Done", "statusCategory": { "id": 3, "key": "done" } },
+      { "id": "14", "name": "Won't Do", "statusCategory": { "id": 3, "key": "done" } }
+    ]
+  }
+]

@@ -1,0 +1,8 @@
+# ShellCheck configuration for the spec-kit-jira Bash port.
+# Target the Bash >= 4 dialect the port requires (macOS 3.2 is rejected up front).
+shell=bash
+# Follow sourced files so library functions are analysed in context.
+external-sources=true
+# Enable optional checks that catch portability and quoting bugs early.
+enable=quote-safe-variables
+enable=require-variable-braces

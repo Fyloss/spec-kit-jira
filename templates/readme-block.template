@@ -1,0 +1,15 @@
+<!-- spec-kit-jira:begin v{{VERSION}} -->
+## Jira mirror (spec-kit-jira)
+
+This repository mirrors its Spec Kit artifacts into Jira Cloud via the
+[spec-kit-jira](https://github.com/Fyloss/spec-kit-jira) extension (v{{VERSION}}).
+
+- **Configure**: run `/speckit.jira.config` and answer the enumerated questions.
+- **Mirror**: `spec.md` / `plan.md` / `tasks.md` reconcile into Jira automatically
+  after each Spec Kit lifecycle step; run a manual reconcile any time.
+- **Prerequisites**: Bash ≥ 4 (macOS ships 3.2 — install a newer Bash), or
+  PowerShell 7+ on Windows, plus `curl`, `jq`, and `git`.
+
+This block is managed by spec-kit-jira. Edits between the markers are regenerated
+on the next run; edit outside the markers freely.
+<!-- spec-kit-jira:end v{{VERSION}} -->

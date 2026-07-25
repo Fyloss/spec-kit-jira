@@ -1,0 +1,14 @@
+[
+  {
+    "id": 10001,
+    "globalId": "appId=confluence&pageId=12345",
+    "application": { "type": "com.atlassian.confluence.plugins.confluence-view-file-macro", "name": "Confluence" },
+    "object": { "title": "Onboarding design notes", "url": "https://example.test/wiki/spaces/OPS/pages/12345" }
+  },
+  {
+    "id": 10002,
+    "globalId": "system=https://tracker.example.test/issue/APP-3",
+    "application": { "type": "com.example.tracker", "name": "Tracker" },
+    "object": { "title": "APP-3", "url": "https://tracker.example.test/issue/APP-3" }
+  }
+]

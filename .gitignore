@@ -7,10 +7,14 @@ dist/
 *.test
 *.prof
 
+# Test/coverage output (kcov, Pester)
+coverage/
+coverage.xml
+testResults.xml
+
 # spec-kit-jira: gitignored personal config, secrets, resolved bindings
 .specify/jira/config.local.yml
 .specify/jira/.env
-.specify/jira/VERSION.local
 
 # OS
 .DS_Store
