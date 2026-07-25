@@ -24,7 +24,10 @@ env:
 jobs:
   coverage-bash:
     name: Bash coverage >= 80% (kcov primary, traceability fallback)
-    runs-on: ubuntu-latest
+    # Pinned to 22.04: kcov (the PRIMARY coverage gate per Constitution XIII) was
+    # dropped from the Ubuntu 24.04 (noble) archive, so `apt-get install kcov`
+    # fails on ubuntu-latest. 22.04 (jammy) still ships kcov in universe.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain
