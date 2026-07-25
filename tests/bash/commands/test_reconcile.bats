@@ -80,3 +80,20 @@ setup() {
         \$null = Invoke-JiraReconcile -Arguments @('reconcile','--dry-run','--json','${SPEC_WITH}')")"
   [ "${b}" = "${p}" ]
 }
+
+@test "a bare relative spec filename resolves from the cwd in both ports (NFR-1)" {
+  # dirname of a bare filename is '.' in the Bash port; the PowerShell port's
+  # Split-Path -Parent yields '' for the same input (and for a root-level path),
+  # which must resolve identically instead of failing the interchange schema.
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local b p
+  b="$(cd "${BATS_TEST_TMPDIR}" && cmd_reconcile reconcile --dry-run --json with.md)"
+  p="$(cd "${BATS_TEST_TMPDIR}" && \
+       SPEC_KIT_JIRA_BASE_URL='https://mock' SPEC_KIT_JIRA_SPEC_SLUG='001-feature' \
+       SPEC_KIT_JIRA_REPO='acme/app' SPEC_KIT_JIRA_PROJECT_KEY='PROJ' \
+       pwsh -NoProfile -Command "
+        Import-Module '${PS_CMD}/Reconcile.psm1' -Force
+        \$null = Invoke-JiraReconcile -Arguments @('reconcile','--dry-run','--json','with.md')")"
+  [ -n "${b}" ]
+  [ "${b}" = "${p}" ]
+}

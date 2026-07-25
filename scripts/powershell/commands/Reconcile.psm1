@@ -74,7 +74,14 @@ function Invoke-JiraReconcile {
         return [int](Get-JiraExitCode 'fail_closed')
     }
 
-    $folder = (Resolve-Path -LiteralPath (Split-Path -Parent $specFile)).Path
+    # Split-Path -Parent yields '' for a bare filename and for a root-level path,
+    # where the Bash port's dirname yields '.' and '/' — map those the same way
+    # so both ports resolve the folder (NFR-1) instead of failing the schema.
+    $specParent = Split-Path -Parent $specFile
+    if ([string]::IsNullOrEmpty($specParent)) {
+        $specParent = if ($specFile.StartsWith('/')) { '/' } else { '.' }
+    }
+    $folder = (Resolve-Path -LiteralPath $specParent).Path
     $slug = if ($env:SPEC_KIT_JIRA_SPEC_SLUG) { $env:SPEC_KIT_JIRA_SPEC_SLUG } else { Split-Path -Leaf $folder }
     $repo = if ($env:SPEC_KIT_JIRA_REPO) { $env:SPEC_KIT_JIRA_REPO } else { 'local/repo' }
     $projectKey = if ($env:SPEC_KIT_JIRA_PROJECT_KEY) { $env:SPEC_KIT_JIRA_PROJECT_KEY } else { 'PROJ' }

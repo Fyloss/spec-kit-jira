@@ -61,6 +61,19 @@ Describe 'Invoke-JiraReconcile (dry-run)' {
         $out.actions[0].url | Should -Be '/rest/api/3/issue'
     }
 
+    It 'resolves a bare relative spec filename from the current directory (NFR-1)' {
+        # Split-Path -Parent yields '' for a bare filename, where the Bash port's
+        # dirname yields '.' — the folder must still resolve instead of failing
+        # the interchange schema with an empty spec_ref.folder.
+        Push-Location $TestDrive
+        try {
+            $out = Invoke-Captured @('reconcile', '--dry-run', '--json', 'with.md') 2> $null | ConvertFrom-Json
+            $script:code | Should -Be 0
+            $out.actions[0].body.fields.summary | Should -Be 'The core story'
+        }
+        finally { Pop-Location }
+    }
+
     It 'maps an invalid SPEC_KIT_JIRA_LIFECYCLE to exit 4 with an actionable error (FR-032)' {
         $env:SPEC_KIT_JIRA_LIFECYCLE = '{not json'
         try {

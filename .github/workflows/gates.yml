@@ -31,7 +31,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain
-        run: sudo apt-get update && sudo apt-get install -y bats jq curl kcov
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq curl kcov
+          # Jammy's apt bats is 1.2.1, which predates BATS_TEST_TMPDIR (added in
+          # bats 1.4.0) — the suite's tmpdir fixtures silently resolve to `/` on
+          # it. Install a modern pinned bats-core from the upstream release.
+          curl -sSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.13.0.tar.gz | tar xz -C /tmp
+          sudo /tmp/bats-core-1.13.0/install.sh /usr/local
       - name: Measure statement coverage with kcov
         run: |
           set -euo pipefail
