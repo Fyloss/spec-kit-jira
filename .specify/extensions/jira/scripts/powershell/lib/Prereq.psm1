@@ -1,7 +1,7 @@
 # lib/Prereq.psm1 — Prerequisite checks (NFR-4). Mirror of lib/prereq.sh.
 #
-# Runs BEFORE any Jira interaction. PowerShell 7+ is required. curl, jq, and git
-# must be present. Any failure returns 5 (EXIT_PREREQ) so the dispatcher never
+# Runs BEFORE any Jira interaction. PowerShell 7+ is required and git must be
+# present. Any failure returns 5 (EXIT_PREREQ) so the dispatcher never
 # touches Jira. Port infrastructure only: NO Jira knowledge.
 
 Set-StrictMode -Version Latest

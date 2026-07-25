@@ -5,6 +5,11 @@ BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
     $Hooks = Join-Path $Root '.specify/extensions/jira/scripts/powershell/hooks'
     Import-Module (Join-Path $Hooks 'ReadmeBlock.psm1') -Force
+    # The version is read from the single source (extension.yml), never hardcoded in
+    # a test — the version literal must live only in extension.yml (SC-006/FR-022).
+    $ExtYml = Join-Path $Root '.specify/extensions/jira/extension.yml'
+    $script:VersionRx = [regex]::Escape(
+        (Select-String -LiteralPath $ExtYml -Pattern '^version:\s*(.+)$').Matches[0].Groups[1].Value.Trim())
 }
 
 Describe 'README-block idempotency' {
@@ -29,12 +34,12 @@ Describe 'README-block idempotency' {
 
     It 'regenerates a hand-edited block and reports it written' {
         Set-JiraReadmeBlock -Path $Path -DryRun $false | Out-Null
-        $tampered = (Get-Content -Raw -LiteralPath $Path) -replace 'MANAGED v0\.1\.0', 'HUMAN EDIT'
+        $tampered = (Get-Content -Raw -LiteralPath $Path) -replace "MANAGED v$VersionRx", 'HUMAN EDIT'
         [System.IO.File]::WriteAllText($Path, $tampered, (New-Object System.Text.UTF8Encoding($false)))
         $res = Set-JiraReadmeBlock -Path $Path -DryRun $false
         $res.Status | Should -Be 'written'
         $content = Get-Content -Raw -LiteralPath $Path
-        $content | Should -Match 'MANAGED v0\.1\.0'
+        $content | Should -Match "MANAGED v$VersionRx"
         $content | Should -Not -Match 'HUMAN EDIT'
     }
 
@@ -53,12 +58,12 @@ Describe 'README-block idempotency' {
         $content = Get-Content -Raw -LiteralPath $Path
         $content.StartsWith('INTRO LINE') | Should -BeTrue
         $content.TrimEnd("`n").EndsWith('OUTRO LINE') | Should -BeTrue
-        $content | Should -Match 'MANAGED v0\.1\.0'
+        $content | Should -Match "MANAGED v$VersionRx"
     }
 
     It 'renders the version-marked block from the single source' {
         $block = Get-JiraReadmeBlock
-        $block | Should -Match 'spec-kit-jira:begin v0\.1\.0'
-        $block | Should -Match 'spec-kit-jira:end v0\.1\.0'
+        $block | Should -Match "spec-kit-jira:begin v$VersionRx"
+        $block | Should -Match "spec-kit-jira:end v$VersionRx"
     }
 }

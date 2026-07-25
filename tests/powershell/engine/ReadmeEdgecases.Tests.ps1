@@ -13,6 +13,11 @@ BeforeAll {
     $script:Begin = '<!-- x:begin'
     $script:End = '<!-- x:end'
     $script:Block = "<!-- x:begin v1 -->`nMANAGED LINE A`n<!-- x:end v1 -->"
+    # The version is read from the single source (extension.yml), never hardcoded in
+    # a test — the version literal must live only in extension.yml (SC-006/FR-022).
+    $ExtYml = Join-Path $Root '.specify/extensions/jira/extension.yml'
+    $script:VersionRx = [regex]::Escape(
+        (Select-String -LiteralPath $ExtYml -Pattern '^version:\s*(.+)$').Matches[0].Groups[1].Value.Trim())
 }
 
 Describe 'Managed-section edge cases' {
@@ -64,7 +69,7 @@ Describe 'Managed-section edge cases' {
         $res = Set-JiraReadmeBlock -Path $path -DryRun $false
         $res.Status | Should -Be 'created'
         Test-Path -LiteralPath $path | Should -BeTrue
-        (Get-Content -Raw -LiteralPath $path) | Should -Match 'MANAGED v0\.1\.0'
+        (Get-Content -Raw -LiteralPath $path) | Should -Match "MANAGED v$VersionRx"
     }
 
     It 'refuses a malformed README and writes nothing (exit 4)' {
