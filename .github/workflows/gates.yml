@@ -39,14 +39,31 @@ jobs:
           curl -sSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.13.0.tar.gz | tar xz -C /tmp
           sudo /tmp/bats-core-1.13.0/install.sh /usr/local
       - name: Measure statement coverage with kcov
+        id: kcov
+        # continue-on-error lets the traceability fallback rescue the JOB when
+        # kcov could not measure; the fallback step re-fails on genuine failures.
+        continue-on-error: true
         run: |
           set -euo pipefail
           out="coverage/bash"
           mkdir -p "${out}"
-          kcov --include-path="${PWD}/${BASH_SCRIPTS}" "${out}" bats -r tests/bash
-          report="$(find "${out}" -name 'coverage.json' | head -n1)"
-          if [ -z "${report}" ]; then
-            echo "kcov produced no report — using the traceability fallback"
+          rc=0
+          kcov --include-path="${PWD}/${BASH_SCRIPTS}" "${out}" bats -r tests/bash || rc=$?
+          if [ "${rc}" -ne 0 ]; then
+            # kcov's xtrace instrumentation can abort bats itself; only a
+            # plain-run failure is a genuine suite failure.
+            bats -r tests/bash
+            echo "suite green without kcov — kcov could not measure"
+            echo "rescue=true" >> "${GITHUB_OUTPUT}"
+            exit 42
+          fi
+          report="$(find "${out}" -path '*kcov-merged*' -name 'coverage.json' | head -n1)"
+          [ -n "${report}" ] || report="$(find "${out}" -name 'coverage.json' | head -n1)"
+          files=0
+          [ -n "${report}" ] && files="$(jq '.files | length' "${report}")"
+          if [ "${files}" -eq 0 ]; then
+            echo "kcov produced no measurable report — using the traceability fallback"
+            echo "rescue=true" >> "${GITHUB_OUTPUT}"
             exit 42
           fi
           pct="$(jq -r '.percent_covered' "${report}")"
@@ -54,9 +71,13 @@ jobs:
           awk -v p="${pct}" 'BEGIN { exit (p+0 >= 80) ? 0 : 1 }' \
             || { echo "::error::Bash coverage ${pct}% is below the 80% gate"; exit 1; }
       - name: Traceability fallback (only if kcov could not measure)
-        if: ${{ failure() }}
+        if: ${{ steps.kcov.outcome == 'failure' }}
         run: |
           set -euo pipefail
+          if [ "${{ steps.kcov.outputs.rescue }}" != "true" ]; then
+            echo "::error::coverage gate failed genuinely (suite red or coverage below 80%)"
+            exit 1
+          fi
           # Every shipped script must be referenced by at least one test file.
           missing=0
           while IFS= read -r script; do
