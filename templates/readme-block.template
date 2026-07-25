@@ -2,7 +2,7 @@
 ## Jira mirror (spec-kit-jira)
 
 This repository mirrors its Spec Kit artifacts into Jira Cloud via the
-[spec-kit-jira](https://github.com/spec-kit/spec-kit-jira) extension (v{{VERSION}}).
+[spec-kit-jira](https://github.com/Fyloss/spec-kit-jira) extension (v{{VERSION}}).
 
 - **Configure**: run `/speckit.jira.config` and answer the enumerated questions.
 - **Mirror**: `spec.md` / `plan.md` / `tasks.md` reconcile into Jira automatically

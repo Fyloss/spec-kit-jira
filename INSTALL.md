@@ -9,13 +9,13 @@ prerequisites for your platform, then run the one-command install ceremony.
 The prerequisite check runs **before any Jira interaction** and exits with code
 `5`, naming the missing item, if any of these is absent:
 
-| Requirement | Notes |
-|-------------|-------|
-| **Bash ≥ 4** (macOS/Linux port) | macOS ships Bash **3.2** — the check detects and names this case explicitly. Install a newer Bash (e.g. `brew install bash`). |
-| **PowerShell 7+** (Windows port) | The sole Windows implementation. |
-| `curl` | HTTP transport (the Authorization header is passed off-argv via `curl --config`, never on the command line). |
-| `jq` | JSON handling and the canonical serializer. |
-| `git` | Repository context and the managed README block. |
+| Requirement                      | Notes                                                                                                                                                                                                    |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Bash ≥ 4** (macOS/Linux port)  | macOS ships Bash **3.2** — the check detects and names this case explicitly. Install a newer Bash (e.g. `brew install bash`).                                                                            |
+| **PowerShell 7+** (Windows port) | The sole Windows implementation.                                                                                                                                                                         |
+| `curl`                           | Required for the Bash port HTTP transport (the Authorization header is passed off-argv via `curl --config`, never on the command line). Not required for the PowerShell port (uses `Invoke-RestMethod`). |
+| `jq`                             | Required for the Bash port JSON handling and the canonical serializer. Not required for the PowerShell port (native JSON + port serializer).                                                             |
+| `git`                            | Repository context and the managed README block.                                                                                                                                                         |
 
 ## Credentials (NFR-3 — eliminatory)
 
@@ -53,6 +53,7 @@ credential-shaped values in either YAML layer are rejected at config time (exit 
    In one run it performs — and reports as three separate effects — metadata
    discovery, idempotent `after_*` hook registration in `.specify/extensions.yml`,
    and creation/update of the managed README block (FR-054).
+
 3. Mirror your specs: `spec.md` / `plan.md` / `tasks.md` reconcile into Jira
    automatically at each Spec Kit lifecycle step, or run `reconcile` manually.
 

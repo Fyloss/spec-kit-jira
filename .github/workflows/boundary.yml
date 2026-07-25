@@ -34,7 +34,7 @@ jobs:
             scripts/bash/engine \
             scripts/powershell/engine; do
             [ -d "${dir}" ] || continue
-            if grep -rnE '^[[:space:]]*[^#[:space:]].*((source|^[[:space:]]*\.)[[:space:]].*sink/|Import-Module[^#]*sink)' "${dir}"; then
+            if grep -rnE '^[[:space:]]*[^#[:space:]].*((source|\.)[[:space:]].*sink/|Import-Module[^#]*sink)' "${dir}"; then
               echo "::error::an engine/ script sources or imports sink/ (Constitution VIII)"
               violations=1
             fi
