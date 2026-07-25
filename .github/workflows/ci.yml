@@ -38,7 +38,7 @@ jobs:
       - name: Run Pester (PowerShell port — all hosts)
         shell: pwsh
         run: |
-          Set-PSResourceRepository -Name PSGallery -Trusted -ErrorAction SilentlyContinue
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
           if (-not (Get-Module -ListAvailable Pester | Where-Object Version -ge '5.0.0')) {
               Install-Module Pester -MinimumVersion 5.0.0 -Force -SkipPublisherCheck -Scope CurrentUser
           }
