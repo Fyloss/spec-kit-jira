@@ -20,6 +20,21 @@ Import-Module (Join-Path $PSScriptRoot 'Output.psm1') -Force
 
 $script:ExitConfig = 4
 
+function Sort-JiraOrdinal {
+    # Sort strings by Unicode code point (ordinal), matching the Bash port's jq
+    # ordering. `-Culture Ordinal` is NOT a valid CultureInfo, so we sort via
+    # [StringComparer]::Ordinal instead. With -Unique, collapses duplicates
+    # ordinally like jq `unique`.
+    param([object[]] $Items, [switch] $Unique)
+    $arr = [string[]]@(foreach ($it in $Items) { [string]$it })
+    [System.Array]::Sort($arr, [System.StringComparer]::Ordinal)
+    if (-not $Unique) { return $arr }
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $out = [System.Collections.Generic.List[string]]::new()
+    foreach ($s in $arr) { if ($seen.Add($s)) { $out.Add($s) } }
+    return $out.ToArray()
+}
+
 # =============================================================================
 # Version single-source (T032, FR-021/FR-022)
 # =============================================================================
@@ -320,7 +335,7 @@ function Get-JiraCredentialPathError {
     param($Node, [string] $Path, [System.Collections.Generic.List[string]] $Acc)
 
     if ($Node -is [System.Collections.IDictionary]) {
-        foreach ($k in ($Node.Keys | Sort-Object { [string]$_ } -Culture Ordinal)) {
+        foreach ($k in (Sort-JiraOrdinal $Node.Keys)) {
             $seg = if ($Path -eq '') { [string]$k } else { "$Path.$k" }
             Get-JiraCredentialPathError $Node[$k] $seg $Acc
         }
@@ -384,7 +399,7 @@ function Test-JiraTeamConfig {
 
     $allowedTop = @('version_compat', 'projects', 'routing', 'routing_default', 'privacy')
     if ($Object -is [System.Collections.IDictionary]) {
-        foreach ($k in ($Object.Keys | Sort-Object { [string]$_ } -Culture Ordinal)) {
+        foreach ($k in (Sort-JiraOrdinal $Object.Keys)) {
             if ($allowedTop -cnotcontains [string]$k) { $errs.Add("unknown top-level key: $k") }
         }
     }
@@ -414,7 +429,7 @@ function Test-JiraLocalConfig {
     $errs = [System.Collections.Generic.List[string]]::new()
     $allowed = @('site_alias', 'resolved_ids', 'overrides')
     if ($Object -is [System.Collections.IDictionary]) {
-        foreach ($k in ($Object.Keys | Sort-Object { [string]$_ } -Culture Ordinal)) {
+        foreach ($k in (Sort-JiraOrdinal $Object.Keys)) {
             if ($allowed -cnotcontains [string]$k) { $errs.Add("unknown config.local key: $k") }
         }
     }
@@ -595,7 +610,7 @@ function Get-JiraPhaseStatusTargetSet {
     }
     # `unique` in jq sorts ascending; mirror with an ordinal sort of distinct values.
     $distinct = [System.Collections.Generic.List[object]]::new()
-    foreach ($v in ($values | Sort-Object -Culture Ordinal -Unique)) { $distinct.Add($v) }
+    foreach ($v in (Sort-JiraOrdinal $values -Unique)) { $distinct.Add($v) }
     return (ConvertTo-JiraJsonValue $distinct)
 }
 
