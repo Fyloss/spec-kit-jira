@@ -21,7 +21,7 @@ extension:
     ports: Bash (macOS/Linux) and PowerShell 7+ (Windows).
   category: integration
   effect: read-write
-  author: S.T. EMPIRE
+  author: Fyloss
   repository: https://github.com/Fyloss/spec-kit-jira
   license: MIT
   homepage: https://github.com/Fyloss/spec-kit-jira
