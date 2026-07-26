@@ -28,7 +28,7 @@ source "${_ENTRY_DIR}/lib/prereq.sh"
 # bytes regardless of host line-ending conventions (NFR-1). $1 is the target fd.
 _usage() {
   printf '%s\n' \
-    'usage: spec-kit-jira <config|reconcile|mention> [options]' \
+    'usage: spec-kit-jira <config|reconcile|mention|feature> [options]' \
     '  --dry-run                 predict actions without writing' \
     '  --json                    machine-readable run summary' \
     '  --on-drift=abort|proceed  drift handling (default: abort)' \
@@ -67,7 +67,7 @@ main() {
   fi
 
   if [[ -z "${command}" ]]; then
-    printf 'spec-kit-jira: a command is required (config|reconcile|mention)\n' >&2
+    printf 'spec-kit-jira: a command is required (config|reconcile|mention|feature)\n' >&2
     _usage 2
     return "$(cli_exit_code usage)"
   fi

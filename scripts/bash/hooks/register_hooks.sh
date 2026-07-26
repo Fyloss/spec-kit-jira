@@ -31,6 +31,25 @@ source "${_register_hooks_dir}/../lib/output.sh" # json_canonical
 HOOK_COMMAND='speckit.jira.reconcile'
 HOOK_EVENTS=(after_specify after_clarify after_plan after_tasks after_implement after_analyze)
 
+# The feature-naming command registered under the `before_specify` event (002
+# US3, FR-013): a non-blocking, optional hook that resolves the Jira ticket and
+# computes the team-based feature name before the host creates the spec.
+HOOK_BEFORE_EVENT='before_specify'
+HOOK_BEFORE_COMMAND='speckit.jira.feature'
+
+# _register_hooks_before_entry — the canonical desired entry for the before_specify
+# feature hook (enabled + optional, so it never blocks feature creation).
+_register_hooks_before_entry() {
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -cn --arg cmd "${HOOK_BEFORE_COMMAND}" '{
+    command: $cmd,
+    description: "Resolve the Jira ticket and compute the team-based feature name before spec creation (non-blocking).",
+    enabled: true,
+    optional: true
+  }'
+  # kcov-excl-stop
+}
+
 # _register_hooks_events_json — the lifecycle events as a canonical JSON array.
 _register_hooks_events_json() {
   printf '%s\n' "${HOOK_EVENTS[@]}" | jq -cR . | jq -cs .
@@ -54,16 +73,22 @@ _register_hooks_entry() {
 # every lifecycle event, set-not-append (FR-047) and never disturbing an entry the
 # operator already placed or disabled (FR-048). Prints the canonical merged JSON.
 _register_hooks_merge() {
-  local existing="$1" events entry
+  local existing="$1" events entry before_entry
   events="$(_register_hooks_events_json)"
   entry="$(_register_hooks_entry)"
+  before_entry="$(_register_hooks_before_entry)"
   # kcov-excl-start — jq literal (string lines are not statements)
-  jq -c --argjson events "${events}" --argjson entry "${entry}" --arg cmd "${HOOK_COMMAND}" '
+  jq -c --argjson events "${events}" --argjson entry "${entry}" --arg cmd "${HOOK_COMMAND}" \
+    --argjson bentry "${before_entry}" --arg bevent "${HOOK_BEFORE_EVENT}" --arg bcmd "${HOOK_BEFORE_COMMAND}" '
     reduce $events[] as $e (.;
       .hooks[$e] = (
         (((.hooks // {})[$e]) // []) as $cur
         | if any($cur[]; .command == $cmd) then $cur else $cur + [$entry] end
       ))
+    | .hooks[$bevent] = (
+        (((.hooks // {})[$bevent]) // []) as $bcur
+        | if any($bcur[]; .command == $bcmd) then $bcur else $bcur + [$bentry] end
+      )
   ' <<< "${existing}" | json_canonical
   # kcov-excl-stop
 }

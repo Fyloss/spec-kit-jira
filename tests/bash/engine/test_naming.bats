@@ -56,8 +56,11 @@ setup() {
 }
 
 @test "the engine file contains no issue-key-shaped text (Constitution VIII)" {
-  ! grep -qE '[A-Z][A-Z0-9_]+-[0-9]+' "${ENGINE_DIR}/naming.sh"
-  ! grep -qiE 'jira|atlassian|createmeta' "${ENGINE_DIR}/naming.sh"
+  # `run` keeps the negated greps from being swallowed by bats' errexit.
+  run grep -E '[A-Z][A-Z0-9_]+-[0-9]+' "${ENGINE_DIR}/naming.sh"
+  [ "$status" -ne 0 ]
+  run grep -iE 'jira|atlassian|createmeta' "${ENGINE_DIR}/naming.sh"
+  [ "$status" -ne 0 ]
 }
 
 @test "the PowerShell port names byte-identically (FR-020)" {

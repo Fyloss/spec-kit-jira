@@ -28,7 +28,7 @@ write_cfg() {
     printf '    epic_strategy: per_repo\n'
     printf '    task_strategy: subtask\n'
     printf 'routing_default: IJT\n'
-    [ -n "${1:-}" ] && printf '%s\n' "$1"
+    if [ -n "${1:-}" ]; then printf '%s\n' "$1"; fi
   } > "${DIR}/config.yml"
 }
 

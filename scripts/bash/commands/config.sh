@@ -184,6 +184,44 @@ _config_resolve_style() {
   return "${EXIT_CONFIG}"
 }
 
+# _config_gitignore_effect <repo-root> <dry_run> — enforce gitignore coverage of
+# the gitignored config layer (002 US3, FR-019): config.local.yml, .env, and the
+# new personal.yml. Only missing exact lines are appended, idempotently; an
+# absent file is created with the three lines. Prints the effect status
+# (created|written|unchanged) on stdout; a dry-run computes the status without
+# touching the file.
+_config_gitignore_effect() {
+  local repo_root="$1" dry_run="$2"
+  local gi="${SPEC_KIT_JIRA_GITIGNORE:-${repo_root}/.gitignore}"
+  local -a lines=(
+    ".specify/jira/config.local.yml"
+    ".specify/jira/.env"
+    ".specify/jira/personal.yml"
+  )
+  local status
+  if [[ ! -f "${gi}" ]]; then
+    status="created"
+    [[ "${dry_run}" != "true" ]] && printf '%s\n' "${lines[@]}" > "${gi}"
+  else
+    local -a missing=()
+    local l
+    for l in "${lines[@]}"; do
+      grep -qxF "${l}" "${gi}" 2> /dev/null || missing+=("${l}")
+    done
+    if [[ ${#missing[@]} -eq 0 ]]; then
+      status="unchanged"
+    else
+      status="written"
+      if [[ "${dry_run}" != "true" ]]; then
+        # Guarantee a trailing newline before appending the missing lines.
+        [[ -s "${gi}" && -n "$(tail -c1 "${gi}")" ]] && printf '\n' >> "${gi}"
+        printf '%s\n' "${missing[@]}" >> "${gi}"
+      fi
+    fi
+  fi
+  printf '%s' "${status}"
+}
+
 # cmd_config <argv...> — the deterministic install ceremony (US1). Echoes the run
 # summary to stdout and returns the exit code.
 cmd_config() {
@@ -310,6 +348,32 @@ cmd_config() {
     printf '%s\n' "${yaml}" > "${localf}"
   fi
 
+  # Connected-run mismatch surfacing (002 US2, FR-009): when the committed config
+  # declares a `teams:` catalogue, check each declared team's project against the
+  # accessible-projects list and warn (never block) for any team whose project is
+  # not visible. Without a catalogue no extra read is performed.
+  local run_warnings=0
+  if [[ "$(jq -r '(.teams // []) | length' <<< "${cfg}")" -gt 0 ]]; then
+    local accessible
+    if accessible="$(discovery_list_projects 2> /dev/null)"; then
+      local tid tproj
+      while IFS=$'\t' read -r tid tproj; do
+        [[ -z "${tid}" ]] && continue
+        if ! jq -e --arg p "${tproj}" 'any(.[]; .key == $p)' <<< "${accessible}" > /dev/null; then
+          output_warn "team '${tid}': project ${tproj} matches no accessible Jira project — a provisional, branch-derived value may have been accepted into the catalogue; verify or fix config.yml"
+          run_warnings=$((run_warnings + 1))
+        fi
+      done <<< "$(jq -r '.teams[] | "\(.id)\t\(.project)"' <<< "${cfg}")"
+    fi
+  fi
+
+  # Gitignore effect (002 US3, FR-019): ensure the repository .gitignore covers the
+  # gitignored config layer (config.local.yml, .env, personal.yml). Repo root is
+  # the parent of the .specify directory (overridable via SPEC_KIT_JIRA_GITIGNORE).
+  local repo_root gitignore_status
+  repo_root="$(dirname "$(dirname "${configdir}")")"
+  gitignore_status="$(_config_gitignore_effect "${repo_root}" "${dry_run}")"
+
   # README effect (US5, T065): splice the version-marked managed block into the
   # consuming repository's README. The path derives from the config dir's repo
   # root (the parent of .specify), overridable via SPEC_KIT_JIRA_README.
@@ -346,17 +410,19 @@ cmd_config() {
     --arg ds "${disc_status}" --arg dd "${nproj} project(s) discovered" \
     --argjson dp "${proj_styles}" \
     --arg hs "${hooks_status}" --arg hd "${hooks_detail}" \
-    --arg rs "${readme_status}" --arg rd "${readme_detail}" '
+    --arg rs "${readme_status}" --arg rd "${readme_detail}" \
+    --arg gs "${gitignore_status}" '
     {
       discovery: {status: $ds, detail: $dd, projects: $dp},
       hooks:     {status: $hs, detail: $hd},
-      readme:    {status: $rs, detail: $rd}
+      readme:    {status: $rs, detail: $rd},
+      gitignore: {status: $gs, detail: "personal.yml gitignore coverage"}
     }')"
 
   local summary
-  summary="$(jq -cn --argjson effects "${effects}" --argjson dry "${dry_run}" '
+  summary="$(jq -cn --argjson effects "${effects}" --argjson dry "${dry_run}" --argjson w "${run_warnings}" '
     {schema_version: "1.0", command: "config", dry_run: $dry,
-     counts: {created: 0, updated: 0, skipped: 0, warnings: 0, errors: 0},
+     counts: {created: 0, updated: 0, skipped: 0, warnings: $w, errors: 0},
      effects: $effects, exit_code: 0}' | json_canonical)"
 
   if [[ "${json}" == "true" ]]; then

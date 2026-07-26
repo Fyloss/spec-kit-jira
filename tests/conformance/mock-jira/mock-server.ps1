@@ -216,9 +216,10 @@ function Write-Response {
     $Stream.Flush()
 }
 
-function Read-RequestLine {
+function Read-RequestHead {
     param([System.IO.Stream]$Stream)
-    # Read bytes until CRLFCRLF (end of headers); we only need the request line.
+    # Read bytes until CRLFCRLF (end of headers); return the full header text so
+    # the caller can parse the request line AND Content-Length (for POST bodies).
     $bytes = New-Object System.Collections.Generic.List[byte]
     $one = New-Object byte[] 1
     while ($bytes.Count -lt 65536) {
@@ -229,8 +230,7 @@ function Read-RequestLine {
         if ($c -ge 4 -and $bytes[$c - 4] -eq 13 -and $bytes[$c - 3] -eq 10 -and $bytes[$c - 2] -eq 13 -and $bytes[$c - 1] -eq 10) { break }
     }
     if ($bytes.Count -eq 0) { return $null }
-    $text = [System.Text.Encoding]::ASCII.GetString($bytes.ToArray())
-    return ($text -split "`r`n")[0]
+    return [System.Text.Encoding]::ASCII.GetString($bytes.ToArray())
 }
 
 # --- Listen -----------------------------------------------------------------
@@ -246,16 +246,42 @@ try {
         try {
             $stream = $client.GetStream()
             $stream.ReadTimeout = 5000
-            $line = Read-RequestLine -Stream $stream
-            if (-not $line) { continue }
+            $head = Read-RequestHead -Stream $stream
+            if (-not $head) { continue }
+            $headLines = $head -split "`r`n"
+            $line = $headLines[0]
             $parts = $line -split ' '
             $method = $parts[0]
             $target = if ($parts.Count -ge 2) { $parts[1] } else { '/' }
             $path = ($target -split '\?')[0]
 
+            # Read the request body when present (Content-Length) — POST /issue
+            # carries the project the ticket is created in, needed for faults.
+            $contentLength = 0
+            foreach ($h in $headLines) {
+                if ($h -match '^(?i)Content-Length:\s*(\d+)\s*$') { $contentLength = [int]$Matches[1] }
+            }
+            $body = ''
+            if ($contentLength -gt 0) {
+                $buf = New-Object byte[] $contentLength
+                $read = 0
+                while ($read -lt $contentLength) {
+                    $r = $stream.Read($buf, $read, $contentLength - $read)
+                    if ($r -le 0) { break }
+                    $read += $r
+                }
+                $body = $Utf8NoBom.GetString($buf, 0, $read)
+            }
+
             [System.IO.File]::AppendAllText($CallLogPath, "$method $target`n", $Utf8NoBom)
 
-            $fault = Get-Fault -Path $path
+            # Fault selection is path-keyed by project; POST /issue has no project
+            # in its path, so a create fault is keyed by the body's project key.
+            $faultPath = $path
+            if ($method -eq 'POST' -and $path -eq '/rest/api/3/issue' -and $body -match '"project"\s*:\s*\{\s*"key"\s*:\s*"([^"]+)"') {
+                $faultPath = "/$($Matches[1])"
+            }
+            $fault = Get-Fault -Path $faultPath
             if ($fault) {
                 if ($fault.ContainsKey('network') -and $fault.network) {
                     # Simulate a dropped connection: close without responding.

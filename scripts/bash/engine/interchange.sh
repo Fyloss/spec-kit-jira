@@ -127,7 +127,13 @@ routing_resolve() {
           | .project
         ) // null
       ) as $matched
-    | ( $matched // .routing_default // "" )
+    | ( $folder | sub("^[0-9]+-"; "") ) as $flat
+    | ( first( (.teams // [])[]
+          | . as $t
+          | select($flat | startswith($t.folder_prefix))
+          | $t.project
+        ) // null ) as $team_route
+    | ( $matched // $team_route // .routing_default // "" )
   ' <<< "${cfg}")"
   # kcov-excl-stop
 

@@ -42,13 +42,14 @@ boot() {
   boot
   run cmd_config config --json
   [ "$status" -eq 0 ]
-  # All three effects are present as distinct, named sections.
-  [ "$(jq -r '.effects | keys | sort | join(",")' <<< "$output")" = "discovery,hooks,readme" ]
+  # All effects are present as distinct, named sections (002 adds gitignore).
+  [ "$(jq -r '.effects | keys | sort | join(",")' <<< "$output")" = "discovery,gitignore,hooks,readme" ]
   # The discovery effect performed its write this phase.
   [ "$(jq -r '.effects.discovery.status' <<< "$output")" = "written" ]
   # Every effect carries a status from the documented enumeration.
   [ "$(jq -r '.effects.hooks | has("status")' <<< "$output")" = "true" ]
   [ "$(jq -r '.effects.readme | has("status")' <<< "$output")" = "true" ]
+  [ "$(jq -r '.effects.gitignore | has("status")' <<< "$output")" = "true" ]
 }
 
 @test "the prose summary names each of the three effects" {
