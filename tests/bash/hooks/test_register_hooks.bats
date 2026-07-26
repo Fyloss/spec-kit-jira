@@ -145,3 +145,33 @@ teardown() {
   run diff "${WORK}/ext-bash" "${psext}"
   [ "$status" -eq 0 ]
 }
+
+@test "before_specify registers the feature hook enabled+optional, set-not-append (T046)" {
+  register_hooks_write "${EXT}" > /dev/null
+  local json
+  json="$(config_yaml_to_json "${EXT}")"
+  [ "$(jq -r '.hooks.before_specify | map(select(.command=="speckit.jira.feature")) | length' <<< "$json")" -eq 1 ]
+  [ "$(jq -r '.hooks.before_specify[0].enabled' <<< "$json")" = "true" ]
+  [ "$(jq -r '.hooks.before_specify[0].optional' <<< "$json")" = "true" ]
+  # Re-run: still exactly one entry (set, not append).
+  register_hooks_write "${EXT}" > /dev/null
+  json="$(config_yaml_to_json "${EXT}")"
+  [ "$(jq -r '.hooks.before_specify | length' <<< "$json")" -eq 1 ]
+  # The six after_* registrations are unchanged by the new event.
+  for e in after_specify after_clarify after_plan after_tasks after_implement after_analyze; do
+    [ "$(jq -r --arg e "$e" '.hooks[$e] | map(select(.command=="speckit.jira.reconcile")) | length' <<< "$json")" -eq 1 ]
+  done
+}
+
+@test "an operator-disabled feature hook is never re-added or re-enabled (T046, FR-048)" {
+  register_hooks_write "${EXT}" > /dev/null
+  local disabled
+  disabled="$(config_yaml_to_json "${EXT}" | jq -c '.hooks.before_specify[0].enabled = false')"
+  printf '%s' "$disabled" | config_to_yaml > "${EXT}"
+  run register_hooks_write "${EXT}"
+  [ "$status" -eq 0 ]
+  local json
+  json="$(config_yaml_to_json "${EXT}")"
+  [ "$(jq -r '.hooks.before_specify | length' <<< "$json")" -eq 1 ]
+  [ "$(jq -r '.hooks.before_specify[0].enabled' <<< "$json")" = "false" ]
+}

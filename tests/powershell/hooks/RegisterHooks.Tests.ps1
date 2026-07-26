@@ -100,4 +100,29 @@ Describe 'after_* hook registration' {
         @($h.missing).Count | Should -Be 6
         @($h.present).Count | Should -Be 0
     }
+
+    It 'registers before_specify -> speckit.jira.feature enabled+optional, set-not-append (T047)' {
+        [void](Set-JiraHookRegistration -Path $Ext)
+        [void](Set-JiraHookRegistration -Path $Ext)
+        $obj = ConvertFrom-JiraConfigYaml -Path $Ext | ConvertFrom-Json
+        @($obj.hooks.before_specify).Count | Should -Be 1
+        $obj.hooks.before_specify[0].command | Should -Be 'speckit.jira.feature'
+        $obj.hooks.before_specify[0].enabled | Should -BeTrue
+        $obj.hooks.before_specify[0].optional | Should -BeTrue
+        foreach ($e in @('after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')) {
+            @($obj.hooks.$e | Where-Object { $_.command -eq 'speckit.jira.reconcile' }).Count | Should -Be 1
+        }
+    }
+
+    It 'never re-adds or re-enables an operator-disabled feature hook (T047, FR-048)' {
+        [void](Set-JiraHookRegistration -Path $Ext)
+        $obj = ConvertFrom-JiraConfigYaml -Path $Ext | ConvertFrom-Json
+        $obj.hooks.before_specify[0].enabled = $false
+        $yaml = ConvertTo-JiraConfigYaml -Json (ConvertTo-JiraJsonValue $obj)
+        [System.IO.File]::WriteAllText($Ext, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
+        [void](Set-JiraHookRegistration -Path $Ext)
+        $obj = ConvertFrom-JiraConfigYaml -Path $Ext | ConvertFrom-Json
+        @($obj.hooks.before_specify).Count | Should -Be 1
+        $obj.hooks.before_specify[0].enabled | Should -BeFalse
+    }
 }

@@ -1,0 +1,16 @@
+{
+  "name": "us3-feature-create",
+  "description": "US3 (FR-013): team ijt selected, no ticket mentioned. The feature command creates the ticket in IJT (mock records POST /issue and the identity PUT), and the created number feeds <ID>: branch ijt-123/invoice-export. Byte-identical across ports.",
+  "mock": {
+    "projects": { "IJT": "team", "WEX": "team" },
+    "createdKey": "IJT-123"
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-teams",
+  "argv": ["feature", "--json", "invoice export"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_PLAN_CONTEXT": "{\"story_type_id\":\"10201\",\"priority_ids\":{\"P1\":\"1\",\"P2\":\"2\",\"P3\":\"3\"},\"estimation_field_id\":null}"
+  }
+}

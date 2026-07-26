@@ -1,0 +1,15 @@
+{
+  "name": "us3-feature-cross-team",
+  "description": "US3 (FR-014): team ijt selected, ticket WEX-7 mentioned (catalogue team wex). Without --use-team the command emits confirmation_required naming wex, exit 0, zero writes. Byte-identical across ports. (The --use-team re-invocation is asserted in the bats/Pester feature suites.)",
+  "mock": {
+    "projects": { "IJT": "team", "WEX": "team" }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-teams",
+  "argv": ["feature", "WEX-7", "--json", "onboarding"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_PLAN_CONTEXT": "{\"story_type_id\":\"10201\",\"priority_ids\":{\"P1\":\"1\",\"P2\":\"2\",\"P3\":\"3\"},\"estimation_field_id\":null}"
+  }
+}
