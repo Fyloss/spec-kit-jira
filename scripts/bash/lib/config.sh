@@ -139,9 +139,11 @@ _cfg_prep() {
 
 # _cfg_is_map_entry <content> — true when the line opens a `key:` mapping entry
 # (as opposed to a bare scalar such as a URL). The key charset is intentionally
-# narrow; `key:` and `key: value` match, `https://x` does not.
+# narrow; `key:` and `key: value` match, `https://x` does not. The apostrophe is
+# included because discovered status names ("Won't Do") are legal map keys.
 _cfg_is_map_entry() {
-  [[ "$1" =~ ^[A-Za-z0-9_.\ -]+:([[:space:]].*)?$ ]]
+  local re="^[A-Za-z0-9_.' -]+:([[:space:]].*)?$"
+  [[ "$1" =~ $re ]]
 }
 
 # _cfg_scalar_json <raw> — encode a YAML scalar as a JSON value.
@@ -388,7 +390,7 @@ def projkey: test("^[A-Z][A-Z0-9_]+$");
    | "unknown top-level key: \(.)"),
   ((.projects // []) | to_entries[] | .key as $i | .value as $p |
     ( [ (if (($p.key // "")|projkey) != true then "projects[\($i)].key is not a valid project key" else empty end),
-        (if ($p.style|IN("company_managed","team_managed")|not) then "projects[\($i)].style is invalid" else empty end),
+        (if ($p | has("style")) and ($p.style|IN("company_managed","team_managed")|not) then "projects[\($i)].style is invalid" else empty end),
         (if ($p.epic_strategy|IN("per_repo","per_feature")|not) then "projects[\($i)].epic_strategy is invalid" else empty end),
         (if ($p.task_strategy|IN("subtask","linked_story")|not) then "projects[\($i)].task_strategy is invalid" else empty end),
         (if ($p.task_strategy == "linked_story" and (($p.link_type // "")|length) < 1)
@@ -402,7 +404,14 @@ def projkey: test("^[A-Z][A-Z0-9_]+$");
 _CFG_LOCAL_ERRORS_JQ='
 [
   (keys_unsorted[] | select(IN("site_alias","resolved_ids","overrides")|not)
-   | "unknown config.local key: \(.)")
+   | "unknown config.local key: \(.)"),
+  ((.resolved_ids // {}) | to_entries[] | .key as $k | .value as $v
+   | ( (if (($v|type) == "object") and ($v | has("style"))
+          and ($v.style | IN("company_managed","team_managed") | not)
+        then "resolved_ids.\($k).style is invalid" else empty end),
+       (if (($v|type) == "object") and ($v | has("style_source"))
+          and ($v.style_source | IN("api","operator") | not)
+        then "resolved_ids.\($k).style_source is invalid" else empty end) ))
 ] | flatten'
 # kcov-excl-stop
 

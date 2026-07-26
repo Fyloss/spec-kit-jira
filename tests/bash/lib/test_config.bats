@@ -262,3 +262,15 @@ YAML
   ")"
   [ "$bash_v" = "$ps_v" ]
 }
+
+@test "an apostrophe map key (e.g. a Won't Do status) survives the YAML round-trip" {
+  # Regression (002 US1): the writer emits discovered status names verbatim and
+  # a name like "Won't Do" is a legal map key; the reader must not stop the
+  # mapping there — keys sorted after it (style, style_source) were dropped.
+  printf '%s' '{"resolved_ids":{"TEAM":{"statuses":{"Done":"13","Won'\''t Do":"14"},"style":"team_managed","style_source":"api"}}}' \
+    | config_to_yaml > "${DIR}/local.yml"
+  json="$(config_yaml_to_json "${DIR}/local.yml")"
+  [ "$(printf '%s' "${json}" | jq -r '.resolved_ids.TEAM.statuses["Won'\''t Do"]')" = "14" ]
+  [ "$(printf '%s' "${json}" | jq -r '.resolved_ids.TEAM.style')" = "team_managed" ]
+  [ "$(printf '%s' "${json}" | jq -r '.resolved_ids.TEAM.style_source')" = "api" ]
+}

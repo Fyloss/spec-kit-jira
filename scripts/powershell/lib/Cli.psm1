@@ -40,11 +40,14 @@ function Invoke-JiraCliParse {
     $repairHooks = 'false'
     $help = 'false'
     $parseError = ''
+    $useTeam = ''
     $positional = [System.Collections.Generic.List[string]]::new()
+    $styles = [System.Collections.Generic.List[string]]::new()
 
-    foreach ($arg in $Arguments) {
+    for ($idx = 0; $idx -lt $Arguments.Count; $idx++) {
+        $arg = $Arguments[$idx]
         switch -Regex ($arg) {
-            '^(config|reconcile|mention)$' {
+            '^(config|reconcile|mention|feature)$' {
                 if ([string]::IsNullOrEmpty($command)) { $command = $arg } else { $positional.Add($arg) }
                 break
             }
@@ -53,6 +56,30 @@ function Invoke-JiraCliParse {
             '^--verbose$' { $verbose = 'true'; break }
             '^--repair-hooks$' { $repairHooks = 'true'; break }
             '^(--help|-h)$' { $help = 'true'; break }
+            '^--style$' {
+                # Repeatable operator answer to the closed style question (002 US1).
+                if ($idx + 1 -ge $Arguments.Count) {
+                    $parseError = '--style requires a value (--style KEY=VALUE)'
+                }
+                else {
+                    $idx++
+                    $v = $Arguments[$idx]
+                    if ($v -cmatch '^[A-Z][A-Z0-9_]+=(company_managed|team_managed)$') { $styles.Add($v) }
+                    else { $parseError = "invalid --style value: $v (expected <PROJECT_KEY>=company_managed|team_managed)" }
+                }
+                break
+            }
+            '^--use-team$' {
+                # The answer to the cross-team closed confirmation (002 US3, FR-014).
+                if ($idx + 1 -ge $Arguments.Count) {
+                    $parseError = '--use-team requires a value (--use-team <id>)'
+                }
+                else {
+                    $idx++
+                    $useTeam = $Arguments[$idx]
+                }
+                break
+            }
             '^--on-drift=' {
                 $onDrift = $arg.Substring($arg.IndexOf('=') + 1)
                 if ($onDrift -ne 'abort' -and $onDrift -ne 'proceed') {
@@ -80,6 +107,8 @@ function Invoke-JiraCliParse {
         $lines.Add("verbose=$verbose")
         $lines.Add("repair_hooks=$repairHooks")
         $lines.Add("help=$help")
+        $lines.Add("styles=$($styles -join ' ')")
+        $lines.Add("use_team=$useTeam")
         $lines.Add("args=$($positional -join ' ')")
         $lines.Add("exit=$($script:ExitCodes.ok)")
     }

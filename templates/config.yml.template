@@ -13,9 +13,13 @@ projects:
   - # The project key (public within your org), e.g. PROJ.
     key: PROJ
 
-    # How the project is managed in Jira. Detected automatically at config time;
-    # persisted here by its logical value. One of: company_managed | team_managed.
-    style: company_managed
+    # How the project is managed in Jira: company_managed | team_managed.
+    # OPTIONAL — detected from the Jira API at config time and persisted with
+    # its provenance in config.local.yml. Declare it here ONLY as an explicit
+    # operator answer (e.g. when the API signal is ambiguous); a declaration
+    # that conflicts with an unambiguous API signal is refused, never silently
+    # overridden.
+    # style: team_managed
 
     # Where the Epic for this repo's work lives.
     #   per_repo    — one Epic for the whole repository.

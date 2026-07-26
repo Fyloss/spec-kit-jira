@@ -83,6 +83,20 @@ Describe 'ConvertFrom-JiraConfigYaml' {
         $json | Should -Be '{"generation":{"design_section":false}}'
         Remove-Item -Recurse -Force $d
     }
+
+    It "keeps a map key with an apostrophe (a Won't Do status) in the round-trip" {
+        # Regression (002 US1): keys sorted after an apostrophe key (style,
+        # style_source) were dropped by the reader. Twin of the bats test.
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'local.yml'
+        $yaml = ConvertTo-JiraConfigYaml -Json '{"resolved_ids":{"TEAM":{"statuses":{"Done":"13","Won''t Do":"14"},"style":"team_managed","style_source":"api"}}}'
+        [System.IO.File]::WriteAllText($f, $yaml + "`n")
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.resolved_ids.TEAM.statuses."Won't Do" | Should -Be '14'
+        $obj.resolved_ids.TEAM.style | Should -Be 'team_managed'
+        $obj.resolved_ids.TEAM.style_source | Should -Be 'api'
+        Remove-Item -Recurse -Force $d
+    }
 }
 
 Describe 'Import-JiraConfig' {

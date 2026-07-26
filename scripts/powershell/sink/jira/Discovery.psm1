@@ -29,14 +29,27 @@ function Get-DiscProp {
 }
 
 function Get-JiraDiscoveryStyle {
-    # Map the detected style to its logical value (research §1). next-gen /
-    # simplified -> team_managed; classic -> company_managed; neither -> company.
+    # THREE-VALUED style mapping (002 research §2, FR-001/FR-002). Mirror of
+    # _disc_style: a style is returned ONLY on an explicit, non-contradictory
+    # signal; both absent or contradictory returns '' — the sink never
+    # substitutes a default (the binding carries style: null).
     param($Project)
     $style = [string](Get-DiscProp $Project 'style')
     $simplified = Get-DiscProp $Project 'simplified'
-    if ($style -eq 'next-gen' -or $simplified -eq $true) { return 'team_managed' }
-    if ($style -eq 'classic' -or $simplified -eq $false) { return 'company_managed' }
-    return 'company_managed'
+    $sSig = switch ($style) {
+        'next-gen' { 'team_managed' }
+        'classic' { 'company_managed' }
+        default { '' }
+    }
+    $fSig = ''
+    if ($simplified -is [bool]) {
+        $fSig = if ($simplified) { 'team_managed' } else { 'company_managed' }
+    }
+    if ($sSig -and $fSig) {
+        if ($sSig -eq $fSig) { return $sSig }
+        return ''
+    }
+    return "$sSig$fSig"
 }
 
 function Get-JiraDiscoveryBindingResult {
@@ -156,7 +169,7 @@ function Get-JiraDiscoveryBindingResult {
     $flagged = Get-JiraDiscoveryFlaggedField -FieldsJson (ConvertTo-JiraJsonValue @($meta.fields))
 
     $binding = [ordered]@{
-        style                 = $style
+        style                 = $(if ($style -eq '') { $null } else { $style })
         issue_types           = $issueTypes
         statuses              = $statuses
         priorities            = $prio
@@ -396,4 +409,5 @@ function Get-JiraMentionedFetch {
 }
 
 Export-ModuleMember -Function Get-JiraDiscoveryBinding, Get-JiraDiscoveryBindingResult, `
-    Get-JiraDiscoveryFlaggedField, Get-JiraMentionedFetch, Get-JiraMentionedFetchResult
+    Get-JiraDiscoveryStyle, Get-JiraDiscoveryFlaggedField, `
+    Get-JiraMentionedFetch, Get-JiraMentionedFetchResult

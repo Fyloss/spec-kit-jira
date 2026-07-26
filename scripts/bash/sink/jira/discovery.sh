@@ -55,20 +55,33 @@ discovery_flagged_field() {
   # kcov-excl-stop
 }
 
-# _disc_style <project-json> — map the detected style to its logical value
-# (research §1): next-gen / simplified -> team_managed, classic -> company_managed,
-# neither present -> company_managed (the superset path degrades gracefully).
+# _disc_style <project-json> — THREE-VALUED style mapping (002 research §2,
+# FR-001/FR-002): a style is returned ONLY on an explicit, non-contradictory
+# signal — `style: next-gen` / `simplified: true` -> team_managed,
+# `style: classic` / `simplified: false` -> company_managed. Both signals
+# absent, or the two signals contradicting each other, print NOTHING: the sink
+# never substitutes a default (the binding carries `style: null` and the
+# command layer asks / fails closed).
 _disc_style() {
-  local proj="$1" style simplified
+  local proj="$1" style simplified s_sig="" f_sig=""
   style="$(jq -r '.style // ""' <<< "${proj}")"
   simplified="$(jq -r 'if has("simplified") then (.simplified|tostring) else "" end' <<< "${proj}")"
-  if [[ "${style}" == "next-gen" || "${simplified}" == "true" ]]; then
-    printf 'team_managed'
-  elif [[ "${style}" == "classic" || "${simplified}" == "false" ]]; then
-    printf 'company_managed'
+  case "${style}" in
+    next-gen) s_sig="team_managed" ;;
+    classic) s_sig="company_managed" ;;
+  esac
+  case "${simplified}" in
+    true) f_sig="team_managed" ;;
+    false) f_sig="company_managed" ;;
+  esac
+  if [[ -n "${s_sig}" && -n "${f_sig}" ]]; then
+    if [[ "${s_sig}" == "${f_sig}" ]]; then
+      printf '%s' "${s_sig}"
+    fi
   else
-    printf 'company_managed'
+    printf '%s' "${s_sig}${f_sig}"
   fi
+  return 0
 }
 
 # discover_binding <project_key> — see the file header.
@@ -125,7 +138,7 @@ discover_binding() {
     --argjson fields "${fields}" \
     --argjson flagged "${flagged}" '
     {
-      style: $style,
+      style: (if $style == "" then null else $style end),
       issue_types: [ $itypes.issueTypes[]
         | {logical_name: .name, id: .id, subtask: .subtask, hierarchy_level: .hierarchyLevel} ],
       statuses: ( reduce ($statuses[] | .statuses[]) as $s ([];

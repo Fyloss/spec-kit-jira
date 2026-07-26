@@ -138,8 +138,10 @@ function Initialize-CfgBuffer {
 }
 
 function Test-CfgMapEntry {
+    # The apostrophe is included because discovered status names ("Won't Do")
+    # are legal map keys — mirror of _cfg_is_map_entry.
     param([string] $Content)
-    return ($Content -match '^[A-Za-z0-9_. -]+:(\s.*)?$')
+    return ($Content -match "^[A-Za-z0-9_.' -]+:(\s.*)?$")
 }
 
 function Convert-CfgScalar {
@@ -409,8 +411,11 @@ function Test-JiraTeamConfig {
         foreach ($p in $projects) {
             $key = Get-CfgProp $p 'key'
             if (($key -isnot [string]) -or ($key -cnotmatch '^[A-Z][A-Z0-9_]+$')) { $errs.Add("projects[$i].key is not a valid project key") }
-            $style = Get-CfgProp $p 'style'
-            if (@('company_managed', 'team_managed') -cnotcontains $style) { $errs.Add("projects[$i].style is invalid") }
+            $hasStyle = ($p -is [System.Collections.IDictionary]) -and $p.Contains('style')
+            if ($hasStyle) {
+                $style = Get-CfgProp $p 'style'
+                if (@('company_managed', 'team_managed') -cnotcontains $style) { $errs.Add("projects[$i].style is invalid") }
+            }
             $es = Get-CfgProp $p 'epic_strategy'
             if (@('per_repo', 'per_feature') -cnotcontains $es) { $errs.Add("projects[$i].epic_strategy is invalid") }
             $ts = Get-CfgProp $p 'task_strategy'
@@ -431,6 +436,22 @@ function Test-JiraLocalConfig {
     if ($Object -is [System.Collections.IDictionary]) {
         foreach ($k in (Sort-JiraOrdinal $Object.Keys)) {
             if ($allowed -cnotcontains [string]$k) { $errs.Add("unknown config.local key: $k") }
+        }
+    }
+    # Per-project style provenance keys (002 US1): when present under a
+    # resolved_ids entry they must carry the enum values — same error strings as
+    # the Bash port's jq program.
+    $rids = Get-CfgProp $Object 'resolved_ids'
+    if ($rids -is [System.Collections.IDictionary]) {
+        foreach ($k in (Sort-JiraOrdinal $rids.Keys)) {
+            $v = $rids[[string]$k]
+            if ($v -isnot [System.Collections.IDictionary]) { continue }
+            if ($v.Contains('style') -and (@('company_managed', 'team_managed') -cnotcontains $v['style'])) {
+                $errs.Add("resolved_ids.$k.style is invalid")
+            }
+            if ($v.Contains('style_source') -and (@('api', 'operator') -cnotcontains $v['style_source'])) {
+                $errs.Add("resolved_ids.$k.style_source is invalid")
+            }
         }
     }
     return $errs.ToArray()

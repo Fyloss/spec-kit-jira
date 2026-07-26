@@ -104,17 +104,56 @@ config_resolved_ids_for() {
   }' <<< "$1" | json_canonical
 }
 
+# _config_style_flag_for <project-key> <styles-string> — the operator's --style
+# answer for one project (last occurrence wins), or empty when none was given.
+_config_style_flag_for() {
+  local key="$1" styles="$2" tok out=""
+  for tok in ${styles}; do
+    [[ "${tok}" == "${key}="* ]] && out="${tok#*=}"
+  done
+  printf '%s' "${out}"
+}
+
+# _config_resolve_style <project-key> <api-style> <committed-style> <style-flag>
+# Per-project style resolution (002 US1, FR-001/FR-002): unambiguous API signal
+# (agreeing with any committed declaration) -> "api"; otherwise the operator's
+# --style answer or, absent an API signal, the committed declaration ->
+# "operator"; otherwise fail closed (EXIT_CONFIG) with a located stderr naming
+# the project, the reason, and the two valid --style values. Prints
+# "<style> <source>" on success.
+_config_resolve_style() {
+  local pkey="$1" api_style="$2" committed="$3" flag="$4"
+  if [[ -n "${api_style}" && (-z "${committed}" || "${committed}" == "${api_style}") ]]; then
+    printf '%s api' "${api_style}"
+    return 0
+  fi
+  if [[ -n "${flag}" ]]; then
+    printf '%s operator' "${flag}"
+    return 0
+  fi
+  if [[ -z "${api_style}" && -n "${committed}" ]]; then
+    printf '%s operator' "${committed}"
+    return 0
+  fi
+  local reason="no unambiguous style signal in the discovery payload"
+  [[ -n "${api_style}" ]] && reason="the committed style conflicts with the API signal"
+  printf 'config: project %s: style is ambiguous (%s); pass --style %s=company_managed or --style %s=team_managed\n' \
+    "${pkey}" "${reason}" "${pkey}" "${pkey}" >&2
+  return "${EXIT_CONFIG}"
+}
+
 # cmd_config <argv...> — the deterministic install ceremony (US1). Echoes the run
 # summary to stdout and returns the exit code.
 cmd_config() {
   # Parse flags (config-read, no model judgement). The dispatcher already handled
   # --help; re-parse here so the command is runnable standalone.
-  local parsed json="false" dry_run="false" exit_code="0" error=""
+  local parsed json="false" dry_run="false" exit_code="0" error="" styles=""
   parsed="$(cli_parse "$@")"
   while IFS='=' read -r key value; do
     case "${key}" in
       json) json="${value}" ;;
       dry_run) dry_run="${value}" ;;
+      styles) styles="${value}" ;;
       exit) exit_code="${value}" ;;
       error) error="${value}" ;;
     esac
@@ -143,13 +182,26 @@ cmd_config() {
   # bytes on every run (FR-003).
   local keys
   keys="$(jq -r '.projects[]?.key // empty' <<< "${cfg}")"
-  local resolved nproj=0 pkey binding rids
+  local resolved nproj=0 pkey binding rids proj_styles='{}'
+  local api_style committed style_flag style_resolved style style_source
   resolved="$(jq -c '.resolved_ids // {}' <<< "${existing}")"
   while IFS= read -r pkey; do
     [[ -z "${pkey}" ]] && continue
     binding="$(discover_binding "${pkey}")" || return $?
+    # Style resolution (002 US1): api signal -> operator answer/declaration ->
+    # fail closed. An ambiguous project refuses BEFORE any write (zero writes).
+    api_style="$(jq -r '.style // ""' <<< "${binding}")"
+    committed="$(jq -r --arg k "${pkey}" '[.projects[] | select(.key == $k)][0].style // ""' <<< "${cfg}")"
+    style_flag="$(_config_style_flag_for "${pkey}" "${styles}")"
+    style_resolved="$(_config_resolve_style "${pkey}" "${api_style}" "${committed}" "${style_flag}")" || return $?
+    style="${style_resolved%% *}"
+    style_source="${style_resolved##* }"
     rids="$(config_resolved_ids_for "${binding}")"
+    rids="$(jq -c --arg s "${style}" --arg src "${style_source}" \
+      '. + {style: $s, style_source: $src}' <<< "${rids}")"
     resolved="$(jq -c --arg k "${pkey}" --argjson r "${rids}" '. + {($k): $r}' <<< "${resolved}")"
+    proj_styles="$(jq -c --arg k "${pkey}" --arg s "${style}" --arg src "${style_source}" \
+      '. + {($k): {style: $s, style_source: $src}}' <<< "${proj_styles}")"
     nproj=$((nproj + 1))
   done <<< "${keys}"
 
@@ -204,10 +256,11 @@ cmd_config() {
   local effects
   effects="$(jq -cn \
     --arg ds "${disc_status}" --arg dd "${nproj} project(s) discovered" \
+    --argjson dp "${proj_styles}" \
     --arg hs "${hooks_status}" --arg hd "${hooks_detail}" \
     --arg rs "${readme_status}" --arg rd "${readme_detail}" '
     {
-      discovery: {status: $ds, detail: $dd},
+      discovery: {status: $ds, detail: $dd, projects: $dp},
       hooks:     {status: $hs, detail: $hd},
       readme:    {status: $rs, detail: $rd}
     }')"

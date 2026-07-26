@@ -103,6 +103,62 @@ function Get-JiraResolvedIdMap {
     return (ConvertTo-JiraJsonValue ([ordered]@{ issue_types = $issue; priorities = $prio; statuses = $stat }))
 }
 
+function Get-CmdProp {
+    # StrictMode-safe optional property read: $null when the property is absent.
+    param($Object, [string] $Name)
+    if ($null -eq $Object) { return $null }
+    if ($Object -is [System.Management.Automation.PSCustomObject]) {
+        $p = $Object.PSObject.Properties[$Name]
+        if ($p) { return $p.Value }
+    }
+    elseif ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) { return $Object[$Name] }
+    }
+    return $null
+}
+
+function Get-JiraStyleFlagFor {
+    # The operator's --style answer for one project (last occurrence wins), or
+    # '' when none was given. Mirror of _config_style_flag_for.
+    param([string] $ProjectKey, [string] $Styles)
+    $out = ''
+    foreach ($tok in ($Styles -split ' ')) {
+        if ($tok -clike "$ProjectKey=*") { $out = $tok.Substring($tok.IndexOf('=') + 1) }
+    }
+    return $out
+}
+
+function Resolve-JiraProjectStyle {
+    <#
+    .SYNOPSIS
+      Per-project style resolution (002 US1, FR-001/FR-002). Mirror of
+      _config_resolve_style: api signal (agreeing with any committed
+      declaration) -> "api"; the --style answer or, absent an API signal, the
+      committed declaration -> "operator"; otherwise exit 4 with the located
+      stderr. Returns { ExitCode; Style; Source }.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ProjectKey,
+        [string] $ApiStyle = '',
+        [string] $Committed = '',
+        [string] $Flag = ''
+    )
+    if ($ApiStyle -and (-not $Committed -or $Committed -eq $ApiStyle)) {
+        return [pscustomobject]@{ ExitCode = 0; Style = $ApiStyle; Source = 'api' }
+    }
+    if ($Flag) {
+        return [pscustomobject]@{ ExitCode = 0; Style = $Flag; Source = 'operator' }
+    }
+    if (-not $ApiStyle -and $Committed) {
+        return [pscustomobject]@{ ExitCode = 0; Style = $Committed; Source = 'operator' }
+    }
+    $reason = if ($ApiStyle) { 'the committed style conflicts with the API signal' }
+    else { 'no unambiguous style signal in the discovery payload' }
+    [Console]::Error.WriteLine("config: project ${ProjectKey}: style is ambiguous ($reason); pass --style $ProjectKey=company_managed or --style $ProjectKey=team_managed")
+    return [pscustomobject]@{ ExitCode = $script:ExitConfig; Style = ''; Source = '' }
+}
+
 function Invoke-JiraConfig {
     <#
     .SYNOPSIS
@@ -125,6 +181,7 @@ function Invoke-JiraConfig {
     }
     $json = $state['json'] -eq 'true'
     $dryRun = $state['dry_run'] -eq 'true'
+    $styles = if ($state.ContainsKey('styles')) { $state['styles'] } else { '' }
 
     $configdir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
 
@@ -158,12 +215,28 @@ function Invoke-JiraConfig {
     $nproj = 0
     $projects = @()
     if ($cfgObj.PSObject.Properties.Name -contains 'projects') { $projects = @($cfgObj.projects) }
+    $projStyles = [ordered]@{}
     foreach ($p in $projects) {
         $pkey = [string]$p.key
         if ([string]::IsNullOrEmpty($pkey)) { continue }
         $r = Get-JiraDiscoveryBindingResult -ProjectKey $pkey
         if ($r.ExitCode -ne 0) { return [int] $r.ExitCode }
-        $resolved[$pkey] = ((Get-JiraResolvedIdMap -BindingJson $r.Binding) | ConvertFrom-Json -Depth 100)
+        # Style resolution (002 US1): api signal -> operator answer/declaration
+        # -> fail closed. An ambiguous project refuses BEFORE any write.
+        $bindingObj = $r.Binding | ConvertFrom-Json -Depth 100
+        $apiStyle = [string](Get-CmdProp $bindingObj 'style')
+        $committed = [string](Get-CmdProp $p 'style')
+        $flag = Get-JiraStyleFlagFor -ProjectKey $pkey -Styles $styles
+        $sr = Resolve-JiraProjectStyle -ProjectKey $pkey -ApiStyle $apiStyle -Committed $committed -Flag $flag
+        if ($sr.ExitCode -ne 0) { return [int] $sr.ExitCode }
+        $rids = [ordered]@{}
+        foreach ($prop in ((Get-JiraResolvedIdMap -BindingJson $r.Binding) | ConvertFrom-Json -Depth 100).PSObject.Properties) {
+            $rids[$prop.Name] = $prop.Value
+        }
+        $rids['style'] = $sr.Style
+        $rids['style_source'] = $sr.Source
+        $resolved[$pkey] = $rids
+        $projStyles[$pkey] = [ordered]@{ style = $sr.Style; style_source = $sr.Source }
         $nproj++
     }
 
@@ -222,7 +295,7 @@ function Invoke-JiraConfig {
     # Build the three-effect summary (FR-054), byte-identical to the Bash port:
     # discovery, hooks, and README each reported as a distinct section.
     $effects = [ordered]@{
-        discovery = [ordered]@{ status = $discStatus; detail = "$nproj project(s) discovered" }
+        discovery = [ordered]@{ status = $discStatus; detail = "$nproj project(s) discovered"; projects = $projStyles }
         hooks     = [ordered]@{ status = $hooksStatus; detail = $hooksDetail }
         readme    = [ordered]@{ status = $readmeStatus; detail = $readmeDetail }
     }

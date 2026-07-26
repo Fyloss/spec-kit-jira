@@ -63,13 +63,13 @@ Single-project twin-port layout (unchanged from 001):
 
 ### Implementation for User Story 1
 
-- [ ] T012 [US1] Make `_disc_style` three-valued in scripts/bash/sink/jira/discovery.sh: explicit non-contradictory signal ⇒ mapped style; absent or contradictory ⇒ empty result surfaced as `style: null` in the binding; remove the `company_managed` default (research §2)
-- [ ] T013 [US1] Twin the three-valued mapping in scripts/powershell/sink/jira/Discovery.psm1 (makes T005/T006 pass)
-- [ ] T014 [US1] Update scripts/bash/lib/config.sh: `projects[].style` becomes optional in the committed-config schema (operator declaration when present); extend the config.local known-key list with `style` and `style_source` under `resolved_ids.<KEY>` so the canonical serialiser round-trips them byte-identically
-- [ ] T015 [US1] Twin the schema changes in scripts/powershell/lib/Config.psm1
-- [ ] T016 [US1] Implement style resolution in scripts/bash/commands/config.sh: repeatable `--style KEY=VALUE` flag (enum-validated, exit 1 otherwise); per-project order api-signal → `--style`/committed declaration (provenance `operator`) → fail closed exit 4 with zero writes; committed-vs-API conflict re-enters the ambiguous branch; persist `style`/`style_source`; per-project audit in the run summary (contracts/config-cli-contract.md)
-- [ ] T017 [US1] Twin the style resolution in scripts/powershell/commands/Config.psm1 (makes T007–T011 pass)
-- [ ] T018 [P] [US1] Update templates/config.yml.template: remove the pre-filled `style: company_managed` line, replace with a comment documenting the optional operator declaration
+- [X] T012 [US1] Make `_disc_style` three-valued in scripts/bash/sink/jira/discovery.sh: explicit non-contradictory signal ⇒ mapped style; absent or contradictory ⇒ empty result surfaced as `style: null` in the binding; remove the `company_managed` default (research §2)
+- [X] T013 [US1] Twin the three-valued mapping in scripts/powershell/sink/jira/Discovery.psm1 (makes T005/T006 pass)
+- [X] T014 [US1] Update scripts/bash/lib/config.sh: `projects[].style` becomes optional in the committed-config schema (operator declaration when present); extend the config.local known-key list with `style` and `style_source` under `resolved_ids.<KEY>` so the canonical serialiser round-trips them byte-identically
+- [X] T015 [US1] Twin the schema changes in scripts/powershell/lib/Config.psm1
+- [X] T016 [US1] Implement style resolution in scripts/bash/commands/config.sh: repeatable `--style KEY=VALUE` flag (enum-validated, exit 1 otherwise); per-project order api-signal → `--style`/committed declaration (provenance `operator`) → fail closed exit 4 with zero writes; committed-vs-API conflict re-enters the ambiguous branch; persist `style`/`style_source`; per-project audit in the run summary (contracts/config-cli-contract.md)
+- [X] T017 [US1] Twin the style resolution in scripts/powershell/commands/Config.psm1 (makes T007–T011 pass)
+- [X] T018 [P] [US1] Update templates/config.yml.template: remove the pre-filled `style: company_managed` line, replace with a comment documenting the optional operator declaration
 
 **Checkpoint**: US1 fully functional — ambiguity never silently defaults; provenance auditable; both ports byte-identical
 
