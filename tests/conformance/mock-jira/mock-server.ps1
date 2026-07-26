@@ -48,6 +48,12 @@ $GlobalFault = if ($cfg.ContainsKey('fault'))   { $cfg.fault }    else { $null }
 # property matches a configured key, the mock returns that stored marker instead of
 # a 404 — this is how the "claimed by another spec" case (FR-051) is exercised.
 $Identity   = if ($cfg.ContainsKey('identity')) { $cfg.identity } else { @{} }
+# Optional page-size cap for GET /project/search: lets a scenario with a handful
+# of projects exercise real pagination (the transport asks for maxResults=50).
+$SearchPageSize = if ($cfg.ContainsKey('pageSize')) { [int]$cfg.pageSize } else { 0 }
+# Optional issue key returned by POST /rest/api/3/issue (feature-creation tests
+# derive the branch <ID> from the created key's number).
+$CreatedKey = if ($cfg.ContainsKey('createdKey')) { [string]$cfg.createdKey } else { '' }
 
 # --- Helpers ----------------------------------------------------------------
 
@@ -57,6 +63,55 @@ function Get-Style {
         if ($Path -match "/$([regex]::Escape($key))(/|$)") { return $Projects[$key] }
     }
     return 'company'
+}
+
+function Get-MetaStyle {
+    # The metadata fixtures (createmeta / statuses) exist only for the two real
+    # styles; an ambiguous/contradictory project reuses the company set — those
+    # tests exercise the style signal, never the metadata content.
+    param([string]$Style)
+    if ($Style -in @('company', 'team')) { return $Style }
+    return 'company'
+}
+
+function Get-ProjectSearchPage {
+    # Paginated GET /rest/api/3/project/search over the configured projects,
+    # honouring startAt/maxResults (optionally capped by pageSize) with
+    # isLast/total. Values carry key/name plus the style signals mapped from the
+    # configured style: company -> classic/false, team -> next-gen/true,
+    # contradictory -> classic/true, ambiguous -> neither field.
+    param([string]$Query)
+    $startAt = 0; $maxResults = 50
+    foreach ($pair in ($Query -split '&')) {
+        if ($pair -match '^startAt=(\d+)$') { $startAt = [int]$Matches[1] }
+        elseif ($pair -match '^maxResults=(\d+)$') { $maxResults = [int]$Matches[1] }
+    }
+    if ($SearchPageSize -gt 0 -and $SearchPageSize -lt $maxResults) { $maxResults = $SearchPageSize }
+
+    $keys = [string[]]@($Projects.Keys)
+    [System.Array]::Sort($keys, [System.StringComparer]::Ordinal)
+    $total = $keys.Count
+    $values = [System.Collections.Generic.List[object]]::new()
+    $end = [Math]::Min($startAt + $maxResults, $total)
+    for ($i = $startAt; $i -lt $end; $i++) {
+        $k = $keys[$i]
+        $entry = [ordered]@{ key = $k; name = "$k project" }
+        switch ([string]$Projects[$k]) {
+            'company'       { $entry['style'] = 'classic';  $entry['simplified'] = $false }
+            'team'          { $entry['style'] = 'next-gen'; $entry['simplified'] = $true }
+            'contradictory' { $entry['style'] = 'classic';  $entry['simplified'] = $true }
+            default { }
+        }
+        $values.Add($entry)
+    }
+    $page = [ordered]@{
+        startAt    = $startAt
+        maxResults = $maxResults
+        total      = $total
+        isLast     = (($startAt + $maxResults) -ge $total)
+        values     = $values.ToArray()
+    }
+    return @{ status = 200; body = ($page | ConvertTo-Json -Depth 10 -Compress) }
 }
 
 function Get-Fault {
@@ -93,17 +148,26 @@ function Read-FixtureBody {
 }
 
 function Resolve-Route {
-    param([string]$Method, [string]$Path)
+    param([string]$Method, [string]$Path, [string]$Query = '')
     $style = Get-Style -Path $Path
+    $metaStyle = Get-MetaStyle -Style $style
     switch -regex ($Path) {
         '^/__mock/health$'                                           { return @{ status = 200; body = '{"ok":true}' } }
-        '^/rest/api/3/project/[^/]+/statuses$'                        { return (Read-FixtureBody "statuses-$style") }
+        '^/rest/api/3/project/search$'                                { if ($Method -eq 'GET') { return (Get-ProjectSearchPage -Query $Query) } }
+        '^/rest/api/3/project/[^/]+/statuses$'                        { return (Read-FixtureBody "statuses-$metaStyle") }
         '^/rest/api/3/project/[^/]+$'                                 { return (Read-FixtureBody "project-$style") }
-        '^/rest/api/3/issue/createmeta/[^/]+/issuetypes/[^/]+$'       { return (Read-FixtureBody "createmeta-fields-$style") }
-        '^/rest/api/3/issue/createmeta/[^/]+/issuetypes$'            { return (Read-FixtureBody "createmeta-issuetypes-$style") }
+        '^/rest/api/3/issue/createmeta/[^/]+/issuetypes/[^/]+$'       { return (Read-FixtureBody "createmeta-fields-$metaStyle") }
+        '^/rest/api/3/issue/createmeta/[^/]+/issuetypes$'            { return (Read-FixtureBody "createmeta-issuetypes-$metaStyle") }
         '^/rest/api/3/priority$'                                      { return (Read-FixtureBody 'priority') }
         '^/rest/api/3/field$'                                         { return (Read-FixtureBody 'field') }
-        '^/rest/api/3/issue$'                                         { if ($Method -eq 'POST') { $b = Read-FixtureBody 'issue-created'; $b.status = 201; return $b } }
+        '^/rest/api/3/issue$'                                         {
+            if ($Method -eq 'POST') {
+                if ($CreatedKey) {
+                    return @{ status = 201; body = "{`"id`":`"99001`",`"key`":`"$CreatedKey`",`"self`":`"/rest/api/3/issue/99001`"}" }
+                }
+                $b = Read-FixtureBody 'issue-created'; $b.status = 201; return $b
+            }
+        }
         '^/rest/api/3/issue/[^/]+/transitions$'                       { if ($Method -eq 'POST') { return @{ status = 204; body = '' } } }
         '^/rest/api/3/issue/[^/]+/remotelink$'                        { if ($Method -eq 'GET') { return (Read-FixtureBody 'remotelinks') } }
         '^/rest/api/3/(search|search/jql)$'                           { if ($Method -eq 'GET') { return (Read-FixtureBody 'search-siblings') } }
@@ -117,7 +181,21 @@ function Resolve-Route {
                 return $b
             }
         }
-        '^/rest/api/3/issue/[^/]+$'                                   { if ($Method -eq 'GET') { return (Read-FixtureBody 'issue-mentioned') } }
+        '^/rest/api/3/issue/[^/]+$' {
+            if ($Method -eq 'GET') {
+                # Mentioned-ticket validation (fields=project): the issue's project
+                # is its key prefix; an unconfigured project is a 404 (fail-closed).
+                if ($Query -match '(^|&)fields=project(&|$)') {
+                    $ikey = ($Path -split '/')[-1]
+                    $pkey = ($ikey -split '-')[0]
+                    if ($Projects.ContainsKey($pkey)) {
+                        return @{ status = 200; body = "{`"key`":`"$ikey`",`"fields`":{`"project`":{`"key`":`"$pkey`"}}}" }
+                    }
+                    return @{ status = 404; body = '{"errorMessages":["not found"],"errors":{}}' }
+                }
+                return (Read-FixtureBody 'issue-mentioned')
+            }
+        }
         default { }
     }
     return @{ status = 404; body = '{"errorMessages":["not found"],"errors":{}}' }
@@ -190,7 +268,8 @@ try {
                 continue
             }
 
-            $route = Resolve-Route -Method $method -Path $path
+            $query = if (($target -split '\?').Count -ge 2) { ($target -split '\?')[1] } else { '' }
+            $route = Resolve-Route -Method $method -Path $path -Query $query
             Write-Response -Stream $stream -Status ([int]$route.status) -Body ([string]$route.body)
         }
         finally {

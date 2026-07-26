@@ -68,11 +68,27 @@ MOCK_CFG="$(mktemp)"
 jq '.mock // {}' "${SCENARIO}" > "${MOCK_CFG}"
 mock_start "${MOCK_CFG}"
 
+# --- Optional git repository (degraded-mode / branch-state scenarios) --------
+# `git_branch` initialises the workdir as a git repo checked out on that branch
+# (deterministic default branch so both ports see identical refs).
+GIT_BRANCH="$(jq -r '.git_branch // empty' "${SCENARIO}")"
+if [ -n "${GIT_BRANCH}" ]; then
+  (
+    cd "${WORKDIR}"
+    git init -q -b main
+    git -c user.email=conformance@example.invalid -c user.name=conformance \
+      commit -q --allow-empty -m init
+    git checkout -q -b "${GIT_BRANCH}"
+  )
+fi
+
 # --- Environment -------------------------------------------------------------
+# The mock base URL is set FIRST so a scenario's env can override it (e.g. to
+# the empty string, which the ports treat as unset — the degraded-mode trigger).
+export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 while IFS=$'\t' read -r key value; do
   [ -n "${key}" ] && export "${key}=${value}"
 done < <(jq -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv' "${SCENARIO}")
-export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 
 # --- Argv --------------------------------------------------------------------
 ARGV=()

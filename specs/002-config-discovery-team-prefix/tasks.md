@@ -27,8 +27,8 @@ Single-project twin-port layout (unchanged from 001):
 
 **Purpose**: Recorded payloads and fixture repositories every story's tests replay
 
-- [ ] T001 [P] Add ambiguous-style discovery payload fixtures in tests/conformance/fixtures/: a `GET /project/{key}` payload with neither `style` nor `simplified`, and one with contradictory signals (`style: "classic"` + `simplified: true`) — used by US1 regression and conformance tests
-- [ ] T002 [P] Add `repo-with-teams` conformance fixture in tests/conformance/fixtures/repo-with-teams/: committed `config.yml` declaring teams `ijt` (project IJT, prefix `ijt-`, pattern `ijt-<ID>/<FEATURE_NAME>`) and `wex` (project WEX, prefix `wex-`, pattern `wex-<ID>/<FEATURE_NAME>`), plus a sample `personal.yml` selecting `ijt` — used by US3 tests and scenarios
+- [X] T001 [P] Add ambiguous-style discovery payload fixtures in tests/conformance/fixtures/: a `GET /project/{key}` payload with neither `style` nor `simplified`, and one with contradictory signals (`style: "classic"` + `simplified: true`) — used by US1 regression and conformance tests
+- [X] T002 [P] Add `repo-with-teams` conformance fixture in tests/conformance/fixtures/repo-with-teams/: committed `config.yml` declaring teams `ijt` (project IJT, prefix `ijt-`, pattern `ijt-<ID>/<FEATURE_NAME>`) and `wex` (project WEX, prefix `wex-`, pattern `wex-<ID>/<FEATURE_NAME>`), plus a sample `personal.yml` selecting `ijt` — used by US3 tests and scenarios
 
 ---
 
@@ -38,8 +38,8 @@ Single-project twin-port layout (unchanged from 001):
 
 **⚠️ CRITICAL**: Complete before starting any user story's conformance tasks
 
-- [ ] T003 Extend the mock Jira server in tests/conformance/mock-jira/ with paginated `GET /rest/api/3/project/search` (honouring `startAt`/`maxResults`, `isLast`/`total`, per-page `values[].{key,name,style,simplified}`), including an empty-result variant (contracts/jira-endpoints-delta.md)
-- [ ] T004 Extend the mock Jira server in tests/conformance/mock-jira/ with `GET /rest/api/3/issue/{key}?fields=project` (mentioned-ticket validation) and `POST /rest/api/3/issue` (create, returning a new key), both recorded in the mock's call log so scenarios can assert call sequences and zero-call cases
+- [X] T003 Extend the mock Jira server in tests/conformance/mock-jira/ with paginated `GET /rest/api/3/project/search` (honouring `startAt`/`maxResults`, `isLast`/`total`, per-page `values[].{key,name,style,simplified}`), including an empty-result variant (contracts/jira-endpoints-delta.md)
+- [X] T004 Extend the mock Jira server in tests/conformance/mock-jira/ with `GET /rest/api/3/issue/{key}?fields=project` (mentioned-ticket validation) and `POST /rest/api/3/issue` (create, returning a new key), both recorded in the mock's call log so scenarios can assert call sequences and zero-call cases
 
 **Checkpoint**: Fixtures and mock endpoints ready — user story phases can begin
 
