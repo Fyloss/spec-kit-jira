@@ -93,13 +93,13 @@ Single-project twin-port layout (unchanged from 001):
 - [X] T026 [P] [US2] Conformance scenario tests/conformance/scenarios/us2-list-projects.json: connected run with no key ⇒ paginated project/search call sequence recorded, closed-question error/output lists the accessible projects, byte-identical across ports
 - [X] T027 [P] [US2] Conformance scenario tests/conformance/scenarios/us2-placeholder-key-refusal.json: `config.yml` holding `PROJ`, arbitrary branch prefix checked out ⇒ exit 4 unattended, summary contains no branch-derived value (quickstart scenario 3)
 - [X] T028 [P] [US2] Conformance scenario tests/conformance/scenarios/us2-degraded-mode.json: no base URL in env ⇒ exit 0, provisional proposals, re-run guidance, zero writes, zero mock-Jira calls; both ports byte-identical
-- [ ] T029 [US2] Implement `discovery_list_projects` in scripts/bash/sink/jira/discovery.sh: paginated `GET /rest/api/3/project/search` through the existing transport, canonical array output reusing the three-valued style mapping, zero-results fail-closed error
-- [ ] T030 [US2] Twin `Get-JiraDiscoveryProjectList` in scripts/powershell/sink/jira/Discovery.psm1 (makes T019/T020 pass)
-- [ ] T031 [US2] Add the placeholder-key rule in scripts/bash/lib/config.sh: a configured key equal to the template's literal `PROJ` constant is treated as unset (constant lives beside the template consumer)
-- [ ] T032 [US2] Twin the placeholder rule in scripts/powershell/lib/Config.psm1
-- [ ] T033 [US2] Implement key sourcing and degraded mode in scripts/bash/commands/config.sh: optional positional `PROJECT_KEY` (validated, fail-closed, no substitution); source order argument → config → closed question, exit 4 unattended; degraded-mode trigger test before any Jira call; degraded branch scan via `git for-each-ref refs/heads --format='%(refname:short)'` producing provisional proposals, one warning, copy-pasteable re-run command, zero writes to config.local.yml; mismatch surfacing on the next connected run (FR-009)
-- [ ] T034 [US2] Twin key sourcing and degraded mode in scripts/powershell/commands/Config.psm1 (makes T021–T028 pass)
-- [ ] T035 [US2] Rewrite commands/speckit.jira.config.md per contracts/config-cli-contract.md: normative MUST/NEVER wording forbidding git-state inference in connected runs, degraded-mode announcement/provisional semantics, the two closed questions (style two-value; key over the discovered list), agent asks then re-invokes with `--style`/the chosen key (makes T025 pass)
+- [X] T029 [US2] Implement `discovery_list_projects` in scripts/bash/sink/jira/discovery.sh: paginated `GET /rest/api/3/project/search` through the existing transport, canonical array output reusing the three-valued style mapping, zero-results fail-closed error
+- [X] T030 [US2] Twin `Get-JiraDiscoveryProjectList` in scripts/powershell/sink/jira/Discovery.psm1 (makes T019/T020 pass)
+- [X] T031 [US2] Add the placeholder-key rule in scripts/bash/lib/config.sh: a configured key equal to the template's literal `PROJ` constant is treated as unset (constant lives beside the template consumer)
+- [X] T032 [US2] Twin the placeholder rule in scripts/powershell/lib/Config.psm1
+- [X] T033 [US2] Implement key sourcing and degraded mode in scripts/bash/commands/config.sh: optional positional `PROJECT_KEY` (validated, fail-closed, no substitution); source order argument → config → closed question, exit 4 unattended; degraded-mode trigger test before any Jira call; degraded branch scan via `git for-each-ref refs/heads --format='%(refname:short)'` producing provisional proposals, one warning, copy-pasteable re-run command, zero writes to config.local.yml; mismatch surfacing on the next connected run (FR-009)
+- [X] T034 [US2] Twin key sourcing and degraded mode in scripts/powershell/commands/Config.psm1 (makes T021–T028 pass)
+- [X] T035 [US2] Rewrite commands/speckit.jira.config.md per contracts/config-cli-contract.md: normative MUST/NEVER wording forbidding git-state inference in connected runs, degraded-mode announcement/provisional semantics, the two closed questions (style two-value; key over the discovered list), agent asks then re-invokes with `--style`/the chosen key (makes T025 pass)
 
 **Checkpoint**: US1 + US2 independently functional — connected runs never touch git state; degraded runs are loud, provisional, and write-free
 
@@ -133,36 +133,36 @@ Single-project twin-port layout (unchanged from 001):
 
 ### Implementation for User Story 3
 
-- [ ] T053 [US3] Implement the `teams:` catalogue schema and load-time validation in scripts/bash/lib/config.sh (uniqueness, prefix/pattern grammar, credential-shape refusal, optional section)
-- [ ] T054 [US3] Twin the catalogue validation in scripts/powershell/lib/Config.psm1 (makes T036/T037 pass)
-- [ ] T055 [US3] Implement the personal-file loader in scripts/bash/lib/config.sh: read `.specify/jira/personal.yml`, validate `team` against the catalogue with the located-error listing, validate `override` as a catalogue entry, never write the file
-- [ ] T056 [US3] Twin the personal-file loader in scripts/powershell/lib/Config.psm1 (makes T038/T039 pass)
-- [ ] T057 [P] [US3] Create pure naming engine scripts/bash/engine/naming.sh: pattern expansion, project-key stripping of an opaque ticket key, folder-prefix dedup, flat-folder guarantee — no Jira knowledge, no issue-key-shaped literals
-- [ ] T058 [P] [US3] Create twin scripts/powershell/engine/Naming.psm1 (makes T040/T041 pass)
-- [ ] T059 [P] [US3] Create sink scripts/bash/sink/jira/ticket.sh: `ticket_validate` (read via existing transport) and `ticket_create` (guarded write: PASS-1 guard, resolved story-type id, identity stamp) per contracts/jira-endpoints-delta.md
-- [ ] T060 [P] [US3] Create twin scripts/powershell/sink/jira/Ticket.psm1 (makes T042/T043 pass)
-- [ ] T061 [US3] Create scripts/bash/commands/feature.sh implementing `cmd_feature` per contracts/feature-cli-contract.md: load catalogue + personal file; effective-team resolution with `confirmation_required` / proceed-stop outputs; ticket-before-naming; non-blocking fallback; canonical JSON output (`team`, `ticket{key,number,action}`, `branch_name`, `short_name`, `override_used`, `warnings`); `--json`, `--dry-run`, `--use-team` (depends on T053–T060)
-- [ ] T062 [US3] Create twin scripts/powershell/commands/Feature.psm1 implementing `Invoke-JiraFeature` (makes T044/T045 pass)
-- [ ] T063 [US3] Register the `feature` subcommand in the dispatcher scripts/bash/lib/cli.sh
-- [ ] T064 [US3] Twin the dispatch entry in scripts/powershell/lib/Cli.psm1
-- [ ] T065 [US3] Add the gitignore effect to scripts/bash/commands/config.sh: verify/append `.specify/jira/personal.yml` coverage idempotently alongside the existing `config.local.yml`/`.env` lines, report `created|written|unchanged|skipped` as its own effect, covered by `--dry-run`
-- [ ] T066 [US3] Twin the gitignore effect in scripts/powershell/commands/Config.psm1 (makes T048/T049 pass)
-- [ ] T067 [US3] Register `before_specify` → `speckit.jira.feature` (`enabled: true`, `optional: true`) in scripts/bash/hooks/register_hooks.sh using the existing set-not-append merge with disabled-stays-disabled
-- [ ] T068 [US3] Twin the registration in scripts/powershell/hooks/RegisterHooks.psm1 (makes T046/T047 pass)
-- [ ] T069 [P] [US3] Create templates/personal.yml.template (commented `team:` + optional `override:` example) and document the `teams:` catalogue with commented examples in templates/config.yml.template
-- [ ] T070 [P] [US3] Create agent command definition commands/speckit.jira.feature.md: ordered ceremony — run the deterministic command, ask only its closed questions (`confirmation_required` ⇒ `--use-team` or stop), `{active:false}` ⇒ proceed exactly as today, otherwise drive `create-new-feature.sh --short-name "<short_name>"`, create/switch to `branch_name`, report `override_used` and the ticket action
-- [ ] T071 [US3] Declare `speckit.jira.feature` in extension.yml's provided commands so installation mirrors the new command file
+- [X] T053 [US3] Implement the `teams:` catalogue schema and load-time validation in scripts/bash/lib/config.sh (uniqueness, prefix/pattern grammar, credential-shape refusal, optional section)
+- [X] T054 [US3] Twin the catalogue validation in scripts/powershell/lib/Config.psm1 (makes T036/T037 pass)
+- [X] T055 [US3] Implement the personal-file loader in scripts/bash/lib/config.sh: read `.specify/jira/personal.yml`, validate `team` against the catalogue with the located-error listing, validate `override` as a catalogue entry, never write the file
+- [X] T056 [US3] Twin the personal-file loader in scripts/powershell/lib/Config.psm1 (makes T038/T039 pass)
+- [X] T057 [P] [US3] Create pure naming engine scripts/bash/engine/naming.sh: pattern expansion, project-key stripping of an opaque ticket key, folder-prefix dedup, flat-folder guarantee — no Jira knowledge, no issue-key-shaped literals
+- [X] T058 [P] [US3] Create twin scripts/powershell/engine/Naming.psm1 (makes T040/T041 pass)
+- [X] T059 [P] [US3] Create sink scripts/bash/sink/jira/ticket.sh: `ticket_validate` (read via existing transport) and `ticket_create` (guarded write: PASS-1 guard, resolved story-type id, identity stamp) per contracts/jira-endpoints-delta.md
+- [X] T060 [P] [US3] Create twin scripts/powershell/sink/jira/Ticket.psm1 (makes T042/T043 pass)
+- [X] T061 [US3] Create scripts/bash/commands/feature.sh implementing `cmd_feature` per contracts/feature-cli-contract.md: load catalogue + personal file; effective-team resolution with `confirmation_required` / proceed-stop outputs; ticket-before-naming; non-blocking fallback; canonical JSON output (`team`, `ticket{key,number,action}`, `branch_name`, `short_name`, `override_used`, `warnings`); `--json`, `--dry-run`, `--use-team` (depends on T053–T060)
+- [X] T062 [US3] Create twin scripts/powershell/commands/Feature.psm1 implementing `Invoke-JiraFeature` (makes T044/T045 pass)
+- [X] T063 [US3] Register the `feature` subcommand in the dispatcher scripts/bash/lib/cli.sh
+- [X] T064 [US3] Twin the dispatch entry in scripts/powershell/lib/Cli.psm1
+- [X] T065 [US3] Add the gitignore effect to scripts/bash/commands/config.sh: verify/append `.specify/jira/personal.yml` coverage idempotently alongside the existing `config.local.yml`/`.env` lines, report `created|written|unchanged|skipped` as its own effect, covered by `--dry-run`
+- [X] T066 [US3] Twin the gitignore effect in scripts/powershell/commands/Config.psm1 (makes T048/T049 pass)
+- [X] T067 [US3] Register `before_specify` → `speckit.jira.feature` (`enabled: true`, `optional: true`) in scripts/bash/hooks/register_hooks.sh using the existing set-not-append merge with disabled-stays-disabled
+- [X] T068 [US3] Twin the registration in scripts/powershell/hooks/RegisterHooks.psm1 (makes T046/T047 pass)
+- [X] T069 [P] [US3] Create templates/personal.yml.template (commented `team:` + optional `override:` example) and document the `teams:` catalogue with commented examples in templates/config.yml.template
+- [X] T070 [P] [US3] Create agent command definition commands/speckit.jira.feature.md: ordered ceremony — run the deterministic command, ask only its closed questions (`confirmation_required` ⇒ `--use-team` or stop), `{active:false}` ⇒ proceed exactly as today, otherwise drive `create-new-feature.sh --short-name "<short_name>"`, create/switch to `branch_name`, report `override_used` and the ticket action
+- [X] T071 [US3] Declare `speckit.jira.feature` in extension.yml's provided commands so installation mirrors the new command file
 
 ### Remediation additions (speckit-analyze A1/A3 — depend on T053/T054)
 
 - [X] T077 [P] [US2] Failing bats suite tests/bash/commands/test_config_team_mismatch.bats: connected run with a `teams:` catalogue whose team project is not in project/search ⇒ exactly one warning naming the team id and project key, counts.warnings incremented, exit 0, binding written; all teams accessible ⇒ zero warnings; no project/search call when no catalogue is declared (FR-009)
 - [X] T078 [P] [US2] Pester twin tests/powershell/commands/Config.TeamMismatch.Tests.ps1
-- [ ] T079 [US2] Implement connected-run mismatch surfacing in scripts/bash/commands/config.sh (after key binding, before the summary; reuses discovery_list_projects) per contracts/config-cli-contract.md
-- [ ] T080 [US2] Twin the mismatch surfacing in scripts/powershell/commands/Config.psm1 (makes T077/T078 pass)
+- [X] T079 [US2] Implement connected-run mismatch surfacing in scripts/bash/commands/config.sh (after key binding, before the summary; reuses discovery_list_projects) per contracts/config-cli-contract.md
+- [X] T080 [US2] Twin the mismatch surfacing in scripts/powershell/commands/Config.psm1 (makes T077/T078 pass)
 - [X] T081 [P] [US3] Failing bats suite tests/bash/engine/test_routing_team.bats: a folder `003-ijt-invoice-export` with catalogue teams ijt/wex routes to IJT with no explicit rule; an explicit routing rule still wins; no catalogue ⇒ behaviour unchanged (US3 scenario 6, data-model §4)
 - [X] T082 [P] [US3] Pester twin tests/powershell/engine/Routing.Team.Tests.ps1
-- [ ] T083 [US3] Add the implicit team→project fallback to the routing resolution (catalogue passed as opaque data — the engine keeps zero Jira knowledge)
-- [ ] T084 [US3] Twin the fallback in the PowerShell routing module (makes T081/T082 pass)
+- [X] T083 [US3] Add the implicit team→project fallback to the routing resolution (catalogue passed as opaque data — the engine keeps zero Jira knowledge)
+- [X] T084 [US3] Twin the fallback in the PowerShell routing module (makes T081/T082 pass)
 
 **Checkpoint**: All three user stories independently functional — no-selection path byte-for-byte identical to today
 
@@ -170,11 +170,11 @@ Single-project twin-port layout (unchanged from 001):
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T072 [P] Add the CHANGELOG.md entry and MINOR SemVer bump in extension.yml (Constitution XII)
-- [ ] T073 [P] Lint gates clean: `shellcheck scripts/bash/**/*.sh` and PSScriptAnalyzer over scripts/powershell/ with zero new findings
-- [ ] T074 Run the full conformance suite (`tests/conformance/run-scenario.sh` over every scenario, new and existing) asserting byte-identical stdout, exit codes, call sequences, and written files across both ports — including SC-004 byte-identical re-run of an unchanged project
+- [X] T072 [P] Add the CHANGELOG.md entry and MINOR SemVer bump in extension.yml (Constitution XII)
+- [X] T073 [P] Lint gates clean: `shellcheck scripts/bash/**/*.sh` and PSScriptAnalyzer over scripts/powershell/ with zero new findings
+- [X] T074 Run the full conformance suite (`tests/conformance/run-scenario.sh` over every scenario, new and existing) asserting byte-identical stdout, exit codes, call sequences, and written files across both ports — including SC-004 byte-identical re-run of an unchanged project
 - [ ] T075 Verify statement coverage ≥ 80% on both ports (kcov for bats, Pester CodeCoverage) and close any gap with targeted unit tests
-- [ ] T076 Walk through specs/002-config-discovery-team-prefix/quickstart.md scenarios 1–7 end-to-end against the mock server and record the results
+- [X] T076 Walk through specs/002-config-discovery-team-prefix/quickstart.md scenarios 1–7 end-to-end against the mock server and record the results
 
 ---
 

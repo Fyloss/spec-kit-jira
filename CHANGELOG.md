@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-26
+
+Reliable automatic Jira discovery & team-based feature prefix (002).
+
+### Added
+
+- Three-valued project-style detection: style comes exclusively from an
+  unambiguous API signal (`style_source: api`) or an explicit operator answer
+  via the repeatable `--style KEY=VALUE` flag (`style_source: operator`);
+  ambiguity fails closed with exit 4 and zero writes — the silent
+  `company_managed` default is gone.
+- Jira-first project-key sourcing: argument → committed config (the literal
+  `PROJ` placeholder counts as unset) → closed question over the paginated
+  `GET /project/search` accessible-projects list. Git state is never a source
+  in a connected run; undefined connection parameters trigger a loud,
+  provisional, write-free degraded mode, and the next connected run surfaces
+  catalogue/project mismatches as warnings.
+- Team naming conventions: committed `teams:` catalogue, human-owned
+  gitignored `.specify/jira/personal.yml` selection, and the new twin-ported
+  `feature` command (`speckit.jira.feature`, registered as a non-blocking
+  `before_specify` hook) that resolves the ticket first (validate or
+  guarded-create), then emits `branch_name` per team pattern and a flat
+  deduped `short_name`. No selection ⇒ byte-for-byte previous behaviour.
+- Config ceremony gitignore effect: idempotent `.gitignore` coverage of
+  `config.local.yml`, `.env`, and `personal.yml`, reported as its own effect.
+- Implicit team→project routing fallback: a team-prefixed spec folder routes
+  to the team's project when no explicit routing rule matches.
+
 ## [0.1.0] - 2026-07-25
 
 First public release.

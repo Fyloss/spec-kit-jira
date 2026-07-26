@@ -130,6 +130,8 @@ A single run's effects are each reported **separately** in the summary:
   including the per-project style audit.
 - **hooks** — idempotent lifecycle-hook registration (US9).
 - **readme** — the version-marked managed README block (US5).
+- **gitignore** — idempotent `.gitignore` coverage of the gitignored config
+  layer (`config.local.yml`, `.env`, `personal.yml` — FR-019).
 
 ## Flags
 

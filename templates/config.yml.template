@@ -54,6 +54,26 @@ routing:
 # The project used when no routing rule matches.
 routing_default: PROJ
 
+# OPTIONAL team catalogue: the naming conventions each team ships under. When a
+# developer selects a team in the gitignored .specify/jira/personal.yml, the
+# feature ceremony resolves the Jira ticket first and names the branch/folder
+# by that team's convention. Without this section (or without a personal
+# selection) nothing changes.
+#   id            — catalogue team id (lowercase, ^[a-z][a-z0-9]*$), unique.
+#   project       — the team's Jira project key.
+#   folder_prefix — flat spec-folder prefix (^[a-z0-9][a-z0-9-]*-$), unique.
+#   branch_pattern— branch template holding <ID> and <FEATURE_NAME> exactly
+#                   once each; other characters restricted to [a-z0-9/_-].
+# teams:
+#   - id: ijt
+#     project: IJT
+#     folder_prefix: "ijt-"
+#     branch_pattern: "ijt-<ID>/<FEATURE_NAME>"
+#   - id: wex
+#     project: WEX
+#     folder_prefix: "wex-"
+#     branch_pattern: "wex-<ID>/<FEATURE_NAME>"
+
 # Privacy allowlist: hosts/domains that never block or warn (e.g. your public
 # documentation Confluence host).
 privacy:
