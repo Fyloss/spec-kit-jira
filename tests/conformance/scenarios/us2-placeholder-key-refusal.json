@@ -1,0 +1,15 @@
+{
+  "name": "us2-placeholder-key-refusal",
+  "description": "US2 (FR-004/FR-005, quickstart scenario 3): config.yml holds the PROJ placeholder and an arbitrary team-shaped branch (wex-99/red-herring) is checked out. The connected unattended run exits 4 and NOTHING in its output derives from the branch name — git state is never a key source in a connected run. Byte-identical across ports.",
+  "mock": {
+    "projects": { "COMP": "company", "TEAM": "team" }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-config-placeholder",
+  "git_branch": "wex-99/red-herring",
+  "argv": ["config", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1"
+  }
+}

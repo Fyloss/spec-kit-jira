@@ -1,0 +1,15 @@
+{
+  "name": "us2-list-projects",
+  "description": "US2 (FR-004c/FR-005): a connected run with no usable key (the committed config still holds the PROJ placeholder) performs the paginated project/search read sequence and fails closed with exit 4 — the error surface IS the closed question: it lists the accessible projects (key, name, style) and the exact re-run command. stderr, exit, and the call sequence are byte-identical across ports.",
+  "mock": {
+    "projects": { "COMP": "company", "TEAM": "team", "AMBI": "ambiguous" },
+    "pageSize": 2
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-config-placeholder",
+  "argv": ["config", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1"
+  }
+}
