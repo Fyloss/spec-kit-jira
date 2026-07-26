@@ -1,0 +1,14 @@
+{
+  "name": "us1-style-ambiguous-refusal",
+  "description": "US1 (FR-001/FR-002): the AMBI project's discovery payload carries neither `style` nor `simplified`. An unattended config run MUST fail closed with exit 4 (EXIT_CONFIG), write NOTHING (no config.local.yml, no extensions.yml, no README block), and name on stderr the project key, the missing signal, and the two valid --style values. stderr, exit code, and the (unchanged) workdir are byte-identical across ports (FR-020).",
+  "mock": {
+    "projects": { "AMBI": "ambiguous" }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-ambiguous",
+  "argv": ["config", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1"
+  }
+}

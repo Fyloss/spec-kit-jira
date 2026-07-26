@@ -53,13 +53,13 @@ Single-project twin-port layout (unchanged from 001):
 
 ### Tests for User Story 1 (write FIRST — must FAIL on current code) ⚠️
 
-- [ ] T005 [P] [US1] Failing regression bats suite in tests/bash/sink/test_discovery_ambiguous.bats: `_disc_style` on a payload with no `style`/`simplified` yields empty (never `company_managed`); contradictory signals (`classic`+`simplified:true`) yield empty; unambiguous signals still map correctly — MUST fail against current scripts/bash/sink/jira/discovery.sh
-- [ ] T006 [P] [US1] Failing Pester twin in tests/powershell/sink/Discovery.Ambiguous.Tests.ps1 asserting the same three-valued mapping against scripts/powershell/sink/jira/Discovery.psm1
-- [ ] T007 [P] [US1] Bats suite in tests/bash/commands/test_config_style.bats: `--style KEY=VALUE` repeatable flag (bad value ⇒ usage exit 1); resolution order api → operator → fail closed; ambiguous without `--style` ⇒ exit 4, zero writes, stderr names project key + missing/contradictory signal + the two valid values; committed `config.yml` `style` conflicting with an unambiguous API signal ⇒ treated as ambiguous; summary carries per-project `style`/`style_source` (FR-003)
-- [ ] T008 [P] [US1] Pester twin in tests/powershell/commands/Config.Style.Tests.ps1 covering the same resolution matrix
-- [ ] T009 [P] [US1] Conformance scenario tests/conformance/scenarios/us1-style-ambiguous-refusal.json: unattended run against the ambiguous fixture ⇒ exit 4, zero writes, stderr names project and missing signal, byte-identical stderr/exit across ports
-- [ ] T010 [P] [US1] Conformance scenario tests/conformance/scenarios/us1-style-operator-answer.json: `config --style PROJ1=team_managed --json` against the ambiguous fixture ⇒ persisted `style_source: "operator"`, summary audits it, `config.local.yml` byte-identical across ports
-- [ ] T011 [US1] Extend tests/conformance/scenarios/us2-team-managed-discovery.json and us2-company-managed-discovery.json to also assert the persisted `style` + `style_source: "api"` in `config.local.yml` and the summary audit
+- [X] T005 [P] [US1] Failing regression bats suite in tests/bash/sink/test_discovery_ambiguous.bats: `_disc_style` on a payload with no `style`/`simplified` yields empty (never `company_managed`); contradictory signals (`classic`+`simplified:true`) yield empty; unambiguous signals still map correctly — MUST fail against current scripts/bash/sink/jira/discovery.sh
+- [X] T006 [P] [US1] Failing Pester twin in tests/powershell/sink/Discovery.Ambiguous.Tests.ps1 asserting the same three-valued mapping against scripts/powershell/sink/jira/Discovery.psm1
+- [X] T007 [P] [US1] Bats suite in tests/bash/commands/test_config_style.bats: `--style KEY=VALUE` repeatable flag (bad value ⇒ usage exit 1); resolution order api → operator → fail closed; ambiguous without `--style` ⇒ exit 4, zero writes, stderr names project key + missing/contradictory signal + the two valid values; committed `config.yml` `style` conflicting with an unambiguous API signal ⇒ treated as ambiguous; summary carries per-project `style`/`style_source` (FR-003)
+- [X] T008 [P] [US1] Pester twin in tests/powershell/commands/Config.Style.Tests.ps1 covering the same resolution matrix
+- [X] T009 [P] [US1] Conformance scenario tests/conformance/scenarios/us1-style-ambiguous-refusal.json: unattended run against the ambiguous fixture ⇒ exit 4, zero writes, stderr names project and missing signal, byte-identical stderr/exit across ports
+- [X] T010 [P] [US1] Conformance scenario tests/conformance/scenarios/us1-style-operator-answer.json: `config --style PROJ1=team_managed --json` against the ambiguous fixture ⇒ persisted `style_source: "operator"`, summary audits it, `config.local.yml` byte-identical across ports
+- [X] T011 [US1] Extend tests/conformance/scenarios/us2-team-managed-discovery.json and us2-company-managed-discovery.json to also assert the persisted `style` + `style_source: "api"` in `config.local.yml` and the summary audit
 
 ### Implementation for User Story 1
 
