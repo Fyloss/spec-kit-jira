@@ -62,6 +62,12 @@ Contract: [`contracts/teams-catalogue.schema.json`](./contracts/teams-catalogue.
 Credential-shaped values are refused without echoing (FR-018). The section is
 optional — its absence changes nothing (FR-017).
 
+**Implicit team route**: when resolving a spec folder to a project, a folder
+whose flat name carries a catalogue team's `folder_prefix` (after the numbering
+component) routes to that team's `project` when no explicit `routing` rule
+matches, before `routing_default`. Explicit rules always win (US3 scenario 6,
+SC-006).
+
 ## 5. Personal team selection (new, gitignored — `.specify/jira/personal.yml`)
 
 Contract: [`contracts/personal-config.schema.json`](./contracts/personal-config.schema.json)

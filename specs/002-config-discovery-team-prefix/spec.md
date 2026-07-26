@@ -242,7 +242,10 @@ creation behaves exactly as today.
 - **FR-009**: A run with a working Jira connection MUST take precedence over
   any provisional, branch-derived values: it MUST validate or replace them
   and surface every mismatch. Provisional values MUST never be written into
-  the authoritative resolved-id binding.
+  the authoritative resolved-id binding. Concretely, in a connected run where
+  the committed configuration declares a team catalogue, the ceremony MUST
+  check each declared team's project against the accessible-projects list and
+  emit one named warning per team whose project matches no accessible project.
 - **FR-010**: The committed team configuration MUST support a catalogue of
   team naming conventions: for each team, a unique folder-safe team prefix and
   a branch-name pattern whose only placeholders are the ticket number and the

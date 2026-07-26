@@ -56,6 +56,19 @@ effects report `skipped`); one warning naming the missing variables; branch
 scan proposes distinct `<prefix>-<number>/…` prefixes as provisional team
 candidates; prose and `--json` both carry the re-run guidance.
 
+## Connected-run mismatch surfacing (FR-009)
+
+When the committed config declares a `teams:` catalogue, a connected run
+performs the paginated `GET /project/search` read and emits, per catalogue team
+whose `project` is not among the accessible projects, one warning:
+
+```text
+WARNING: team '<id>': project <KEY> matches no accessible Jira project — a provisional, branch-derived value may have been accepted into the catalogue; verify or fix config.yml
+```
+
+Each warning increments `counts.warnings`. The run still binds normally
+(warn, never block). Without a `teams:` catalogue no extra read is performed.
+
 ## Run-summary extensions (`run-summary.schema.json` delta)
 
 ```jsonc

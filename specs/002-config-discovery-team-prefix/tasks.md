@@ -153,6 +153,17 @@ Single-project twin-port layout (unchanged from 001):
 - [ ] T070 [P] [US3] Create agent command definition commands/speckit.jira.feature.md: ordered ceremony — run the deterministic command, ask only its closed questions (`confirmation_required` ⇒ `--use-team` or stop), `{active:false}` ⇒ proceed exactly as today, otherwise drive `create-new-feature.sh --short-name "<short_name>"`, create/switch to `branch_name`, report `override_used` and the ticket action
 - [ ] T071 [US3] Declare `speckit.jira.feature` in extension.yml's provided commands so installation mirrors the new command file
 
+### Remediation additions (speckit-analyze A1/A3 — depend on T053/T054)
+
+- [ ] T077 [P] [US2] Failing bats suite tests/bash/commands/test_config_team_mismatch.bats: connected run with a `teams:` catalogue whose team project is not in project/search ⇒ exactly one warning naming the team id and project key, counts.warnings incremented, exit 0, binding written; all teams accessible ⇒ zero warnings; no project/search call when no catalogue is declared (FR-009)
+- [ ] T078 [P] [US2] Pester twin tests/powershell/commands/Config.TeamMismatch.Tests.ps1
+- [ ] T079 [US2] Implement connected-run mismatch surfacing in scripts/bash/commands/config.sh (after key binding, before the summary; reuses discovery_list_projects) per contracts/config-cli-contract.md
+- [ ] T080 [US2] Twin the mismatch surfacing in scripts/powershell/commands/Config.psm1 (makes T077/T078 pass)
+- [ ] T081 [P] [US3] Failing bats suite tests/bash/engine/test_routing_team.bats: a folder `003-ijt-invoice-export` with catalogue teams ijt/wex routes to IJT with no explicit rule; an explicit routing rule still wins; no catalogue ⇒ behaviour unchanged (US3 scenario 6, data-model §4)
+- [ ] T082 [P] [US3] Pester twin tests/powershell/engine/Routing.Team.Tests.ps1
+- [ ] T083 [US3] Add the implicit team→project fallback to the routing resolution (catalogue passed as opaque data — the engine keeps zero Jira knowledge)
+- [ ] T084 [US3] Twin the fallback in the PowerShell routing module (makes T081/T082 pass)
+
 **Checkpoint**: All three user stories independently functional — no-selection path byte-for-byte identical to today
 
 ---
@@ -239,7 +250,7 @@ Each story leaves both ports green and every persisted byte identical, so any pr
 
 ## Notes
 
-- Total: **76 tasks** (Setup 2 · Foundational 2 · US1 14 · US2 17 · US3 36 · Polish 5)
+- Total: **84 tasks** (Setup 2 · Foundational 2 · US1 14 · US2 21 · US3 40 · Polish 5) — T077–T084 added by the speckit-analyze remediation (FR-009 mismatch surfacing, implicit team route)
 - [P] = different files, no incomplete-task dependency
 - Exit codes are reused, never extended: 1 usage · 2 fail-closed read · 3 auth · 4 config refusal · 9 privacy BLOCK (research §8)
 - Commit after each task or twin pair; keep the failing-test commit separate from the fix commit for the two regression suites (T005/T006, T025)

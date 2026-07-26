@@ -25,6 +25,16 @@ _JIRA_LIB_CONFIG=1
 : "${EXIT_CONFIG:=4}"
 : "${JIRA_CONFIG_DIR:=.specify/jira}"
 
+# The template's literal placeholder project key (templates/config.yml.template):
+# a configured key equal to it is treated as UNSET (002 US2, FR-005). The
+# constant lives here, beside the template's config consumer.
+: "${JIRA_CONFIG_PLACEHOLDER_KEY:=PROJ}"
+
+# config_key_is_placeholder <key> — the FR-005 placeholder rule.
+config_key_is_placeholder() {
+  [[ "$1" == "${JIRA_CONFIG_PLACEHOLDER_KEY}" ]]
+}
+
 _CONFIG_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${_CONFIG_LIB_DIR}/output.sh"   # json_canonical (byte-parity serialiser)

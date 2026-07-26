@@ -52,6 +52,54 @@ function Get-JiraDiscoveryStyle {
     return "$sSig$fSig"
 }
 
+function Get-JiraDiscoveryProjectList {
+    <#
+    .SYNOPSIS
+      The accessible-projects list (002 US2, FR-004c). Mirror of
+      discovery_list_projects: paginated GET /project/search, each value mapped
+      to {key, name, style} with the three-valued style rule (null when
+      ambiguous). Returns { ExitCode; List } — List is the canonical JSON array
+      (empty string on a fail-closed read or zero visible projects).
+    #>
+    [CmdletBinding()]
+    param()
+
+    $base = $env:SPEC_KIT_JIRA_BASE_URL
+    if (-not $base) {
+        [Console]::Error.WriteLine('discovery: SPEC_KIT_JIRA_BASE_URL is not set')
+        return [pscustomobject]@{ ExitCode = (Get-JiraExitCode 'fail_closed'); List = '' }
+    }
+    $api = "$base/rest/api/3"
+
+    $list = [System.Collections.Generic.List[object]]::new()
+    $start = 0
+    while ($true) {
+        $r = Invoke-JiraRequest -Method GET -Url "$api/project/search?startAt=$start&maxResults=50"
+        if ($r.ExitCode -ne 0) { return [pscustomobject]@{ ExitCode = [int] $r.ExitCode; List = '' } }
+        $page = $r.Body | ConvertFrom-Json -Depth 100
+        $values = @(Get-DiscProp $page 'values')
+        foreach ($v in $values) {
+            $style = Get-JiraDiscoveryStyle $v
+            $list.Add([ordered]@{
+                key   = (Get-DiscProp $v 'key')
+                name  = (Get-DiscProp $v 'name')
+                style = $(if ($style -eq '') { $null } else { $style })
+            })
+        }
+        $isLast = Get-DiscProp $page 'isLast'
+        if ($null -eq $isLast) { $isLast = $true }
+        $total = Get-DiscProp $page 'total'
+        if ($null -eq $total) { $total = 0 }
+        $start += $values.Count
+        if ($isLast -eq $true -or $start -ge [int]$total -or $values.Count -eq 0) { break }
+    }
+    if ($list.Count -eq 0) {
+        [Console]::Error.WriteLine('discovery: the configured credentials can browse no visible project (project/search returned zero results)')
+        return [pscustomobject]@{ ExitCode = (Get-JiraExitCode 'fail_closed'); List = '' }
+    }
+    return [pscustomobject]@{ ExitCode = 0; List = (ConvertTo-JiraJsonValue $list) }
+}
+
 function Get-JiraDiscoveryBindingResult {
     <#
     .SYNOPSIS
@@ -409,5 +457,5 @@ function Get-JiraMentionedFetch {
 }
 
 Export-ModuleMember -Function Get-JiraDiscoveryBinding, Get-JiraDiscoveryBindingResult, `
-    Get-JiraDiscoveryStyle, Get-JiraDiscoveryFlaggedField, `
+    Get-JiraDiscoveryStyle, Get-JiraDiscoveryFlaggedField, Get-JiraDiscoveryProjectList, `
     Get-JiraMentionedFetch, Get-JiraMentionedFetchResult

@@ -84,6 +84,45 @@ _disc_style() {
   return 0
 }
 
+# discovery_list_projects — the accessible-projects list (002 US2, FR-004c).
+# Paginated GET /rest/api/3/project/search through the existing transport
+# (honouring isLast/total); each page's values map to {key, name, style} with
+# the same three-valued style rule as _disc_style (null when ambiguous). Zero
+# results fail closed: the credentials can browse no project, so there is no
+# closed question to ask. Prints the canonical array on stdout.
+discovery_list_projects() {
+  local base="${SPEC_KIT_JIRA_BASE_URL:-}"
+  if [[ -z "${base}" ]]; then
+    printf 'discovery: SPEC_KIT_JIRA_BASE_URL is not set\n' >&2
+    return "$(cli_exit_code fail_closed)"
+  fi
+  local api="${base}/rest/api/3"
+  local start=0 page n i value style entry is_last total list='[]'
+  while :; do
+    page="$(jira_request GET "${api}/project/search?startAt=${start}&maxResults=50")" || return $?
+    n="$(jq -r '.values | length' <<< "${page}")"
+    for ((i = 0; i < n; i++)); do
+      value="$(jq -c ".values[${i}]" <<< "${page}")"
+      style="$(_disc_style "${value}")"
+      entry="$(jq -cn --argjson v "${value}" --arg s "${style}" \
+        '{key: $v.key, name: $v.name, style: (if $s == "" then null else $s end)}')"
+      list="$(jq -c --argjson e "${entry}" '. + [$e]' <<< "${list}")"
+    done
+    # `// true` would swallow a real `false` (jq treats false as empty).
+    is_last="$(jq -r 'if has("isLast") then (.isLast | tostring) else "true" end' <<< "${page}")"
+    total="$(jq -r '.total // 0' <<< "${page}")"
+    start=$((start + n))
+    if [[ "${is_last}" == "true" || ${start} -ge ${total} || ${n} -eq 0 ]]; then
+      break
+    fi
+  done
+  if [[ "$(jq -r 'length' <<< "${list}")" -eq 0 ]]; then
+    printf 'discovery: the configured credentials can browse no visible project (project/search returned zero results)\n' >&2
+    return "$(cli_exit_code fail_closed)"
+  fi
+  printf '%s' "${list}" | json_canonical
+}
+
 # discover_binding <project_key> — see the file header.
 discover_binding() {
   local key="$1"

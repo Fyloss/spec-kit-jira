@@ -19,6 +19,7 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../lib/Credentials.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../hooks/ReadmeBlock.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force
 
@@ -101,6 +102,56 @@ function Get-JiraResolvedIdMap {
     $prio = [ordered]@{}; foreach ($p in @($b.priorities)) { $prio[[string]$p.logical_name] = [string]$p.id }
     $stat = [ordered]@{}; foreach ($s in @($b.statuses)) { $stat[[string]$s.name] = [string]$s.id }
     return (ConvertTo-JiraJsonValue ([ordered]@{ issue_types = $issue; priorities = $prio; statuses = $stat }))
+}
+
+function Invoke-JiraConfigDegraded {
+    <#
+    .SYNOPSIS
+      The degraded, report-only path (002 US2, FR-008/FR-009). Mirror of
+      _config_degraded_run: branch-scan proposals marked provisional, exactly
+      one warning naming the missing variables, re-run guidance, zero writes,
+      every effect skipped, exit 0.
+    #>
+    [CmdletBinding()]
+    param(
+        [bool] $Json = $false,
+        [bool] $DryRun = $false,
+        [Parameter(Mandatory)] [string] $Missing
+    )
+    $branches = @()
+    try { $branches = @(git for-each-ref refs/heads --format='%(refname:short)' 2> $null) }
+    catch { $branches = @() }
+    $prefixes = [System.Collections.Generic.List[string]]::new()
+    foreach ($b in $branches) {
+        if ([string]$b -cmatch '^([a-z0-9][a-z0-9-]*)-[0-9]+/') { $prefixes.Add($Matches[1]) }
+    }
+    $arr = [string[]]@($prefixes | Select-Object -Unique)
+    [System.Array]::Sort($arr, [System.StringComparer]::Ordinal)
+    $proposals = [System.Collections.Generic.List[object]]::new()
+    foreach ($p in $arr) { $proposals.Add([ordered]@{ team_prefix = $p; provisional = $true }) }
+
+    [Console]::Error.WriteLine("WARNING: degraded mode — Jira introspection is unavailable (undefined: $Missing); team-name proposals are provisional and nothing was written")
+    $rerun = "define $Missing, then re-run: spec-kit-jira config"
+
+    $detail = 'degraded mode: Jira connection parameters undefined'
+    $summaryObj = [ordered]@{
+        schema_version = '1.0'
+        command        = 'config'
+        dry_run        = [bool]$DryRun
+        counts         = [ordered]@{ created = 0; updated = 0; skipped = 0; warnings = 1; errors = 0 }
+        effects        = [ordered]@{
+            discovery = [ordered]@{ status = 'skipped'; detail = $detail }
+            hooks     = [ordered]@{ status = 'skipped'; detail = $detail }
+            readme    = [ordered]@{ status = 'skipped'; detail = $detail }
+        }
+        provisional    = $proposals
+        rerun_guidance = $rerun
+        exit_code      = 0
+    }
+    $summary = ConvertTo-JiraJsonValue $summaryObj
+    if ($Json) { [Console]::Out.Write($summary + "`n") }
+    else { [Console]::Out.Write((ConvertTo-JiraSummaryProse -Json $summary)) }
+    return 0
 }
 
 function Get-CmdProp {
@@ -190,6 +241,21 @@ function Invoke-JiraConfig {
     if ($cfg.ExitCode -ne 0) { return [int] $cfg.ExitCode }
     $cfgObj = $cfg.Json | ConvertFrom-Json -Depth 100
 
+    # Degraded-mode trigger (002 US2, FR-008) — tested BEFORE any Jira call and
+    # ONLY on ABSENT connection parameters (research §4).
+    $missing = [System.Collections.Generic.List[string]]::new()
+    if (-not $env:SPEC_KIT_JIRA_BASE_URL) { $missing.Add('SPEC_KIT_JIRA_BASE_URL') }
+    if (-not (Resolve-JiraToken)) { $missing.Add('JIRA_API_TOKEN') }
+    if ($missing.Count -gt 0) {
+        return [int](Invoke-JiraConfigDegraded -Json $json -DryRun $dryRun -Missing ($missing -join ', '))
+    }
+
+    # Project-key sourcing (002 US2, FR-004/FR-005): positional argument ->
+    # committed non-placeholder keys -> the closed question over the discovered
+    # accessible-projects list (unattended: exit 4). Git state plays no role.
+    $argsLine = if ($state.ContainsKey('args')) { $state['args'] } else { '' }
+    $argKey = ($argsLine -split ' ')[0]
+
     # Read the machine-owned local layer up front: its prior resolved-id table seeds
     # this run so re-running only (re)binds the currently configured projects while
     # every previously-bound project's mapping is preserved untouched — the config
@@ -215,10 +281,39 @@ function Invoke-JiraConfig {
     $nproj = 0
     $projects = @()
     if ($cfgObj.PSObject.Properties.Name -contains 'projects') { $projects = @($cfgObj.projects) }
+
+    # Effective key list: argument, or the committed non-placeholder keys.
+    $keys = [System.Collections.Generic.List[string]]::new()
+    if ($argKey) {
+        $keys.Add($argKey)
+    }
+    else {
+        foreach ($p in $projects) {
+            $ckey = [string](Get-CmdProp $p 'key')
+            if ([string]::IsNullOrEmpty($ckey)) { continue }
+            if (Test-JiraPlaceholderKey -Key $ckey) { continue }
+            $keys.Add($ckey)
+        }
+    }
+    if ($keys.Count -eq 0) {
+        $lr = Get-JiraDiscoveryProjectList
+        if ($lr.ExitCode -ne 0) { return [int] $lr.ExitCode }
+        $placeholder = Get-JiraPlaceholderKey
+        [Console]::Error.WriteLine("config: no usable project key — config.yml holds no bound key (the $placeholder placeholder counts as unset) and no key argument was given")
+        [Console]::Error.WriteLine('config: accessible projects (closed question — choose one and re-run: spec-kit-jira config <KEY>):')
+        foreach ($entry in @($lr.List | ConvertFrom-Json -Depth 100)) {
+            $styleText = if ($null -eq $entry.style) { 'style unknown' } else { [string]$entry.style }
+            [Console]::Error.WriteLine("config:   $($entry.key) — $($entry.name) ($styleText)")
+        }
+        return $script:ExitConfig
+    }
+
     $projStyles = [ordered]@{}
-    foreach ($p in $projects) {
-        $pkey = [string]$p.key
-        if ([string]::IsNullOrEmpty($pkey)) { continue }
+    foreach ($pkey in $keys) {
+        $p = $null
+        foreach ($cand in $projects) {
+            if ([string](Get-CmdProp $cand 'key') -ceq $pkey) { $p = $cand; break }
+        }
         $r = Get-JiraDiscoveryBindingResult -ProjectKey $pkey
         if ($r.ExitCode -ne 0) { return [int] $r.ExitCode }
         # Style resolution (002 US1): api signal -> operator answer/declaration

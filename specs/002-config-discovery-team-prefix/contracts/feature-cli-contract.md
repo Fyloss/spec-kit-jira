@@ -54,7 +54,8 @@ spec-kit-jira feature [TICKET-KEY] [--use-team <id>] [--json] [--dry-run] <descr
    `confirmation_required` output, exit 0, zero writes (unattended callers
    treat it as a stop). Mapped to no catalogue team ⇒ analogous proceed/stop
    closed confirmation. No key ⇒ guarded create (`POST /issue`) in the
-   effective team's project using the binding's resolved story-type id; the
+   effective team's project using the binding's resolved story-type id (from
+   `SPEC_KIT_JIRA_PLAN_CONTEXT.story_type_id`; absent ⇒ rule 4 fallback); the
    PASS-1 privacy guard runs before the write.
 4. **Non-blocking fallback** (FR-016): Jira unreachable or create refused ⇒
    `{active:false}` + exactly one warning; exit 0. Reconciliation attaches the

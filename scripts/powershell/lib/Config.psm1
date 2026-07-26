@@ -20,6 +20,23 @@ Import-Module (Join-Path $PSScriptRoot 'Output.psm1') -Force
 
 $script:ExitConfig = 4
 
+# The template's literal placeholder project key (templates/config.yml.template):
+# a configured key equal to it is treated as UNSET (002 US2, FR-005).
+$script:PlaceholderKey = if ($env:JIRA_CONFIG_PLACEHOLDER_KEY) { $env:JIRA_CONFIG_PLACEHOLDER_KEY } else { 'PROJ' }
+
+function Test-JiraPlaceholderKey {
+    # The FR-005 placeholder rule. Mirror of config_key_is_placeholder.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $Key)
+    return ($Key -ceq $script:PlaceholderKey)
+}
+
+function Get-JiraPlaceholderKey {
+    [CmdletBinding()]
+    param()
+    return $script:PlaceholderKey
+}
+
 function Sort-JiraOrdinal {
     # Sort strings by Unicode code point (ordinal), matching the Bash port's jq
     # ordering. `-Culture Ordinal` is NOT a valid CultureInfo, so we sort via
@@ -638,4 +655,5 @@ function Get-JiraPhaseStatusTargetSet {
 Export-ModuleMember -Function Get-JiraExtensionVersion, Assert-JiraSingleVersionSource, `
     ConvertFrom-JiraConfigYaml, ConvertTo-JiraConfigYaml, Read-JiraConfigYamlObject, `
     Get-JiraConfigCredentialError, Test-JiraTeamConfig, Test-JiraLocalConfig, Import-JiraConfig, `
-    Get-JiraStatusClassification, Get-JiraPhaseStatusTargetSet
+    Get-JiraStatusClassification, Get-JiraPhaseStatusTargetSet, `
+    Test-JiraPlaceholderKey, Get-JiraPlaceholderKey
