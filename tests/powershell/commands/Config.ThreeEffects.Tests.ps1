@@ -38,10 +38,12 @@ Describe 'Config three-effect reporting' {
         try { [void](Invoke-JiraConfig -Arguments @('config', '--json')) }
         finally { [Console]::SetOut($orig) }
         $obj = $sw.ToString().Trim() | ConvertFrom-Json
-        ($obj.effects.PSObject.Properties.Name | Sort-Object) -join ',' | Should -Be 'discovery,hooks,readme'
+        # All effects are present as distinct, named sections (002 adds gitignore).
+        ($obj.effects.PSObject.Properties.Name | Sort-Object) -join ',' | Should -Be 'discovery,gitignore,hooks,readme'
         $obj.effects.discovery.status | Should -Be 'written'
         $obj.effects.hooks.status | Should -Not -BeNullOrEmpty
         $obj.effects.readme.status | Should -Not -BeNullOrEmpty
+        $obj.effects.gitignore.status | Should -Not -BeNullOrEmpty
     }
 
     It 'names each of the three effects in the prose summary' {

@@ -177,6 +177,20 @@ function Resolve-JiraRouting {
         }
     }
 
+    # Implicit team→project route (US3 scenario 6): after the numbering
+    # component, a folder carrying a catalogue team's folder_prefix routes to
+    # that team's project — before routing_default. The catalogue is opaque
+    # data; the engine keeps zero tracker knowledge.
+    $flat = $FolderName -creplace '^[0-9]+-', ''
+    if ((Test-JiraInterchangeProp $cfg 'teams')) {
+        foreach ($t in @($cfg.teams)) {
+            $prefix = [string](Get-JiraInterchangeProp $t 'folder_prefix')
+            if (-not [string]::IsNullOrEmpty($prefix) -and $flat.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
+                return [pscustomobject]@{ ExitCode = 0; ProjectKey = [string](Get-JiraInterchangeProp $t 'project') }
+            }
+        }
+    }
+
     $default = [string](Get-JiraInterchangeProp $cfg 'routing_default')
     if (-not [string]::IsNullOrEmpty($default)) {
         return [pscustomobject]@{ ExitCode = 0; ProjectKey = $default }

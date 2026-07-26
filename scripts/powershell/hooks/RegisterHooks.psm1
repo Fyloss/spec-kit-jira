@@ -18,12 +18,30 @@ $script:HookCommand = 'speckit.jira.reconcile'
 $script:HookEvents = @('after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')
 $script:HookExitConfig = 4
 
+# The feature-naming command registered under the `before_specify` event (002
+# US3, FR-013): a non-blocking, optional hook that resolves the Jira ticket and
+# computes the team-based feature name before the host creates the spec.
+$script:HookBeforeEvent = 'before_specify'
+$script:HookBeforeCommand = 'speckit.jira.feature'
+
 function Get-JiraHookEntry {
     # The canonical desired entry for our reconcile hook. `optional = true` makes it
     # non-blocking: a bridge failure never fails the host command (FR-046).
     return [ordered]@{
         command     = $script:HookCommand
         description = 'Mirror the updated spec-kit artifacts into Jira Cloud (non-blocking).'
+        enabled     = $true
+        optional    = $true
+    }
+}
+
+function Get-JiraHookBeforeEntry {
+    # The canonical desired entry for the before_specify feature hook (enabled +
+    # optional, so it never blocks feature creation). Mirror of
+    # _register_hooks_before_entry.
+    return [ordered]@{
+        command     = $script:HookBeforeCommand
+        description = 'Resolve the Jira ticket and compute the team-based feature name before spec creation (non-blocking).'
         enabled     = $true
         optional    = $true
     }
@@ -63,6 +81,20 @@ function Get-JiraHookMerged {
         if (-not $present) { $cur.Add((Get-JiraHookEntry)) }
         $hooksMap[$e] = $cur.ToArray()
     }
+
+    # before_specify feature hook (002 US3): same set-not-append rule — an entry
+    # the operator already placed (or disabled) is never re-added or re-enabled.
+    $bcur = [System.Collections.Generic.List[object]]::new()
+    if ($hooksMap.Contains($script:HookBeforeEvent) -and $null -ne $hooksMap[$script:HookBeforeEvent]) {
+        foreach ($x in @($hooksMap[$script:HookBeforeEvent])) { $bcur.Add($x) }
+    }
+    $bpresent = $false
+    foreach ($x in $bcur) {
+        if ((Get-JiraHookProp $x 'command') -eq $script:HookBeforeCommand) { $bpresent = $true; break }
+    }
+    if (-not $bpresent) { $bcur.Add((Get-JiraHookBeforeEntry)) }
+    $hooksMap[$script:HookBeforeEvent] = $bcur.ToArray()
+
     $rootMap['hooks'] = $hooksMap
 
     return (ConvertTo-JiraJsonValue $rootMap)

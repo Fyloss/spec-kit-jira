@@ -210,6 +210,47 @@ function Resolve-JiraProjectStyle {
     return [pscustomobject]@{ ExitCode = $script:ExitConfig; Style = ''; Source = '' }
 }
 
+function Set-JiraConfigGitignore {
+    <#
+    .SYNOPSIS
+      Enforce gitignore coverage of the gitignored config layer (002 US3,
+      FR-019): config.local.yml, .env, and personal.yml. Mirror of
+      _config_gitignore_effect. Only missing exact lines are appended,
+      idempotently; an absent file is created with the three lines. Returns the
+      effect status (created|written|unchanged); a dry-run computes the status
+      without touching the file.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $RepoRoot,
+        [bool] $DryRun = $false
+    )
+    $gi = if ($env:SPEC_KIT_JIRA_GITIGNORE) { $env:SPEC_KIT_JIRA_GITIGNORE } else { Join-Path $RepoRoot '.gitignore' }
+    $lines = @(
+        '.specify/jira/config.local.yml'
+        '.specify/jira/.env'
+        '.specify/jira/personal.yml'
+    )
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    if (-not (Test-Path -LiteralPath $gi)) {
+        if (-not $DryRun) {
+            [System.IO.File]::WriteAllText($gi, (($lines -join "`n") + "`n"), $utf8)
+        }
+        return 'created'
+    }
+    $content = [System.IO.File]::ReadAllText($gi)
+    $existing = $content -split "`r?`n"
+    $missing = @($lines | Where-Object { $existing -cnotcontains $_ })
+    if ($missing.Count -eq 0) { return 'unchanged' }
+    if (-not $DryRun) {
+        # Guarantee a trailing newline before appending the missing lines.
+        if ($content.Length -gt 0 -and -not $content.EndsWith("`n")) { $content += "`n" }
+        $content += (($missing -join "`n") + "`n")
+        [System.IO.File]::WriteAllText($gi, $content, $utf8)
+    }
+    return 'written'
+}
+
 function Invoke-JiraConfig {
     <#
     .SYNOPSIS
@@ -356,6 +397,41 @@ function Invoke-JiraConfig {
         [System.IO.File]::WriteAllText($localf, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
     }
 
+    # Connected-run mismatch surfacing (002 US2, FR-009): when the committed config
+    # declares a `teams:` catalogue, check each declared team's project against the
+    # accessible-projects list and warn (never block) for any team whose project is
+    # not visible. Without a catalogue no extra read is performed.
+    $runWarnings = 0
+    $teams = @((Get-CmdProp $cfgObj 'teams') | Where-Object { $null -ne $_ })
+    if ($teams.Count -gt 0) {
+        # The Bash twin silences this read's stderr (2>/dev/null): a failed list
+        # skips the check without extra output.
+        $errSink = [System.IO.StringWriter]::new()
+        $origErr = [Console]::Error
+        [Console]::SetError($errSink)
+        try { $accessible = Get-JiraDiscoveryProjectList }
+        finally { [Console]::SetError($origErr) }
+        if ($accessible.ExitCode -eq 0) {
+            $accessibleKeys = @(($accessible.List | ConvertFrom-Json -Depth 100) | ForEach-Object { [string]$_.key })
+            foreach ($t in $teams) {
+                $tid = [string](Get-CmdProp $t 'id')
+                if ([string]::IsNullOrEmpty($tid)) { continue }
+                $tproj = [string](Get-CmdProp $t 'project')
+                if ($accessibleKeys -cnotcontains $tproj) {
+                    Write-JiraWarning "team '$tid': project $tproj matches no accessible Jira project — a provisional, branch-derived value may have been accepted into the catalogue; verify or fix config.yml"
+                    $runWarnings++
+                }
+            }
+        }
+    }
+
+    # Gitignore effect (002 US3, FR-019): ensure the repository .gitignore covers the
+    # gitignored config layer (config.local.yml, .env, personal.yml). Repo root is
+    # the parent of the .specify directory (overridable via SPEC_KIT_JIRA_GITIGNORE).
+    $gitignoreRoot = Split-Path -Parent (Split-Path -Parent $configdir)
+    if ([string]::IsNullOrEmpty($gitignoreRoot)) { $gitignoreRoot = '.' }
+    $gitignoreStatus = Set-JiraConfigGitignore -RepoRoot $gitignoreRoot -DryRun ([bool]$dryRun)
+
     # README effect (US5, T065): splice the version-marked managed block into the
     # consuming repository's README. The path derives from the config dir's repo
     # root (the parent of .specify), overridable via SPEC_KIT_JIRA_README.
@@ -393,12 +469,13 @@ function Invoke-JiraConfig {
         discovery = [ordered]@{ status = $discStatus; detail = "$nproj project(s) discovered"; projects = $projStyles }
         hooks     = [ordered]@{ status = $hooksStatus; detail = $hooksDetail }
         readme    = [ordered]@{ status = $readmeStatus; detail = $readmeDetail }
+        gitignore = [ordered]@{ status = $gitignoreStatus; detail = 'personal.yml gitignore coverage' }
     }
     $summaryObj = [ordered]@{
         schema_version = '1.0'
         command        = 'config'
         dry_run        = [bool]$dryRun
-        counts         = [ordered]@{ created = 0; updated = 0; skipped = 0; warnings = 0; errors = 0 }
+        counts         = [ordered]@{ created = 0; updated = 0; skipped = 0; warnings = $runWarnings; errors = 0 }
         effects        = $effects
         exit_code      = 0
     }

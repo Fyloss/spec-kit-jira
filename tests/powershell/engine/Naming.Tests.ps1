@@ -42,7 +42,9 @@ Describe 'Naming engine' {
         # (Parse/Drift/Interchange); the boundary forbids Atlassian-specific
         # identifiers and issue-key-shaped literals, not the module prefix.
         $content = Get-Content -Raw -LiteralPath $EngineFile
-        $content | Should -Not -Match '[A-Z][A-Z0-9_]+-[0-9]+'
+        # -CMatch mirrors the bats twin's case-sensitive grep: an issue key is
+        # upper-case by definition; lower-case regex literals are legitimate.
+        $content | Should -Not -CMatch '[A-Z][A-Z0-9_]+-[0-9]+'
         $content | Should -Not -Match '(?i)atlassian|createmeta'
     }
 }
