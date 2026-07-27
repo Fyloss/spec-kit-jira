@@ -190,6 +190,24 @@ function ConvertTo-JiraSummaryProse {
             $line = "  ${effect}: $status"
             if (-not [string]::IsNullOrEmpty($detail)) { $line = "$line — $detail" }
             $lines.Add($line)
+            # The per-project style audit (FR-003) is nested under the discovery
+            # effect so a wrong binding can be audited from the default output,
+            # not only from --json. Ordinal key order matches the Bash port's
+            # `jq keys` (code-point) ordering.
+            if ($effect -eq 'discovery' -and
+                $e.PSObject.Properties.Name -contains 'projects' -and $null -ne $e.projects) {
+                $pkeys = [System.Collections.Generic.List[string]]::new()
+                foreach ($p in $e.projects.PSObject.Properties) { $pkeys.Add([string]$p.Name) }
+                $pkeys.Sort([System.StringComparer]::Ordinal)
+                foreach ($pkey in $pkeys) {
+                    $entry = $e.projects.$pkey
+                    if ($null -eq $entry) { continue }
+                    $pstyle = if ($entry.PSObject.Properties.Name -contains 'style') { [string]$entry.style } else { '' }
+                    if ([string]::IsNullOrEmpty($pstyle)) { continue }
+                    $psource = if ($entry.PSObject.Properties.Name -contains 'style_source') { [string]$entry.style_source } else { '' }
+                    $lines.Add("    ${pkey}: $pstyle ($psource)")
+                }
+            }
         }
     }
     # The degraded run's provisional team proposals and copy-pasteable re-run

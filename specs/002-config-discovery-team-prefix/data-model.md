@@ -87,7 +87,7 @@ gitignore effect (FR-019).
 |-------|------|-------|
 | `key` | issue key | Mentioned (validated read) or created (guarded write) — resolved **before** naming (FR-013). |
 | `number` | string | `key` stripped of `^[A-Z][A-Z0-9_]+-` (feeds `<ID>`). |
-| `action` | `attached \| created \| none` | `none` = non-blocking fallback (FR-016) or no team selected. |
+| `action` | `attached \| created \| would-attach \| would-create` | The `would-*` pair is the `--dry-run` prediction. The non-blocking fallback (FR-016) and the no-team-selected path carry no ticket at all — they emit `{active:false}` (plus one warning for the fallback). |
 | `team` | catalogue id | Effective team; differs from the personal selection only after the closed confirmation (FR-014). |
 
 **Effective-team transitions**:

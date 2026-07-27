@@ -275,3 +275,15 @@ Each story leaves both ports green and every persisted byte identical, so any pr
 - [P] = different files, no incomplete-task dependency
 - Exit codes are reused, never extended: 1 usage · 2 fail-closed read · 3 auth · 4 config refusal · 9 privacy BLOCK (research §8)
 - Commit after each task or twin pair; keep the failing-test commit separate from the fix commit for the two regression suites (T005/T006, T025)
+
+---
+
+## Phase 8: Convergence
+
+- [ ] T097 Verify Bash statement coverage ≥ 80% with kcov (CI gate job or a bounded local run) and close any gap with targeted unit tests; the PowerShell port measures 89.11% locally per Constitution XIII (missing)
+  - **Infrastructure delivered, threshold NOT yet verified.** `tests/coverage/bash-coverage.sh` (kcov runner, `--mode conformance|bats`, `--threshold`) plus the `bash-coverage` CI job on ubuntu-latest. `run-scenario.sh` gained a coverage-only in-process mode (`SPEC_KIT_JIRA_COVERAGE_INPROCESS`), because kcov's bash tracing follows sourced files and forked subshells but not execve'd children; the conformance suite asserts that mode is behaviourally identical to the forked one (30/30 scenarios).
+  - **Cannot be measured on macOS**: kcov runs the traced script under `--bash-parser` (default `/bin/bash` = Apple's 3.2, which this port refuses by design → exit 5 on the prereq gate), and pointing it at a Homebrew bash 5 aborts with `Failed to exchange stderr for pipe: Bad file descriptor` for every path/`--bash-method` combination. The runner now refuses with that explanation instead of reporting a bogus 0%. The number will come from the Linux CI job.
+  - **Known gap**: a bash-5 xtrace estimate of the conformance corpus puts its statement floor at ~55%, concentrated in the modules whose branches are asserted by bats rather than end-to-end (`lib/credentials.sh`, `engine/drift.sh`, `sink/jira/client.sh`, `engine/interchange.sh`). Reaching 80% means measuring the bats suites (`--mode bats`), which is opt-in precisely because kcov + bats-core's DEBUG-trap tracing feed each other an unbounded trace (91.7 GB observed). Making that pairing terminate on Linux is the open work.
+- [X] T098 Failing twin tests + fix: render the per-project style audit (`effects.discovery.projects.<KEY>.{style,style_source}`) in the prose run summary — `summary_render_prose` / `ConvertTo-JiraSummaryProse` (the twin's actual name) emitted it only under `--json`, while the default output is prose per FR-003
+- [X] T099 Add `.specify/jira/personal.yml` to the repository's own `.gitignore` alongside the existing `config.local.yml` / `.env` lines per FR-019
+- [X] T100 Align the `action` enum in specs/002-config-discovery-team-prefix/data-model.md §6 with the implemented feature contract (`attached | created | would-attach | would-create`; the fallback emits `{active:false}` instead of `none`) per plan: data-model §6

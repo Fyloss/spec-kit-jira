@@ -57,3 +57,52 @@ setup() {
   ps_out="$(pwsh -NoProfile -Command "Import-Module '${PS_LIB}/Output.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraSummaryProse '$json'))")"
   [ "$bash_out" = "$ps_out" ]
 }
+
+# T098 — the per-project style audit (FR-003) lives at
+# effects.discovery.projects.<KEY>.{style,style_source}. It must reach the
+# DEFAULT output, not only --json: prose is the default rendering.
+
+style_audit_json() {
+  # Two projects, deliberately declared out of order, so the renderer's own
+  # ordering (project key, ordinal) is what is asserted.
+  printf '%s' '{"command":"config","counts":{"created":0,"errors":0,"skipped":0,"updated":0,"warnings":0},"dry_run":false,"effects":{"discovery":{"detail":"2 project(s) discovered","projects":{"WEX":{"style":"company_managed","style_source":"operator"},"IJT":{"style":"team_managed","style_source":"api"}},"status":"written"},"gitignore":{"detail":"personal.yml gitignore coverage","status":"unchanged"},"hooks":{"detail":"lifecycle hooks already registered","status":"unchanged"},"readme":{"detail":"block present","status":"unchanged"}},"exit_code":0,"schema_version":"1.0"}'
+}
+
+line_of() {
+  # line_of <needle> — 1-based line number of the first match in $output
+  printf '%s\n' "$output" | grep -n -- "$1" | head -1 | cut -d: -f1
+}
+
+@test "prose renders the per-project style audit under the discovery effect (T098)" {
+  run bash -c "$(declare -f style_audit_json); style_audit_json | { source '${LIB_DIR}/output.sh'; summary_render_prose; }"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"    IJT: team_managed (api)"* ]]
+  [[ "$output" == *"    WEX: company_managed (operator)"* ]]
+}
+
+@test "the style audit is nested under discovery and ordered by project key (T098)" {
+  run bash -c "$(declare -f style_audit_json); style_audit_json | { source '${LIB_DIR}/output.sh'; summary_render_prose; }"
+  [ "$status" -eq 0 ]
+  disc_ln="$(line_of '  discovery: ')"
+  ijt_ln="$(line_of 'IJT: ')"
+  wex_ln="$(line_of 'WEX: ')"
+  hooks_ln="$(line_of '  hooks: ')"
+  # discovery < IJT < WEX < hooks: ordinal key order, inside the discovery block.
+  [ "$disc_ln" -lt "$ijt_ln" ]
+  [ "$ijt_ln" -lt "$wex_ln" ]
+  [ "$wex_ln" -lt "$hooks_ln" ]
+}
+
+@test "an empty projects map adds no style-audit lines (degraded run) (T098)" {
+  json='{"command":"config","counts":{"created":0,"errors":0,"skipped":0,"updated":0,"warnings":1},"dry_run":false,"effects":{"discovery":{"detail":"0 project(s) discovered","projects":{},"status":"skipped"},"gitignore":{"detail":"personal.yml gitignore coverage","status":"skipped"}},"exit_code":0,"schema_version":"1.0"}'
+  run bash -c "printf '%s' '$json' | { source '${LIB_DIR}/output.sh'; summary_render_prose; }"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^    ')" -eq 0 ]
+}
+
+@test "the style-audit prose is byte-identical across ports (T098)" {
+  json="$(style_audit_json)"
+  bash_out="$(printf '%s' "$json" | summary_render_prose)"
+  ps_out="$(pwsh -NoProfile -Command "Import-Module '${PS_LIB}/Output.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraSummaryProse '$json'))")"
+  [ "$bash_out" = "$ps_out" ]
+}

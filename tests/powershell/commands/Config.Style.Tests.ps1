@@ -125,4 +125,23 @@ Describe 'Config style resolution matrix' {
         $obj.effects.discovery.projects.TEAM.style | Should -Be 'team_managed'
         $obj.effects.discovery.projects.TEAM.style_source | Should -Be 'api'
     }
+
+    It 'audits style + style_source in the DEFAULT (prose) summary (FR-003, T098)' {
+        # FR-003 asks the run summary to state the provenance so a wrong binding
+        # can be audited; prose is the default output, so --json must not be the
+        # only way to see it.
+        Write-TestConfig 'TEAM'
+        Start-TestMock '{"TEAM":"team"}'
+        $r = Invoke-ConfigCaptured @('config')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -BeLike '*    TEAM: team_managed (api)*'
+    }
+
+    It 'reports operator provenance in the prose audit too (FR-003, T098)' {
+        Write-TestConfig 'AMBI'
+        Start-TestMock '{"AMBI":"ambiguous"}'
+        $r = Invoke-ConfigCaptured @('config', '--style', 'AMBI=team_managed')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -BeLike '*    AMBI: team_managed (operator)*'
+    }
 }

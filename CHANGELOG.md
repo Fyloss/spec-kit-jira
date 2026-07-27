@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Bash statement-coverage gate: `tests/coverage/bash-coverage.sh` plus a
+  `bash-coverage` CI job on Linux, the twin of Pester's CodeCoverage
+  (Constitution XIII).
+
+### Fixed
+
+- The default (prose) run summary now states how each project's style was
+  resolved — `    <KEY>: <style> (<style_source>)`, nested under the discovery
+  effect and ordered by project key. It was previously visible only under
+  `--json`, so the FR-003 audit trail was missing from the default output.
+
 ## [0.2.0] - 2026-07-26
 
 Reliable automatic Jira discovery & team-based feature prefix (002).

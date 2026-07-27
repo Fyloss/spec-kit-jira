@@ -161,3 +161,22 @@ boot() {
   [ "$(jq -r '.effects.discovery.projects.TEAM.style' <<< "$output")" = "team_managed" ]
   [ "$(jq -r '.effects.discovery.projects.TEAM.style_source' <<< "$output")" = "api" ]
 }
+
+@test "the DEFAULT (prose) summary audits style + style_source per project (FR-003, T098)" {
+  # FR-003 asks the run summary to state the provenance so a wrong binding can
+  # be audited; prose is the default output, so --json must not be the only way
+  # to see it.
+  write_config TEAM
+  boot '{"TEAM":"team"}'
+  run cmd_config config
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"    TEAM: team_managed (api)"* ]]
+}
+
+@test "the prose audit reports operator provenance too (FR-003, T098)" {
+  write_config AMBI
+  boot '{"AMBI":"ambiguous"}'
+  run cmd_config config --style AMBI=team_managed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"    AMBI: team_managed (operator)"* ]]
+}

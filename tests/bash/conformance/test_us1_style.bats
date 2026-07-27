@@ -83,6 +83,25 @@ both_ports() {
   [ "$(jq -r '.effects.discovery.projects.COMP.style_source' "${TMP}/out-bash/stdout")" = "api" ]
 }
 
+@test "the DEFAULT (prose) summary carries the per-project style audit (T098)" {
+  bash "${HARNESS}" "${CONF}/scenarios/us1-style-prose-audit.json" bash "${TMP}/out-bash" > /dev/null
+  [ "$(cat "${TMP}/out-bash/exit")" = "0" ]
+  # Nested under the discovery effect line, before the next effect.
+  grep -q '^    COMP: company_managed (api)$' "${TMP}/out-bash/stdout"
+  # Not JSON: prose really is the default rendering.
+  run jq -e . "${TMP}/out-bash/stdout"
+  [ "$status" -ne 0 ]
+}
+
+@test "the prose style audit is byte-identical across ports (T098)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  both_ports us1-style-prose-audit.json
+  run diff "${TMP}/out-bash/stdout" "${TMP}/out-ps/stdout"
+  [ "$status" -eq 0 ]
+  run diff -r "${TMP}/out-bash/workdir" "${TMP}/out-ps/workdir"
+  [ "$status" -eq 0 ]
+}
+
 @test "company-managed discovery persists style + style_source api (T011)" {
   bash "${HARNESS}" "${CONF}/scenarios/us2-company-managed-discovery.json" bash "${TMP}/out-bash" > /dev/null
   [ "$(cat "${TMP}/out-bash/exit")" = "0" ]

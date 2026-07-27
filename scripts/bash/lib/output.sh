@@ -77,6 +77,20 @@ summary_render_prose() {
       line="  ${effect}: ${status}"
       [[ -n "${detail}" ]] && line="${line} — ${detail}"
       printf '%s\n' "${line}"
+      # The per-project style audit (FR-003) is nested under the discovery
+      # effect so a wrong binding can be audited from the default output, not
+      # only from --json. jq's `keys` sorts by code point, which is the
+      # PowerShell port's ordinal sort.
+      if [[ "${effect}" == "discovery" ]]; then
+        local pkey pstyle psource
+        while IFS= read -r pkey; do
+          [[ -z "${pkey}" ]] && continue
+          pstyle="$(jq -r --arg k "${pkey}" '.effects.discovery.projects[$k].style // empty' <<< "${json}")"
+          [[ -z "${pstyle}" ]] && continue
+          psource="$(jq -r --arg k "${pkey}" '.effects.discovery.projects[$k].style_source // empty' <<< "${json}")"
+          printf '    %s: %s (%s)\n' "${pkey}" "${pstyle}" "${psource}"
+        done <<< "$(jq -r '(.effects.discovery.projects // {}) | keys[]?' <<< "${json}")"
+      fi
     done
   fi
   # The degraded run's provisional team proposals and copy-pasteable re-run

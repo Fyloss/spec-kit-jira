@@ -97,7 +97,21 @@ while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq -r '.argv[]? // empty' 
 # --- Run and capture ---------------------------------------------------------
 set +e
 if [ "${PORT}" = "bash" ]; then
-  ( cd "${WORKDIR}" && bash "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout" 2> "${OUTDIR}/stderr"
+  if [ -n "${SPEC_KIT_JIRA_COVERAGE_INPROCESS:-}" ]; then
+    # Coverage mode only (T097): kcov's bash tracing follows forked subshells but
+    # NOT execve'd children, so `bash "${ENTRY}"` measures nothing. Sourcing the
+    # entry point in a subshell keeps every observable identical — own cwd, own
+    # argv, own redirections, own exit status, and `set -euo pipefail` scoped to
+    # the subshell — while making scripts/bash/** visible to the tracer.
+    # stderr is deliberately NOT captured in this mode: the tracer streams its
+    # PS4 trace on fd 2, so redirecting fd 2 to a file would hide every executed
+    # line from it. Coverage mode asserts nothing about stderr.
+    # shellcheck source=/dev/null
+    ( cd "${WORKDIR}" && source "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout"
+    : > "${OUTDIR}/stderr"
+  else
+    ( cd "${WORKDIR}" && bash "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout" 2> "${OUTDIR}/stderr"
+  fi
 else
   ( cd "${WORKDIR}" && pwsh -NoProfile -File "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout" 2> "${OUTDIR}/stderr"
 fi

@@ -94,3 +94,33 @@ jobs:
             fi
           done
           exit "${failed}"
+
+  bash-coverage:
+    name: Bash coverage (>= 80%)
+    # Linux only, on purpose: kcov drives the traced script under /bin/bash, and
+    # on macOS that is Apple's 3.2 (which this port refuses by design) while
+    # pointing kcov at a Homebrew bash 5 aborts with "Failed to exchange stderr
+    # for pipe". Ubuntu's /bin/bash is >= 4, so this is the only host where the
+    # Bash twin of Pester's CodeCoverage can be measured faithfully.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y kcov jq curl
+
+      # Bounded on purpose: `--mode bats` would measure the assertion-backed unit
+      # suites, but kcov and bats-core's own DEBUG-trap tracing feed each other an
+      # unbounded trace (91.7 GB observed before a disk filled), so the corpus
+      # mode is the default and the step still carries a wall-clock guard.
+      - name: Measure statement coverage (Constitution XIII)
+        timeout-minutes: 20
+        run: ./tests/coverage/bash-coverage.sh --mode conformance --threshold 80
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bash-coverage
+          path: coverage/bash
+          if-no-files-found: ignore
