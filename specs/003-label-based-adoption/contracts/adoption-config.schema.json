@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-kit-jira/contracts/adoption-config.schema.json",
+  "title": "Adoption section of the committable team config",
+  "description": "The `adoption:` section of .specify/jira/config.yml (layer 1, COMMITTABLE, credential-free). Delta to 001's config.schema.json: `adoption` becomes an accepted top-level key. The section is OPTIONAL; its absence is exactly equivalent to `enabled: false` (FR-001). Validation runs at config load, BEFORE any Jira read: a violation is a located configuration error with exit 4, nothing searched and nothing written (FR-002).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "FR-001 — adoption is opt-in and disabled by default. Enabling it is a deliberate, PR-reviewable team decision (Constitution I, condition 1). While false, a labelled ticket is NEVER written to and NEVER read as a candidate: the adopt command refuses with exit 4, names this key, and performs zero reads against candidate tickets and zero writes (SC-009)."
+    },
+    "label_prefix": {
+      "type": "string",
+      "default": "speckit-adopt:",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^\\S+$",
+      "description": "FR-002 — the single label prefix an adoption label is built on. A ticket's label must NAME the spec it belongs to: `<prefix><spec-folder>`, `<prefix><spec-folder>:us<N>`, or `<prefix><NNN>` (the folder's numbering component alone). A label carrying the prefix ALONE never triggers adoption — the bridge never guesses which spec a ticket belongs to (Constitution I, condition 2). Validation: non-empty, no whitespace of any kind (Jira rejects whitespace in labels), and short enough that prefix + the longest implied suffix stays within Jira's 255-character label limit. The maxLength of 200 here leaves room for the longest realistic spec-folder suffix; the effective per-target check is performed against 255 at config load."
+    }
+  },
+  "examples": [
+    {
+      "enabled": false
+    },
+    {
+      "enabled": true,
+      "label_prefix": "speckit-adopt:"
+    },
+    {
+      "enabled": true,
+      "label_prefix": "adopt-"
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-kit-jira/contracts/adoption-plan.schema.json",
+  "title": "Adoption plan / run-summary delta",
+  "description": "Delta to 001's run-summary.schema.json for the adopt command (FR-024). Two changes there: the `command` enum gains \"adopt\", and an `adoption` property carries the object defined here. The DEFAULT output stays human-readable prose; this JSON form is the opt-in --json output, and MUST be byte-identical between the Bash and PowerShell ports for identical inputs (SC-008). The same object is the --dry-run report, which is why FR-023's 'identical action set' is a structural guarantee rather than a behavioural promise.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["enabled", "label_prefix", "confirmed", "bindings", "refusals", "out_of_scope"],
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "description": "The effective value of adoption.enabled. False means the run refused at the enablement gate with zero reads against candidate tickets (FR-001)."
+    },
+    "label_prefix": {
+      "type": "string",
+      "description": "The validated prefix every searched label was built on (FR-002). A prefix, never a credential or a host (FR-025)."
+    },
+    "confirmed": {
+      "type": "boolean",
+      "description": "True when the apply phase ran (--yes, or an interactive confirmation). False for a dry-run, a decline, and the no-terminal-without---yes path — in all of which the plan is identical and zero writes occurred (FR-006, research §6)."
+    },
+    "bindings": {
+      "type": "array",
+      "description": "Applied bindings, ordered by spec_folder ascending, then feature before story, then story_ordinal ascending. Order is total and deterministic so both ports emit identical bytes; it never depends on the order Jira returned results (FR-012).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["spec_folder", "level", "issue_key", "reason", "status"],
+        "properties": {
+          "spec_folder": { "type": "string" },
+          "level": { "enum": ["feature", "story"] },
+          "story_ordinal": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "description": "Non-null exactly when level = story; the ordinal the bridge already assigns to the user story in spec.md."
+          },
+          "issue_key": { "type": "string" },
+          "reason": {
+            "enum": ["label-match", "explicit-binding"],
+            "description": "FR-024 — why this candidate was chosen. There is no third value: FR-012 forbids any similarity, order, recency, or issue-type heuristic from existing in any code path."
+          },
+          "overrode_key": {
+            "type": ["string", "null"],
+            "description": "FR-022 — non-null only when an explicit binding overrode a discovered candidate; carries the discovered key that was overridden, so the plan states both."
+          },
+          "status": {
+            "enum": ["adopt", "already-adopted"],
+            "description": "`adopt` emits exactly one identity stamp. `already-adopted` emits NO action: the ticket already carries this spec's marker with origin human, so it is skipped rather than re-stamped and counted as skipped (FR-027) — which is what makes an interrupted adoption complete on re-run with exactly one stamp per ticket (SC-007)."
+          }
+        }
+      }
+    },
+    "refusals": {
+      "type": "array",
+      "description": "Per-binding refusals. Each leaves zero writes for its binding while unambiguous bindings in the same run still apply, and any refusal makes the run exit 4 (FR-013). Same ordering rule as `bindings`.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["spec_folder", "level", "reason", "issue_keys", "message", "remediation"],
+        "properties": {
+          "spec_folder": { "type": "string" },
+          "level": { "enum": ["feature", "story"] },
+          "story_ordinal": { "type": ["integer", "null"], "minimum": 1 },
+          "reason": {
+            "enum": [
+              "no-candidate",
+              "several-candidates",
+              "already-claimed",
+              "spec-owns-bridge-ticket",
+              "wrong-project",
+              "unbound-parent",
+              "wrong-parent",
+              "ambiguous-short-number"
+            ],
+            "description": "A CLOSED set, so the conformance corpus can assert one fixture per class (SC-005) and both ports cannot drift into differently-worded reasons (NFR-1). no-candidate: FR-009. several-candidates: FR-010. already-claimed / spec-owns-bridge-ticket: FR-011. wrong-project: FR-005. unbound-parent: FR-014. wrong-parent: FR-015. ambiguous-short-number: two spec folders in scope share the numbering component a short-form label names."
+          },
+          "issue_keys": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Every key involved, sorted ascending. For several-candidates this is ALL candidates, never a truncated pair — which is why discovery must paginate to exhaustion (NFR-6)."
+          },
+          "message": {
+            "type": "string",
+            "description": "Names the spec folder and every ticket involved (Principle XVI). Carries no credential and no site host (FR-025)."
+          },
+          "remediation": {
+            "type": "string",
+            "description": "A copy-pasteable command line. For no-candidate and several-candidates this is the `adopt --bind` invocation that resolves it — which is precisely why US4 is the documented answer to US2."
+          }
+        }
+      }
+    },
+    "out_of_scope": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "FR-026 — spec folders excluded by --spec, sorted ascending. No label of theirs entered any query and no ticket of theirs was read or written."
+    }
+  }
+}
