@@ -178,6 +178,27 @@ Single-project twin-port layout (unchanged from 001):
 
 ---
 
+## Phase 7: Code-review remediation (post-implementation review findings)
+
+Confirmed defects from the branch code review, each fixed failing-test-first on both ports.
+
+- [X] T085 Failing tests: `${VAR:-\{\}}` literal-backslash default kills the bash entry point when `SPEC_KIT_JIRA_PLAN_CONTEXT` is unset (conformance scenario, both ports) and pollutes `config_personal_load` stderr in the 1-arg form
+- [X] T086 Fix the `\{\}` defaults in `feature.sh` and `lib/config.sh` (empty ⇒ `{}`); drop the redundant mktemp capture around `ticket_create`
+- [X] T087 Failing tests: feature prose output (non-`--json`) renders run-summary nulls on bash and raw JSON on PowerShell — define the feature prose contract (unit twins + prose conformance scenario)
+- [X] T088 Implement the twin feature prose renderer (`_feat_render_prose` / `ConvertTo-JiraFeatureProse`), byte-identical
+- [X] T089 Failing tests + fix: PowerShell discovery — `@($null)` phantom project bypasses the zero-results fail-closed; style switch is case-insensitive and `simplified` rejects the string form (align to bash: case-sensitive, `tostring` semantics)
+- [X] T090 Failing tests + fix: routing — an empty-string `folder_prefix`/`spec_label` rule condition counts as undeclared (template catch-all disabled the implicit team route); a `teams` entry without `folder_prefix` no longer aborts bash `routing_resolve`
+- [X] T091 Failing test + fix: bash `.gitignore` idempotency probe ignores CRLF line endings (`written` forever + duplicate appends); align with the PowerShell `\r?\n` split
+- [X] T092 Failing test + fix: PowerShell repo-root derivation throws on a single-component `JIRA_CONFIG_DIR` (dead `IsNullOrEmpty` guard after nested `Split-Path`)
+- [X] T093 Failing tests + fix: prose run summary must render the `gitignore` effect and the degraded run's provisional teams + rerun guidance; degraded effects gain `gitignore: skipped` (both ports)
+- [X] T094 Failing tests + fix: hook health must cover the `before_specify` feature hook (present/missing/disabled), so a deleted entry is reported instead of silently re-added; case-sensitive command compare in the PowerShell merge
+- [X] T095 quickstart.md: replace the documented `rm -f` cleanup with `trash` (File Deletion Policy)
+- [X] T096 Full suites green on both ports (bats + Pester + conformance parity)
+
+Deferred (design decisions, not fixed here): degraded-mode exit 0 is per FR-008/research §4; YAML reader's silent-truncation hardening; PowerShell OS-secret-manager rung implementation; reuse/efficiency refactors (shared run-summary builder, shared prop readers, spec-ref builder, discovery jq batching).
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

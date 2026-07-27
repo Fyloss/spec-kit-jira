@@ -130,7 +130,8 @@ _config_degraded_run() {
   effects="$(jq -cn --arg d "${detail}" '{
     discovery: {status: "skipped", detail: $d},
     hooks:     {status: "skipped", detail: $d},
-    readme:    {status: "skipped", detail: $d}
+    readme:    {status: "skipped", detail: $d},
+    gitignore: {status: "skipped", detail: $d}
   }')"
   summary="$(jq -cn --argjson effects "${effects}" --argjson dry "${dry_run}" \
     --argjson prov "${proposals}" --arg rerun "${rerun}" '
@@ -203,10 +204,15 @@ _config_gitignore_effect() {
     status="created"
     [[ "${dry_run}" != "true" ]] && printf '%s\n' "${lines[@]}" > "${gi}"
   else
+    # Strip CR before probing so a CRLF .gitignore (core.autocrlf checkouts)
+    # matches like the PowerShell twin's `r?`n split — otherwise every run
+    # re-appends the three lines forever (FR-019 idempotency).
+    local content
+    content="$(tr -d '\r' < "${gi}" 2> /dev/null || true)"
     local -a missing=()
     local l
     for l in "${lines[@]}"; do
-      grep -qxF "${l}" "${gi}" 2> /dev/null || missing+=("${l}")
+      grep -qxF "${l}" <<< "${content}" || missing+=("${l}")
     done
     if [[ ${#missing[@]} -eq 0 ]]; then
       status="unchanged"

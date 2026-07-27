@@ -36,14 +36,21 @@ function Get-JiraDiscoveryStyle {
     param($Project)
     $style = [string](Get-DiscProp $Project 'style')
     $simplified = Get-DiscProp $Project 'simplified'
-    $sSig = switch ($style) {
+    # Case-SENSITIVE like the bash twin's `case` — "Classic" is no signal.
+    $sSig = switch -CaseSensitive ($style) {
         'next-gen' { 'team_managed' }
         'classic' { 'company_managed' }
         default { '' }
     }
-    $fSig = ''
-    if ($simplified -is [bool]) {
-        $fSig = if ($simplified) { 'team_managed' } else { 'company_managed' }
+    # jq tostring semantics like the bash twin: the boolean AND the exact JSON
+    # string "true"/"false" count; any other shape (including "True") does not.
+    $fStr = ''
+    if ($simplified -is [bool]) { $fStr = if ($simplified) { 'true' } else { 'false' } }
+    elseif ($null -ne $simplified) { $fStr = [string]$simplified }
+    $fSig = switch -CaseSensitive ($fStr) {
+        'true' { 'team_managed' }
+        'false' { 'company_managed' }
+        default { '' }
     }
     if ($sSig -and $fSig) {
         if ($sSig -eq $fSig) { return $sSig }
@@ -77,7 +84,11 @@ function Get-JiraDiscoveryProjectList {
         $r = Invoke-JiraRequest -Method GET -Url "$api/project/search?startAt=$start&maxResults=50"
         if ($r.ExitCode -ne 0) { return [pscustomobject]@{ ExitCode = [int] $r.ExitCode; List = '' } }
         $page = $r.Body | ConvertFrom-Json -Depth 100
-        $values = @(Get-DiscProp $page 'values')
+        # A page without `values` must stay an EMPTY list: @($null) is a
+        # one-element array that would fabricate a phantom {null,null,null}
+        # project and bypass the zero-results fail-closed guard below.
+        $values = Get-DiscProp $page 'values'
+        if ($null -eq $values) { $values = @() } else { $values = @($values) }
         foreach ($v in $values) {
             $style = Get-JiraDiscoveryStyle $v
             $list.Add([ordered]@{

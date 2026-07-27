@@ -106,9 +106,12 @@ interchange_build() {
 # in the spec (a JSON array, tested against each rule's spec_label), and the team
 # config's `routing` rules plus `routing_default`. First matching rule wins; a rule
 # matches only when EVERY condition it declares holds (a rule with no condition is
-# skipped). An unmatched spec falls back to routing_default; a spec that matches
-# nothing with no default is refused with EXIT_CONFIG (zero writes downstream).
-# PURE: no Jira reads or writes. Prints the resolved project key on stdout.
+# skipped, and an empty-string condition counts as undeclared — the shipped
+# template's placeholder rule must not become a match-everything rule that
+# shadows the implicit team route). An unmatched spec falls back to
+# routing_default; a spec that matches nothing with no default is refused with
+# EXIT_CONFIG (zero writes downstream). PURE: no Jira reads or writes. Prints
+# the resolved project key on stdout.
 routing_resolve() {
   local folder="$1" labels="$2" cfg="$3" key
   # kcov-excl-start — jq literal (string lines are not statements)
@@ -118,11 +121,13 @@ routing_resolve() {
           $rules[]
           | .match as $m
           | select(($m | type) == "object")
-          | select(($m | has("folder_prefix")) or ($m | has("spec_label")))
+          | ($m.folder_prefix // "") as $mfp
+          | ($m.spec_label // "") as $msl
+          | select(($mfp != "") or ($msl != ""))
           | select(
-              (if ($m | has("folder_prefix")) then ($folder | startswith($m.folder_prefix)) else true end)
+              (if ($mfp != "") then ($folder | startswith($mfp)) else true end)
               and
-              (if ($m | has("spec_label")) then (($labels | index($m.spec_label)) != null) else true end)
+              (if ($msl != "") then (($labels | index($msl)) != null) else true end)
             )
           | .project
         ) // null
@@ -130,7 +135,7 @@ routing_resolve() {
     | ( $folder | sub("^[0-9]+-"; "") ) as $flat
     | ( first( (.teams // [])[]
           | . as $t
-          | select($flat | startswith($t.folder_prefix))
+          | select((($t.folder_prefix // "") != "") and ($flat | startswith($t.folder_prefix)))
           | $t.project
         ) // null ) as $team_route
     | ( $matched // $team_route // .routing_default // "" )

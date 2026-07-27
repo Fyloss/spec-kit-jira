@@ -33,8 +33,38 @@ _feat_emit() {
   if [[ "${json}" == "true" ]]; then
     printf '%s\n' "${payload}"
   else
-    printf '%s' "${payload}" | summary_render_prose 2> /dev/null || printf '%s\n' "${payload}"
+    _feat_render_prose "${payload}"
   fi
+}
+
+# _feat_render_prose <json> — render the feature result as human prose (the
+# default output). The payload is feature-shaped (contracts/
+# feature-cli-contract.md) — never a run summary, so the run-summary renderer
+# does not apply. Byte-identical to the PowerShell twin (NFR-1).
+_feat_render_prose() {
+  local payload="$1"
+  if [[ "$(jq -r '.active' <<< "${payload}")" != "true" ]]; then
+    printf 'Feature: inactive\n'
+  elif [[ "$(jq -r 'has("confirmation_required")' <<< "${payload}")" == "true" ]]; then
+    printf 'Feature: confirmation required\n'
+    printf 'Ticket: %s (team: %s)\n' \
+      "$(jq -r '.confirmation_required.ticket' <<< "${payload}")" \
+      "$(jq -r '.confirmation_required.ticket_team // "—"' <<< "${payload}")"
+    printf 'Selected team: %s\n' "$(jq -r '.confirmation_required.selected_team' <<< "${payload}")"
+  else
+    printf 'Feature: active (team: %s)\n' "$(jq -r '.team' <<< "${payload}")"
+    printf 'Ticket: %s (%s)\n' \
+      "$(jq -r '.ticket.key // "—"' <<< "${payload}")" \
+      "$(jq -r '.ticket.action' <<< "${payload}")"
+    printf 'Branch: %s\n' "$(jq -r '.branch_name // "—"' <<< "${payload}")"
+    printf 'Folder: %s\n' "$(jq -r '.short_name' <<< "${payload}")"
+    printf 'Override used: %s\n' "$(jq -r '.override_used' <<< "${payload}")"
+  fi
+  local w
+  while IFS= read -r w; do
+    [[ -z "${w}" ]] && continue
+    printf 'Warning: %s\n' "${w}"
+  done <<< "$(jq -r '.warnings[]? // empty' <<< "${payload}")"
 }
 
 # cmd_feature <argv...> — see the file header. Echoes the result to stdout;
@@ -173,8 +203,13 @@ cmd_feature() {
       return 0
     fi
 
-    local typeid
-    typeid="$(jq -r '.story_type_id // ""' <<< "${SPEC_KIT_JIRA_PLAN_CONTEXT:-\{\}}" 2> /dev/null)"
+    # An unset/empty plan context is the normal before_specify state (the
+    # context only exists after /plan): default to valid JSON so the read
+    # yields an empty typeid and the FR-016 fallback below runs — the entry
+    # point's errexit must never see a failing jq here.
+    local typeid plan_ctx="${SPEC_KIT_JIRA_PLAN_CONTEXT:-}"
+    [[ -z "${plan_ctx}" ]] && plan_ctx='{}'
+    typeid="$(jq -r '.story_type_id // ""' <<< "${plan_ctx}" 2> /dev/null)" || typeid=""
     local spec_ref
     spec_ref="$(jq -cn --arg r "${SPEC_KIT_JIRA_REPO:-local/repo}" --arg s "${SPEC_KIT_JIRA_SPEC_SLUG:-spec}" \
       '{repo:$r, spec_slug:$s}')"
@@ -186,11 +221,8 @@ cmd_feature() {
 
     # The `|| rc=$?` guard keeps the entry point's errexit from aborting the
     # ceremony before the FR-016 fallback can run.
-    local tmp created rc=0
-    tmp="$(mktemp)"
-    ticket_create "${eff_project}" "${desc}" "${typeid}" '[]' '[]' "${spec_ref}" > "${tmp}" || rc=$?
-    created="$(cat "${tmp}")"
-    rm -f "${tmp}"
+    local created rc=0
+    created="$(ticket_create "${eff_project}" "${desc}" "${typeid}" '[]' '[]' "${spec_ref}")" || rc=$?
     if ((rc == 9)); then
       return 9
     elif ((rc != 0)); then

@@ -176,12 +176,13 @@ function ConvertTo-JiraSummaryProse {
     $lines.Add("Command: $($s.command)$suffix")
     $lines.Add("Created: $($s.counts.created), Updated: $($s.counts.updated), Skipped: $($s.counts.skipped)")
     $lines.Add("Warnings: $($s.counts.warnings), Errors: $($s.counts.errors)")
-    # The config ceremony's three effects, reported separately (FR-054), in a
-    # fixed order (discovery, hooks, readme) so both ports match byte-for-byte.
+    # The config ceremony's effects, reported separately (FR-054), in a fixed
+    # order (discovery, hooks, readme, gitignore) so both ports match
+    # byte-for-byte.
     if ($s.PSObject.Properties.Name -contains 'effects') {
         $lines.Add('Effects:')
-        foreach ($effect in @('discovery', 'hooks', 'readme')) {
-            $e = $s.effects.$effect
+        foreach ($effect in @('discovery', 'hooks', 'readme', 'gitignore')) {
+            $e = if ($s.effects.PSObject.Properties.Name -contains $effect) { $s.effects.$effect } else { $null }
             if ($null -eq $e) { continue }
             $status = $e.status
             if ([string]::IsNullOrEmpty($status)) { continue }
@@ -190,6 +191,18 @@ function ConvertTo-JiraSummaryProse {
             if (-not [string]::IsNullOrEmpty($detail)) { $line = "$line — $detail" }
             $lines.Add($line)
         }
+    }
+    # The degraded run's provisional team proposals and copy-pasteable re-run
+    # guidance (FR-008/FR-009): the agent command doc relays them verbatim, so
+    # they must exist in the default output, not only in --json.
+    if ($s.PSObject.Properties.Name -contains 'provisional') {
+        $prov = @($s.provisional | Where-Object { $null -ne $_ })
+        if ($prov.Count -gt 0) {
+            $lines.Add("Provisional teams: $((@($prov | ForEach-Object { [string]$_.team_prefix })) -join ', ')")
+        }
+    }
+    if ($s.PSObject.Properties.Name -contains 'rerun_guidance') {
+        $lines.Add("Rerun: $($s.rerun_guidance)")
     }
     $lines.Add("Exit: $($s.exit_code)")
     return (($lines -join "`n") + "`n")

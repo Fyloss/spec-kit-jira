@@ -76,7 +76,8 @@ function Get-JiraHookMerged {
         }
         $present = $false
         foreach ($x in $cur) {
-            if ((Get-JiraHookProp $x 'command') -eq $script:HookCommand) { $present = $true; break }
+            # Case-SENSITIVE like the bash twin's jq `==` (NFR-1).
+            if ((Get-JiraHookProp $x 'command') -ceq $script:HookCommand) { $present = $true; break }
         }
         if (-not $present) { $cur.Add((Get-JiraHookEntry)) }
         $hooksMap[$e] = $cur.ToArray()
@@ -90,7 +91,8 @@ function Get-JiraHookMerged {
     }
     $bpresent = $false
     foreach ($x in $bcur) {
-        if ((Get-JiraHookProp $x 'command') -eq $script:HookBeforeCommand) { $bpresent = $true; break }
+        # Case-SENSITIVE like the bash twin's jq `==` (NFR-1).
+        if ((Get-JiraHookProp $x 'command') -ceq $script:HookBeforeCommand) { $bpresent = $true; break }
     }
     if (-not $bpresent) { $bcur.Add((Get-JiraHookBeforeEntry)) }
     $hooksMap[$script:HookBeforeEvent] = $bcur.ToArray()
@@ -119,6 +121,9 @@ function Get-JiraHookHealth {
       { present; missing; disabled; repair_hint? }. `missing` lists lifecycle
       events with no reconcile hook at all; an operator-disabled hook is listed
       under `disabled` (never "missing"), so it is never re-added (FR-048).
+      Health covers EVERY event the writer registers — the six after_*
+      reconcile hooks AND the before_specify feature hook — so a deleted entry
+      is reported instead of silently re-added by the next repair.
       `repair_hint` appears only when a hook is missing. A malformed file reports
       every event missing. Mirror of register_hooks_health.
     #>
@@ -131,7 +136,7 @@ function Get-JiraHookHealth {
         catch {
             return (ConvertTo-JiraJsonValue ([ordered]@{
                         present     = @()
-                        missing     = @($script:HookEvents)
+                        missing     = @(@($script:HookEvents) + $script:HookBeforeEvent)
                         disabled    = @()
                         repair_hint = 'extensions.yml is not valid YAML — fix it, then run /speckit.jira.config or reconcile --repair-hooks'
                     }))
@@ -143,10 +148,12 @@ function Get-JiraHookHealth {
     $present = [System.Collections.Generic.List[string]]::new()
     $missing = [System.Collections.Generic.List[string]]::new()
     $disabled = [System.Collections.Generic.List[string]]::new()
-    foreach ($e in $script:HookEvents) {
+    foreach ($e in (@($script:HookEvents) + $script:HookBeforeEvent)) {
+        $cmd = if ($e -ceq $script:HookBeforeEvent) { $script:HookBeforeCommand } else { $script:HookCommand }
         $ours = [System.Collections.Generic.List[object]]::new()
         foreach ($x in @(Get-JiraHookProp $hooks $e)) {
-            if ((Get-JiraHookProp $x 'command') -eq $script:HookCommand) { $ours.Add($x) }
+            # Case-SENSITIVE like the bash twin's jq `==` (NFR-1).
+            if ((Get-JiraHookProp $x 'command') -ceq $cmd) { $ours.Add($x) }
         }
         if ($ours.Count -eq 0) { $missing.Add($e); continue }
         $enabled = $false

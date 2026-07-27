@@ -87,7 +87,7 @@ yields `wex-7/…` and the `wex` folder prefix; `personal.yml` unchanged.
 ## Scenario 6 — No selection ⇒ zero behaviour change (US3)
 
 ```bash
-rm -f .specify/jira/personal.yml   # in a scratch clone; use trash outside CI
+trash .specify/jira/personal.yml   # recoverable deletion (File Deletion Policy)
 spec-kit-jira feature --json "invoice export"
 # ⇒ {"active":false} — no prompt, no warning, no Jira call (mock log empty)
 ```

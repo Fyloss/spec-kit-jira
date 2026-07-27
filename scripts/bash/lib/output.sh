@@ -64,12 +64,13 @@ summary_render_prose() {
   printf 'Command: %s%s\n' "${command}" "${suffix}"
   printf 'Created: %s, Updated: %s, Skipped: %s\n' "${created}" "${updated}" "${skipped}"
   printf 'Warnings: %s, Errors: %s\n' "${warnings}" "${errors}"
-  # The config ceremony's three effects, reported separately (FR-054). Rendered
-  # in a fixed order (discovery, hooks, readme) so both ports match byte-for-byte.
+  # The config ceremony's effects, reported separately (FR-054). Rendered in a
+  # fixed order (discovery, hooks, readme, gitignore) so both ports match
+  # byte-for-byte.
   if [[ "$(jq -r 'has("effects")' <<< "${json}")" == "true" ]]; then
     printf 'Effects:\n'
     local effect status detail line
-    for effect in discovery hooks readme; do
+    for effect in discovery hooks readme gitignore; do
       status="$(jq -r --arg e "${effect}" '.effects[$e].status // empty' <<< "${json}")"
       [[ -z "${status}" ]] && continue
       detail="$(jq -r --arg e "${effect}" '.effects[$e].detail // empty' <<< "${json}")"
@@ -77,6 +78,15 @@ summary_render_prose() {
       [[ -n "${detail}" ]] && line="${line} — ${detail}"
       printf '%s\n' "${line}"
     done
+  fi
+  # The degraded run's provisional team proposals and copy-pasteable re-run
+  # guidance (FR-008/FR-009): the agent command doc relays them verbatim, so
+  # they must exist in the default output, not only in --json.
+  if [[ "$(jq -r 'has("provisional") and ((.provisional | length) > 0)' <<< "${json}")" == "true" ]]; then
+    printf 'Provisional teams: %s\n' "$(jq -r '[.provisional[].team_prefix] | join(", ")' <<< "${json}")"
+  fi
+  if [[ "$(jq -r 'has("rerun_guidance")' <<< "${json}")" == "true" ]]; then
+    printf 'Rerun: %s\n' "$(jq -r '.rerun_guidance' <<< "${json}")"
   fi
   printf 'Exit: %s\n' "${exit_code}"
 }

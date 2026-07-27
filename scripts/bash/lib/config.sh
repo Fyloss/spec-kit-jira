@@ -487,7 +487,10 @@ def branchpattern:
 # the valid catalogue ids; `override` passes the catalogue-entry validation.
 # Prints the canonical {active, team, override} JSON on stdout.
 config_personal_load() {
-  local dir="${1:-${JIRA_CONFIG_DIR}}" cfg="${2:-\{\}}"
+  # The optional [merged-config-json] defaults to valid JSON ({}) — a literal
+  # backslash default would make every jq read below spray parse errors.
+  local dir="${1:-${JIRA_CONFIG_DIR}}" cfg="${2:-}"
+  [[ -z "${cfg}" ]] && cfg='{}'
   local pf="${dir}/personal.yml"
   if [[ ! -f "${pf}" ]]; then
     printf '{"active":false}'

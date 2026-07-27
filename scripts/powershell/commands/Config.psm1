@@ -143,6 +143,7 @@ function Invoke-JiraConfigDegraded {
             discovery = [ordered]@{ status = 'skipped'; detail = $detail }
             hooks     = [ordered]@{ status = 'skipped'; detail = $detail }
             readme    = [ordered]@{ status = 'skipped'; detail = $detail }
+            gitignore = [ordered]@{ status = 'skipped'; detail = $detail }
         }
         provisional    = $proposals
         rerun_guidance = $rerun
@@ -152,6 +153,16 @@ function Invoke-JiraConfigDegraded {
     if ($Json) { [Console]::Out.Write($summary + "`n") }
     else { [Console]::Out.Write((ConvertTo-JiraSummaryProse -Json $summary)) }
     return 0
+}
+
+function Get-CmdParentPath {
+    # Mirror of bash dirname: the parent of a single-component relative path is
+    # '.', never the empty string — Split-Path -Parent '' throws downstream,
+    # before any IsNullOrEmpty guard can run.
+    param([string] $Path)
+    $parent = Split-Path -Parent $Path
+    if ([string]::IsNullOrEmpty($parent)) { return '.' }
+    return $parent
 }
 
 function Get-CmdProp {
@@ -428,15 +439,13 @@ function Invoke-JiraConfig {
     # Gitignore effect (002 US3, FR-019): ensure the repository .gitignore covers the
     # gitignored config layer (config.local.yml, .env, personal.yml). Repo root is
     # the parent of the .specify directory (overridable via SPEC_KIT_JIRA_GITIGNORE).
-    $gitignoreRoot = Split-Path -Parent (Split-Path -Parent $configdir)
-    if ([string]::IsNullOrEmpty($gitignoreRoot)) { $gitignoreRoot = '.' }
+    $gitignoreRoot = Get-CmdParentPath (Get-CmdParentPath $configdir)
     $gitignoreStatus = Set-JiraConfigGitignore -RepoRoot $gitignoreRoot -DryRun ([bool]$dryRun)
 
     # README effect (US5, T065): splice the version-marked managed block into the
     # consuming repository's README. The path derives from the config dir's repo
     # root (the parent of .specify), overridable via SPEC_KIT_JIRA_README.
-    $repoRoot = Split-Path -Parent (Split-Path -Parent $configdir)
-    if ([string]::IsNullOrEmpty($repoRoot)) { $repoRoot = '.' }
+    $repoRoot = Get-CmdParentPath (Get-CmdParentPath $configdir)
     $readmePath = if ($env:SPEC_KIT_JIRA_README) { $env:SPEC_KIT_JIRA_README } else { Join-Path $repoRoot 'README.md' }
     $readmeResult = Set-JiraReadmeBlock -Path $readmePath -DryRun ([bool]$dryRun)
     $readmeStatus = $readmeResult.Status
@@ -452,7 +461,7 @@ function Invoke-JiraConfig {
     # .specify/extensions.yml (FR-054) — the same self-healing write reachable from a
     # run via reconcile --repair-hooks. The path derives from the config dir's parent
     # (.specify), overridable via SPEC_KIT_JIRA_EXTENSIONS_YML.
-    $extPath = if ($env:SPEC_KIT_JIRA_EXTENSIONS_YML) { $env:SPEC_KIT_JIRA_EXTENSIONS_YML } else { Join-Path (Split-Path -Parent $configdir) 'extensions.yml' }
+    $extPath = if ($env:SPEC_KIT_JIRA_EXTENSIONS_YML) { $env:SPEC_KIT_JIRA_EXTENSIONS_YML } else { Join-Path (Get-CmdParentPath $configdir) 'extensions.yml' }
     $hooksResult = Set-JiraHookRegistration -Path $extPath -DryRun ([bool]$dryRun)
     $hooksStatus = $hooksResult.Status
     $hooksDetail = switch ($hooksStatus) {

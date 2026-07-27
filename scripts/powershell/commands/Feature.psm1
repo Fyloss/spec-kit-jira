@@ -38,9 +38,46 @@ function Write-FeatResult {
         [Console]::Out.Write($Payload + "`n")
     }
     else {
-        try { [Console]::Out.Write((ConvertTo-JiraSummaryProse -Json $Payload)) }
-        catch { [Console]::Out.Write($Payload + "`n") }
+        [Console]::Out.Write((ConvertTo-JiraFeatureProse -Json $Payload))
     }
+}
+
+function ConvertTo-JiraFeatureProse {
+    # Render the feature result as human prose (the default output). The
+    # payload is feature-shaped (contracts/feature-cli-contract.md) — never a
+    # run summary, so the run-summary renderer does not apply. Byte-identical
+    # to the bash twin's _feat_render_prose (NFR-1).
+    param([Parameter(Mandatory)] [string] $Json)
+    $p = $Json | ConvertFrom-Json -Depth 100
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $confirmation = Get-FeatProp $p 'confirmation_required'
+    if (-not [bool](Get-FeatProp $p 'active')) {
+        $lines.Add('Feature: inactive')
+    }
+    elseif ($null -ne $confirmation) {
+        $lines.Add('Feature: confirmation required')
+        $tt = [string](Get-FeatProp $confirmation 'ticket_team')
+        if ([string]::IsNullOrEmpty($tt)) { $tt = '—' }
+        $lines.Add("Ticket: $([string](Get-FeatProp $confirmation 'ticket')) (team: $tt)")
+        $lines.Add("Selected team: $([string](Get-FeatProp $confirmation 'selected_team'))")
+    }
+    else {
+        $lines.Add("Feature: active (team: $([string](Get-FeatProp $p 'team')))")
+        $ticket = Get-FeatProp $p 'ticket'
+        $key = [string](Get-FeatProp $ticket 'key')
+        if ([string]::IsNullOrEmpty($key)) { $key = '—' }
+        $lines.Add("Ticket: $key ($([string](Get-FeatProp $ticket 'action')))")
+        $branch = [string](Get-FeatProp $p 'branch_name')
+        if ([string]::IsNullOrEmpty($branch)) { $branch = '—' }
+        $lines.Add("Branch: $branch")
+        $lines.Add("Folder: $([string](Get-FeatProp $p 'short_name'))")
+        $ou = if ([bool](Get-FeatProp $p 'override_used')) { 'true' } else { 'false' }
+        $lines.Add("Override used: $ou")
+    }
+    foreach ($w in @(Get-FeatProp $p 'warnings')) {
+        if (-not [string]::IsNullOrEmpty([string]$w)) { $lines.Add("Warning: $w") }
+    }
+    return (($lines -join "`n") + "`n")
 }
 
 function Write-FeatFallback {
