@@ -71,4 +71,25 @@ Describe 'Config gitignore effect' {
         ($r.Out.Trim() | ConvertFrom-Json).effects.gitignore.status | Should -Be 'created'
         (Test-Path $GitignorePath) | Should -BeFalse
     }
+
+    It 'derives the repo root from a single-component JIRA_CONFIG_DIR without throwing (T092)' {
+        # Split-Path -Parent (Split-Path -Parent 'jira') throws on the empty
+        # inner result; the bash twin (dirname of dirname) lands on '.'.
+        Push-Location $Work
+        $origCwd = [System.Environment]::CurrentDirectory
+        [System.Environment]::CurrentDirectory = $Work
+        try {
+            New-Item -ItemType Directory -Path (Join-Path $Work 'jira') -Force | Out-Null
+            Copy-Item (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') (Join-Path $Work 'jira/config.yml')
+            $env:JIRA_CONFIG_DIR = 'jira'
+            $r = Invoke-ConfigCaptured @('config', '--json')
+            $r.ExitCode | Should -Be 0
+            ($r.Out.Trim() | ConvertFrom-Json).effects.gitignore.status | Should -Be 'created'
+            Test-Path -LiteralPath $GitignorePath | Should -BeTrue
+        }
+        finally {
+            Pop-Location
+            [System.Environment]::CurrentDirectory = $origCwd
+        }
+    }
 }

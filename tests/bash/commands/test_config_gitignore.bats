@@ -83,3 +83,17 @@ boot() {
   [ "$(jq -r '.effects.gitignore.status' <<< "$output")" = "created" ]
   [ ! -f "${WORK}/.gitignore" ]
 }
+
+@test "a CRLF .gitignore already covering the three lines stays unchanged (T091)" {
+  # Windows checkouts (core.autocrlf=true) end each line in \r; the whole-line
+  # probe must strip it like the PowerShell twin's `r?`n split, or every run
+  # re-appends the three lines forever (FR-019 idempotency broken on one port).
+  boot
+  printf '.specify/jira/config.local.yml\r\n.specify/jira/.env\r\n.specify/jira/personal.yml\r\n' > "${WORK}/.gitignore"
+  cp "${WORK}/.gitignore" "${WORK}/.gitignore.before"
+  run cmd_config config --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.effects.gitignore.status' <<< "$output")" = "unchanged" ]
+  run cmp "${WORK}/.gitignore.before" "${WORK}/.gitignore"
+  [ "$status" -eq 0 ]
+}

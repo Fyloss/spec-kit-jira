@@ -126,3 +126,27 @@ run_in_work() {
   [ "$status" -eq 0 ]
   [ -z "$(mock_calls)" ]
 }
+
+@test "degraded effects include gitignore: skipped — same effect set as nominal (T093)" {
+  unset SPEC_KIT_JIRA_BASE_URL
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  run run_in_work config --json
+  [ "$status" -eq 0 ]
+  local summary
+  summary="$(printf '%s\n' "$output" | grep -v '^WARNING:')"
+  [ "$(jq -r '.effects.gitignore.status' <<< "${summary}")" = "skipped" ]
+  [ ! -f "${WORK}/.gitignore" ]
+}
+
+@test "degraded prose surfaces the proposals and the rerun guidance (T093)" {
+  # The agent command doc instructs the model to relay the re-run guidance
+  # verbatim — it must exist in the default (non---json) output, not only in
+  # the JSON summary.
+  unset SPEC_KIT_JIRA_BASE_URL
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  run run_in_work config
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"  gitignore: skipped"* ]]
+  [[ "$output" == *"Provisional teams: ijt, wex"* ]]
+  [[ "$output" == *"Rerun: define SPEC_KIT_JIRA_BASE_URL, then re-run: spec-kit-jira config"* ]]
+}

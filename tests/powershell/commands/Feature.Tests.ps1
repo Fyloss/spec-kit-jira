@@ -161,4 +161,39 @@ Describe 'Feature command' {
         $obj.override_used | Should -BeTrue
         $obj.branch_name | Should -Be 'special-42/invoice-export'
     }
+
+    # --- T087: feature prose (default, non---json) output — twin of the bash
+    # prose tests; the raw-JSON StrictMode catch fallback is a defect, not prose.
+
+    It 'renders exactly "Feature: inactive" on pass-through prose (T087)' {
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $r = Invoke-FeatureCaptured @('feature', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Be "Feature: inactive`n"
+    }
+
+    It 'renders the feature shape on dry-run prose (T087)' {
+        Select-Team ijt
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $r = Invoke-FeatureCaptured @('feature', '--dry-run', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Be "Feature: active (team: ijt)`nTicket: — (would-create)`nBranch: —`nFolder: ijt-invoice-export`nOverride used: false`n"
+    }
+
+    It 'renders inactive plus the warning line on fallback prose (T087)' {
+        Select-Team ijt
+        Start-TestMock '{"projects":{"IJT":"team"},"fault":{"network":true}}'
+        $r = Invoke-FeatureCaptured @('feature', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Match '^Feature: inactive\n'
+        $r.Out | Should -Match 'Warning: could not resolve a ticket in Jira'
+    }
+
+    It 'renders the closed question on cross-team confirmation prose (T087)' {
+        Select-Team ijt
+        Start-TestMock '{"projects":{"IJT":"team","WEX":"team"}}'
+        $r = Invoke-FeatureCaptured @('feature', 'WEX-7', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Be "Feature: confirmation required`nTicket: WEX-7 (team: wex)`nSelected team: ijt`n"
+    }
 }

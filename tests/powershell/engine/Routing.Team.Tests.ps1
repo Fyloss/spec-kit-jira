@@ -28,3 +28,18 @@ Describe 'Implicit team route' {
         (Resolve-JiraRouting -FolderName '003-ijt-invoice-export' -LabelsJson '[]' -RoutingConfigJson '{"routing":[],"routing_default":"COMP"}').ProjectKey | Should -Be 'COMP'
     }
 }
+
+Describe 'Implicit team route — review remediation (T090)' {
+    It 'does not let a template catch-all rule (empty folder_prefix) shadow the team route' {
+        $cfg = '{"routing":[{"match":{"folder_prefix":""},"project":"COMP"}],"routing_default":"COMP","teams":[{"id":"wex","project":"WEX","folder_prefix":"wex-","branch_pattern":"wex-<ID>/<FEATURE_NAME>"}]}'
+        (Resolve-JiraRouting -FolderName '004-wex-onboarding' -LabelsJson '[]' -RoutingConfigJson $cfg).ProjectKey | Should -Be 'WEX'
+        (Resolve-JiraRouting -FolderName '005-plain-feature' -LabelsJson '[]' -RoutingConfigJson $cfg).ProjectKey | Should -Be 'COMP'
+    }
+
+    It 'ignores a teams entry without folder_prefix (twin of the bash jq guard)' {
+        $cfg = '{"routing":[{"match":{"folder_prefix":"001-"},"project":"AAA"}],"routing_default":"DEF","teams":[{"id":"t","project":"TTT"}]}'
+        $r = Resolve-JiraRouting -FolderName '001-alpha' -LabelsJson '[]' -RoutingConfigJson $cfg
+        $r.ExitCode | Should -Be 0
+        $r.ProjectKey | Should -Be 'AAA'
+    }
+}

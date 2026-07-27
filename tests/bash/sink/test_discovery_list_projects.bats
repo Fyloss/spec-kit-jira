@@ -82,3 +82,20 @@ boot() {
     ")"
   [ "$bash_out" = "$ps_out" ]
 }
+
+# --- T089: _disc_style pins (the bash port is the parity reference) ----------
+
+@test "style signal is case-sensitive: 'Classic' maps to no signal (T089)" {
+  run _disc_style '{"style":"Classic"}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run _disc_style '{"style":"NEXT-GEN"}'
+  [ -z "$output" ]
+}
+
+@test "simplified follows tostring semantics: the string form counts (T089)" {
+  run _disc_style '{"simplified":"true"}'
+  [ "$output" = "team_managed" ]
+  run _disc_style '{"simplified":"false"}'
+  [ "$output" = "company_managed" ]
+}

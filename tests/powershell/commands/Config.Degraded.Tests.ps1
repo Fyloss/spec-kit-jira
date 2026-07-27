@@ -94,4 +94,23 @@ Describe 'Config degraded mode' {
         $r.ExitCode | Should -Be 0
         @(Get-JiraMockCallLog -Mock $M | Where-Object { $_ }).Count | Should -Be 0
     }
+
+    It 'includes gitignore: skipped in the degraded effect set (T093)' {
+        $env:SPEC_KIT_JIRA_BASE_URL = ''
+        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+        $r = Invoke-ConfigCaptured @('config', '--json')
+        $r.ExitCode | Should -Be 0
+        ($r.Out.Trim() | ConvertFrom-Json).effects.gitignore.status | Should -Be 'skipped'
+        Test-Path (Join-Path $Work '.gitignore') | Should -BeFalse
+    }
+
+    It 'surfaces the proposals and rerun guidance in degraded prose (T093)' {
+        $env:SPEC_KIT_JIRA_BASE_URL = ''
+        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+        $r = Invoke-ConfigCaptured @('config')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Match '  gitignore: skipped'
+        $r.Out | Should -Match 'Provisional teams: ijt, wex'
+        $r.Out | Should -Match 'Rerun: define SPEC_KIT_JIRA_BASE_URL, then re-run: spec-kit-jira config'
+    }
 }

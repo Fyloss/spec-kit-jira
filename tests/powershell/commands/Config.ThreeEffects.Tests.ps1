@@ -46,7 +46,7 @@ Describe 'Config three-effect reporting' {
         $obj.effects.gitignore.status | Should -Not -BeNullOrEmpty
     }
 
-    It 'names each of the three effects in the prose summary' {
+    It 'names each of the four effects in the prose summary' {
         $sw = [System.IO.StringWriter]::new()
         $orig = [Console]::Out
         [Console]::SetOut($sw)
@@ -56,5 +56,8 @@ Describe 'Config three-effect reporting' {
         $text | Should -Match 'discovery'
         $text | Should -Match 'hooks'
         $text | Should -Match 'readme'
+        # T093 — the gitignore effect modifies a tracked file; the default
+        # output must say so, not only the --json summary.
+        $text | Should -Match '  gitignore: '
     }
 }

@@ -234,3 +234,46 @@ boot() {
   [ "$(jq -r '.short_name' <<< "$output")" = "ijt-invoice-export" ]
   [[ "$(jq -r '.short_name' <<< "$output")" != *"ijt-ijt-"* ]]
 }
+
+# --- T087: feature prose (default, non---json) output ------------------------
+# The prose renderer is feature-shaped: never the run-summary renderer (whose
+# jq reads yield "Command: null" garbage on feature payloads).
+
+@test "prose: pass-through renders exactly 'Feature: inactive' (T087)" {
+  boot '{"projects":{"IJT":"team"}}'
+  run cmd_feature feature "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$output" = "Feature: inactive" ]
+}
+
+@test "prose: dry-run create renders the feature shape (T087)" {
+  boot '{"projects":{"IJT":"team"}}'
+  select_team ijt
+  run cmd_feature feature --dry-run "invoice export"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "Feature: active (team: ijt)" ]
+  [ "${lines[1]}" = "Ticket: — (would-create)" ]
+  [ "${lines[2]}" = "Branch: —" ]
+  [ "${lines[3]}" = "Folder: ijt-invoice-export" ]
+  [ "${lines[4]}" = "Override used: false" ]
+}
+
+@test "prose: fallback renders inactive plus the warning line (T087)" {
+  boot '{"projects":{"IJT":"team"},"fault":{"network":true}}'
+  select_team ijt
+  run cmd_feature feature "invoice export"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Feature: inactive"* ]]
+  [[ "$output" == *"Warning: could not resolve a ticket in Jira"* ]]
+  [[ "$output" != *"Command: null"* ]]
+}
+
+@test "prose: cross-team confirmation renders the closed question (T087)" {
+  boot '{"projects":{"IJT":"team","WEX":"team"}}'
+  select_team ijt
+  run cmd_feature feature WEX-7 "invoice export"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "Feature: confirmation required" ]
+  [ "${lines[1]}" = "Ticket: WEX-7 (team: wex)" ]
+  [ "${lines[2]}" = "Selected team: ijt" ]
+}

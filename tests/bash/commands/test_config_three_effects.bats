@@ -52,13 +52,16 @@ boot() {
   [ "$(jq -r '.effects.gitignore | has("status")' <<< "$output")" = "true" ]
 }
 
-@test "the prose summary names each of the three effects" {
+@test "the prose summary names each of the four effects" {
   boot
   run cmd_config config
   [ "$status" -eq 0 ]
   [[ "$output" == *"discovery"* ]]
   [[ "$output" == *"hooks"* ]]
   [[ "$output" == *"readme"* ]]
+  # T093 — the gitignore effect modifies a tracked file; the default output
+  # must say so, not only the --json summary.
+  [[ "$output" == *"  gitignore: "* ]]
 }
 
 @test "the PowerShell port reports the same three effects (NFR-1)" {

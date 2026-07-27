@@ -131,3 +131,34 @@ parity() {
   both_ports us3-gitignore-effect.json
   parity
 }
+
+@test "no plan context: FR-016 fallback, exit 0, zero Jira calls (T085)" {
+  bash "${HARNESS}" "${CONF}/scenarios/us3-feature-no-plan-context.json" bash "${TMP}/out-bash" > /dev/null
+  [ "$(cat "${TMP}/out-bash/exit")" = "0" ]
+  [ "$(jq -r '.active' "${TMP}/out-bash/stdout")" = "false" ]
+  [ "$(jq -r '.warnings | length' "${TMP}/out-bash/stdout")" -eq 1 ]
+  [ "$(grep -c '^WARNING:' "${TMP}/out-bash/stderr")" -eq 1 ]
+  [ ! -s "${TMP}/out-bash/calls.log" ]
+}
+
+@test "no plan context is byte-identical across ports (T085, FR-020)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  both_ports us3-feature-no-plan-context.json
+  parity
+}
+
+@test "prose dry-run: feature-shaped prose, no run-summary nulls (T087)" {
+  bash "${HARNESS}" "${CONF}/scenarios/us3-feature-prose-dry-run.json" bash "${TMP}/out-bash" > /dev/null
+  [ "$(cat "${TMP}/out-bash/exit")" = "0" ]
+  run cat "${TMP}/out-bash/stdout"
+  [[ "$output" == *"Feature: active (team: ijt)"* ]]
+  [[ "$output" == *"Folder: ijt-invoice-export"* ]]
+  [[ "$output" != *"Command: null"* ]]
+  [[ "$output" != *"Exit: null"* ]]
+}
+
+@test "prose dry-run is byte-identical across ports (T087, FR-020)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  both_ports us3-feature-prose-dry-run.json
+  parity
+}

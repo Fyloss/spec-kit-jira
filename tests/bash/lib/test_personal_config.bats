@@ -102,3 +102,16 @@ teardown() {
   ")"
   [ "$bash_out" = "$ps_out" ]
 }
+
+@test "the 1-arg form defaults to an empty catalogue with clean stderr (T085)" {
+  # The documented [merged-config-json] argument is optional: the default must
+  # be valid JSON ({}), not the literal bytes \{} that make every jq read spray
+  # parse errors onto the caller's stderr before the located message.
+  printf 'team: ijt\n' > "${DIR}/personal.yml"
+  run config_personal_load "${DIR}"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"unknown team"* ]]
+  [[ "$output" == *"(none)"* ]]
+  [[ "$output" != *"Invalid numeric literal"* ]]
+  [[ "$output" != *"jq: error"* ]]
+}

@@ -60,3 +60,28 @@ setup() {
   ")"
   [ "$bash_out" = "$ps_out" ]
 }
+
+@test "a template catch-all rule (folder_prefix: '') does not shadow the team route (T090)" {
+  # The shipped config.yml.template carries a placeholder rule whose
+  # folder_prefix is the empty string; startswith("") is always true, which
+  # made the implicit team route unreachable in every template-derived repo.
+  # An empty-string condition counts as undeclared.
+  local cfg
+  cfg="$(jq -c '.routing = [{"match": {"folder_prefix": ""}, "project": "COMP"}]' <<< "${CFG_TEAMS}")"
+  run routing_resolve "004-wex-onboarding" '[]' "${cfg}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "WEX" ]
+  # A non-team folder still lands on routing_default, not on the inert rule.
+  run routing_resolve "005-plain-feature" '[]' "${cfg}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "COMP" ]
+}
+
+@test "a teams entry without folder_prefix cannot abort routing (T090)" {
+  # startswith(null) is a jq type error that wiped out the whole resolution —
+  # including an explicit rule that had already matched.
+  local cfg='{"routing":[{"match":{"folder_prefix":"001-"},"project":"AAA"}],"routing_default":"DEF","teams":[{"id":"t","project":"TTT"}]}'
+  run routing_resolve "001-alpha" '[]' "${cfg}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "AAA" ]
+}

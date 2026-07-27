@@ -98,7 +98,7 @@ teardown() {
   register_hooks_write "${EXT}" > /dev/null
   local h
   h="$(register_hooks_health "${EXT}")"
-  [ "$(jq -r '.present | length' <<< "$h")" -eq 6 ]
+  [ "$(jq -r '.present | length' <<< "$h")" -eq 7 ]
   [ "$(jq -r '.missing | length' <<< "$h")" -eq 0 ]
   [ "$(jq -r '.disabled | length' <<< "$h")" -eq 0 ]
   [ "$(jq -r 'has("repair_hint")' <<< "$h")" = "false" ]
@@ -108,7 +108,7 @@ teardown() {
   printf '%s' "$trimmed" | config_to_yaml > "${EXT}"
   h="$(register_hooks_health "${EXT}")"
   [ "$(jq -r '.missing[0]' <<< "$h")" = "after_analyze" ]
-  [ "$(jq -r '.present | length' <<< "$h")" -eq 5 ]
+  [ "$(jq -r '.present | length' <<< "$h")" -eq 6 ]
   [[ "$(jq -r '.repair_hint' <<< "$h")" == *"repair-hooks"* ]]
 }
 
@@ -120,15 +120,41 @@ teardown() {
   local h
   h="$(register_hooks_health "${EXT}")"
   [ "$(jq -r '.disabled[0]' <<< "$h")" = "after_implement" ]
-  [ "$(jq -r '.present | length' <<< "$h")" -eq 5 ]
+  [ "$(jq -r '.present | length' <<< "$h")" -eq 6 ]
   [ "$(jq -r '.missing | length' <<< "$h")" -eq 0 ]
 }
 
 @test "health on an absent file reports every hook missing" {
   local h
   h="$(register_hooks_health "${WORK}/nope.yml")"
-  [ "$(jq -r '.missing | length' <<< "$h")" -eq 6 ]
+  [ "$(jq -r '.missing | length' <<< "$h")" -eq 7 ]
   [ "$(jq -r '.present | length' <<< "$h")" -eq 0 ]
+}
+
+@test "health reports a deleted before_specify feature hook as missing (T094)" {
+  # Deleting the feature hook used to be invisible: health iterated only the
+  # six after_* events, so the very next config run silently re-added the
+  # entry the operator removed while reporting "healthy".
+  register_hooks_write "${EXT}" > /dev/null
+  local trimmed
+  trimmed="$(config_yaml_to_json "${EXT}" | jq -c 'del(.hooks.before_specify)')"
+  printf '%s' "$trimmed" | config_to_yaml > "${EXT}"
+  local h
+  h="$(register_hooks_health "${EXT}")"
+  [ "$(jq -r '.missing | index("before_specify") != null' <<< "$h")" = "true" ]
+  [ "$(jq -r '.present | length' <<< "$h")" -eq 6 ]
+  [[ "$(jq -r '.repair_hint' <<< "$h")" == *"repair-hooks"* ]]
+}
+
+@test "health lists a disabled feature hook under disabled (T094, FR-048)" {
+  register_hooks_write "${EXT}" > /dev/null
+  local disabled
+  disabled="$(config_yaml_to_json "${EXT}" | jq -c '.hooks.before_specify = (.hooks.before_specify | map(if .command == "speckit.jira.feature" then .enabled = false else . end))')"
+  printf '%s' "$disabled" | config_to_yaml > "${EXT}"
+  local h
+  h="$(register_hooks_health "${EXT}")"
+  [ "$(jq -r '.disabled | index("before_specify") != null' <<< "$h")" = "true" ]
+  [ "$(jq -r '.missing | length' <<< "$h")" -eq 0 ]
 }
 
 @test "the PowerShell port registers a byte-identical extensions.yml (NFR-1)" {
