@@ -43,7 +43,7 @@ teardown() {
   [ "$status" -eq 0 ]
   # No extensions.yml yet: all six lifecycle events are missing, none present,
   # and the one-command repair hint is surfaced (run-summary.schema.json).
-  [ "$(jq -r '.hook_health.missing | length' <<< "$output")" -eq 6 ]
+  [ "$(jq -r '.hook_health.missing | length' <<< "$output")" -eq 7 ]
   [ "$(jq -r '.hook_health.present | length' <<< "$output")" -eq 0 ]
   [ "$(jq -r '.hook_health.disabled | length' <<< "$output")" -eq 0 ]
   [[ "$(jq -r '.hook_health.repair_hint' <<< "$output")" == *"repair-hooks"* ]]
@@ -62,14 +62,14 @@ teardown() {
   # A dry-run repair previews only — the file is not written, health still degraded.
   [ "$status" -eq 0 ]
   [ ! -f "${SPEC_KIT_JIRA_EXTENSIONS_YML}" ]
-  [ "$(jq -r '.hook_health.missing | length' <<< "$output")" -eq 6 ]
+  [ "$(jq -r '.hook_health.missing | length' <<< "$output")" -eq 7 ]
 
   # A real --repair-hooks run writes the file and the same run reports healthy. The
   # mirror write itself fails-closed against the unreachable base, but the repair is
   # independent of the mirror's result, so the hooks are registered regardless.
   run cmd_reconcile reconcile --repair-hooks --json "${SPEC}"
   [ -f "${SPEC_KIT_JIRA_EXTENSIONS_YML}" ]
-  [ "$(jq -r '.hook_health.present | length' <<< "$(grep '^{' <<< "$output")")" -eq 6 ]
+  [ "$(jq -r '.hook_health.present | length' <<< "$(grep '^{' <<< "$output")")" -eq 7 ]
   [ "$(jq -r '.hook_health | has("repair_hint")' <<< "$(grep '^{' <<< "$output")")" = "false" ]
 }
 

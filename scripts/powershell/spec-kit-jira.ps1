@@ -37,7 +37,7 @@ $CommandsDir = if ($env:SPEC_KIT_JIRA_COMMANDS_DIR) {
 # Usage block emitted with explicit LF so both ports produce byte-identical bytes
 # regardless of host line-ending conventions (NFR-1).
 $UsageLines = @(
-    'usage: spec-kit-jira <config|reconcile|mention> [options]'
+    'usage: spec-kit-jira <config|reconcile|mention|feature> [options]'
     '  --dry-run                 predict actions without writing'
     '  --json                    machine-readable run summary'
     '  --on-drift=abort|proceed  drift handling (default: abort)'
@@ -76,7 +76,7 @@ if ($state['help'] -eq 'true') {
 
 $command = $state['command']
 if ([string]::IsNullOrEmpty($command)) {
-    [Console]::Error.WriteLine('spec-kit-jira: a command is required (config|reconcile|mention)')
+    [Console]::Error.WriteLine('spec-kit-jira: a command is required (config|reconcile|mention|feature)')
     [Console]::Error.Write($UsageText)
     exit (Get-JiraExitCode 'usage')
 }

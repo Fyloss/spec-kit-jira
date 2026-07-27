@@ -42,22 +42,26 @@ boot() {
   boot
   run cmd_config config --json
   [ "$status" -eq 0 ]
-  # All three effects are present as distinct, named sections.
-  [ "$(jq -r '.effects | keys | sort | join(",")' <<< "$output")" = "discovery,hooks,readme" ]
+  # All effects are present as distinct, named sections (002 adds gitignore).
+  [ "$(jq -r '.effects | keys | sort | join(",")' <<< "$output")" = "discovery,gitignore,hooks,readme" ]
   # The discovery effect performed its write this phase.
   [ "$(jq -r '.effects.discovery.status' <<< "$output")" = "written" ]
   # Every effect carries a status from the documented enumeration.
   [ "$(jq -r '.effects.hooks | has("status")' <<< "$output")" = "true" ]
   [ "$(jq -r '.effects.readme | has("status")' <<< "$output")" = "true" ]
+  [ "$(jq -r '.effects.gitignore | has("status")' <<< "$output")" = "true" ]
 }
 
-@test "the prose summary names each of the three effects" {
+@test "the prose summary names each of the four effects" {
   boot
   run cmd_config config
   [ "$status" -eq 0 ]
   [[ "$output" == *"discovery"* ]]
   [[ "$output" == *"hooks"* ]]
   [[ "$output" == *"readme"* ]]
+  # T093 — the gitignore effect modifies a tracked file; the default output
+  # must say so, not only the --json summary.
+  [[ "$output" == *"  gitignore: "* ]]
 }
 
 @test "the PowerShell port reports the same three effects (NFR-1)" {

@@ -14,7 +14,7 @@ schema_version: "1.0"
 extension:
   id: jira
   name: Jira Reconcile Engine
-  version: 0.1.0
+  version: 0.2.0
   description: >-
     Mirrors a repository's Spec Kit artifacts (spec.md, plan.md, tasks.md) into
     Jira Cloud as a self-healing, idempotent, fail-closed bridge. Twin native
@@ -37,6 +37,12 @@ provides:
         Deterministic install ceremony — per-project metadata discovery,
         idempotent after_* hook registration, and the managed README block,
         reported as three separate effects.
+    - name: speckit.jira.feature
+      file: commands/speckit.jira.feature.md
+      description: >-
+        Ticket-first feature naming — resolve or create the Jira ticket, then
+        name the branch and flat spec folder by the developer's selected team
+        convention; non-blocking before_specify step.
 
 tags:
   - jira

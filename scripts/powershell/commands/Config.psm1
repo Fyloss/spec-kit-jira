@@ -19,6 +19,7 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../lib/Credentials.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../hooks/ReadmeBlock.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force
 
@@ -103,6 +104,164 @@ function Get-JiraResolvedIdMap {
     return (ConvertTo-JiraJsonValue ([ordered]@{ issue_types = $issue; priorities = $prio; statuses = $stat }))
 }
 
+function Invoke-JiraConfigDegraded {
+    <#
+    .SYNOPSIS
+      The degraded, report-only path (002 US2, FR-008/FR-009). Mirror of
+      _config_degraded_run: branch-scan proposals marked provisional, exactly
+      one warning naming the missing variables, re-run guidance, zero writes,
+      every effect skipped, exit 0.
+    #>
+    [CmdletBinding()]
+    param(
+        [bool] $Json = $false,
+        [bool] $DryRun = $false,
+        [Parameter(Mandatory)] [string] $Missing
+    )
+    $branches = @()
+    try { $branches = @(git for-each-ref refs/heads --format='%(refname:short)' 2> $null) }
+    catch { $branches = @() }
+    $prefixes = [System.Collections.Generic.List[string]]::new()
+    foreach ($b in $branches) {
+        if ([string]$b -cmatch '^([a-z0-9][a-z0-9-]*)-[0-9]+/') { $prefixes.Add($Matches[1]) }
+    }
+    $arr = [string[]]@($prefixes | Select-Object -Unique)
+    [System.Array]::Sort($arr, [System.StringComparer]::Ordinal)
+    $proposals = [System.Collections.Generic.List[object]]::new()
+    foreach ($p in $arr) { $proposals.Add([ordered]@{ team_prefix = $p; provisional = $true }) }
+
+    [Console]::Error.WriteLine("WARNING: degraded mode — Jira introspection is unavailable (undefined: $Missing); team-name proposals are provisional and nothing was written")
+    $rerun = "define $Missing, then re-run: spec-kit-jira config"
+
+    $detail = 'degraded mode: Jira connection parameters undefined'
+    $summaryObj = [ordered]@{
+        schema_version = '1.0'
+        command        = 'config'
+        dry_run        = [bool]$DryRun
+        counts         = [ordered]@{ created = 0; updated = 0; skipped = 0; warnings = 1; errors = 0 }
+        effects        = [ordered]@{
+            discovery = [ordered]@{ status = 'skipped'; detail = $detail }
+            hooks     = [ordered]@{ status = 'skipped'; detail = $detail }
+            readme    = [ordered]@{ status = 'skipped'; detail = $detail }
+            gitignore = [ordered]@{ status = 'skipped'; detail = $detail }
+        }
+        provisional    = $proposals
+        rerun_guidance = $rerun
+        exit_code      = 0
+    }
+    $summary = ConvertTo-JiraJsonValue $summaryObj
+    if ($Json) { [Console]::Out.Write($summary + "`n") }
+    else { [Console]::Out.Write((ConvertTo-JiraSummaryProse -Json $summary)) }
+    return 0
+}
+
+function Get-CmdParentPath {
+    # Mirror of bash dirname: the parent of a single-component relative path is
+    # '.', never the empty string — Split-Path -Parent '' throws downstream,
+    # before any IsNullOrEmpty guard can run.
+    param([string] $Path)
+    $parent = Split-Path -Parent $Path
+    if ([string]::IsNullOrEmpty($parent)) { return '.' }
+    return $parent
+}
+
+function Get-CmdProp {
+    # StrictMode-safe optional property read: $null when the property is absent.
+    param($Object, [string] $Name)
+    if ($null -eq $Object) { return $null }
+    if ($Object -is [System.Management.Automation.PSCustomObject]) {
+        $p = $Object.PSObject.Properties[$Name]
+        if ($p) { return $p.Value }
+    }
+    elseif ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) { return $Object[$Name] }
+    }
+    return $null
+}
+
+function Get-JiraStyleFlagFor {
+    # The operator's --style answer for one project (last occurrence wins), or
+    # '' when none was given. Mirror of _config_style_flag_for.
+    param([string] $ProjectKey, [string] $Styles)
+    $out = ''
+    foreach ($tok in ($Styles -split ' ')) {
+        if ($tok -clike "$ProjectKey=*") { $out = $tok.Substring($tok.IndexOf('=') + 1) }
+    }
+    return $out
+}
+
+function Resolve-JiraProjectStyle {
+    <#
+    .SYNOPSIS
+      Per-project style resolution (002 US1, FR-001/FR-002). Mirror of
+      _config_resolve_style: api signal (agreeing with any committed
+      declaration) -> "api"; the --style answer or, absent an API signal, the
+      committed declaration -> "operator"; otherwise exit 4 with the located
+      stderr. Returns { ExitCode; Style; Source }.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ProjectKey,
+        [string] $ApiStyle = '',
+        [string] $Committed = '',
+        [string] $Flag = ''
+    )
+    if ($ApiStyle -and (-not $Committed -or $Committed -eq $ApiStyle)) {
+        return [pscustomobject]@{ ExitCode = 0; Style = $ApiStyle; Source = 'api' }
+    }
+    if ($Flag) {
+        return [pscustomobject]@{ ExitCode = 0; Style = $Flag; Source = 'operator' }
+    }
+    if (-not $ApiStyle -and $Committed) {
+        return [pscustomobject]@{ ExitCode = 0; Style = $Committed; Source = 'operator' }
+    }
+    $reason = if ($ApiStyle) { 'the committed style conflicts with the API signal' }
+    else { 'no unambiguous style signal in the discovery payload' }
+    [Console]::Error.WriteLine("config: project ${ProjectKey}: style is ambiguous ($reason); pass --style $ProjectKey=company_managed or --style $ProjectKey=team_managed")
+    return [pscustomobject]@{ ExitCode = $script:ExitConfig; Style = ''; Source = '' }
+}
+
+function Set-JiraConfigGitignore {
+    <#
+    .SYNOPSIS
+      Enforce gitignore coverage of the gitignored config layer (002 US3,
+      FR-019): config.local.yml, .env, and personal.yml. Mirror of
+      _config_gitignore_effect. Only missing exact lines are appended,
+      idempotently; an absent file is created with the three lines. Returns the
+      effect status (created|written|unchanged); a dry-run computes the status
+      without touching the file.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $RepoRoot,
+        [bool] $DryRun = $false
+    )
+    $gi = if ($env:SPEC_KIT_JIRA_GITIGNORE) { $env:SPEC_KIT_JIRA_GITIGNORE } else { Join-Path $RepoRoot '.gitignore' }
+    $lines = @(
+        '.specify/jira/config.local.yml'
+        '.specify/jira/.env'
+        '.specify/jira/personal.yml'
+    )
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    if (-not (Test-Path -LiteralPath $gi)) {
+        if (-not $DryRun) {
+            [System.IO.File]::WriteAllText($gi, (($lines -join "`n") + "`n"), $utf8)
+        }
+        return 'created'
+    }
+    $content = [System.IO.File]::ReadAllText($gi)
+    $existing = $content -split "`r?`n"
+    $missing = @($lines | Where-Object { $existing -cnotcontains $_ })
+    if ($missing.Count -eq 0) { return 'unchanged' }
+    if (-not $DryRun) {
+        # Guarantee a trailing newline before appending the missing lines.
+        if ($content.Length -gt 0 -and -not $content.EndsWith("`n")) { $content += "`n" }
+        $content += (($missing -join "`n") + "`n")
+        [System.IO.File]::WriteAllText($gi, $content, $utf8)
+    }
+    return 'written'
+}
+
 function Invoke-JiraConfig {
     <#
     .SYNOPSIS
@@ -125,6 +284,7 @@ function Invoke-JiraConfig {
     }
     $json = $state['json'] -eq 'true'
     $dryRun = $state['dry_run'] -eq 'true'
+    $styles = if ($state.ContainsKey('styles')) { $state['styles'] } else { '' }
 
     $configdir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
 
@@ -132,6 +292,21 @@ function Invoke-JiraConfig {
     $cfg = Import-JiraConfig -ConfigDir $configdir
     if ($cfg.ExitCode -ne 0) { return [int] $cfg.ExitCode }
     $cfgObj = $cfg.Json | ConvertFrom-Json -Depth 100
+
+    # Degraded-mode trigger (002 US2, FR-008) — tested BEFORE any Jira call and
+    # ONLY on ABSENT connection parameters (research §4).
+    $missing = [System.Collections.Generic.List[string]]::new()
+    if (-not $env:SPEC_KIT_JIRA_BASE_URL) { $missing.Add('SPEC_KIT_JIRA_BASE_URL') }
+    if (-not (Resolve-JiraToken)) { $missing.Add('JIRA_API_TOKEN') }
+    if ($missing.Count -gt 0) {
+        return [int](Invoke-JiraConfigDegraded -Json $json -DryRun $dryRun -Missing ($missing -join ', '))
+    }
+
+    # Project-key sourcing (002 US2, FR-004/FR-005): positional argument ->
+    # committed non-placeholder keys -> the closed question over the discovered
+    # accessible-projects list (unattended: exit 4). Git state plays no role.
+    $argsLine = if ($state.ContainsKey('args')) { $state['args'] } else { '' }
+    $argKey = ($argsLine -split ' ')[0]
 
     # Read the machine-owned local layer up front: its prior resolved-id table seeds
     # this run so re-running only (re)binds the currently configured projects while
@@ -158,12 +333,57 @@ function Invoke-JiraConfig {
     $nproj = 0
     $projects = @()
     if ($cfgObj.PSObject.Properties.Name -contains 'projects') { $projects = @($cfgObj.projects) }
-    foreach ($p in $projects) {
-        $pkey = [string]$p.key
-        if ([string]::IsNullOrEmpty($pkey)) { continue }
+
+    # Effective key list: argument, or the committed non-placeholder keys.
+    $keys = [System.Collections.Generic.List[string]]::new()
+    if ($argKey) {
+        $keys.Add($argKey)
+    }
+    else {
+        foreach ($p in $projects) {
+            $ckey = [string](Get-CmdProp $p 'key')
+            if ([string]::IsNullOrEmpty($ckey)) { continue }
+            if (Test-JiraPlaceholderKey -Key $ckey) { continue }
+            $keys.Add($ckey)
+        }
+    }
+    if ($keys.Count -eq 0) {
+        $lr = Get-JiraDiscoveryProjectList
+        if ($lr.ExitCode -ne 0) { return [int] $lr.ExitCode }
+        $placeholder = Get-JiraPlaceholderKey
+        [Console]::Error.WriteLine("config: no usable project key — config.yml holds no bound key (the $placeholder placeholder counts as unset) and no key argument was given")
+        [Console]::Error.WriteLine('config: accessible projects (closed question — choose one and re-run: spec-kit-jira config <KEY>):')
+        foreach ($entry in @($lr.List | ConvertFrom-Json -Depth 100)) {
+            $styleText = if ($null -eq $entry.style) { 'style unknown' } else { [string]$entry.style }
+            [Console]::Error.WriteLine("config:   $($entry.key) — $($entry.name) ($styleText)")
+        }
+        return $script:ExitConfig
+    }
+
+    $projStyles = [ordered]@{}
+    foreach ($pkey in $keys) {
+        $p = $null
+        foreach ($cand in $projects) {
+            if ([string](Get-CmdProp $cand 'key') -ceq $pkey) { $p = $cand; break }
+        }
         $r = Get-JiraDiscoveryBindingResult -ProjectKey $pkey
         if ($r.ExitCode -ne 0) { return [int] $r.ExitCode }
-        $resolved[$pkey] = ((Get-JiraResolvedIdMap -BindingJson $r.Binding) | ConvertFrom-Json -Depth 100)
+        # Style resolution (002 US1): api signal -> operator answer/declaration
+        # -> fail closed. An ambiguous project refuses BEFORE any write.
+        $bindingObj = $r.Binding | ConvertFrom-Json -Depth 100
+        $apiStyle = [string](Get-CmdProp $bindingObj 'style')
+        $committed = [string](Get-CmdProp $p 'style')
+        $flag = Get-JiraStyleFlagFor -ProjectKey $pkey -Styles $styles
+        $sr = Resolve-JiraProjectStyle -ProjectKey $pkey -ApiStyle $apiStyle -Committed $committed -Flag $flag
+        if ($sr.ExitCode -ne 0) { return [int] $sr.ExitCode }
+        $rids = [ordered]@{}
+        foreach ($prop in ((Get-JiraResolvedIdMap -BindingJson $r.Binding) | ConvertFrom-Json -Depth 100).PSObject.Properties) {
+            $rids[$prop.Name] = $prop.Value
+        }
+        $rids['style'] = $sr.Style
+        $rids['style_source'] = $sr.Source
+        $resolved[$pkey] = $rids
+        $projStyles[$pkey] = [ordered]@{ style = $sr.Style; style_source = $sr.Source }
         $nproj++
     }
 
@@ -188,11 +408,44 @@ function Invoke-JiraConfig {
         [System.IO.File]::WriteAllText($localf, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
     }
 
+    # Connected-run mismatch surfacing (002 US2, FR-009): when the committed config
+    # declares a `teams:` catalogue, check each declared team's project against the
+    # accessible-projects list and warn (never block) for any team whose project is
+    # not visible. Without a catalogue no extra read is performed.
+    $runWarnings = 0
+    $teams = @((Get-CmdProp $cfgObj 'teams') | Where-Object { $null -ne $_ })
+    if ($teams.Count -gt 0) {
+        # The Bash twin silences this read's stderr (2>/dev/null): a failed list
+        # skips the check without extra output.
+        $errSink = [System.IO.StringWriter]::new()
+        $origErr = [Console]::Error
+        [Console]::SetError($errSink)
+        try { $accessible = Get-JiraDiscoveryProjectList }
+        finally { [Console]::SetError($origErr) }
+        if ($accessible.ExitCode -eq 0) {
+            $accessibleKeys = @(($accessible.List | ConvertFrom-Json -Depth 100) | ForEach-Object { [string]$_.key })
+            foreach ($t in $teams) {
+                $tid = [string](Get-CmdProp $t 'id')
+                if ([string]::IsNullOrEmpty($tid)) { continue }
+                $tproj = [string](Get-CmdProp $t 'project')
+                if ($accessibleKeys -cnotcontains $tproj) {
+                    Write-JiraWarning "team '$tid': project $tproj matches no accessible Jira project — a provisional, branch-derived value may have been accepted into the catalogue; verify or fix config.yml"
+                    $runWarnings++
+                }
+            }
+        }
+    }
+
+    # Gitignore effect (002 US3, FR-019): ensure the repository .gitignore covers the
+    # gitignored config layer (config.local.yml, .env, personal.yml). Repo root is
+    # the parent of the .specify directory (overridable via SPEC_KIT_JIRA_GITIGNORE).
+    $gitignoreRoot = Get-CmdParentPath (Get-CmdParentPath $configdir)
+    $gitignoreStatus = Set-JiraConfigGitignore -RepoRoot $gitignoreRoot -DryRun ([bool]$dryRun)
+
     # README effect (US5, T065): splice the version-marked managed block into the
     # consuming repository's README. The path derives from the config dir's repo
     # root (the parent of .specify), overridable via SPEC_KIT_JIRA_README.
-    $repoRoot = Split-Path -Parent (Split-Path -Parent $configdir)
-    if ([string]::IsNullOrEmpty($repoRoot)) { $repoRoot = '.' }
+    $repoRoot = Get-CmdParentPath (Get-CmdParentPath $configdir)
     $readmePath = if ($env:SPEC_KIT_JIRA_README) { $env:SPEC_KIT_JIRA_README } else { Join-Path $repoRoot 'README.md' }
     $readmeResult = Set-JiraReadmeBlock -Path $readmePath -DryRun ([bool]$dryRun)
     $readmeStatus = $readmeResult.Status
@@ -208,7 +461,7 @@ function Invoke-JiraConfig {
     # .specify/extensions.yml (FR-054) — the same self-healing write reachable from a
     # run via reconcile --repair-hooks. The path derives from the config dir's parent
     # (.specify), overridable via SPEC_KIT_JIRA_EXTENSIONS_YML.
-    $extPath = if ($env:SPEC_KIT_JIRA_EXTENSIONS_YML) { $env:SPEC_KIT_JIRA_EXTENSIONS_YML } else { Join-Path (Split-Path -Parent $configdir) 'extensions.yml' }
+    $extPath = if ($env:SPEC_KIT_JIRA_EXTENSIONS_YML) { $env:SPEC_KIT_JIRA_EXTENSIONS_YML } else { Join-Path (Get-CmdParentPath $configdir) 'extensions.yml' }
     $hooksResult = Set-JiraHookRegistration -Path $extPath -DryRun ([bool]$dryRun)
     $hooksStatus = $hooksResult.Status
     $hooksDetail = switch ($hooksStatus) {
@@ -222,15 +475,16 @@ function Invoke-JiraConfig {
     # Build the three-effect summary (FR-054), byte-identical to the Bash port:
     # discovery, hooks, and README each reported as a distinct section.
     $effects = [ordered]@{
-        discovery = [ordered]@{ status = $discStatus; detail = "$nproj project(s) discovered" }
+        discovery = [ordered]@{ status = $discStatus; detail = "$nproj project(s) discovered"; projects = $projStyles }
         hooks     = [ordered]@{ status = $hooksStatus; detail = $hooksDetail }
         readme    = [ordered]@{ status = $readmeStatus; detail = $readmeDetail }
+        gitignore = [ordered]@{ status = $gitignoreStatus; detail = 'personal.yml gitignore coverage' }
     }
     $summaryObj = [ordered]@{
         schema_version = '1.0'
         command        = 'config'
         dry_run        = [bool]$dryRun
-        counts         = [ordered]@{ created = 0; updated = 0; skipped = 0; warnings = 0; errors = 0 }
+        counts         = [ordered]@{ created = 0; updated = 0; skipped = 0; warnings = $runWarnings; errors = 0 }
         effects        = $effects
         exit_code      = 0
     }

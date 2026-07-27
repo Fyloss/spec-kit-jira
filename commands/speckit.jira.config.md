@@ -24,6 +24,19 @@ The heavy lifting is performed by the deterministic entry point
 follows to drive it. **Never invent a project key, an issue-type name, a status,
 a field id, or a strategy** — each comes from an API read or a closed question.
 
+## Git state is never a source (FR-004/FR-007) — normative
+
+Normative rule: in a connected run the project key and the project style are NEVER inferred from git state
+(branch names, branch prefixes, folder names, remote names).
+You MUST NOT read, suggest, or use any of them as a source for the project key
+or style, no matter what the checked-out branch looks like. Every
+branch-derived output belongs to the degraded mode only and is provisional
+(see below); it MUST NOT be treated as authoritative or written anywhere.
+
+The interactive closed questions this ceremony may ask are exactly: the project
+style (two values), the project key (over the discovered list), and the
+pre-existing template enumerations of step 1 — nothing else.
+
 ## Preconditions (fail before touching Jira)
 
 1. **Prerequisite gate** — the entry point checks `bash ≥ 4` (macOS ships 3.2 —
@@ -32,22 +45,44 @@ a field id, or a strategy** — each comes from an API read or a closed question
 2. **Credentials** — resolve the token via env → OS secret manager → gitignored
    `.specify/jira/.env` (NFR-3). The token NEVER appears in argv, logs, or errors.
 
+## Degraded mode (FR-008/FR-009)
+
+When `SPEC_KIT_JIRA_BASE_URL` is undefined or the token resolves through none of
+the three rungs, the entry point enters degraded mode **before any Jira call**:
+it exits `0`, prints exactly one warning naming the missing variables, proposes
+team names scanned from existing branch prefixes with every proposal marked
+`provisional: true`, and writes **nothing** — the authoritative resolved-id
+binding is untouched. Relay the warning and the `rerun_guidance` verbatim and
+invite the operator to define the variables and re-run; a later connected run
+performs authoritative discovery and surfaces any mismatch with the provisional
+proposals. Defined-but-wrong credentials fail with the auth/network exit codes
+and never trigger the degraded mode — do not retry into it.
+
 ## Algorithm (ordered, each step is read / config-read / closed question)
 
 1. **Config read** — read `.specify/jira/config.yml`. If absent, create it from
    `.specify/extensions/jira/templates/config.yml.template` and ask the operator
    the closed questions it documents (each key is an enumeration):
-   - `style`: **{ company_managed | team_managed }** — *detected* by an API read
-     at step 3; only confirmed here.
    - `epic_strategy`: **{ per_repo | per_feature }**.
    - `task_strategy`: **{ subtask | linked_story }**; if `linked_story`, ask
-     `link_type` from the **discovered** link-type list (step 3) — never invented.
+     `link_type` from the **discovered** link-type list (step 4) — never invented.
    - `priority_map`: for each of **P1 / P2 / P3**, pick a priority **from the
-     discovered priority list** (step 3).
-2. **Config read** — for each project, resolve its routing (`routing[]` /
+     discovered priority list** (step 4).
+   - `style` is **not** pre-filled: it is detected at step 4 or answered via the
+     closed question below.
+2. **Closed question (project key)** (FR-004/FR-005) — the bound key comes
+   exclusively from: (a) the command argument, (b) the committed
+   `projects[].key` where the literal `PROJ` placeholder counts as **unset**, or
+   (c) this closed question. When no usable key exists the entry point exits `4`
+   and its error lists the accessible projects discovered via the paginated
+   `GET /project/search` read (key, name, style). Ask the operator to choose
+   **from that list only**, persist the choice into `config.yml`, and re-invoke
+   `spec-kit-jira config <KEY>`. An unknown or unresolvable key fails closed
+   with the transport's exit code — never substitute another key (FR-006).
+3. **Config read** — for each project, resolve its routing (`routing[]` /
    `routing_default`). A credential-shaped value in either YAML layer is refused
    with exit `4` (FR-023); the offending value is never echoed.
-3. **API reads (discovery, US2)** — for each configured project the entry point
+4. **API reads (discovery, US2)** — for each configured project the entry point
    runs the fixed, style-first read sequence (research §1–§3), **in this order**:
    1. `GET /project/{key}` → detect **style** (this is the first Jira call).
    2. `GET /issue/createmeta/{key}/issuetypes` → issue types + hierarchy levels.
@@ -57,48 +92,63 @@ a field id, or a strategy** — each comes from an API read or a closed question
    4. `GET /project/{key}/statuses` → statuses + `statusCategory`.
    5. `GET /priority` → priorities.
    6. `GET /field` → the logical-name → id catalogue.
-4. **Closed question (estimation field)** — the entry point *ranks* the project's
+5. **Closed question (project style)** (FR-001/FR-002) — the style is resolved
+   per project, in order:
+   1. an unambiguous API signal is persisted with `style_source: "api"`;
+   2. when the payload is ambiguous (absent or contradictory signals, or a
+      committed declaration conflicting with the API signal) the entry point
+      exits `4` naming the project and the missing signal. Ask the operator the
+      closed two-value question and re-invoke with the answer:
+      `--style <KEY>=company_managed` or `--style <KEY>=team_managed` —
+      persisted with `style_source: "operator"`. Never pick a default yourself.
+   The run summary audits `style` + `style_source` per project (FR-003).
+6. **Closed question (estimation field)** — the entry point *ranks* the project's
    numeric fields and **proposes** the top candidate; the operator **confirms or
    picks another from the ranked list**. It is never silently assumed, and never
    the global Story Points field (research §3).
-5. **Closed question (status classification)** — each discovered status is seeded
+7. **Closed question (status classification)** — each discovered status is seeded
    objectively from its `statusCategory` (done → `post-scope`, else `unknown`) and
    the operator maps phases → statuses from the **discovered** status list. There
    is **no built-in "ideal" status/phase table** — the operator's workflow is
    authoritative (FR-012).
-6. **Capability check (mapping validity, FR-007)** — a team-managed project
-   supports only an Epic parent and Sub-task children. A configured level **above
-   the discovered Epic tier** is refused at config time with exit `4`, naming the
-   offending level and the project style. The Epic tier is the top non-subtask
-   hierarchy level **from the binding**, never a compiled-in name.
-7. **Persist (deterministic write)** — the resolved-id table (logical name → id
-   for issue types, priorities, statuses) is written into the machine-owned
-   `.specify/jira/config.local.yml` via the canonical serialiser, preserving the
-   operator's `site_alias` / `overrides`. `config.yml` is **not** rewritten.
+8. **Capability check (mapping validity, FR-007 of 001)** — a team-managed
+   project supports only an Epic parent and Sub-task children. A configured level
+   **above the discovered Epic tier** is refused at config time with exit `4`,
+   naming the offending level and the project style. The Epic tier is the top
+   non-subtask hierarchy level **from the binding**, never a compiled-in name.
+9. **Persist (deterministic write)** — the resolved-id table (logical name → id
+   for issue types, priorities, statuses, plus `style`/`style_source`) is written
+   into the machine-owned `.specify/jira/config.local.yml` via the canonical
+   serialiser, preserving the operator's `site_alias` / `overrides`.
+   `config.yml` is **not** rewritten.
 
-## The three effects (reported separately — FR-054)
+## The effects (reported separately — FR-054)
 
-A single run has three effects and the summary reports each **separately**:
+A single run's effects are each reported **separately** in the summary:
 
-- **discovery** — the resolved-id table written to `config.local.yml` (above).
-- **hooks** — idempotent `after_*` lifecycle-hook registration (US9).
+- **discovery** — the resolved-id table written to `config.local.yml` (above),
+  including the per-project style audit.
+- **hooks** — idempotent lifecycle-hook registration (US9).
 - **readme** — the version-marked managed README block (US5).
-
-> **Increment note**: in the current increment only the **discovery** effect
-> performs its write; the **hooks** and **readme** effects appear as distinct
-> summary sections and are wired in later increments (US9 hook registration, US5
-> README block). The summary structure is stable across increments.
+- **gitignore** — idempotent `.gitignore` coverage of the gitignored config
+  layer (`config.local.yml`, `.env`, `personal.yml` — FR-019).
 
 ## Flags
 
+- `<PROJECT_KEY>` — optional positional: the key to (re)bind (validated by the
+  first discovery read; fail-closed on an unknown key).
+- `--style <KEY>=<company_managed|team_managed>` — repeatable; the operator's
+  answer to the closed style question.
 - `--json` — emit the machine-readable run summary (`run-summary.schema.json`).
 - `--dry-run` — compute everything and report, but write nothing.
-- `--repair-hooks` — one-command repair of missing `after_*` hooks (US9).
+- `--repair-hooks` — one-command repair of missing lifecycle hooks (US9).
 - `--verbose` — extra diagnostics (the token never appears, even here).
 - `--help` — usage; exits `0`.
 
 ## Exit codes
 
-`0` success · `1` usage · `2` fail-closed read · `3` auth · `4` config/capability
-refusal · `5` prerequisite failure · `9` privacy BLOCK. Monotonically escalating
+`0` success (including a degraded report-only run) · `1` usage (bad `--style`
+value) · `2` fail-closed read (unknown key, network) · `3` auth · `4`
+config/capability refusal (ambiguous style unattended; no usable key unattended)
+· `5` prerequisite failure · `9` privacy BLOCK. Monotonically escalating
 (Constitution III); identical on both ports.

@@ -7,13 +7,15 @@ dist/
 *.test
 *.prof
 
-# Test/coverage output (kcov, Pester)
-coverage/
+# Test/coverage output (kcov, Pester) — anchored to the repo root so the
+# tests/coverage/ runner itself stays tracked
+/coverage/
 coverage.xml
 testResults.xml
 
 # spec-kit-jira: gitignored personal config, secrets, resolved bindings
 .specify/jira/config.local.yml
+.specify/jira/personal.yml
 .specify/jira/.env
 
 # OS

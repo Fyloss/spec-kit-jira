@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-kit-jira/contracts/personal-config.schema.json",
+  "title": "Personal Team Selection (.specify/jira/personal.yml)",
+  "description": "Human-owned, gitignored, per-clone, OPTIONAL file: never written by any script, never required for any workflow (FR-011). The `team` value MUST match a catalogue team id; an unknown value produces a located error naming this file and listing the valid ids. `override` passes exactly the catalogue-entry validation and its use is reported in every feature-creation output (FR-012). Credential-shaped values in any string are refused without echoing (FR-018). Gitignore coverage of this path is enforced by the config ceremony's gitignore effect (FR-019). Presented as JSON Schema; the on-disk file is YAML.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["team"],
+  "properties": {
+    "team": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*$",
+      "description": "The developer's selected catalogue team id."
+    },
+    "override": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Exceptional, auditable convention override (FR-012). Same validation rules as teams-catalogue.schema.json fields.",
+      "properties": {
+        "folder_prefix": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*-$"
+        },
+        "branch_pattern": {
+          "type": "string",
+          "pattern": "^(?=(?:(?!<ID>).)*<ID>(?:(?!<ID>).)*$)(?=(?:(?!<FEATURE_NAME>).)*<FEATURE_NAME>(?:(?!<FEATURE_NAME>).)*$)(?:[a-z0-9/_-]|<ID>|<FEATURE_NAME>)+$"
+        }
+      }
+    }
+  }
+}

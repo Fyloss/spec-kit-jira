@@ -25,6 +25,16 @@ _JIRA_LIB_CONFIG=1
 : "${EXIT_CONFIG:=4}"
 : "${JIRA_CONFIG_DIR:=.specify/jira}"
 
+# The template's literal placeholder project key (templates/config.yml.template):
+# a configured key equal to it is treated as UNSET (002 US2, FR-005). The
+# constant lives here, beside the template's config consumer.
+: "${JIRA_CONFIG_PLACEHOLDER_KEY:=PROJ}"
+
+# config_key_is_placeholder <key> — the FR-005 placeholder rule.
+config_key_is_placeholder() {
+  [[ "$1" == "${JIRA_CONFIG_PLACEHOLDER_KEY}" ]]
+}
+
 _CONFIG_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${_CONFIG_LIB_DIR}/output.sh"   # json_canonical (byte-parity serialiser)
@@ -139,9 +149,11 @@ _cfg_prep() {
 
 # _cfg_is_map_entry <content> — true when the line opens a `key:` mapping entry
 # (as opposed to a bare scalar such as a URL). The key charset is intentionally
-# narrow; `key:` and `key: value` match, `https://x` does not.
+# narrow; `key:` and `key: value` match, `https://x` does not. The apostrophe is
+# included because discovered status names ("Won't Do") are legal map keys.
 _cfg_is_map_entry() {
-  [[ "$1" =~ ^[A-Za-z0-9_.\ -]+:([[:space:]].*)?$ ]]
+  local re="^[A-Za-z0-9_.' -]+:([[:space:]].*)?$"
+  [[ "$1" =~ ${re} ]]
 }
 
 # _cfg_scalar_json <raw> — encode a YAML scalar as a JSON value.
@@ -379,16 +391,36 @@ config_phase_status_targets() {
 # kcov-excl-start — jq literal (string lines are not statements)
 _CFG_TEAM_ERRORS_JQ='
 def projkey: test("^[A-Z][A-Z0-9_]+$");
+def branchpattern:
+  (type == "string")
+  and (([match("<ID>"; "g")] | length) == 1)
+  and (([match("<FEATURE_NAME>"; "g")] | length) == 1)
+  and ((gsub("<ID>"; "") | gsub("<FEATURE_NAME>"; "")) | test("^[a-z0-9/_-]*$"));
 [
   (if (.projects|type) != "array" or (.projects|length) < 1
    then "projects must be a non-empty array" else empty end),
   (if (.routing_default|type) != "string" or ((.routing_default|projkey) != true)
    then "routing_default must be a valid project key" else empty end),
-  (keys_unsorted[] | select(IN("version_compat","projects","routing","routing_default","privacy")|not)
+  (keys_unsorted[] | select(IN("version_compat","projects","routing","routing_default","privacy","teams")|not)
    | "unknown top-level key: \(.)"),
+  ((.teams // []) | to_entries[] | .key as $i | .value as $t |
+    ( [ (if (($t.id // "") | test("^[a-z][a-z0-9]*$") | not)
+         then "teams[\($i)].id is invalid" else empty end),
+        (if (($t.project // "") | projkey | not)
+         then "teams[\($i)].project is not a valid project key" else empty end),
+        (if (($t.folder_prefix // "") | test("^[a-z0-9][a-z0-9-]*-$") | not)
+         then "teams[\($i)].folder_prefix is invalid" else empty end),
+        (if (($t.branch_pattern // "") | branchpattern | not)
+         then "teams[\($i)].branch_pattern is invalid" else empty end)
+      ][] )),
+  ((.teams // []) as $ts | (range(1; ($ts | length)) as $i |
+    ( (if ([$ts[0:$i][].id] | index($ts[$i].id)) != null
+       then "teams[\($i)].id duplicates an earlier team id" else empty end),
+      (if ([$ts[0:$i][].folder_prefix] | index($ts[$i].folder_prefix)) != null
+       then "teams[\($i)].folder_prefix duplicates an earlier folder_prefix" else empty end) ))),
   ((.projects // []) | to_entries[] | .key as $i | .value as $p |
     ( [ (if (($p.key // "")|projkey) != true then "projects[\($i)].key is not a valid project key" else empty end),
-        (if ($p.style|IN("company_managed","team_managed")|not) then "projects[\($i)].style is invalid" else empty end),
+        (if ($p | has("style")) and ($p.style|IN("company_managed","team_managed")|not) then "projects[\($i)].style is invalid" else empty end),
         (if ($p.epic_strategy|IN("per_repo","per_feature")|not) then "projects[\($i)].epic_strategy is invalid" else empty end),
         (if ($p.task_strategy|IN("subtask","linked_story")|not) then "projects[\($i)].task_strategy is invalid" else empty end),
         (if ($p.task_strategy == "linked_story" and (($p.link_type // "")|length) < 1)
@@ -402,13 +434,92 @@ def projkey: test("^[A-Z][A-Z0-9_]+$");
 _CFG_LOCAL_ERRORS_JQ='
 [
   (keys_unsorted[] | select(IN("site_alias","resolved_ids","overrides")|not)
-   | "unknown config.local key: \(.)")
+   | "unknown config.local key: \(.)"),
+  ((.resolved_ids // {}) | to_entries[] | .key as $k | .value as $v
+   | ( (if (($v|type) == "object") and ($v | has("style"))
+          and ($v.style | IN("company_managed","team_managed") | not)
+        then "resolved_ids.\($k).style is invalid" else empty end),
+       (if (($v|type) == "object") and ($v | has("style_source"))
+          and ($v.style_source | IN("api","operator") | not)
+        then "resolved_ids.\($k).style_source is invalid" else empty end) ))
 ] | flatten'
 # kcov-excl-stop
 
 # _cfg_schema_errors <jq-program> — read JSON on stdin, print each error line.
 _cfg_schema_errors() {
   jq -r "${1} | .[]" 2> /dev/null
+}
+
+# =============================================================================
+# Personal team selection (002 US3, FR-011/FR-012) — .specify/jira/personal.yml
+# =============================================================================
+
+# The personal-file schema as a declarative jq program (mirrors
+# contracts/personal-config.schema.json): only `team` and an optional
+# `override` (folder_prefix / branch_pattern, catalogue-entry rules).
+# shellcheck disable=SC2016  # `\(...)` is jq string interpolation, not shell expansion
+# kcov-excl-start — jq literal (string lines are not statements)
+_CFG_PERSONAL_ERRORS_JQ='
+def branchpattern:
+  (type == "string")
+  and (([match("<ID>"; "g")] | length) == 1)
+  and (([match("<FEATURE_NAME>"; "g")] | length) == 1)
+  and ((gsub("<ID>"; "") | gsub("<FEATURE_NAME>"; "")) | test("^[a-z0-9/_-]*$"));
+[
+  (keys_unsorted[] | select(IN("team","override")|not) | "unknown personal key: \(.)"),
+  (if ((.team // "") | test("^[a-z][a-z0-9]*$") | not) then "team is invalid" else empty end),
+  (if has("override") then
+     ( .override
+       | ( (keys_unsorted[] | select(IN("folder_prefix","branch_pattern")|not)
+            | "unknown override key: \(.)"),
+           (if has("folder_prefix") and ((.folder_prefix // "") | test("^[a-z0-9][a-z0-9-]*-$") | not)
+            then "override.folder_prefix is invalid" else empty end),
+           (if has("branch_pattern") and ((.branch_pattern // "") | branchpattern | not)
+            then "override.branch_pattern is invalid" else empty end) ) )
+   else empty end)
+] | flatten | .[]'
+# kcov-excl-stop
+
+# config_personal_load [config_dir] [merged-config-json] — load the human-owned
+# personal team selection. NEVER writes the file. Absent file => the inactive
+# result {active:false} (FR-011: never required). Credential-shaped values are
+# refused without echoing; an unknown `team` produces a located error listing
+# the valid catalogue ids; `override` passes the catalogue-entry validation.
+# Prints the canonical {active, team, override} JSON on stdout.
+config_personal_load() {
+  # The optional [merged-config-json] defaults to valid JSON ({}) — a literal
+  # backslash default would make every jq read below spray parse errors.
+  local dir="${1:-${JIRA_CONFIG_DIR}}" cfg="${2:-}"
+  [[ -z "${cfg}" ]] && cfg='{}'
+  local pf="${dir}/personal.yml"
+  if [[ ! -f "${pf}" ]]; then
+    printf '{"active":false}'
+    return 0
+  fi
+
+  local pjson
+  if ! pjson="$(config_yaml_to_json "${pf}" 2> /dev/null)"; then
+    printf 'config: personal (%s): not valid personal YAML\n' "${pf}" >&2
+    return "${EXIT_CONFIG}"
+  fi
+  printf '%s' "${pjson}" | _cfg_credential_errors | _cfg_report_errors "credential" "${pf}" || return "${EXIT_CONFIG}"
+  printf '%s' "${pjson}" | jq -r "${_CFG_PERSONAL_ERRORS_JQ}" 2> /dev/null \
+    | _cfg_report_errors "personal" "${pf}" || return "${EXIT_CONFIG}"
+
+  # The selected team must exist in the committed catalogue (FR-011).
+  local team ids
+  team="$(jq -r '.team // ""' <<< "${pjson}")"
+  if ! jq -e --arg t "${team}" '([.teams[]?.id] | index($t)) != null' <<< "${cfg}" > /dev/null; then
+    ids="$(jq -r '[.teams[]?.id] | join(", ")' <<< "${cfg}")"
+    [[ -z "${ids}" ]] && ids="(none)"
+    printf 'config: personal (%s): unknown team "%s" — valid teams: %s\n' \
+      "${pf}" "${team}" "${ids}" >&2
+    return "${EXIT_CONFIG}"
+  fi
+
+  jq -cn --arg t "${team}" \
+    --argjson o "$(jq -c '.override // null' <<< "${pjson}")" \
+    '{active: true, team: $t, override: $o}' | json_canonical
 }
 
 # =============================================================================

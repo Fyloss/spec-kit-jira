@@ -1,0 +1,16 @@
+{
+  "name": "us3-feature-fallback",
+  "description": "US3 (FR-016): team ijt selected, Jira unreachable (network fault on every call). The feature command falls back non-blocking: {active:false} plus exactly one warning, exit 0 — feature creation proceeds with default naming; reconciliation attaches later. Byte-identical across ports.",
+  "mock": {
+    "projects": { "IJT": "team" },
+    "fault": { "network": true }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-teams",
+  "argv": ["feature", "--json", "invoice export"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_PLAN_CONTEXT": "{\"story_type_id\":\"10201\",\"priority_ids\":{\"P1\":\"1\",\"P2\":\"2\",\"P3\":\"3\"},\"estimation_field_id\":null}"
+  }
+}

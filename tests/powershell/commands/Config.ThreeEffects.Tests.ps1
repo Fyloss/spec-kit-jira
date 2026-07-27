@@ -38,13 +38,15 @@ Describe 'Config three-effect reporting' {
         try { [void](Invoke-JiraConfig -Arguments @('config', '--json')) }
         finally { [Console]::SetOut($orig) }
         $obj = $sw.ToString().Trim() | ConvertFrom-Json
-        ($obj.effects.PSObject.Properties.Name | Sort-Object) -join ',' | Should -Be 'discovery,hooks,readme'
+        # All effects are present as distinct, named sections (002 adds gitignore).
+        ($obj.effects.PSObject.Properties.Name | Sort-Object) -join ',' | Should -Be 'discovery,gitignore,hooks,readme'
         $obj.effects.discovery.status | Should -Be 'written'
         $obj.effects.hooks.status | Should -Not -BeNullOrEmpty
         $obj.effects.readme.status | Should -Not -BeNullOrEmpty
+        $obj.effects.gitignore.status | Should -Not -BeNullOrEmpty
     }
 
-    It 'names each of the three effects in the prose summary' {
+    It 'names each of the four effects in the prose summary' {
         $sw = [System.IO.StringWriter]::new()
         $orig = [Console]::Out
         [Console]::SetOut($sw)
@@ -54,5 +56,8 @@ Describe 'Config three-effect reporting' {
         $text | Should -Match 'discovery'
         $text | Should -Match 'hooks'
         $text | Should -Match 'readme'
+        # T093 — the gitignore effect modifies a tracked file; the default
+        # output must say so, not only the --json summary.
+        $text | Should -Match '  gitignore: '
     }
 }

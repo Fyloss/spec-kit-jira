@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-27
+
+Reliable automatic Jira discovery & team-based feature prefix (002).
+
+### Added
+
+- Three-valued project-style detection: style comes exclusively from an
+  unambiguous API signal (`style_source: api`) or an explicit operator answer
+  via the repeatable `--style KEY=VALUE` flag (`style_source: operator`);
+  ambiguity fails closed with exit 4 and zero writes — the silent
+  `company_managed` default is gone.
+- Jira-first project-key sourcing: argument → committed config (the literal
+  `PROJ` placeholder counts as unset) → closed question over the paginated
+  `GET /project/search` accessible-projects list. Git state is never a source
+  in a connected run; undefined connection parameters trigger a loud,
+  provisional, write-free degraded mode, and the next connected run surfaces
+  catalogue/project mismatches as warnings.
+- Team naming conventions: committed `teams:` catalogue, human-owned
+  gitignored `.specify/jira/personal.yml` selection, and the new twin-ported
+  `feature` command (`speckit.jira.feature`, registered as a non-blocking
+  `before_specify` hook) that resolves the ticket first (validate or
+  guarded-create), then emits `branch_name` per team pattern and a flat
+  deduped `short_name`. No selection ⇒ byte-for-byte previous behaviour.
+- Config ceremony gitignore effect: idempotent `.gitignore` coverage of
+  `config.local.yml`, `.env`, and `personal.yml`, reported as its own effect.
+- Implicit team→project routing fallback: a team-prefixed spec folder routes
+  to the team's project when no explicit routing rule matches.
+- Bash statement-coverage gate: `tests/coverage/bash-coverage.sh` plus a
+  `bash-coverage` CI job on Linux, the twin of Pester's CodeCoverage
+  (Constitution XIII). It measures the mocked unit suites the way that
+  constitution requires, using two collectors: kcov owns the denominator and
+  drives the conformance corpus, while the bats suite is traced on a dedicated
+  descriptor — kcov cannot run bats, because it instruments bats-core's own
+  DEBUG-trap tracing and the two never terminate. `--mode bats` reports traced
+  hit counts on hosts where kcov cannot run the port at all, macOS included.
+
+### Fixed
+
+- The default (prose) run summary now states how each project's style was
+  resolved — `    <KEY>: <style> (<style_source>)`, nested under the discovery
+  effect and ordered by project key. It was previously visible only under
+  `--json`, so the FR-003 audit trail was missing from the default output.
+- The literal `\{}` defaults in `feature.sh` and `lib/config.sh` no longer
+  kill the bash entry point under `errexit` when `SPEC_KIT_JIRA_PLAN_CONTEXT`
+  is unset, and no longer pollute `config_personal_load` stderr; the
+  redundant `mktemp` capture around `ticket_create` is gone.
+- `feature` command prose output (non-`--json`) no longer renders run-summary
+  nulls on bash or raw JSON on PowerShell — both ports now share a dedicated
+  twin prose renderer (`_feat_render_prose` / `ConvertTo-JiraFeatureProse`).
+- PowerShell discovery no longer fabricates a phantom project from a
+  `values`-less page, bypassing the zero-results fail-closed; style-switch
+  comparisons are case-sensitive and `simplified` follows `tostring`
+  semantics like bash.
+- Routing: an empty-string `folder_prefix`/`spec_label` rule condition now
+  counts as undeclared, so the shipped template's catch-all rule no longer
+  shadows the implicit team route; a `teams` entry without `folder_prefix`
+  no longer aborts bash `routing_resolve`.
+- The bash `.gitignore` idempotency probe now strips CR, so a CRLF checkout
+  no longer causes endless duplicate appends (FR-019); PowerShell repo-root
+  derivation no longer throws on a single-component `JIRA_CONFIG_DIR`.
+- The prose run summary now renders the `gitignore` effect and the degraded
+  run's provisional teams plus rerun guidance; degraded effects gain
+  `gitignore: skipped`.
+- Hook health now covers the `before_specify` feature hook
+  (present/missing/disabled), so a deleted entry is reported instead of
+  silently re-added; PowerShell command comparisons in the hook merge are
+  case-sensitive like bash.
+- `quickstart.md` now documents `trash` instead of `rm -f` for cleanup, per
+  the project's file-deletion policy.
+
 ## [0.1.0] - 2026-07-25
 
 First public release.
@@ -74,5 +144,6 @@ First public release.
   repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Fyloss/spec-kit-jira/releases/tag/v0.1.0

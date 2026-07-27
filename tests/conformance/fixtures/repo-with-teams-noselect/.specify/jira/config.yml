@@ -1,0 +1,26 @@
+# Same two-team catalogue as repo-with-teams, but WITHOUT a personal.yml:
+# the no-selection pass-through fixture (002 US3, FR-017).
+projects:
+  - key: IJT
+    epic_strategy: per_repo
+    task_strategy: subtask
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: ''
+    project: IJT
+routing_default: IJT
+teams:
+  - id: ijt
+    project: IJT
+    folder_prefix: "ijt-"
+    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"
+  - id: wex
+    project: WEX
+    folder_prefix: "wex-"
+    branch_pattern: "wex-<ID>/<FEATURE_NAME>"
+privacy:
+  allowlist: []

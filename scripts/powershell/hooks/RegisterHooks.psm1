@@ -18,12 +18,30 @@ $script:HookCommand = 'speckit.jira.reconcile'
 $script:HookEvents = @('after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')
 $script:HookExitConfig = 4
 
+# The feature-naming command registered under the `before_specify` event (002
+# US3, FR-013): a non-blocking, optional hook that resolves the Jira ticket and
+# computes the team-based feature name before the host creates the spec.
+$script:HookBeforeEvent = 'before_specify'
+$script:HookBeforeCommand = 'speckit.jira.feature'
+
 function Get-JiraHookEntry {
     # The canonical desired entry for our reconcile hook. `optional = true` makes it
     # non-blocking: a bridge failure never fails the host command (FR-046).
     return [ordered]@{
         command     = $script:HookCommand
         description = 'Mirror the updated spec-kit artifacts into Jira Cloud (non-blocking).'
+        enabled     = $true
+        optional    = $true
+    }
+}
+
+function Get-JiraHookBeforeEntry {
+    # The canonical desired entry for the before_specify feature hook (enabled +
+    # optional, so it never blocks feature creation). Mirror of
+    # _register_hooks_before_entry.
+    return [ordered]@{
+        command     = $script:HookBeforeCommand
+        description = 'Resolve the Jira ticket and compute the team-based feature name before spec creation (non-blocking).'
         enabled     = $true
         optional    = $true
     }
@@ -58,11 +76,27 @@ function Get-JiraHookMerged {
         }
         $present = $false
         foreach ($x in $cur) {
-            if ((Get-JiraHookProp $x 'command') -eq $script:HookCommand) { $present = $true; break }
+            # Case-SENSITIVE like the bash twin's jq `==` (NFR-1).
+            if ((Get-JiraHookProp $x 'command') -ceq $script:HookCommand) { $present = $true; break }
         }
         if (-not $present) { $cur.Add((Get-JiraHookEntry)) }
         $hooksMap[$e] = $cur.ToArray()
     }
+
+    # before_specify feature hook (002 US3): same set-not-append rule — an entry
+    # the operator already placed (or disabled) is never re-added or re-enabled.
+    $bcur = [System.Collections.Generic.List[object]]::new()
+    if ($hooksMap.Contains($script:HookBeforeEvent) -and $null -ne $hooksMap[$script:HookBeforeEvent]) {
+        foreach ($x in @($hooksMap[$script:HookBeforeEvent])) { $bcur.Add($x) }
+    }
+    $bpresent = $false
+    foreach ($x in $bcur) {
+        # Case-SENSITIVE like the bash twin's jq `==` (NFR-1).
+        if ((Get-JiraHookProp $x 'command') -ceq $script:HookBeforeCommand) { $bpresent = $true; break }
+    }
+    if (-not $bpresent) { $bcur.Add((Get-JiraHookBeforeEntry)) }
+    $hooksMap[$script:HookBeforeEvent] = $bcur.ToArray()
+
     $rootMap['hooks'] = $hooksMap
 
     return (ConvertTo-JiraJsonValue $rootMap)
@@ -87,6 +121,9 @@ function Get-JiraHookHealth {
       { present; missing; disabled; repair_hint? }. `missing` lists lifecycle
       events with no reconcile hook at all; an operator-disabled hook is listed
       under `disabled` (never "missing"), so it is never re-added (FR-048).
+      Health covers EVERY event the writer registers — the six after_*
+      reconcile hooks AND the before_specify feature hook — so a deleted entry
+      is reported instead of silently re-added by the next repair.
       `repair_hint` appears only when a hook is missing. A malformed file reports
       every event missing. Mirror of register_hooks_health.
     #>
@@ -99,7 +136,7 @@ function Get-JiraHookHealth {
         catch {
             return (ConvertTo-JiraJsonValue ([ordered]@{
                         present     = @()
-                        missing     = @($script:HookEvents)
+                        missing     = @(@($script:HookEvents) + $script:HookBeforeEvent)
                         disabled    = @()
                         repair_hint = 'extensions.yml is not valid YAML — fix it, then run /speckit.jira.config or reconcile --repair-hooks'
                     }))
@@ -111,10 +148,12 @@ function Get-JiraHookHealth {
     $present = [System.Collections.Generic.List[string]]::new()
     $missing = [System.Collections.Generic.List[string]]::new()
     $disabled = [System.Collections.Generic.List[string]]::new()
-    foreach ($e in $script:HookEvents) {
+    foreach ($e in (@($script:HookEvents) + $script:HookBeforeEvent)) {
+        $cmd = if ($e -ceq $script:HookBeforeEvent) { $script:HookBeforeCommand } else { $script:HookCommand }
         $ours = [System.Collections.Generic.List[object]]::new()
         foreach ($x in @(Get-JiraHookProp $hooks $e)) {
-            if ((Get-JiraHookProp $x 'command') -eq $script:HookCommand) { $ours.Add($x) }
+            # Case-SENSITIVE like the bash twin's jq `==` (NFR-1).
+            if ((Get-JiraHookProp $x 'command') -ceq $cmd) { $ours.Add($x) }
         }
         if ($ours.Count -eq 0) { $missing.Add($e); continue }
         $enabled = $false

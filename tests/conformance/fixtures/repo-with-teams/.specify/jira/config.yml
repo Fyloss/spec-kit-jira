@@ -1,0 +1,26 @@
+# Team config with a team-convention catalogue (002 US3 fixture, committable,
+# credential-free). Declares two teams sharing this clone-family: ijt and wex.
+projects:
+  - key: IJT
+    epic_strategy: per_repo
+    task_strategy: subtask
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: ''
+    project: IJT
+routing_default: IJT
+teams:
+  - id: ijt
+    project: IJT
+    folder_prefix: "ijt-"
+    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"
+  - id: wex
+    project: WEX
+    folder_prefix: "wex-"
+    branch_pattern: "wex-<ID>/<FEATURE_NAME>"
+privacy:
+  allowlist: []

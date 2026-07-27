@@ -1,0 +1,13 @@
+{
+  "name": "us3-feature-no-plan-context",
+  "description": "T085 — the normal before_specify state: SPEC_KIT_JIRA_PLAN_CONTEXT is empty (plan context only exists after /plan). The guarded create cannot resolve a story type id, so the ceremony MUST take the FR-016 fallback ({active:false} + one warning, exit 0) with zero Jira calls — not die on an invalid default.",
+  "mock": {"projects": {"IJT": "team"}},
+  "fixture": "tests/conformance/fixtures/repo-with-teams",
+  "argv": ["feature", "--json", "invoice export"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_PLAN_CONTEXT": ""
+  }
+}

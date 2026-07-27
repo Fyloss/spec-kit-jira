@@ -67,12 +67,32 @@ fi
 MOCK_CFG="$(mktemp)"
 jq '.mock // {}' "${SCENARIO}" > "${MOCK_CFG}"
 mock_start "${MOCK_CFG}"
+# From here on every exit path reaps the mock, including the ones `set -e` takes
+# on our behalf. An orphan holds each descriptor it inherited, and whoever reads
+# the other end then blocks forever rather than failing.
+trap mock_stop EXIT
+
+# --- Optional git repository (degraded-mode / branch-state scenarios) --------
+# `git_branch` initialises the workdir as a git repo checked out on that branch
+# (deterministic default branch so both ports see identical refs).
+GIT_BRANCH="$(jq -r '.git_branch // empty' "${SCENARIO}")"
+if [ -n "${GIT_BRANCH}" ]; then
+  (
+    cd "${WORKDIR}"
+    git init -q -b main
+    git -c user.email=conformance@example.invalid -c user.name=conformance \
+      commit -q --allow-empty -m init
+    git checkout -q -b "${GIT_BRANCH}"
+  )
+fi
 
 # --- Environment -------------------------------------------------------------
+# The mock base URL is set FIRST so a scenario's env can override it (e.g. to
+# the empty string, which the ports treat as unset — the degraded-mode trigger).
+export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 while IFS=$'\t' read -r key value; do
   [ -n "${key}" ] && export "${key}=${value}"
 done < <(jq -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv' "${SCENARIO}")
-export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 
 # --- Argv --------------------------------------------------------------------
 ARGV=()
@@ -81,7 +101,21 @@ while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq -r '.argv[]? // empty' 
 # --- Run and capture ---------------------------------------------------------
 set +e
 if [ "${PORT}" = "bash" ]; then
-  ( cd "${WORKDIR}" && bash "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout" 2> "${OUTDIR}/stderr"
+  if [ -n "${SPEC_KIT_JIRA_COVERAGE_INPROCESS:-}" ]; then
+    # Coverage mode only (T097): kcov's bash tracing follows forked subshells but
+    # NOT execve'd children, so `bash "${ENTRY}"` measures nothing. Sourcing the
+    # entry point in a subshell keeps every observable identical — own cwd, own
+    # argv, own redirections, own exit status, and `set -euo pipefail` scoped to
+    # the subshell — while making scripts/bash/** visible to the tracer.
+    # stderr is deliberately NOT captured in this mode: the tracer streams its
+    # PS4 trace on fd 2, so redirecting fd 2 to a file would hide every executed
+    # line from it. Coverage mode asserts nothing about stderr.
+    # shellcheck source=/dev/null
+    ( cd "${WORKDIR}" && source "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout"
+    : > "${OUTDIR}/stderr"
+  else
+    ( cd "${WORKDIR}" && bash "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout" 2> "${OUTDIR}/stderr"
+  fi
 else
   ( cd "${WORKDIR}" && pwsh -NoProfile -File "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout" 2> "${OUTDIR}/stderr"
 fi

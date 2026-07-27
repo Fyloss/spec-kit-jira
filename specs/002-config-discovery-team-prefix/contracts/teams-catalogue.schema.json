@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-kit-jira/contracts/teams-catalogue.schema.json",
+  "title": "Team Convention Catalogue (config.yml `teams:` section)",
+  "description": "Delta to config.schema.json: a new OPTIONAL top-level `teams` key in the committed team config. One reviewable entry per team (SC-006). Credential-shaped values are refused without echoing (FR-018). Presented as JSON Schema; the on-disk file is YAML. Additionally, this feature makes `projects[].style` OPTIONAL in config.schema.json (style is detected at ceremony time; a committed value is an operator declaration validated against discovery).",
+  "type": "array",
+  "items": { "$ref": "#/$defs/team" },
+  "$defs": {
+    "team": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "project", "folder_prefix", "branch_pattern"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*$",
+          "description": "Team identifier, unique across the catalogue. Referenced by the personal file's `team` key (FR-011)."
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]+$",
+          "description": "The team's Jira project key. Target of automatic ticket creation (FR-013) and of the cross-team ticket check (FR-014)."
+        },
+        "folder_prefix": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*-$",
+          "description": "Folder-safe prefix, unique across the catalogue, trailing hyphen required. Placed after the numbering component in the flat feature-folder name (FR-015), e.g. specs/003-ijt-invoice-export. Combined with the existing routing rules it routes the team's features to the team's project (US3 scenario 6)."
+        },
+        "branch_pattern": {
+          "type": "string",
+          "description": "Branch-name pattern. MUST contain <ID> exactly once and <FEATURE_NAME> exactly once; every other character MUST be in [a-z0-9/_-] (FR-010, FR-018). <ID> = the Jira ticket number stripped of its project-key prefix. '/' creates git branch hierarchy only — the spec folder always stays flat (FR-015).",
+          "pattern": "^(?=(?:(?!<ID>).)*<ID>(?:(?!<ID>).)*$)(?=(?:(?!<FEATURE_NAME>).)*<FEATURE_NAME>(?:(?!<FEATURE_NAME>).)*$)(?:[a-z0-9/_-]|<ID>|<FEATURE_NAME>)+$"
+        }
+      }
+    }
+  }
+}

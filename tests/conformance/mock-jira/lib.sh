@@ -14,6 +14,15 @@
 
 _MOCK_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Startup failures are otherwise mute: the mock's own diagnostics now land in
+# files rather than on the caller's stderr, so quote them here.
+mock_died() {
+  echo "mock process ${1}" >&2
+  [ -s "${MOCK_TMPDIR}/mock.err" ] && sed 's/^/  mock: /' "${MOCK_TMPDIR}/mock.err" >&2
+  [ -s "${MOCK_TMPDIR}/mock.out" ] && sed 's/^/  mock: /' "${MOCK_TMPDIR}/mock.out" >&2
+  return 0
+}
+
 mock_start() {
   local config="${1:-}"
   MOCK_TMPDIR="$(mktemp -d)"
@@ -26,16 +35,20 @@ mock_start() {
     -FixtureDir "${_MOCK_LIB_DIR}/fixtures")
   [ -n "${config}" ] && args+=(-ConfigPath "${config}")
 
-  pwsh "${args[@]}" &
+  # The mock inherits no descriptor from its caller. A background child that
+  # holds one open blocks whoever reads the other end until it dies — bats' fd
+  # 3, a `run` pipe, or kcov's trace pipe, which is how the Bash coverage job
+  # spent a whole CI step waiting for an EOF that could not arrive.
+  pwsh "${args[@]}" < /dev/null > "${MOCK_TMPDIR}/mock.out" 2> "${MOCK_TMPDIR}/mock.err" 3>&- &
   MOCK_PID=$!
 
   local i=0
   while [ ! -s "${ready}" ] && [ "${i}" -lt 200 ]; do
-    kill -0 "${MOCK_PID}" 2> /dev/null || { echo "mock process exited before ready" >&2; return 1; }
+    kill -0 "${MOCK_PID}" 2> /dev/null || { mock_died "exited before ready"; return 1; }
     sleep 0.05
     i=$((i + 1))
   done
-  [ -s "${ready}" ] || { echo "mock failed to become ready" >&2; return 1; }
+  [ -s "${ready}" ] || { mock_died "failed to become ready within 10s"; return 1; }
 
   MOCK_PORT="$(cat "${ready}")"
   MOCK_BASE_URL="http://127.0.0.1:${MOCK_PORT}"

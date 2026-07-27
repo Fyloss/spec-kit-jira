@@ -1,0 +1,7 @@
+# Committed config still holding the template's PROJ placeholder (002 US2):
+# the placeholder counts as unset (FR-005) — no key source in this repo.
+projects:
+  - key: PROJ
+    epic_strategy: per_repo
+    task_strategy: subtask
+routing_default: PROJ

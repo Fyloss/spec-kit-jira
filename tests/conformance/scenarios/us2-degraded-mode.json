@@ -1,0 +1,16 @@
+{
+  "name": "us2-degraded-mode",
+  "description": "US2 (FR-008/FR-009): SPEC_KIT_JIRA_BASE_URL is overridden to the empty string (unset to the ports), so the ceremony enters the loudly-announced degraded mode BEFORE any Jira call: exit 0, one warning naming the missing variable, the ijt branch prefix proposed with provisional: true, rerun_guidance present, zero writes, and an EMPTY mock call log. Byte-identical across ports.",
+  "mock": {
+    "projects": { "TEAM": "team" }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-config-placeholder",
+  "git_branch": "ijt-4/sample-feature",
+  "argv": ["config", "--json"],
+  "env": {
+    "SPEC_KIT_JIRA_BASE_URL": "",
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1"
+  }
+}

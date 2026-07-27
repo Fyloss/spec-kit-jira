@@ -40,6 +40,8 @@ EOF
 }
 
 teardown() {
+  # A mock the harness failed to reap would otherwise outlive the whole suite.
+  pkill -f "${TMP}" 2> /dev/null || true
   rm -rf "${TMP}"
 }
 
@@ -66,6 +68,44 @@ teardown() {
   bash "${HARNESS}" "${SCENARIO}" bash "${OUT}"
   [ -f "${OUT}/workdir/project.json" ]
   [ "$(jq -r .style "${OUT}/workdir/project.json")" = "classic" ]
+}
+
+@test "harness stops the mock when the run aborts after the mock started" {
+  # A surviving mock holds every fd it inherited, which under kcov is the
+  # tracer's own pipe — the coverage run then never sees EOF and burns the CI
+  # step's whole budget. An invalid branch name aborts the harness after
+  # mock_start, which is where the leak used to happen.
+  before="$(pgrep -f 'mock-server.ps1' 2> /dev/null | sort || true)"
+  cat > "${TMP}/abort.json" << 'EOF'
+{
+  "name": "abort-after-mock",
+  "mock": { "projects": { "COMP": "company" } },
+  "git_branch": "bad..name"
+}
+EOF
+
+  # Every inherited fd is closed or pointed at a file on purpose. `run` would
+  # hand the harness a pipe, and bats keeps its diagnostic fd 3 open across the
+  # test; a surviving mock holds either of them open, so the assertions below
+  # would never be reached — the test would hang instead of failing.
+  status=0
+  bash "${HARNESS}" "${TMP}/abort.json" bash "${OUT}" \
+    < /dev/null > "${TMP}/abort.out" 2>&1 3>&- || status=$?
+  [ "${status}" -ne 0 ]
+  grep -q 'not a valid branch name' "${TMP}/abort.out"
+
+  # Termination is asynchronous; poll rather than assume the kill has landed.
+  leaked="?"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    after="$(pgrep -f 'mock-server.ps1' 2> /dev/null | sort || true)"
+    leaked="$(comm -13 <(printf '%s\n' "${before}") <(printf '%s\n' "${after}"))"
+    [ -n "${leaked}" ] || break
+    sleep 0.3
+  done
+  [ -z "${leaked}" ] || {
+    printf 'the aborted run left mock pid(s) behind: %s\n' "${leaked}"
+    false
+  }
 }
 
 @test "harness fails clearly when the entry point is missing" {

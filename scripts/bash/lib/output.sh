@@ -64,19 +64,43 @@ summary_render_prose() {
   printf 'Command: %s%s\n' "${command}" "${suffix}"
   printf 'Created: %s, Updated: %s, Skipped: %s\n' "${created}" "${updated}" "${skipped}"
   printf 'Warnings: %s, Errors: %s\n' "${warnings}" "${errors}"
-  # The config ceremony's three effects, reported separately (FR-054). Rendered
-  # in a fixed order (discovery, hooks, readme) so both ports match byte-for-byte.
+  # The config ceremony's effects, reported separately (FR-054). Rendered in a
+  # fixed order (discovery, hooks, readme, gitignore) so both ports match
+  # byte-for-byte.
   if [[ "$(jq -r 'has("effects")' <<< "${json}")" == "true" ]]; then
     printf 'Effects:\n'
     local effect status detail line
-    for effect in discovery hooks readme; do
+    for effect in discovery hooks readme gitignore; do
       status="$(jq -r --arg e "${effect}" '.effects[$e].status // empty' <<< "${json}")"
       [[ -z "${status}" ]] && continue
       detail="$(jq -r --arg e "${effect}" '.effects[$e].detail // empty' <<< "${json}")"
       line="  ${effect}: ${status}"
       [[ -n "${detail}" ]] && line="${line} — ${detail}"
       printf '%s\n' "${line}"
+      # The per-project style audit (FR-003) is nested under the discovery
+      # effect so a wrong binding can be audited from the default output, not
+      # only from --json. jq's `keys` sorts by code point, which is the
+      # PowerShell port's ordinal sort.
+      if [[ "${effect}" == "discovery" ]]; then
+        local pkey pstyle psource
+        while IFS= read -r pkey; do
+          [[ -z "${pkey}" ]] && continue
+          pstyle="$(jq -r --arg k "${pkey}" '.effects.discovery.projects[$k].style // empty' <<< "${json}")"
+          [[ -z "${pstyle}" ]] && continue
+          psource="$(jq -r --arg k "${pkey}" '.effects.discovery.projects[$k].style_source // empty' <<< "${json}")"
+          printf '    %s: %s (%s)\n' "${pkey}" "${pstyle}" "${psource}"
+        done <<< "$(jq -r '(.effects.discovery.projects // {}) | keys[]?' <<< "${json}")"
+      fi
     done
+  fi
+  # The degraded run's provisional team proposals and copy-pasteable re-run
+  # guidance (FR-008/FR-009): the agent command doc relays them verbatim, so
+  # they must exist in the default output, not only in --json.
+  if [[ "$(jq -r 'has("provisional") and ((.provisional | length) > 0)' <<< "${json}")" == "true" ]]; then
+    printf 'Provisional teams: %s\n' "$(jq -r '[.provisional[].team_prefix] | join(", ")' <<< "${json}")"
+  fi
+  if [[ "$(jq -r 'has("rerun_guidance")' <<< "${json}")" == "true" ]]; then
+    printf 'Rerun: %s\n' "$(jq -r '.rerun_guidance' <<< "${json}")"
   fi
   printf 'Exit: %s\n' "${exit_code}"
 }

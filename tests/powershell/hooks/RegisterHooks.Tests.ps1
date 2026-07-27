@@ -68,7 +68,7 @@ Describe 'after_* hook registration' {
     It 'reports present/missing in the contract shape (FR-047, run-summary.schema.json)' {
         [void](Set-JiraHookRegistration -Path $Ext)
         $h = Get-JiraHookHealth -Path $Ext | ConvertFrom-Json
-        @($h.present).Count | Should -Be 6
+        @($h.present).Count | Should -Be 7
         @($h.missing).Count | Should -Be 0
         @($h.disabled).Count | Should -Be 0
         $h.PSObject.Properties.Name | Should -Not -Contain 'repair_hint'
@@ -79,7 +79,7 @@ Describe 'after_* hook registration' {
         [System.IO.File]::WriteAllText($Ext, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
         $h = Get-JiraHookHealth -Path $Ext | ConvertFrom-Json
         $h.missing[0] | Should -Be 'after_analyze'
-        @($h.present).Count | Should -Be 5
+        @($h.present).Count | Should -Be 6
         $h.repair_hint | Should -Match 'repair-hooks'
     }
 
@@ -91,13 +91,61 @@ Describe 'after_* hook registration' {
         [System.IO.File]::WriteAllText($Ext, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
         $h = Get-JiraHookHealth -Path $Ext | ConvertFrom-Json
         $h.disabled[0] | Should -Be 'after_implement'
-        @($h.present).Count | Should -Be 5
+        @($h.present).Count | Should -Be 6
         @($h.missing).Count | Should -Be 0
     }
 
     It 'reports every hook missing for an absent file' {
         $h = Get-JiraHookHealth -Path (Join-Path $Work 'nope.yml') | ConvertFrom-Json
-        @($h.missing).Count | Should -Be 6
+        @($h.missing).Count | Should -Be 7
         @($h.present).Count | Should -Be 0
+    }
+
+    It 'reports a deleted before_specify feature hook as missing (T094)' {
+        [void](Set-JiraHookRegistration -Path $Ext)
+        $obj = ConvertFrom-JiraConfigYaml -Path $Ext | ConvertFrom-Json
+        $obj.hooks.PSObject.Properties.Remove('before_specify')
+        $yaml = ConvertTo-JiraConfigYaml -Json (ConvertTo-JiraJsonValue $obj)
+        [System.IO.File]::WriteAllText($Ext, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
+        $h = Get-JiraHookHealth -Path $Ext | ConvertFrom-Json
+        @($h.missing) | Should -Contain 'before_specify'
+        @($h.present).Count | Should -Be 6
+        $h.repair_hint | Should -Match 'repair-hooks'
+    }
+
+    It 'lists a disabled feature hook under disabled (T094, FR-048)' {
+        [void](Set-JiraHookRegistration -Path $Ext)
+        $obj = ConvertFrom-JiraConfigYaml -Path $Ext | ConvertFrom-Json
+        $obj.hooks.before_specify[0].enabled = $false
+        $yaml = ConvertTo-JiraConfigYaml -Json (ConvertTo-JiraJsonValue $obj)
+        [System.IO.File]::WriteAllText($Ext, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
+        $h = Get-JiraHookHealth -Path $Ext | ConvertFrom-Json
+        @($h.disabled) | Should -Contain 'before_specify'
+        @($h.missing).Count | Should -Be 0
+    }
+
+    It 'registers before_specify -> speckit.jira.feature enabled+optional, set-not-append (T047)' {
+        [void](Set-JiraHookRegistration -Path $Ext)
+        [void](Set-JiraHookRegistration -Path $Ext)
+        $obj = ConvertFrom-JiraConfigYaml -Path $Ext | ConvertFrom-Json
+        @($obj.hooks.before_specify).Count | Should -Be 1
+        $obj.hooks.before_specify[0].command | Should -Be 'speckit.jira.feature'
+        $obj.hooks.before_specify[0].enabled | Should -BeTrue
+        $obj.hooks.before_specify[0].optional | Should -BeTrue
+        foreach ($e in @('after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')) {
+            @($obj.hooks.$e | Where-Object { $_.command -eq 'speckit.jira.reconcile' }).Count | Should -Be 1
+        }
+    }
+
+    It 'never re-adds or re-enables an operator-disabled feature hook (T047, FR-048)' {
+        [void](Set-JiraHookRegistration -Path $Ext)
+        $obj = ConvertFrom-JiraConfigYaml -Path $Ext | ConvertFrom-Json
+        $obj.hooks.before_specify[0].enabled = $false
+        $yaml = ConvertTo-JiraConfigYaml -Json (ConvertTo-JiraJsonValue $obj)
+        [System.IO.File]::WriteAllText($Ext, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
+        [void](Set-JiraHookRegistration -Path $Ext)
+        $obj = ConvertFrom-JiraConfigYaml -Path $Ext | ConvertFrom-Json
+        @($obj.hooks.before_specify).Count | Should -Be 1
+        $obj.hooks.before_specify[0].enabled | Should -BeFalse
     }
 }

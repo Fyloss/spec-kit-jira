@@ -39,12 +39,12 @@ cli_exit_code() {
 # cli_parse <args...> — parse the command line; print key=value state lines.
 cli_parse() {
   local command="" dry_run=false json=false on_drift=abort
-  local verbose=false repair_hooks=false help=false error=""
-  local -a positional=()
+  local verbose=false repair_hooks=false help=false error="" use_team=""
+  local -a positional=() styles=()
 
   while (($#)); do
     case "$1" in
-      config | reconcile | mention)
+      config | reconcile | mention | feature)
         if [[ -z "${command}" ]]; then command="$1"; else positional+=("$1"); fi
         ;;
       --dry-run) dry_run=true ;;
@@ -52,6 +52,29 @@ cli_parse() {
       --verbose) verbose=true ;;
       --repair-hooks) repair_hooks=true ;;
       --help | -h) help=true ;;
+      --style)
+        # Repeatable operator answer to the closed style question (002 US1):
+        # --style KEY=VALUE with VALUE restricted to the two enum members.
+        if [[ $# -lt 2 ]]; then
+          error="--style requires a value (--style KEY=VALUE)"
+        else
+          shift
+          if [[ "$1" =~ ^[A-Z][A-Z0-9_]+=(company_managed|team_managed)$ ]]; then
+            styles+=("$1")
+          else
+            error="invalid --style value: $1 (expected <PROJECT_KEY>=company_managed|team_managed)"
+          fi
+        fi
+        ;;
+      --use-team)
+        # The answer to the cross-team closed confirmation (002 US3, FR-014).
+        if [[ $# -lt 2 ]]; then
+          error="--use-team requires a value (--use-team <id>)"
+        else
+          shift
+          use_team="$1"
+        fi
+        ;;
       --on-drift=*)
         on_drift="${1#*=}"
         if [[ "${on_drift}" != abort && "${on_drift}" != proceed ]]; then
@@ -72,10 +95,14 @@ cli_parse() {
     return 0
   fi
 
-  local args_joined
+  local args_joined styles_joined
   args_joined="$(
     IFS=' '
     printf '%s' "${positional[*]}"
+  )"
+  styles_joined="$(
+    IFS=' '
+    printf '%s' "${styles[*]-}"
   )"
 
   printf 'command=%s\n' "${command}"
@@ -85,6 +112,8 @@ cli_parse() {
   printf 'verbose=%s\n' "${verbose}"
   printf 'repair_hooks=%s\n' "${repair_hooks}"
   printf 'help=%s\n' "${help}"
+  printf 'styles=%s\n' "${styles_joined}"
+  printf 'use_team=%s\n' "${use_team}"
   printf 'args=%s\n' "${args_joined}"
   printf 'exit=%s\n' "${EXIT_OK}"
 }

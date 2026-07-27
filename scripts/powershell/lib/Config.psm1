@@ -20,7 +20,24 @@ Import-Module (Join-Path $PSScriptRoot 'Output.psm1') -Force
 
 $script:ExitConfig = 4
 
-function Sort-JiraOrdinal {
+# The template's literal placeholder project key (templates/config.yml.template):
+# a configured key equal to it is treated as UNSET (002 US2, FR-005).
+$script:PlaceholderKey = if ($env:JIRA_CONFIG_PLACEHOLDER_KEY) { $env:JIRA_CONFIG_PLACEHOLDER_KEY } else { 'PROJ' }
+
+function Test-JiraPlaceholderKey {
+    # The FR-005 placeholder rule. Mirror of config_key_is_placeholder.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $Key)
+    return ($Key -ceq $script:PlaceholderKey)
+}
+
+function Get-JiraPlaceholderKey {
+    [CmdletBinding()]
+    param()
+    return $script:PlaceholderKey
+}
+
+function Get-JiraOrdinalSorted {
     # Sort strings by Unicode code point (ordinal), matching the Bash port's jq
     # ordering. `-Culture Ordinal` is NOT a valid CultureInfo, so we sort via
     # [StringComparer]::Ordinal instead. With -Unique, collapses duplicates
@@ -138,8 +155,10 @@ function Initialize-CfgBuffer {
 }
 
 function Test-CfgMapEntry {
+    # The apostrophe is included because discovered status names ("Won't Do")
+    # are legal map keys — mirror of _cfg_is_map_entry.
     param([string] $Content)
-    return ($Content -match '^[A-Za-z0-9_. -]+:(\s.*)?$')
+    return ($Content -match "^[A-Za-z0-9_.' -]+:(\s.*)?$")
 }
 
 function Convert-CfgScalar {
@@ -335,7 +354,7 @@ function Get-JiraCredentialPathError {
     param($Node, [string] $Path, [System.Collections.Generic.List[string]] $Acc)
 
     if ($Node -is [System.Collections.IDictionary]) {
-        foreach ($k in (Sort-JiraOrdinal $Node.Keys)) {
+        foreach ($k in (Get-JiraOrdinalSorted $Node.Keys)) {
             $seg = if ($Path -eq '') { [string]$k } else { "$Path.$k" }
             Get-JiraCredentialPathError $Node[$k] $seg $Acc
         }
@@ -381,6 +400,19 @@ function Get-CfgProp {
     return $null
 }
 
+function Test-JiraBranchPattern {
+    # A branch_pattern (002 US3, FR-010) contains <ID> and <FEATURE_NAME> exactly
+    # once each; every other character is in [a-z0-9/_-]. Mirror of the Bash
+    # port's `branchpattern` jq def.
+    param($Pattern)
+    if ($Pattern -isnot [string]) { return $false }
+    $idCount = ([regex]::Matches($Pattern, '<ID>')).Count
+    $fnCount = ([regex]::Matches($Pattern, '<FEATURE_NAME>')).Count
+    if ($idCount -ne 1 -or $fnCount -ne 1) { return $false }
+    $stripped = $Pattern.Replace('<ID>', '').Replace('<FEATURE_NAME>', '')
+    return ($stripped -cmatch '^[a-z0-9/_-]*$')
+}
+
 function Test-JiraTeamConfig {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Object)
@@ -397,10 +429,36 @@ function Test-JiraTeamConfig {
         $errs.Add('routing_default must be a valid project key')
     }
 
-    $allowedTop = @('version_compat', 'projects', 'routing', 'routing_default', 'privacy')
+    $allowedTop = @('version_compat', 'projects', 'routing', 'routing_default', 'privacy', 'teams')
     if ($Object -is [System.Collections.IDictionary]) {
-        foreach ($k in (Sort-JiraOrdinal $Object.Keys)) {
+        foreach ($k in (Get-JiraOrdinalSorted $Object.Keys)) {
             if ($allowedTop -cnotcontains [string]$k) { $errs.Add("unknown top-level key: $k") }
+        }
+    }
+
+    # Team convention catalogue (002 US3, FR-010/FR-018) — optional. Mirror of the
+    # Bash port's _CFG_TEAM_ERRORS_JQ: per-entry field validation then id /
+    # folder_prefix uniqueness. Error strings are byte-identical across ports.
+    $teams = Get-CfgProp $Object 'teams'
+    $teamsIsArray = ($teams -is [System.Collections.IEnumerable]) -and ($teams -isnot [string])
+    if ($teamsIsArray) {
+        $seenIds = [System.Collections.Generic.List[string]]::new()
+        $seenPrefixes = [System.Collections.Generic.List[string]]::new()
+        $ti = 0
+        foreach ($t in $teams) {
+            $tid = [string](Get-CfgProp $t 'id')
+            if ($tid -cnotmatch '^[a-z][a-z0-9]*$') { $errs.Add("teams[$ti].id is invalid") }
+            $tproj = [string](Get-CfgProp $t 'project')
+            if ($tproj -cnotmatch '^[A-Z][A-Z0-9_]+$') { $errs.Add("teams[$ti].project is not a valid project key") }
+            $tprefix = [string](Get-CfgProp $t 'folder_prefix')
+            if ($tprefix -cnotmatch '^[a-z0-9][a-z0-9-]*-$') { $errs.Add("teams[$ti].folder_prefix is invalid") }
+            $tpat = Get-CfgProp $t 'branch_pattern'
+            if (-not (Test-JiraBranchPattern $tpat)) { $errs.Add("teams[$ti].branch_pattern is invalid") }
+            if ($seenIds.Contains($tid)) { $errs.Add("teams[$ti].id duplicates an earlier team id") }
+            if ($seenPrefixes.Contains($tprefix)) { $errs.Add("teams[$ti].folder_prefix duplicates an earlier folder_prefix") }
+            $seenIds.Add($tid)
+            $seenPrefixes.Add($tprefix)
+            $ti++
         }
     }
 
@@ -409,8 +467,11 @@ function Test-JiraTeamConfig {
         foreach ($p in $projects) {
             $key = Get-CfgProp $p 'key'
             if (($key -isnot [string]) -or ($key -cnotmatch '^[A-Z][A-Z0-9_]+$')) { $errs.Add("projects[$i].key is not a valid project key") }
-            $style = Get-CfgProp $p 'style'
-            if (@('company_managed', 'team_managed') -cnotcontains $style) { $errs.Add("projects[$i].style is invalid") }
+            $hasStyle = ($p -is [System.Collections.IDictionary]) -and $p.Contains('style')
+            if ($hasStyle) {
+                $style = Get-CfgProp $p 'style'
+                if (@('company_managed', 'team_managed') -cnotcontains $style) { $errs.Add("projects[$i].style is invalid") }
+            }
             $es = Get-CfgProp $p 'epic_strategy'
             if (@('per_repo', 'per_feature') -cnotcontains $es) { $errs.Add("projects[$i].epic_strategy is invalid") }
             $ts = Get-CfgProp $p 'task_strategy'
@@ -429,8 +490,24 @@ function Test-JiraLocalConfig {
     $errs = [System.Collections.Generic.List[string]]::new()
     $allowed = @('site_alias', 'resolved_ids', 'overrides')
     if ($Object -is [System.Collections.IDictionary]) {
-        foreach ($k in (Sort-JiraOrdinal $Object.Keys)) {
+        foreach ($k in (Get-JiraOrdinalSorted $Object.Keys)) {
             if ($allowed -cnotcontains [string]$k) { $errs.Add("unknown config.local key: $k") }
+        }
+    }
+    # Per-project style provenance keys (002 US1): when present under a
+    # resolved_ids entry they must carry the enum values — same error strings as
+    # the Bash port's jq program.
+    $rids = Get-CfgProp $Object 'resolved_ids'
+    if ($rids -is [System.Collections.IDictionary]) {
+        foreach ($k in (Get-JiraOrdinalSorted $rids.Keys)) {
+            $v = $rids[[string]$k]
+            if ($v -isnot [System.Collections.IDictionary]) { continue }
+            if ($v.Contains('style') -and (@('company_managed', 'team_managed') -cnotcontains $v['style'])) {
+                $errs.Add("resolved_ids.$k.style is invalid")
+            }
+            if ($v.Contains('style_source') -and (@('api', 'operator') -cnotcontains $v['style_source'])) {
+                $errs.Add("resolved_ids.$k.style_source is invalid")
+            }
         }
     }
     return $errs.ToArray()
@@ -553,6 +630,94 @@ function Import-JiraConfig {
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue $merged); Errors = @() }
 }
 
+function Test-JiraPersonalObject {
+    # Personal-file schema (002 US3) — mirror of _CFG_PERSONAL_ERRORS_JQ.
+    param([Parameter(Mandatory)] $Object)
+    $errs = [System.Collections.Generic.List[string]]::new()
+    if ($Object -is [System.Collections.IDictionary]) {
+        foreach ($k in (Get-JiraOrdinalSorted $Object.Keys)) {
+            if (@('team', 'override') -cnotcontains [string]$k) { $errs.Add("unknown personal key: $k") }
+        }
+    }
+    $team = [string](Get-CfgProp $Object 'team')
+    if ($team -cnotmatch '^[a-z][a-z0-9]*$') { $errs.Add('team is invalid') }
+    $override = Get-CfgProp $Object 'override'
+    if ($null -ne $override -and $override -is [System.Collections.IDictionary]) {
+        foreach ($k in (Get-JiraOrdinalSorted $override.Keys)) {
+            if (@('folder_prefix', 'branch_pattern') -cnotcontains [string]$k) { $errs.Add("unknown override key: $k") }
+        }
+        if ($override.Contains('folder_prefix')) {
+            $fp = [string](Get-CfgProp $override 'folder_prefix')
+            if ($fp -cnotmatch '^[a-z0-9][a-z0-9-]*-$') { $errs.Add('override.folder_prefix is invalid') }
+        }
+        if ($override.Contains('branch_pattern')) {
+            if (-not (Test-JiraBranchPattern (Get-CfgProp $override 'branch_pattern'))) { $errs.Add('override.branch_pattern is invalid') }
+        }
+    }
+    return $errs.ToArray()
+}
+
+function Import-JiraPersonalConfig {
+    <#
+    .SYNOPSIS
+      Load the human-owned personal team selection (.specify/jira/personal.yml).
+      NEVER writes the file. Absent file => {active:false}. An invalid file or an
+      unknown team fails closed (ExitCode 4). Mirror of config_personal_load.
+      Returns { ExitCode; Json; Errors }.
+    #>
+    [CmdletBinding()]
+    param(
+        [string] $ConfigDir = (Get-JiraConfigDirPath),
+        [string] $MergedJson = '{}'
+    )
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $pf = Join-Path $ConfigDir 'personal.yml'
+    if (-not (Test-Path -LiteralPath $pf)) {
+        return [pscustomobject]@{ ExitCode = 0; Json = '{"active":false}'; Errors = $errors }
+    }
+
+    $fail = {
+        param($line)
+        $errors.Add($line)
+        [Console]::Error.WriteLine($line)
+        return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors }
+    }
+
+    try { $pObj = Read-JiraConfigYamlObject -Path $pf }
+    catch {
+        return (& $fail "config: personal ($pf): not valid personal YAML")
+    }
+
+    $emit = {
+        param($label, $lines)
+        $any = $false
+        foreach ($l in $lines) {
+            if ([string]::IsNullOrEmpty($l)) { continue }
+            $any = $true
+            $errors.Add("config: $label ($pf): $l")
+            [Console]::Error.WriteLine("config: $label ($pf): $l")
+        }
+        return $any
+    }
+    if (& $emit 'credential' (Get-JiraConfigCredentialError $pObj)) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors } }
+    if (& $emit 'personal' (Test-JiraPersonalObject $pObj)) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors } }
+
+    $cfg = $MergedJson | ConvertFrom-Json -Depth 100
+    $team = [string](Get-CfgProp $pObj 'team')
+    $ids = [System.Collections.Generic.List[string]]::new()
+    if ($cfg.PSObject.Properties['teams'] -and $null -ne $cfg.teams) {
+        foreach ($t in @($cfg.teams)) { if ($t.PSObject.Properties['id']) { $ids.Add([string]$t.id) } }
+    }
+    if (-not $ids.Contains($team)) {
+        $list = if ($ids.Count -gt 0) { $ids -join ', ' } else { '(none)' }
+        return (& $fail "config: personal ($pf): unknown team `"$team`" — valid teams: $list")
+    }
+
+    $override = Get-CfgProp $pObj 'override'
+    $result = [ordered]@{ active = $true; team = $team; override = $override }
+    return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue $result); Errors = $errors }
+}
+
 # =============================================================================
 # Status classification + phase->status mapping (T039, FR-011/FR-034)
 # Mirror of config_classify_statuses / config_phase_status_targets.
@@ -610,11 +775,13 @@ function Get-JiraPhaseStatusTargetSet {
     }
     # `unique` in jq sorts ascending; mirror with an ordinal sort of distinct values.
     $distinct = [System.Collections.Generic.List[object]]::new()
-    foreach ($v in (Sort-JiraOrdinal $values -Unique)) { $distinct.Add($v) }
+    foreach ($v in (Get-JiraOrdinalSorted $values -Unique)) { $distinct.Add($v) }
     return (ConvertTo-JiraJsonValue $distinct)
 }
 
 Export-ModuleMember -Function Get-JiraExtensionVersion, Assert-JiraSingleVersionSource, `
     ConvertFrom-JiraConfigYaml, ConvertTo-JiraConfigYaml, Read-JiraConfigYamlObject, `
     Get-JiraConfigCredentialError, Test-JiraTeamConfig, Test-JiraLocalConfig, Import-JiraConfig, `
-    Get-JiraStatusClassification, Get-JiraPhaseStatusTargetSet
+    Import-JiraPersonalConfig, `
+    Get-JiraStatusClassification, Get-JiraPhaseStatusTargetSet, `
+    Test-JiraPlaceholderKey, Get-JiraPlaceholderKey

@@ -45,7 +45,7 @@ Describe 'Hook health reporting' {
 
     It 'reports hook health in every run summary, in the contract shape (FR-047)' {
         $obj = Invoke-ReconcileSummary @('reconcile', '--dry-run', '--json', $Spec) | ConvertFrom-Json
-        @($obj.hook_health.missing).Count | Should -Be 6
+        @($obj.hook_health.missing).Count | Should -Be 7
         @($obj.hook_health.present).Count | Should -Be 0
         @($obj.hook_health.disabled).Count | Should -Be 0
         $obj.hook_health.repair_hint | Should -Match 'repair-hooks'
@@ -61,13 +61,13 @@ Describe 'Hook health reporting' {
     It 'previews a dry-run --repair-hooks without writing (FR-047)' {
         $obj = Invoke-ReconcileSummary @('reconcile', '--repair-hooks', '--dry-run', '--json', $Spec) | ConvertFrom-Json
         Test-Path -LiteralPath $env:SPEC_KIT_JIRA_EXTENSIONS_YML | Should -BeFalse
-        @($obj.hook_health.missing).Count | Should -Be 6
+        @($obj.hook_health.missing).Count | Should -Be 7
     }
 
     It 'registers hooks with --repair-hooks and then reports healthy (FR-047)' {
         $obj = Invoke-ReconcileSummary @('reconcile', '--repair-hooks', '--json', $Spec) | ConvertFrom-Json
         Test-Path -LiteralPath $env:SPEC_KIT_JIRA_EXTENSIONS_YML | Should -BeTrue
-        @($obj.hook_health.present).Count | Should -Be 6
+        @($obj.hook_health.present).Count | Should -Be 7
         @($obj.hook_health.missing).Count | Should -Be 0
         $obj.hook_health.PSObject.Properties.Name | Should -Not -Contain 'repair_hint'
     }

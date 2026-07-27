@@ -157,23 +157,42 @@ function Resolve-JiraRouting {
     foreach ($rule in $rules) {
         $m = Get-JiraInterchangeProp $rule 'match'
         if ($m -isnot [System.Management.Automation.PSCustomObject]) { continue }
-        $hasPrefix = Test-JiraInterchangeProp $m 'folder_prefix'
-        $hasLabel = Test-JiraInterchangeProp $m 'spec_label'
+        # An empty-string condition counts as undeclared (twin of the bash jq
+        # `// "" != ""` guards): the shipped template's placeholder rule must
+        # not become a match-everything rule shadowing the implicit team route.
+        $prefixVal = [string](Get-JiraInterchangeProp $m 'folder_prefix')
+        $labelVal = [string](Get-JiraInterchangeProp $m 'spec_label')
+        $hasPrefix = -not [string]::IsNullOrEmpty($prefixVal)
+        $hasLabel = -not [string]::IsNullOrEmpty($labelVal)
         if (-not $hasPrefix -and -not $hasLabel) { continue }
 
         $ok = $true
-        if ($hasPrefix -and -not $FolderName.StartsWith([string]$m.folder_prefix, [System.StringComparison]::Ordinal)) { $ok = $false }
+        if ($hasPrefix -and -not $FolderName.StartsWith($prefixVal, [System.StringComparison]::Ordinal)) { $ok = $false }
         if ($hasLabel) {
             # Ordinal, CASE-SENSITIVE label match — the Bash twin uses jq index(),
             # so "Backend" must not satisfy a "backend" rule (NFR 1).
             $labelHit = $false
             foreach ($l in $labels) {
-                if ([string]::Equals([string]$l, [string]$m.spec_label, [System.StringComparison]::Ordinal)) { $labelHit = $true; break }
+                if ([string]::Equals([string]$l, $labelVal, [System.StringComparison]::Ordinal)) { $labelHit = $true; break }
             }
             if (-not $labelHit) { $ok = $false }
         }
         if ($ok) {
             return [pscustomobject]@{ ExitCode = 0; ProjectKey = [string](Get-JiraInterchangeProp $rule 'project') }
+        }
+    }
+
+    # Implicit team→project route (US3 scenario 6): after the numbering
+    # component, a folder carrying a catalogue team's folder_prefix routes to
+    # that team's project — before routing_default. The catalogue is opaque
+    # data; the engine keeps zero tracker knowledge.
+    $flat = $FolderName -creplace '^[0-9]+-', ''
+    if ((Test-JiraInterchangeProp $cfg 'teams')) {
+        foreach ($t in @($cfg.teams)) {
+            $prefix = [string](Get-JiraInterchangeProp $t 'folder_prefix')
+            if (-not [string]::IsNullOrEmpty($prefix) -and $flat.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
+                return [pscustomobject]@{ ExitCode = 0; ProjectKey = [string](Get-JiraInterchangeProp $t 'project') }
+            }
         }
     }
 

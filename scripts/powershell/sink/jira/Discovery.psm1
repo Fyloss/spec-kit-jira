@@ -29,14 +29,86 @@ function Get-DiscProp {
 }
 
 function Get-JiraDiscoveryStyle {
-    # Map the detected style to its logical value (research §1). next-gen /
-    # simplified -> team_managed; classic -> company_managed; neither -> company.
+    # THREE-VALUED style mapping (002 research §2, FR-001/FR-002). Mirror of
+    # _disc_style: a style is returned ONLY on an explicit, non-contradictory
+    # signal; both absent or contradictory returns '' — the sink never
+    # substitutes a default (the binding carries style: null).
     param($Project)
     $style = [string](Get-DiscProp $Project 'style')
     $simplified = Get-DiscProp $Project 'simplified'
-    if ($style -eq 'next-gen' -or $simplified -eq $true) { return 'team_managed' }
-    if ($style -eq 'classic' -or $simplified -eq $false) { return 'company_managed' }
-    return 'company_managed'
+    # Case-SENSITIVE like the bash twin's `case` — "Classic" is no signal.
+    $sSig = switch -CaseSensitive ($style) {
+        'next-gen' { 'team_managed' }
+        'classic' { 'company_managed' }
+        default { '' }
+    }
+    # jq tostring semantics like the bash twin: the boolean AND the exact JSON
+    # string "true"/"false" count; any other shape (including "True") does not.
+    $fStr = ''
+    if ($simplified -is [bool]) { $fStr = if ($simplified) { 'true' } else { 'false' } }
+    elseif ($null -ne $simplified) { $fStr = [string]$simplified }
+    $fSig = switch -CaseSensitive ($fStr) {
+        'true' { 'team_managed' }
+        'false' { 'company_managed' }
+        default { '' }
+    }
+    if ($sSig -and $fSig) {
+        if ($sSig -eq $fSig) { return $sSig }
+        return ''
+    }
+    return "$sSig$fSig"
+}
+
+function Get-JiraDiscoveryProjectList {
+    <#
+    .SYNOPSIS
+      The accessible-projects list (002 US2, FR-004c). Mirror of
+      discovery_list_projects: paginated GET /project/search, each value mapped
+      to {key, name, style} with the three-valued style rule (null when
+      ambiguous). Returns { ExitCode; List } — List is the canonical JSON array
+      (empty string on a fail-closed read or zero visible projects).
+    #>
+    [CmdletBinding()]
+    param()
+
+    $base = $env:SPEC_KIT_JIRA_BASE_URL
+    if (-not $base) {
+        [Console]::Error.WriteLine('discovery: SPEC_KIT_JIRA_BASE_URL is not set')
+        return [pscustomobject]@{ ExitCode = (Get-JiraExitCode 'fail_closed'); List = '' }
+    }
+    $api = "$base/rest/api/3"
+
+    $list = [System.Collections.Generic.List[object]]::new()
+    $start = 0
+    while ($true) {
+        $r = Invoke-JiraRequest -Method GET -Url "$api/project/search?startAt=$start&maxResults=50"
+        if ($r.ExitCode -ne 0) { return [pscustomobject]@{ ExitCode = [int] $r.ExitCode; List = '' } }
+        $page = $r.Body | ConvertFrom-Json -Depth 100
+        # A page without `values` must stay an EMPTY list: @($null) is a
+        # one-element array that would fabricate a phantom {null,null,null}
+        # project and bypass the zero-results fail-closed guard below.
+        $values = Get-DiscProp $page 'values'
+        if ($null -eq $values) { $values = @() } else { $values = @($values) }
+        foreach ($v in $values) {
+            $style = Get-JiraDiscoveryStyle $v
+            $list.Add([ordered]@{
+                key   = (Get-DiscProp $v 'key')
+                name  = (Get-DiscProp $v 'name')
+                style = $(if ($style -eq '') { $null } else { $style })
+            })
+        }
+        $isLast = Get-DiscProp $page 'isLast'
+        if ($null -eq $isLast) { $isLast = $true }
+        $total = Get-DiscProp $page 'total'
+        if ($null -eq $total) { $total = 0 }
+        $start += $values.Count
+        if ($isLast -eq $true -or $start -ge [int]$total -or $values.Count -eq 0) { break }
+    }
+    if ($list.Count -eq 0) {
+        [Console]::Error.WriteLine('discovery: the configured credentials can browse no visible project (project/search returned zero results)')
+        return [pscustomobject]@{ ExitCode = (Get-JiraExitCode 'fail_closed'); List = '' }
+    }
+    return [pscustomobject]@{ ExitCode = 0; List = (ConvertTo-JiraJsonValue $list) }
 }
 
 function Get-JiraDiscoveryBindingResult {
@@ -156,7 +228,7 @@ function Get-JiraDiscoveryBindingResult {
     $flagged = Get-JiraDiscoveryFlaggedField -FieldsJson (ConvertTo-JiraJsonValue @($meta.fields))
 
     $binding = [ordered]@{
-        style                 = $style
+        style                 = $(if ($style -eq '') { $null } else { $style })
         issue_types           = $issueTypes
         statuses              = $statuses
         priorities            = $prio
@@ -396,4 +468,5 @@ function Get-JiraMentionedFetch {
 }
 
 Export-ModuleMember -Function Get-JiraDiscoveryBinding, Get-JiraDiscoveryBindingResult, `
-    Get-JiraDiscoveryFlaggedField, Get-JiraMentionedFetch, Get-JiraMentionedFetchResult
+    Get-JiraDiscoveryStyle, Get-JiraDiscoveryFlaggedField, Get-JiraDiscoveryProjectList, `
+    Get-JiraMentionedFetch, Get-JiraMentionedFetchResult

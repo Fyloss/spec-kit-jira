@@ -1,0 +1,14 @@
+{
+  "name": "us1-style-operator-answer",
+  "description": "US1 (FR-001/FR-003): the operator's closed-question answer arrives as --style AMBI=team_managed against the ambiguous payload. The run persists style: team_managed with style_source: operator into resolved_ids.AMBI of config.local.yml, the summary audits the provenance, and the persisted bytes are identical across ports (FR-020, SC-004).",
+  "mock": {
+    "projects": { "AMBI": "ambiguous" }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-ambiguous",
+  "argv": ["config", "--style", "AMBI=team_managed", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1"
+  }
+}
