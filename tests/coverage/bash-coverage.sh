@@ -69,7 +69,41 @@ SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]
 REPO_ROOT="$(cd "$(dirname "${SELF}")/../.." && pwd)"
 HARNESS="${REPO_ROOT}/tests/conformance/run-scenario.sh"
 
+# Runs a command under a wall clock. GNU coreutils ships `timeout` on every
+# Linux CI image; macOS has it only as Homebrew's `gtimeout`. With neither, run
+# unbounded — refusing would block the one host where kcov works at all.
+run_bounded() {
+  local secs="$1"
+  shift
+  if command -v timeout > /dev/null; then
+    timeout --kill-after=30 "${secs}" "$@"
+  elif command -v gtimeout > /dev/null; then
+    gtimeout --kill-after=30 "${secs}" "$@"
+  else
+    "$@"
+  fi
+}
+
 # --- Exercise mode: everything below runs INSIDE kcov -------------------------
+#
+# TWO INVARIANTS HOLD FOR EVERY LINE BELOW, and both are guarded by
+# tests/bash/ci/test_coverage_runner_bounds.bats:
+#
+#   * NEVER redirect fd 2. kcov collects the trace by swapping the traced
+#     program's stderr for a pipe, so `2> /dev/null` on a phase discards every
+#     line that phase executed — the run measures nothing and says nothing.
+#     The port's real stderr therefore reaches the CI log; kcov forwards what
+#     it cannot parse as a trace line. That noise is the price of measuring.
+#   * ALWAYS read stdin from /dev/null. A phase that reaches a prompt would
+#     otherwise wait on the CI runner's stdin until the step is killed.
+
+# Progress is written to a file, not to a stream: stdout belongs to kcov.log and
+# stderr belongs to the tracer, so a stalled run would report nothing at all
+# through either. The drive side prints this file afterwards — including when
+# the wall clock fires, which is the case it exists for.
+progress() {
+  printf '[%4ds] %s\n' "${SECONDS}" "$*" >> "${PROGRESS}"
+}
 
 exercise_scenarios() {
   # Every conformance scenario through the real dispatcher. Sourced, not exec'd,
@@ -81,9 +115,11 @@ exercise_scenarios() {
     i=$((i + 1))
     out="${SCRATCH}/scenario-${i}"
     mkdir -p "${out}"
+    progress "scenario ${i}: $(basename "${scenario}")"
     # shellcheck source=/dev/null
-    ( source "${HARNESS}" "${scenario}" bash "${out}" ) > /dev/null 2>&1
+    ( source "${HARNESS}" "${scenario}" bash "${out}" ) > /dev/null < /dev/null
   done
+  progress "scenarios done (${i} run)"
 }
 
 exercise_dispatcher() {
@@ -91,20 +127,22 @@ exercise_dispatcher() {
   local entry="${REPO_ROOT}/scripts/bash/spec-kit-jira.sh"
   local work="${SCRATCH}/dispatcher"
   mkdir -p "${work}"
+  progress "dispatcher paths"
   # shellcheck source=/dev/null
-  ( cd "${work}" && source "${entry}" --help ) > /dev/null 2>&1          # help, exit 0
+  ( cd "${work}" && source "${entry}" --help ) > /dev/null < /dev/null          # help, exit 0
   # shellcheck source=/dev/null
-  ( cd "${work}" && source "${entry}" ) > /dev/null 2>&1                 # no command
+  ( cd "${work}" && source "${entry}" ) > /dev/null < /dev/null                 # no command
   # shellcheck source=/dev/null
-  ( cd "${work}" && source "${entry}" nosuchcommand ) > /dev/null 2>&1   # unknown command
+  ( cd "${work}" && source "${entry}" nosuchcommand ) > /dev/null < /dev/null   # unknown command
   # shellcheck source=/dev/null
-  ( cd "${work}" && source "${entry}" config --nosuchflag ) > /dev/null 2>&1  # usage error
+  ( cd "${work}" && source "${entry}" config --nosuchflag ) > /dev/null < /dev/null  # usage error
 }
 
 exercise_libraries() {
   # Pure library/engine surface the end-to-end corpus cannot drive into every
   # branch (serialisers, validators, naming rules). Kept to public entry points.
   local d="${REPO_ROOT}/scripts/bash"
+  progress "library entry points"
   (
     # shellcheck source=/dev/null
     source "${d}/lib/output.sh"
@@ -113,8 +151,8 @@ exercise_libraries() {
     printf '%s' "$(summary_build_json reconcile true 1 0 0 2 1 2)" | summary_render_prose > /dev/null
     uri_encode 'a b/c&d=é' > /dev/null
     printf '%s' '{"b":1,"a":[2,3]}' | json_canonical > /dev/null
-    output_warn 'coverage exercise' 2> /dev/null
-  ) > /dev/null 2>&1
+    output_warn 'coverage exercise'
+  ) > /dev/null < /dev/null
   (
     # shellcheck source=/dev/null
     source "${d}/engine/naming.sh"
@@ -124,19 +162,24 @@ exercise_libraries() {
     naming_slug 'Invoice Export — Phase 2!' > /dev/null
     naming_short_name 'ijt-' 'invoice-export' > /dev/null      # prefix prepended
     naming_short_name 'ijt-' 'ijt-invoice-export' > /dev/null  # prefix not duplicated
-  ) > /dev/null 2>&1
+  ) > /dev/null < /dev/null
 }
 
 if [ "${MODE}" = "exercise" ]; then
   SCRATCH="${SPEC_KIT_JIRA_COVERAGE_SCRATCH:-$(mktemp -d)}"
   export SCRATCH
+  PROGRESS="${SCRATCH}/progress.log"
+  : > "${PROGRESS}"
+  progress "exercise start (mode=${TARGET})"
   if [ "${TARGET}" = "bats" ]; then
-    bats -r "${REPO_ROOT}/tests/bash" > /dev/null 2>&1
+    bats -r "${REPO_ROOT}/tests/bash" > /dev/null < /dev/null
+    progress "bats done"
     exit 0
   fi
   exercise_scenarios
   exercise_dispatcher
   exercise_libraries
+  progress "exercise complete"
   exit 0
 fi
 
@@ -176,9 +219,46 @@ if [ -z "${parser_major}" ] || [ "${parser_major}" -lt 4 ]; then
   exit 2
 fi
 
-kcov --bash-parser="${BASH_PARSER}" --include-path="${REPO_ROOT}/scripts/bash" \
-  "${REPORT_DIR}" "${SELF}" --exercise > "${REPORT_DIR}/kcov.log"
+# The exercise scratch sits beside the report dir rather than inside it — kcov
+# owns that directory — but still under coverage/, so CI uploads it with the
+# rest: when a run stalls, progress.log is the only record of where.
+SCRATCH="${REPORT_DIR%/}-scratch"
+rm -rf "${SCRATCH}"
+mkdir -p "${SCRATCH}"
+export SPEC_KIT_JIRA_COVERAGE_SCRATCH="${SCRATCH}"
+PROGRESS="${SCRATCH}/progress.log"
+
+# A wall clock, because the failure this guards against is a hang, not a crash:
+# kcov reads the trace until every descendant has closed the pipe, so one child
+# that outlives the exercise makes the run wait for an EOF that never comes.
+# Without a bound of our own the CI runner kills the step and takes the
+# diagnostics with it. Note that kcov's OWN stderr is never redirected — kcov
+# swaps it for the traced program's pipe, and pointing it at anything but a
+# terminal or the job log makes it abort with "Failed to exchange stderr for
+# pipe: Bad file descriptor".
+KCOV_TIMEOUT="${SPEC_KIT_JIRA_COVERAGE_TIMEOUT:-600}"
+run_bounded "${KCOV_TIMEOUT}" kcov \
+  --bash-parser="${BASH_PARSER}" --include-path="${REPO_ROOT}/scripts/bash" \
+  "${REPORT_DIR}" "${SELF}" --exercise > "${REPORT_DIR}/kcov.log" < /dev/null
 kcov_rc=$?
+
+if [ -s "${PROGRESS}" ]; then
+  printf 'Exercise progress:\n'
+  sed 's/^/  /' "${PROGRESS}"
+  printf '\n'
+fi
+
+# 124 is `timeout`'s expiry code.
+if [ "${kcov_rc}" -eq 124 ]; then
+  printf 'bash-coverage.sh: the kcov run did not finish within %ss.\n' "${KCOV_TIMEOUT}" >&2
+  printf '  The progress above shows how far the exercise got. A run that stops\n' >&2
+  printf '  making progress is a child outliving its phase: kcov waits for every\n' >&2
+  printf '  inherited descriptor to close before it writes a report.\n' >&2
+  printf '  Raise the bound with SPEC_KIT_JIRA_COVERAGE_TIMEOUT if the work is\n' >&2
+  printf '  genuinely this long. Last lines of %s/kcov.log:\n' "${REPORT_DIR}" >&2
+  tail -20 "${REPORT_DIR}/kcov.log" 2> /dev/null | sed 's/^/    /' >&2
+  exit 2
+fi
 
 # kcov writes <report-dir>/<script>.<hash>/coverage.json; the merged directory
 # only appears for multi-target runs, so resolve whichever exists.

@@ -119,8 +119,15 @@ jobs:
       # suites, but kcov and bats-core's own DEBUG-trap tracing feed each other an
       # unbounded trace (91.7 GB observed before a disk filled), so the corpus
       # mode is the default and the step still carries a wall-clock guard.
+      # The script carries its own wall clock and prints the exercise progress
+      # when it fires, so a stall names the phase it stalled in. This step
+      # budget stays comfortably above that bound on purpose: if GitHub kills
+      # the step first, the diagnostics die with it — which is exactly how the
+      # first run of this job reported nothing but "timed out after 20 minutes".
       - name: Measure statement coverage (Constitution XIII)
-        timeout-minutes: 20
+        timeout-minutes: 15
+        env:
+          SPEC_KIT_JIRA_COVERAGE_TIMEOUT: 600
         run: ./tests/coverage/bash-coverage.sh --mode conformance --threshold 80
 
       - name: Upload coverage report
@@ -128,5 +135,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bash-coverage
-          path: coverage/bash
+          # coverage/ not coverage/bash: the exercise scratch (progress.log) is
+          # a sibling of kcov's report dir, and it is the only artefact a
+          # stalled run leaves behind.
+          path: coverage
           if-no-files-found: ignore

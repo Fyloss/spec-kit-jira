@@ -67,6 +67,10 @@ fi
 MOCK_CFG="$(mktemp)"
 jq '.mock // {}' "${SCENARIO}" > "${MOCK_CFG}"
 mock_start "${MOCK_CFG}"
+# From here on every exit path reaps the mock, including the ones `set -e` takes
+# on our behalf. An orphan holds each descriptor it inherited, and whoever reads
+# the other end then blocks forever rather than failing.
+trap mock_stop EXIT
 
 # --- Optional git repository (degraded-mode / branch-state scenarios) --------
 # `git_branch` initialises the workdir as a git repo checked out on that branch
