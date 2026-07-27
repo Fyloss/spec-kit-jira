@@ -102,7 +102,13 @@ jobs:
     # pointing kcov at a Homebrew bash 5 aborts with "Failed to exchange stderr
     # for pipe". Ubuntu's /bin/bash is >= 4, so this is the only host where the
     # Bash twin of Pester's CodeCoverage can be measured faithfully.
-    runs-on: ubuntu-latest
+    #
+    # Pinned to 22.04 rather than ubuntu-latest: kcov was dropped from the Ubuntu
+    # 24.04 (noble) archive, so `apt-get install kcov` there fails with "Unable to
+    # locate package kcov". 22.04 (jammy) still ships it in universe — the same
+    # pin the Gates workflow's coverage-bash job carries, guarded by
+    # tests/bash/ci/test_workflow_kcov_runner.bats and its Pester twin.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
