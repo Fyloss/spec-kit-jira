@@ -113,22 +113,31 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install toolchain
-        run: sudo apt-get update && sudo apt-get install -y kcov jq curl
+        run: |
+          sudo apt-get update && sudo apt-get install -y kcov jq curl
+          # Jammy's apt bats is 1.2.1, which predates BATS_TEST_TMPDIR (bats
+          # 1.4.0) — the suite's tmpdir fixtures silently resolve to `/` on it.
+          # Install the same pinned bats-core the Gates workflow uses.
+          curl -sSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.13.0.tar.gz | tar xz -C /tmp
+          sudo /tmp/bats-core-1.13.0/install.sh /usr/local
 
-      # Bounded on purpose: `--mode bats` would measure the assertion-backed unit
-      # suites, but kcov and bats-core's own DEBUG-trap tracing feed each other an
-      # unbounded trace (91.7 GB observed before a disk filled), so the corpus
-      # mode is the default and the step still carries a wall-clock guard.
-      # The script carries its own wall clock and prints the exercise progress
-      # when it fires, so a stall names the phase it stalled in. This step
-      # budget stays comfortably above that bound on purpose: if GitHub kills
-      # the step first, the diagnostics die with it — which is exactly how the
-      # first run of this job reported nothing but "timed out after 20 minutes".
+      # Two collectors, because kcov cannot run bats: it instruments bats-core's
+      # own DEBUG-trap tracing and the two feed each other an unbounded trace
+      # (91.7 GB observed before a disk filled). So kcov measures the conformance
+      # corpus and owns the denominator — which lines are statements — while the
+      # unit suites Constitution XIII actually gates on are traced on a dedicated
+      # fd and merged in. Each phase carries its own wall clock and prints the
+      # exercise progress when it fires, so a stall names the phase it stalled
+      # in. This step budget stays comfortably above both bounds on purpose: if
+      # GitHub kills the step first, the diagnostics die with it — which is
+      # exactly how the first run of this job reported nothing but "timed out
+      # after 20 minutes".
       - name: Measure statement coverage (Constitution XIII)
-        timeout-minutes: 15
+        timeout-minutes: 35
         env:
           SPEC_KIT_JIRA_COVERAGE_TIMEOUT: 600
-        run: ./tests/coverage/bash-coverage.sh --mode conformance --threshold 80
+          SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT: 1200
+        run: ./tests/coverage/bash-coverage.sh --mode full --threshold 80
 
       - name: Upload coverage report
         if: always()

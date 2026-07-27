@@ -11,7 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Bash statement-coverage gate: `tests/coverage/bash-coverage.sh` plus a
   `bash-coverage` CI job on Linux, the twin of Pester's CodeCoverage
-  (Constitution XIII).
+  (Constitution XIII). It measures the mocked unit suites the way that
+  constitution requires, using two collectors: kcov owns the denominator and
+  drives the conformance corpus, while the bats suite is traced on a dedicated
+  descriptor — kcov cannot run bats, because it instruments bats-core's own
+  DEBUG-trap tracing and the two never terminate. `--mode bats` reports traced
+  hit counts on hosts where kcov cannot run the port at all, macOS included.
 
 ### Fixed
 

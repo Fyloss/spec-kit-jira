@@ -2,34 +2,49 @@
 # tests/coverage/bash-coverage.sh — Bash-port statement coverage gate (T097).
 #
 #   ./tests/coverage/bash-coverage.sh [--threshold N] [--report-dir DIR]
-#                                     [--mode conformance|bats]
+#                                     [--mode full|conformance|bats]
 #
-# Constitution XIII requires ≥ 80% statement coverage on both ports. The
-# PowerShell port uses Pester's built-in CodeCoverage; this is the Bash twin.
+# Constitution XIII requires ≥ 80% statement coverage on both ports, computed on
+# the MOCKED UNIT SUITES. The PowerShell port uses Pester's built-in
+# CodeCoverage; this is the Bash twin.
 #
-# --- Why the default mode is NOT `kcov ... bats -r tests/bash` ----------------
-# kcov instruments bats-core's OWN tracing infrastructure (bats_debug_trap,
-# lib/bats-core/tracing.bash). kcov's trace output is then re-printed by bats's
-# trace handler and re-instrumented, each line nesting the previous, so the run
-# does not merely get slow — it never terminates, and the trace file grows
-# without bound (a single observed run wrote 91.7 GB and filled the disk).
-# `--mode bats` is therefore opt-in and MUST be run with an external wall-clock
-# and disk guard. It remains the measurement worth having, because the bats
-# suites are where the error and edge paths are asserted; if it can be made to
-# terminate on Linux it should become the default.
+# --- Why this needs two collectors instead of one -----------------------------
+# kcov cannot run bats. It instruments bats-core's OWN tracing infrastructure
+# (bats_debug_trap, lib/bats-core/tracing.bash); kcov's trace output is then
+# re-printed by bats's trace handler and re-instrumented, each line nesting the
+# previous, so the run does not merely get slow — it never terminates, and the
+# trace file grows without bound (a single observed run wrote 91.7 GB and filled
+# the disk). --exclude-path does not help: it filters reporting, not tracing.
 #
-# --- What the default (conformance) mode measures -----------------------------
-# The conformance corpus driven through the real dispatcher end-to-end, plus the
-# dispatcher/usage paths no scenario reaches. kcov's bash tracing follows sourced
-# files and forked subshells but not execve'd children, so both the harness and
-# the entry point are *sourced* (the harness honours
-# SPEC_KIT_JIRA_COVERAGE_INPROCESS for exactly this reason; the conformance suite
-# asserts that mode is behaviourally identical to the forked one).
+# So the two collectors split the work along the only seam that exists:
 #
-# This mode is a LOWER BOUND, not the whole picture: it drives happy paths and
-# the refusals scenarios encode, so modules whose branches are exercised mainly
-# by unit tests (lib/credentials.sh, engine/drift.sh, sink/jira/client.sh,
-# engine/interchange.sh) score far below their real tested coverage.
+#   * kcov owns the DENOMINATOR — which lines are statements — and measures the
+#     conformance corpus end-to-end through the real dispatcher. It is the tool
+#     Constitution XIII names, and it stays the authority on what counts.
+#   * A plain bash xtrace owns the rest of the NUMERATOR. The bats suite runs
+#     with PS4 carrying `file:line` and BASH_XTRACEFD pointing at a dedicated fd,
+#     which nothing in bats-core reads or re-prints — no feedback loop, no kcov.
+#     SHELLOPTS=xtrace is exported, so the trace follows execve'd children too,
+#     which is more than kcov manages.
+#
+# The merge counts a line as covered when either exercise ran it, and counts
+# ONLY lines kcov calls statements: a traced line kcov does not instrument
+# (the opening line of an excluded jq literal, say) can never inflate the score.
+#
+# --- Why --exclude-region is not optional -------------------------------------
+# kcov's bash line parser counts the continuation lines of a multi-line jq
+# literal as statements, and no execution can ever hit them: the whole literal
+# traces as ONE statement at its opening line. The port brackets those regions
+# with `# kcov-excl-start` / `# kcov-excl-stop` (533 lines across 8 files), and
+# without --exclude-region they sit permanently in the denominator — which alone
+# capped engine/drift.sh at 17% and the port at 59%.
+#
+# --- What the tracer must never do --------------------------------------------
+# PS4 expands in EVERY traced shell, including `bash -c` children the suite runs
+# under `set -u`. `${BASH_SOURCE}` without a default makes those children print
+# "BASH_SOURCE: unbound variable" on their own stderr, which lands in the output
+# bats captured and turns green tests red. Measuring must not change what the
+# suite sees, so the marker uses `${BASH_SOURCE:-}`.
 #
 # Exits 0 when coverage meets the threshold, 1 when it falls short, 2 on a setup
 # problem (kcov missing, unusable interpreter, no coverage produced).
@@ -39,7 +54,26 @@ set -uo pipefail
 THRESHOLD=80
 REPORT_DIR=""
 MODE="drive"
-TARGET="${SPEC_KIT_JIRA_COVERAGE_MODE:-conformance}"
+TARGET="${SPEC_KIT_JIRA_COVERAGE_MODE:-full}"
+MERGE_COBERTURA=""
+MERGE_TRACED=""
+
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+REPO_ROOT="$(cd "$(dirname "${SELF}")/../.." && pwd)"
+HARNESS="${REPO_ROOT}/tests/conformance/run-scenario.sh"
+
+# The trace marker. Bash repeats PS4's FIRST CHARACTER once per nesting depth,
+# so a frame three functions deep arrives as `###skjcov#...`; the extractor
+# matches `#+` for exactly that reason. Anything that matches on the literal
+# two-character marker instead silently drops every nested frame — which made
+# credentials.sh and client.sh look untouched.
+# The expansion belongs to each traced shell, not to this one.
+# shellcheck disable=SC2016
+TRACE_PS4='#skjcov#${BASH_SOURCE:-}:${LINENO}#skjcov# '
+# fd 8, spelled out at every use because `exec` cannot take a variable
+# descriptor. Not fd 2: that is the port's own stderr, and under kcov it belongs
+# to kcov. Not fd 3 either — bats-core reports its own results on that one.
+TRACE_FD=8
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -47,12 +81,20 @@ while [ "$#" -gt 0 ]; do
     --report-dir) REPORT_DIR="$2"; shift 2 ;;
     --mode) TARGET="$2"; shift 2 ;;
     --exercise) MODE="exercise"; shift ;;
+    --extract-trace) MODE="extract"; shift ;;
+    --merge-report)
+      MODE="merge"
+      MERGE_COBERTURA="$2"
+      MERGE_TRACED="$3"
+      shift 3
+      ;;
     -h | --help)
       printf '%s\n' \
-        "usage: bash-coverage.sh [--threshold N] [--report-dir DIR] [--mode conformance|bats]" \
-        "  conformance (default)  bounded: the conformance corpus through the real dispatcher" \
-        "  bats                   the full bats suite — see the header; needs an external" \
-        "                         wall-clock and disk guard, it is known to run away"
+        "usage: bash-coverage.sh [--threshold N] [--report-dir DIR] [--mode full|conformance|bats]" \
+        "  full (default)  kcov over the conformance corpus + the traced bats suite, merged" \
+        "  conformance     kcov over the conformance corpus alone (a lower bound)" \
+        "  bats            the traced bats suite alone — hit counts, no denominator," \
+        "                  so no gate; the one mode that runs where kcov cannot"
       exit 0
       ;;
     *) printf 'bash-coverage.sh: unknown argument: %s\n' "$1" >&2; exit 2 ;;
@@ -60,14 +102,13 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "${TARGET}" in
-  conformance | bats) ;;
-  *) printf 'bash-coverage.sh: unknown mode: %s (expected conformance|bats)\n' "${TARGET}" >&2; exit 2 ;;
+  full | conformance | bats) ;;
+  *)
+    printf 'bash-coverage.sh: unknown mode: %s (expected full|conformance|bats)\n' "${TARGET}" >&2
+    exit 2
+    ;;
 esac
 export SPEC_KIT_JIRA_COVERAGE_MODE="${TARGET}"
-
-SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-REPO_ROOT="$(cd "$(dirname "${SELF}")/../.." && pwd)"
-HARNESS="${REPO_ROOT}/tests/conformance/run-scenario.sh"
 
 # Runs a command under a wall clock. GNU coreutils ships `timeout` on every
 # Linux CI image; macOS has it only as Homebrew's `gtimeout`. With neither, run
@@ -83,6 +124,127 @@ run_bounded() {
     "$@"
   fi
 }
+
+# --- Reading the two collectors -----------------------------------------------
+
+# stdin: a raw xtrace stream. stdout: the distinct `scripts/bash/<path>:<line>`
+# frames it contains, repo-relative, with the `..` a sourced module reports
+# (commands/../lib/config.sh) resolved so both collectors name a file the same
+# way. Everything else — bats-core's own frames, `environment:0`, the port's
+# ordinary output — is dropped.
+extract_trace() {
+  # The prefilter is not cosmetic: the raw stream is the whole suite's
+  # execution, bats machinery included, and better than 99 of every 100 lines
+  # are not port frames. A regex engine per line cannot keep up with the writer,
+  # and a FIFO that fills backpressures the very suite being measured.
+  LC_ALL=C grep -F 'scripts/bash/' \
+    | LC_ALL=C awk '
+    function norm(p) { while (p ~ /[^\/]+\/\.\.\//) sub(/[^\/]+\/\.\.\//, "", p); return p }
+    {
+      if (match($0, /^#+skjcov#[^#]*#skjcov#/) == 0) next
+      frame = substr($0, RSTART, RLENGTH)
+      sub(/^#+skjcov#/, "", frame)
+      sub(/#skjcov#$/, "", frame)
+      at = index(frame, "scripts/bash/")
+      if (at == 0) next
+      print norm(substr(frame, at))
+    }
+  ' | sort -u
+}
+
+# Merges kcov's per-line report with the traced frames and prints the gate's
+# verdict. kcov's cobertura.xml is the per-line record (coverage.json carries
+# only per-file totals); its <source> root plus each class's filename gives the
+# absolute path the trace also reports.
+merge_report() {
+  local cobertura="$1" traced="$2" threshold="$3"
+  awk -v traced="${traced}" -v threshold="${threshold}" '
+    function norm(p) { while (p ~ /[^\/]+\/\.\.\//) sub(/[^\/]+\/\.\.\//, "", p); return p }
+    function rel(p,   at) {
+      at = index(p, "scripts/bash/")
+      return at == 0 ? "" : norm(substr(p, at))
+    }
+    function tail3(p,   n, parts) {
+      n = split(p, parts, "/")
+      if (n < 3) return p
+      return parts[n - 2] "/" parts[n - 1] "/" parts[n]
+    }
+    BEGIN {
+      while ((getline line < traced) > 0)
+        if (line != "") hit[line] = 1
+      close(traced)
+    }
+    /<source>/ {
+      s = $0
+      sub(/.*<source>/, "", s)
+      sub(/<\/source>.*/, "", s)
+      sub(/\/$/, "", s)
+      src = s
+      next
+    }
+    /<class / {
+      cur = ""
+      if (match($0, /filename="[^"]*"/)) {
+        f = substr($0, RSTART + 10, RLENGTH - 11)
+        cur = rel(substr(f, 1, 1) == "/" ? f : src "/" f)
+      }
+      next
+    }
+    /<line / {
+      if (cur == "") next
+      if (match($0, /number="[^"]*"/) == 0) next
+      num = substr($0, RSTART + 8, RLENGTH - 9)
+      hits = 0
+      if (match($0, /hits="[^"]*"/)) hits = substr($0, RSTART + 6, RLENGTH - 7) + 0
+      key = cur ":" num
+      if (key in seen) next
+      seen[key] = 1
+      files[cur] = 1
+      total[cur]++
+      if (hits > 0 || (key in hit)) covered[cur]++
+      next
+    }
+    END {
+      t = 0; c = 0
+      for (f in files) { t += total[f]; c += covered[f] + 0 }
+      if (t == 0) {
+        print "bash-coverage.sh: the report names no measurable statement" > "/dev/stderr"
+        exit 2
+      }
+      pct = 100 * c / t
+      printf "Bash statement coverage: %.2f%% (%d/%d lines)\n", pct, c, t
+      printf "\nPer file (ascending):\n"
+      n = 0
+      for (f in files) {
+        n++
+        rows[n] = sprintf("%9.2f|%6.2f%%  %4d/%-4d  %s", \
+          100 * (covered[f] + 0) / total[f], 100 * (covered[f] + 0) / total[f], \
+          covered[f] + 0, total[f], tail3(f))
+      }
+      for (i = 1; i <= n; i++)
+        for (j = i + 1; j <= n; j++)
+          if ((rows[i] + 0) > (rows[j] + 0)) { tmp = rows[i]; rows[i] = rows[j]; rows[j] = tmp }
+      for (i = 1; i <= n; i++) { sub(/^[^|]*\|/, "  ", rows[i]); print rows[i] }
+      if (pct + 0 < threshold + 0) {
+        printf "\nFAIL: %.2f%% is below the %s%% gate (Constitution XIII)\n", pct, threshold \
+          > "/dev/stderr"
+        exit 1
+      }
+      printf "\nPASS: %.2f%% meets the %s%% gate (Constitution XIII)\n", pct, threshold
+      exit 0
+    }
+  ' "${cobertura}"
+}
+
+if [ "${MODE}" = "extract" ]; then
+  extract_trace
+  exit 0
+fi
+
+if [ "${MODE}" = "merge" ]; then
+  merge_report "${MERGE_COBERTURA}" "${MERGE_TRACED}" "${THRESHOLD}"
+  exit $?
+fi
 
 # --- Exercise mode: everything below runs INSIDE kcov -------------------------
 #
@@ -171,11 +333,6 @@ if [ "${MODE}" = "exercise" ]; then
   PROGRESS="${SCRATCH}/progress.log"
   : > "${PROGRESS}"
   progress "exercise start (mode=${TARGET})"
-  if [ "${TARGET}" = "bats" ]; then
-    bats -r "${REPO_ROOT}/tests/bash" > /dev/null < /dev/null
-    progress "bats done"
-    exit 0
-  fi
   exercise_scenarios
   exercise_dispatcher
   exercise_libraries
@@ -183,17 +340,74 @@ if [ "${MODE}" = "exercise" ]; then
   exit 0
 fi
 
-# --- Drive mode: set up kcov, run exercise mode under it, report --------------
-
-if ! command -v kcov > /dev/null 2>&1; then
-  printf 'bash-coverage.sh: kcov not found — install it (brew install kcov / apt-get install kcov)\n' >&2
-  exit 2
-fi
+# --- Drive mode: set up the collectors, run them, merge, report ----------------
 
 if [ -z "${REPORT_DIR}" ]; then
   REPORT_DIR="${REPO_ROOT}/coverage/bash"
 fi
 mkdir -p "${REPORT_DIR}"
+
+# The exercise scratch sits beside the report dir rather than inside it — kcov
+# owns that directory — but still under coverage/, so CI uploads it with the
+# rest: when a run stalls, progress.log is the only record of where.
+SCRATCH="${REPORT_DIR%/}-scratch"
+rm -rf "${SCRATCH}"
+mkdir -p "${SCRATCH}"
+export SPEC_KIT_JIRA_COVERAGE_SCRATCH="${SCRATCH}"
+PROGRESS="${SCRATCH}/progress.log"
+TRACED="${SCRATCH}/traced.lines"
+: > "${TRACED}"
+
+KCOV_TIMEOUT="${SPEC_KIT_JIRA_COVERAGE_TIMEOUT:-600}"
+BATS_TIMEOUT="${SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT:-1200}"
+
+# Runs the bats suite with its trace on fd 8. The filter reads a FIFO rather
+# than a temp file because the raw stream is the whole suite's execution, bats
+# machinery included — gigabytes that never need to exist. Waiting on the
+# filter's own PID (not a bare `wait`) is what makes the collected file
+# complete before the merge reads it.
+trace_bats() {
+  local fifo="${SCRATCH}/trace.fifo" filter_pid
+  rm -f "${fifo}"
+  mkfifo "${fifo}"
+  ( extract_trace < "${fifo}" > "${TRACED}" ) &
+  filter_pid=$!
+  exec 8> "${fifo}"
+
+  printf 'Tracing the bats suite (fd %s)...\n' "${TRACE_FD}"
+  # SHELLOPTS carries xtrace into execve'd children, which is how the dispatcher
+  # runs get measured; it is passed through `env` because the variable is
+  # readonly in a running shell and cannot be assigned as a command prefix.
+  run_bounded "${BATS_TIMEOUT}" env \
+    PS4="${TRACE_PS4}" \
+    BASH_XTRACEFD=8 \
+    SHELLOPTS=xtrace \
+    bats -r "${REPO_ROOT}/tests/bash" > /dev/null < /dev/null
+  bats_rc=$?
+
+  exec 8>&-
+  wait "${filter_pid}"
+
+  if [ "${bats_rc}" -eq 124 ]; then
+    printf 'bash-coverage.sh: the traced bats run did not finish within %ss.\n' "${BATS_TIMEOUT}" >&2
+    printf '  Raise SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT if the suite is genuinely this long.\n' >&2
+    return 2
+  fi
+  # A red suite is the unit job's business, not this one's: a failed test still
+  # covered the lines it ran, and a test that aborts early only ever measures
+  # LESS. Reported, never fatal — unless nothing was measured at all.
+  if [ "${bats_rc}" -ne 0 ]; then
+    printf 'note: the bats suite exited %s under tracing; coverage from aborted tests is missing.\n' \
+      "${bats_rc}"
+  fi
+  if [ ! -s "${TRACED}" ]; then
+    printf 'bash-coverage.sh: the traced bats run produced no port frames at all.\n' >&2
+    printf '  Either bats is not installed, or the trace never reached fd %s.\n' "${TRACE_FD}" >&2
+    return 2
+  fi
+  printf 'Traced %s distinct statements from the bats suite.\n\n' "$(wc -l < "${TRACED}" | tr -d ' ')"
+  return 0
+}
 
 # kcov runs the traced script under its --bash-parser, which defaults to
 # /bin/bash — and that default is the ONLY interpreter it can drive on macOS:
@@ -205,28 +419,27 @@ mkdir -p "${REPORT_DIR}"
 # with exit 5 and measure nothing. Refuse up front with that explanation rather
 # than reporting a meaningless 0%. On Linux /bin/bash is >= 4 and the default
 # works, which is where the CI gate job runs.
-BASH_PARSER="${SPEC_KIT_JIRA_COVERAGE_BASH:-/bin/bash}"
-# The expansion is deliberately deferred to the child shell being probed.
-# shellcheck disable=SC2016
-parser_major="$("${BASH_PARSER}" -c 'printf %s "${BASH_VERSINFO[0]}"' 2> /dev/null)"
-if [ -z "${parser_major}" ] || [ "${parser_major}" -lt 4 ]; then
-  printf 'bash-coverage.sh: kcov must run the port under %s, which is bash %s.\n' \
-    "${BASH_PARSER}" "${parser_major:-unknown}" >&2
-  printf '  This port requires bash >= 4, so coverage measured here would be meaningless.\n' >&2
-  printf '  kcov cannot drive a non-Apple bash on macOS ("Failed to exchange stderr for\n' >&2
-  printf '  pipe"), so run this gate on Linux — the CI "Bash coverage" job does exactly\n' >&2
-  printf '  that. To override the interpreter anyway: SPEC_KIT_JIRA_COVERAGE_BASH=<path>.\n' >&2
-  exit 2
-fi
-
-# The exercise scratch sits beside the report dir rather than inside it — kcov
-# owns that directory — but still under coverage/, so CI uploads it with the
-# rest: when a run stalls, progress.log is the only record of where.
-SCRATCH="${REPORT_DIR%/}-scratch"
-rm -rf "${SCRATCH}"
-mkdir -p "${SCRATCH}"
-export SPEC_KIT_JIRA_COVERAGE_SCRATCH="${SCRATCH}"
-PROGRESS="${SCRATCH}/progress.log"
+require_kcov() {
+  if ! command -v kcov > /dev/null 2>&1; then
+    printf 'bash-coverage.sh: kcov not found — install it (brew install kcov / apt-get install kcov)\n' >&2
+    return 2
+  fi
+  BASH_PARSER="${SPEC_KIT_JIRA_COVERAGE_BASH:-/bin/bash}"
+  local parser_major
+  # The expansion is deliberately deferred to the child shell being probed.
+  # shellcheck disable=SC2016
+  parser_major="$("${BASH_PARSER}" -c 'printf %s "${BASH_VERSINFO[0]}"' 2> /dev/null)"
+  if [ -z "${parser_major}" ] || [ "${parser_major}" -lt 4 ]; then
+    printf 'bash-coverage.sh: kcov must run the port under %s, which is bash %s.\n' \
+      "${BASH_PARSER}" "${parser_major:-unknown}" >&2
+    printf '  This port requires bash >= 4, so coverage measured here would be meaningless.\n' >&2
+    printf '  kcov cannot drive a non-Apple bash on macOS ("Failed to exchange stderr for\n' >&2
+    printf '  pipe"), so run this gate on Linux — the CI "Bash coverage" job does exactly\n' >&2
+    printf '  that. To measure only what runs anywhere, use --mode bats.\n' >&2
+    return 2
+  fi
+  return 0
+}
 
 # A wall clock, because the failure this guards against is a hang, not a crash:
 # kcov reads the trace until every descendant has closed the pipe, so one child
@@ -236,55 +449,65 @@ PROGRESS="${SCRATCH}/progress.log"
 # swaps it for the traced program's pipe, and pointing it at anything but a
 # terminal or the job log makes it abort with "Failed to exchange stderr for
 # pipe: Bad file descriptor".
-KCOV_TIMEOUT="${SPEC_KIT_JIRA_COVERAGE_TIMEOUT:-600}"
-run_bounded "${KCOV_TIMEOUT}" kcov \
-  --bash-parser="${BASH_PARSER}" --include-path="${REPO_ROOT}/scripts/bash" \
-  "${REPORT_DIR}" "${SELF}" --exercise > "${REPORT_DIR}/kcov.log" < /dev/null
-kcov_rc=$?
+run_kcov() {
+  : > "${PROGRESS}"
+  run_bounded "${KCOV_TIMEOUT}" kcov \
+    --bash-parser="${BASH_PARSER}" --include-path="${REPO_ROOT}/scripts/bash" \
+    --exclude-region='kcov-excl-start:kcov-excl-stop' \
+    "${REPORT_DIR}" "${SELF}" --exercise > "${REPORT_DIR}/kcov.log" < /dev/null
+  local kcov_rc=$?
 
-if [ -s "${PROGRESS}" ]; then
-  printf 'Exercise progress:\n'
-  sed 's/^/  /' "${PROGRESS}"
-  printf '\n'
-fi
+  if [ -s "${PROGRESS}" ]; then
+    printf 'Exercise progress:\n'
+    sed 's/^/  /' "${PROGRESS}"
+    printf '\n'
+  fi
 
-# 124 is `timeout`'s expiry code.
-if [ "${kcov_rc}" -eq 124 ]; then
-  printf 'bash-coverage.sh: the kcov run did not finish within %ss.\n' "${KCOV_TIMEOUT}" >&2
-  printf '  The progress above shows how far the exercise got. A run that stops\n' >&2
-  printf '  making progress is a child outliving its phase: kcov waits for every\n' >&2
-  printf '  inherited descriptor to close before it writes a report.\n' >&2
-  printf '  Raise the bound with SPEC_KIT_JIRA_COVERAGE_TIMEOUT if the work is\n' >&2
-  printf '  genuinely this long. Last lines of %s/kcov.log:\n' "${REPORT_DIR}" >&2
-  tail -20 "${REPORT_DIR}/kcov.log" 2> /dev/null | sed 's/^/    /' >&2
-  exit 2
-fi
+  # 124 is `timeout`'s expiry code.
+  if [ "${kcov_rc}" -eq 124 ]; then
+    printf 'bash-coverage.sh: the kcov run did not finish within %ss.\n' "${KCOV_TIMEOUT}" >&2
+    printf '  The progress above shows how far the exercise got. A run that stops\n' >&2
+    printf '  making progress is a child outliving its phase: kcov waits for every\n' >&2
+    printf '  inherited descriptor to close before it writes a report.\n' >&2
+    printf '  Raise the bound with SPEC_KIT_JIRA_COVERAGE_TIMEOUT if the work is\n' >&2
+    printf '  genuinely this long. Last lines of %s/kcov.log:\n' "${REPORT_DIR}" >&2
+    tail -20 "${REPORT_DIR}/kcov.log" 2> /dev/null | sed 's/^/    /' >&2
+    return 2
+  fi
 
-# kcov writes <report-dir>/<script>.<hash>/coverage.json; the merged directory
-# only appears for multi-target runs, so resolve whichever exists.
-SUMMARY="$(find "${REPORT_DIR}" -name coverage.json -maxdepth 3 2> /dev/null | head -1)"
-if [ -z "${SUMMARY}" ] || [ ! -f "${SUMMARY}" ]; then
-  printf 'bash-coverage.sh: kcov produced no coverage.json (rc=%s); see %s/kcov.log\n' \
-    "${kcov_rc}" "${REPORT_DIR}" >&2
-  exit 2
-fi
+  # kcov writes <report-dir>/<script>.<hash>/cobertura.xml; the merged directory
+  # only appears for multi-target runs, so resolve whichever exists.
+  COBERTURA="$(find "${REPORT_DIR}" -maxdepth 3 -name cobertura.xml 2> /dev/null | head -1)"
+  if [ -z "${COBERTURA}" ] || [ ! -f "${COBERTURA}" ]; then
+    printf 'bash-coverage.sh: kcov produced no cobertura.xml (rc=%s); see %s/kcov.log\n' \
+      "${kcov_rc}" "${REPORT_DIR}" >&2
+    return 2
+  fi
+  return 0
+}
 
-percent="$(jq -r '.percent_covered' "${SUMMARY}")"
-covered="$(jq -r '.covered_lines' "${SUMMARY}")"
-total="$(jq -r '.total_lines' "${SUMMARY}")"
+# --- What each mode collects, then the single shared verdict ------------------
 
-printf 'Bash statement coverage: %s%% (%s/%s lines)\n' "${percent}" "${covered}" "${total}"
-printf '\nPer file (ascending):\n'
-jq -r '.files[] | [(.percent_covered | tonumber), .covered_lines, .total_lines, .file]
-       | @tsv' "${SUMMARY}" \
-  | sort -n \
-  | awk -F'\t' '{ n = split($4, p, "/"); printf "  %6.2f%%  %4d/%-4d  %s\n", $1, $2, $3, p[n-2] "/" p[n-1] "/" p[n] }'
+case "${TARGET}" in
+  bats)
+    # The one mode that runs where kcov cannot. No kcov means no denominator,
+    # so this reports hit counts for gap-finding and gates on nothing.
+    trace_bats || exit $?
+    printf 'Statements traced per file (no denominator without kcov — not a gate):\n'
+    awk -F: '{ n = split($1, p, "/"); c[p[n - 2] "/" p[n - 1] "/" p[n]]++ }
+             END { for (f in c) printf "  %5d  %s\n", c[f], f }' "${TRACED}" | sort -k1 -n
+    exit 0
+    ;;
+  conformance)
+    require_kcov || exit $?
+    run_kcov || exit $?
+    ;;
+  full)
+    require_kcov || exit $?
+    run_kcov || exit $?
+    trace_bats || exit $?
+    ;;
+esac
 
-# Integer comparison so the gate needs no bc/python.
-pct_int="${percent%%.*}"
-if [ "${pct_int:-0}" -lt "${THRESHOLD}" ]; then
-  printf '\nFAIL: %s%% is below the %s%% gate (Constitution XIII)\n' "${percent}" "${THRESHOLD}" >&2
-  exit 1
-fi
-printf '\nPASS: %s%% meets the %s%% gate (Constitution XIII)\n' "${percent}" "${THRESHOLD}"
-exit 0
+merge_report "${COBERTURA}" "${TRACED}" "${THRESHOLD}"
+exit $?
