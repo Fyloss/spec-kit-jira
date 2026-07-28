@@ -242,6 +242,114 @@ YAML
   [[ "$output" == *"unknown"* ]]
 }
 
+# --- Adoption section (003 T003) ---------------------------------------------
+
+# Write a team config.yml carrying an `adoption:` section into $DIR.
+write_team_with_adoption() {
+  cat > "${DIR}/config.yml" <<YAML
+projects:
+  - key: ADO
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+routing_default: ADO
+adoption:
+  enabled: ${1-true}
+  label_prefix: "${2-speckit-adopt:}"
+YAML
+}
+
+@test "config_load accepts an adoption section (003 T003, FR-001)" {
+  write_team_with_adoption
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"unknown top-level key"* ]]
+  [ "$(jq -r '.adoption.enabled' <<< "${output}")" = "true" ]
+  [ "$(jq -r '.adoption.label_prefix' <<< "${output}")" = "speckit-adopt:" ]
+}
+
+@test "config_load treats an absent adoption section as disabled (003 FR-001)" {
+  write_valid_team
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.adoption.enabled // false' <<< "${output}")" = "false" ]
+}
+
+# --- adoption schema rules (003 T033, FR-002) --------------------------------
+
+@test "config_load refuses an adoption.enabled that is not a boolean (003 T033)" {
+  write_team_with_adoption "maybe"
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"adoption.enabled"* ]]
+}
+
+@test "config_load refuses an empty adoption.label_prefix (003 T033, FR-002)" {
+  write_team_with_adoption true ""
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"adoption.label_prefix"* ]]
+}
+
+@test "config_load refuses a whitespace-bearing adoption.label_prefix (003 T033, FR-002)" {
+  write_team_with_adoption true "speckit adopt:"
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"adoption.label_prefix"* ]]
+  [[ "$output" == *"whitespace"* ]]
+}
+
+@test "config_load refuses an unknown key inside the adoption section (003 T033)" {
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: ADO
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+routing_default: ADO
+adoption:
+  enabled: true
+  mystery: nope
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"unknown adoption key"* ]]
+}
+
+@test "an over-long prefix is refused before any search, exit 4 (003 T033, FR-002)" {
+  # The 255-character label limit is checked against the LONGEST suffix the
+  # folders in scope imply, which only the engine knows — so the rule lives
+  # there and runs before discovery, never after it.
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/bash/engine/adoption.sh"
+  local long
+  long="$(printf 'p%.0s' $(seq 1 250))"
+  run adoption_validate_prefix "${long}" 20
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"255"* ]]
+}
+
+@test "the shipped template documents the adoption section (003 T033, FR-002, XVI)" {
+  local tpl="${ROOT}/templates/config.yml.template"
+  # The section exists, carries both keys, and is self-documented with prose
+  # comments explaining the opt-in and the three label forms.
+  local json
+  json="$(config_yaml_to_json "${tpl}")"
+  [ "$(jq -r '.adoption.enabled' <<< "${json}")" = "false" ]
+  [ "$(jq -r '.adoption.label_prefix' <<< "${json}")" = "speckit-adopt:" ]
+  grep -q '^adoption:' "${tpl}"
+  grep -q '^  # Turn adoption on' "${tpl}"
+  grep -q 'speckit-adopt:007-invoice-export ' "${tpl}"
+  grep -q 'speckit-adopt:007-invoice-export:us2' "${tpl}"
+  grep -q 'speckit-adopt:007  ' "${tpl}"
+  grep -q 'short form' "${tpl}"
+  grep -q 'never guesses' "${tpl}"
+  # And the template still loads and validates as a whole.
+  cp "${tpl}" "${DIR}/config.yml"
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+}
+
 # --- Cross-port parity -------------------------------------------------------
 
 @test "config_yaml_to_json is byte-identical across ports" {

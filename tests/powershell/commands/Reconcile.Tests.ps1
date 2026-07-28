@@ -83,3 +83,55 @@ Describe 'Invoke-JiraReconcile (dry-run)' {
         finally { $env:SPEC_KIT_JIRA_LIFECYCLE = $null }
     }
 }
+
+Describe 'Adoption reporting (003 T111, FR-018)' {
+    BeforeAll {
+        # The reporting helper is exercised directly so the assertion is about
+        # the report itself, not about a whole dispatched run.
+        $script:Adopted = '{"stories":[{"local_id":"s1","title":"S","priority_logical":"P2","description":{"blocks":[]}}]}'
+        $script:HumanDesc = '{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"PO handwritten note."}]}]}'
+    }
+
+    It 'reports the ticket and that the panel was ADDED on the first reconcile' {
+        $ctx = "{`"tickets`":{`"s1`":`"ADO-1`"},`"ticket_origins`":{`"s1`":`"human`"},`"ticket_descriptions`":{`"s1`":$script:HumanDesc}}"
+        $r = @((Get-JiraReconcileAdoptedReport -NeutralDocJson $script:Adopted -PlanContextJson $ctx) | ConvertFrom-Json)
+        $r.Count | Should -Be 1
+        $r[0].ticket | Should -Be 'ADO-1'
+        $r[0].action | Should -BeLike '*adopted ticket*'
+        $r[0].action | Should -BeLike '*added below the existing description*'
+        $r[0].action | Should -BeLike '*nothing outside it was touched*'
+    }
+
+    It 'reports the panel as UPDATED once the marker is present' {
+        $marker = 'Synced from spec-kit — do not edit below this line'
+        $desc = "{`"type`":`"doc`",`"version`":1,`"content`":[{`"type`":`"paragraph`",`"content`":[{`"type`":`"text`",`"text`":`"PO note.`"}]},{`"type`":`"paragraph`",`"content`":[{`"type`":`"text`",`"text`":`"$marker`"}]}]}"
+        $ctx = "{`"tickets`":{`"s1`":`"ADO-1`"},`"ticket_origins`":{`"s1`":`"human`"},`"ticket_descriptions`":{`"s1`":$desc}}"
+        $r = @((Get-JiraReconcileAdoptedReport -NeutralDocJson $script:Adopted -PlanContextJson $ctx) | ConvertFrom-Json)
+        $r[0].action | Should -BeLike '*updated*'
+        $r[0].action | Should -Not -BeLike '*added below*'
+    }
+
+    It 'reports nothing for a bridge-created ticket' {
+        $ctx = "{`"tickets`":{`"s1`":`"ADO-1`"},`"ticket_origins`":{`"s1`":`"bridge-created`"},`"ticket_descriptions`":{`"s1`":$script:HumanDesc}}"
+        (Get-JiraReconcileAdoptedReport -NeutralDocJson $script:Adopted -PlanContextJson $ctx) | Should -Be '[]'
+    }
+
+    It 'reports nothing when the story has no existing ticket' {
+        (Get-JiraReconcileAdoptedReport -NeutralDocJson $script:Adopted -PlanContextJson '{}') | Should -Be '[]'
+    }
+
+    It 'omits the summary key entirely when no ticket is adopted' {
+        $out = Invoke-Captured @('reconcile', '--dry-run', '--json', $script:SpecWith) 2> $null | ConvertFrom-Json
+        $out.PSObject.Properties.Name | Should -Not -Contain 'adopted'
+    }
+
+    It 'surfaces the report in the DEFAULT prose output (Principle XVI)' {
+        $env:SPEC_KIT_JIRA_PLAN_CONTEXT = "{`"tickets`":{`"s1`":`"ADO-1`"},`"ticket_origins`":{`"s1`":`"human`"},`"ticket_descriptions`":{`"s1`":$script:HumanDesc}}"
+        try {
+            $out = (Invoke-Captured @('reconcile', '--dry-run', $script:SpecWith) 2> $null) -join "`n"
+            $out | Should -BeLike '*Adopted:*'
+            $out | Should -BeLike '*ADO-1: adopted ticket*'
+        }
+        finally { $env:SPEC_KIT_JIRA_PLAN_CONTEXT = $null }
+    }
+}

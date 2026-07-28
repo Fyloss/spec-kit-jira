@@ -36,18 +36,22 @@ function Invoke-JiraCliParse {
     $dryRun = 'false'
     $json = 'false'
     $onDrift = 'abort'
+    $onDriftSet = $false
     $verbose = 'false'
     $repairHooks = 'false'
     $help = 'false'
     $parseError = ''
     $useTeam = ''
+    $yes = 'false'
     $positional = [System.Collections.Generic.List[string]]::new()
     $styles = [System.Collections.Generic.List[string]]::new()
+    $binds = [System.Collections.Generic.List[string]]::new()
+    $specs = [System.Collections.Generic.List[string]]::new()
 
     for ($idx = 0; $idx -lt $Arguments.Count; $idx++) {
         $arg = $Arguments[$idx]
         switch -Regex ($arg) {
-            '^(config|reconcile|mention|feature)$' {
+            '^(config|reconcile|mention|feature|adopt)$' {
                 if ([string]::IsNullOrEmpty($command)) { $command = $arg } else { $positional.Add($arg) }
                 break
             }
@@ -55,6 +59,37 @@ function Invoke-JiraCliParse {
             '^--json$' { $json = 'true'; break }
             '^--verbose$' { $verbose = 'true'; break }
             '^--repair-hooks$' { $repairHooks = 'true'; break }
+            # `adopt` pre-confirms the apply phase with --yes (003 research §6).
+            '^--yes$' { $yes = 'true'; break }
+            '^--bind$' {
+                # Repeatable explicit binding (003 US4): <folder>[:us<N>]=<KEY>.
+                # Only the STRUCTURE is checked here; the key's SHAPE is
+                # validated in the sink (research §9).
+                if ($idx + 1 -ge $Arguments.Count) {
+                    $parseError = '--bind requires a value (--bind <folder>[:us<N>]=<KEY>)'
+                }
+                else {
+                    $idx++
+                    $v = $Arguments[$idx]
+                    $eq = $v.IndexOf('=')
+                    if ($eq -gt 0 -and $eq -lt ($v.Length - 1)) { $binds.Add($v) }
+                    else { $parseError = "invalid --bind value: $v (expected <folder>[:us<N>]=<KEY>)" }
+                }
+                break
+            }
+            '^--spec$' {
+                # Repeatable adoption scope (003 US6).
+                if ($idx + 1 -ge $Arguments.Count) {
+                    $parseError = '--spec requires a value (--spec <folder>)'
+                }
+                else {
+                    $idx++
+                    $v = $Arguments[$idx]
+                    if (-not [string]::IsNullOrEmpty($v)) { $specs.Add($v) }
+                    else { $parseError = '--spec requires a non-empty folder name' }
+                }
+                break
+            }
             '^(--help|-h)$' { $help = 'true'; break }
             '^--style$' {
                 # Repeatable operator answer to the closed style question (002 US1).
@@ -82,6 +117,7 @@ function Invoke-JiraCliParse {
             }
             '^--on-drift=' {
                 $onDrift = $arg.Substring($arg.IndexOf('=') + 1)
+                $onDriftSet = $true
                 if ($onDrift -ne 'abort' -and $onDrift -ne 'proceed') {
                     $parseError = "invalid --on-drift value: $onDrift (expected abort|proceed)"
                 }
@@ -92,6 +128,12 @@ function Invoke-JiraCliParse {
             default { $positional.Add($arg); break }
         }
         if ($parseError) { break }
+    }
+
+    # `adopt` performs no transition and reads no status, so drift has no meaning
+    # for it. Checked after the loop because the command may follow the flag.
+    if (-not $parseError -and $command -eq 'adopt' -and $onDriftSet) {
+        $parseError = '--on-drift is not accepted by adopt (adoption performs no transition)'
     }
 
     $lines = [System.Collections.Generic.List[string]]::new()
@@ -109,6 +151,9 @@ function Invoke-JiraCliParse {
         $lines.Add("help=$help")
         $lines.Add("styles=$($styles -join ' ')")
         $lines.Add("use_team=$useTeam")
+        $lines.Add("yes=$yes")
+        $lines.Add("binds=$($binds -join ' ')")
+        $lines.Add("specs=$($specs -join ' ')")
         $lines.Add("args=$($positional -join ' ')")
         $lines.Add("exit=$($script:ExitCodes.ok)")
     }

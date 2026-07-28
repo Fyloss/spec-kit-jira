@@ -1,0 +1,29 @@
+{
+  "name": "us6-adopt-resume",
+  "description": "003 US6 (T162): one ticket is ALREADY stamped in the corpus, as an interrupted first run would have left it. The re-run recognises its own marker, skips that ticket rather than re-stamping it, and writes only the rest — so the two runs together leave exactly ONE stamp per ticket (FR-027, SC-007). Exit 0.",
+  "mock": {
+    "projects": { "ADO": "company", "BILL": "team" },
+    "identity": {
+      "ADO-1": { "origin": "human", "repo": "acme/app", "spec_slug": "003-alpha-report" },
+      "ADO-2": { "origin": "human", "repo": "acme/app", "spec_slug": "003-alpha-report" }
+    },
+    "issues": { "ADO-1": { "labels": ["speckit-adopt:003-alpha-report"] },
+      "ADO-2": { "labels": ["speckit-adopt:003-alpha-report:us1"], "parent": "ADO-1" },
+      "ADO-3": { "labels": ["speckit-adopt:004-beta-import"] },
+      "ADO-4": { "labels": ["speckit-adopt:004-beta-import:us1"], "parent": "ADO-3" },
+      "ADO-5": { "labels": ["speckit-adopt:004-gamma-export"] },
+      "ADO-6": { "labels": ["speckit-adopt:004-gamma-export:us1"], "parent": "ADO-5" },
+      "BILL-1": { "labels": ["speckit-adopt:005-delta-billing"] },
+      "BILL-2": { "labels": ["speckit-adopt:005-delta-billing:us1"], "parent": "BILL-1" },
+      "BILL-3": { "labels": ["speckit-adopt:006-epsilon-ledger"] },
+      "BILL-4": { "labels": ["speckit-adopt:006-epsilon-ledger:us1"], "parent": "BILL-3" } }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption-multi",
+  "argv": ["adopt", "--yes", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

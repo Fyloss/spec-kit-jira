@@ -1,0 +1,18 @@
+{
+  "name": "us4-adopt-unknown-folder",
+  "description": "003 US4 (T127): a --bind naming a spec folder absent from disk. The bridge will not invent a spec, so this is an operator error rather than an ambiguity: the WHOLE run stops as a usage error with exit 1 and zero writes, before anything is searched (FR-021).",
+  "mock": {
+    "projects": { "ADO": "company" },
+    "issues": {
+      "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption",
+  "argv": ["adopt", "--bind", "009-never-on-disk=ADO-1", "--yes", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

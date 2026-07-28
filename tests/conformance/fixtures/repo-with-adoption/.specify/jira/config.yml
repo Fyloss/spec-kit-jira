@@ -1,0 +1,14 @@
+# Team config: a repository with label-based adoption enabled (003 fixtures).
+# Business-language keys; see the extension README for the full reference.
+projects:
+  - key: ADO
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+routing_default: ADO
+
+# Adoption of pre-existing tickets is opt-in (003 FR-001) and enabled here so the
+# conformance corpus can exercise the adopt command end to end.
+adoption:
+  enabled: true
+  label_prefix: "speckit-adopt:"

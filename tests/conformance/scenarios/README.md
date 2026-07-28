@@ -14,7 +14,15 @@ is a failing test, not a documented quirk.
   "description": "…",                  // optional, human note
   "mock": {                            // mock-jira config (see ../mock-jira/README.md)
     "projects": { "COMP": "company", "TEAM": "team" },
-    "faults":   { "AUTH": { "status": 401 } }
+    "faults":   { "AUTH": { "status": 401 } },
+    "identity": {                      // per-issue identity markers (claim reads)
+      "COMP-3": { "origin": "human", "repo": "acme/app", "spec_slug": "004-other" }
+    },
+    "issues": {                        // the 003 adoption candidate corpus
+      "COMP-1": { "labels": ["speckit-adopt:003-feature"] },
+      "COMP-2": { "labels": ["speckit-adopt:003-feature:us1"], "parent": "COMP-1" }
+    },
+    "pageSize": 2                      // cap page size to exercise pagination
   },
   "fixture": "tests/conformance/fixtures/repo-basic",  // optional repo dir copied into the workdir
   "argv": ["config", "--json"],        // optional args to the entry point

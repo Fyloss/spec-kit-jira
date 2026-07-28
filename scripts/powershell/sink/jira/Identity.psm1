@@ -97,4 +97,6 @@ function Set-JiraIdentity {
     return [int]$r.ExitCode
 }
 
-Export-ModuleMember -Function Get-JiraIdentityMarker, Test-JiraIdentityClaimedByOther, Get-JiraIdentity, Set-JiraIdentity
+# Get-JiraIdentityUrl is exported so the adoption sink composes the SAME property
+# URL this module writes to, rather than a second spelling of it (003 research §7).
+Export-ModuleMember -Function Get-JiraIdentityMarker, Test-JiraIdentityClaimedByOther, Get-JiraIdentity, Set-JiraIdentity, Get-JiraIdentityUrl

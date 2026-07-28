@@ -18,6 +18,10 @@ Export-ModuleMember -Function Invoke-JiraConfig
 function Invoke-JiraReconcile { param([string[]] $Arguments) [Console]::Out.WriteLine("reconcile-ran"); return 0 }
 Export-ModuleMember -Function Invoke-JiraReconcile
 '@
+    Set-Content -LiteralPath (Join-Path $script:StubDir 'Adopt.psm1') -Value @'
+function Invoke-JiraAdopt { param([string[]] $Arguments) [Console]::Out.WriteLine("adopt-ran args=$($Arguments -join ' ')"); return 0 }
+Export-ModuleMember -Function Invoke-JiraAdopt
+'@
     function Invoke-Entry {
         param([string[]] $EntryArgs, [hashtable] $Env = @{})
         $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -87,5 +91,49 @@ Describe 'Dispatcher' {
     It 'a routed but unbuilt command is a usage error (exit 1)' {
         $r = Invoke-Entry -EntryArgs @('mention')
         $r.ExitCode | Should -Be 1
+    }
+
+    # --- adopt (003 T012) ----------------------------------------------------
+
+    It 'the usage block lists adopt (003 T012)' {
+        $r = Invoke-Entry -EntryArgs @('--help')
+        $r.ExitCode | Should -Be 0
+        $r.StdOut | Should -Match '<config\|reconcile\|mention\|feature\|adopt>'
+    }
+
+    It 'the a-command-is-required message lists adopt (003 T012)' {
+        $r = Invoke-Entry -EntryArgs @()
+        $r.ExitCode | Should -Be 1
+        $r.StdErr | Should -Match '\(config\|reconcile\|mention\|feature\|adopt\)'
+    }
+
+    It 'routes adopt to its Invoke-JiraAdopt entry, passing options through (003 T012)' {
+        $r = Invoke-Entry -EntryArgs @('adopt', '--yes')
+        $r.ExitCode | Should -Be 0
+        $r.StdOut | Should -Match 'adopt-ran'
+        $r.StdOut | Should -Match '--yes'
+    }
+
+    It 'adopt --on-drift is a usage error at the dispatcher (003 T012)' {
+        $r = Invoke-Entry -EntryArgs @('adopt', '--on-drift=proceed')
+        $r.ExitCode | Should -Be 1
+        $r.StdOut | Should -Not -Match 'adopt-ran'
+    }
+
+    It 'does NOT leak the engine verbose stream into stdout on --verbose (NFR-1)' {
+        # Regression: `pwsh -File <script> … --verbose` binds that token to the
+        # ENGINE's -Verbose common parameter, which streams every module load and
+        # export to stdout and corrupts a --json summary. The Bash port has no
+        # equivalent, so the engine stream must stay silent.
+        $r = Invoke-Entry -EntryArgs @('config', '--verbose')
+        $r.StdOut | Should -Not -Match 'VERBOSE:'
+        $r.StdOut | Should -Not -Match 'Loading module from path'
+        $r.StdOut | Should -Match 'config-ran'
+    }
+
+    It 'still passes --verbose through to the command (NFR-1)' {
+        # Silencing the engine stream must not swallow the extension's own flag.
+        $r = Invoke-Entry -EntryArgs @('config', '--verbose')
+        $r.StdOut | Should -Match '--verbose'
     }
 }

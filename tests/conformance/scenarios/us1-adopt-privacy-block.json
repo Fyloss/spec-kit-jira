@@ -1,0 +1,24 @@
+{
+  "name": "us1-adopt-privacy-block",
+  "description": "003 US1 (T049): the BLOCK-tier privacy guard applies to adoption with NO exemption. Adoption's only payload field it controls is the marker's repository identifier; here it carries a real Cloud host, which is a BLOCK-tier coordinate. Because the stamp set goes through the shared write path, the guard runs BEFORE the first write: exit 9 and zero property PUTs in the call log (FR-028, FR-030, Principle IX).",
+  "mock": {
+    "projects": { "ADO": "company" },
+    "issues": {
+      "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+      "ADO-2": { "labels": ["speckit-adopt:003-label-based-adoption:us1"], "parent": "ADO-1" },
+      "ADO-3": { "labels": ["speckit-adopt:003-label-based-adoption:us2"], "parent": "ADO-1" },
+      "ADO-4": { "labels": ["speckit-adopt:004-billing-export"] },
+      "ADO-5": { "labels": ["speckit-adopt:004-billing-export:us1"], "parent": "ADO-4" },
+      "ADO-6": { "labels": ["speckit-adopt:005-audit-trail"] },
+      "ADO-7": { "labels": ["speckit-adopt:005-audit-trail:us1"], "parent": "ADO-6" }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption",
+  "argv": ["adopt", "--yes", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/mirror-of-acme.atlassian.net"
+  }
+}

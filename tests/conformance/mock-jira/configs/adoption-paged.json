@@ -1,0 +1,13 @@
+{
+  "projects": {
+    "ADO": "company"
+  },
+  "pageSize": 2,
+  "issues": {
+    "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+    "ADO-2": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+    "ADO-3": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+    "ADO-4": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+    "ADO-5": { "labels": ["speckit-adopt:003-label-based-adoption"] }
+  }
+}

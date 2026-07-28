@@ -1,0 +1,31 @@
+{
+  "name": "us4-adopt-pin-refusals",
+  "description": "003 US4 (T126): a pin is validated EXACTLY like a discovered candidate. One pin names a ticket already claimed by another spec and one names a ticket outside the spec's routed project — the `wrong-project` class US2 defers here, because discovery searches inside the routed project and can never produce it. Both refuse with the same messages and the same exit code a discovered candidate would (US4 AS-3), exit 4.",
+  "mock": {
+    "projects": { "ADO": "company", "BILL": "team" },
+    "identity": {
+      "ADO-70": { "origin": "human", "repo": "acme/app", "spec_slug": "009-someone-elses-spec" }
+    },
+    "issues": {
+      "ADO-1": { "labels": ["speckit-adopt:003-alpha-report"] },
+      "ADO-2": { "labels": ["speckit-adopt:003-alpha-report:us1"], "parent": "ADO-1" },
+      "ADO-70": { "labels": [] },
+      "BILL-90": { "labels": [] },
+      "BILL-1": { "labels": ["speckit-adopt:005-delta-billing"] },
+      "BILL-2": { "labels": ["speckit-adopt:005-delta-billing:us1"], "parent": "BILL-1" },
+      "BILL-3": { "labels": ["speckit-adopt:006-epsilon-ledger"] },
+      "BILL-4": { "labels": ["speckit-adopt:006-epsilon-ledger:us1"], "parent": "BILL-3" }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption-multi",
+  "argv": ["adopt",
+           "--bind", "004-beta-import=ADO-70",
+           "--bind", "004-gamma-export=BILL-90",
+           "--yes", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

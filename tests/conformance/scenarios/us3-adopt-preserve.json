@@ -1,0 +1,88 @@
+{
+  "name": "us3-adopt-preserve",
+  "description": "003 US3 (T112): adopt, then reconcile TWICE. Stamping origin `human` is what selects the managed-panel splice, so the first reconcile ADDS the panel below the hand-written description with every pre-existing byte intact, and performs no creation, deletion or transition on the adopted ticket. The second reconcile — given the state the first one left — writes NOTHING at all, because churn on a human-origin ticket is measured on the managed section alone (SC-002, SC-006, FR-018).",
+  "mock": {
+    "projects": {
+      "ADO": "company"
+    },
+    "issues": {
+      "ADO-1": {
+        "labels": [
+          "speckit-adopt:003-label-based-adoption"
+        ]
+      },
+      "ADO-2": {
+        "labels": [
+          "speckit-adopt:003-label-based-adoption:us1"
+        ],
+        "parent": "ADO-1"
+      },
+      "ADO-3": {
+        "labels": [
+          "speckit-adopt:003-label-based-adoption:us2"
+        ],
+        "parent": "ADO-1"
+      },
+      "ADO-4": {
+        "labels": [
+          "speckit-adopt:004-billing-export"
+        ]
+      },
+      "ADO-5": {
+        "labels": [
+          "speckit-adopt:004-billing-export:us1"
+        ],
+        "parent": "ADO-4"
+      },
+      "ADO-6": {
+        "labels": [
+          "speckit-adopt:005-audit-trail"
+        ]
+      },
+      "ADO-7": {
+        "labels": [
+          "speckit-adopt:005-audit-trail:us1"
+        ],
+        "parent": "ADO-6"
+      }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption",
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "003-label-based-adoption"
+  },
+  "steps": [
+    {
+      "argv": [
+        "adopt",
+        "--yes",
+        "--json"
+      ]
+    },
+    {
+      "argv": [
+        "reconcile",
+        "--json",
+        "specs/003-label-based-adoption/spec.md"
+      ],
+      "env": {
+        "SPEC_KIT_JIRA_PLAN_CONTEXT": "{\"tickets\":{\"s1\":\"ADO-2\",\"s2\":\"ADO-3\"},\"ticket_origins\":{\"s1\":\"human\",\"s2\":\"human\"},\"ticket_descriptions\":{\"s1\":{\"type\":\"doc\",\"version\":1,\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"PO handwritten note that must survive byte-for-byte.\"}]}]},\"s2\":{\"type\":\"doc\",\"version\":1,\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"PO handwritten note that must survive byte-for-byte.\"}]}]}}}"
+      }
+    },
+    {
+      "argv": [
+        "reconcile",
+        "--json",
+        "specs/003-label-based-adoption/spec.md"
+      ],
+      "env": {
+        "SPEC_KIT_JIRA_PLAN_CONTEXT": "{\"tickets\":{\"s1\":\"ADO-2\",\"s2\":\"ADO-3\"},\"ticket_origins\":{\"s1\":\"human\",\"s2\":\"human\"},\"ticket_descriptions\":{\"s1\":{\"content\":[{\"content\":[{\"text\":\"PO handwritten note that must survive byte-for-byte.\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"marks\":[{\"type\":\"strong\"}],\"text\":\"Synced from spec-kit — do not edit below this line\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"text\":\"**Given** a ticket carrying a spec-naming adoption label **When** the operator confirms the adoption plan **Then** the ticket carries the spec's identity marker\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"attrs\":{\"level\":3},\"content\":[{\"text\":\"Acceptance Criteria\",\"type\":\"text\"}],\"type\":\"heading\"},{\"attrs\":{\"panelType\":\"info\"},\"content\":[{\"content\":[{\"text\":\"Given a ticket carrying a spec-naming adoption label\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"text\":\"When the operator confirms the adoption plan\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"text\":\"Then the ticket carries the spec's identity marker\",\"type\":\"text\"}],\"type\":\"paragraph\"}],\"type\":\"panel\"}],\"type\":\"doc\",\"version\":1},\"s2\":{\"content\":[{\"content\":[{\"text\":\"PO handwritten note that must survive byte-for-byte.\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"marks\":[{\"type\":\"strong\"}],\"text\":\"Synced from spec-kit — do not edit below this line\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"text\":\"**Given** two tickets carrying the same adoption label **When** the operator runs adopt **Then** the binding is refused with zero writes\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"attrs\":{\"level\":3},\"content\":[{\"text\":\"Acceptance Criteria\",\"type\":\"text\"}],\"type\":\"heading\"},{\"attrs\":{\"panelType\":\"info\"},\"content\":[{\"content\":[{\"text\":\"Given two tickets carrying the same adoption label\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"text\":\"When the operator runs adopt\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"text\":\"Then the binding is refused with zero writes\",\"type\":\"text\"}],\"type\":\"paragraph\"}],\"type\":\"panel\"}],\"type\":\"doc\",\"version\":1}}}",
+        "SPEC_KIT_JIRA_LIFECYCLE": "{\"tickets\":{\"s1\":{\"key\":\"ADO-2\",\"origin\":\"human\",\"current\":{\"description\":{\"content\":[{\"content\":[{\"text\":\"PO handwritten note that must survive byte-for-byte.\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"marks\":[{\"type\":\"strong\"}],\"text\":\"Synced from spec-kit — do not edit below this line\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"text\":\"**Given** a ticket carrying a spec-naming adoption label **When** the operator confirms the adoption plan **Then** the ticket carries the spec's identity marker\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"attrs\":{\"level\":3},\"content\":[{\"text\":\"Acceptance Criteria\",\"type\":\"text\"}],\"type\":\"heading\"},{\"attrs\":{\"panelType\":\"info\"},\"content\":[{\"content\":[{\"text\":\"Given a ticket carrying a spec-naming adoption label\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"text\":\"When the operator confirms the adoption plan\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"text\":\"Then the ticket carries the spec's identity marker\",\"type\":\"text\"}],\"type\":\"paragraph\"}],\"type\":\"panel\"}],\"type\":\"doc\",\"version\":1},\"summary\":\"Adopt a hierarchy discovered by label\"}},\"s2\":{\"key\":\"ADO-3\",\"origin\":\"human\",\"current\":{\"description\":{\"content\":[{\"content\":[{\"text\":\"PO handwritten note that must survive byte-for-byte.\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"marks\":[{\"type\":\"strong\"}],\"text\":\"Synced from spec-kit — do not edit below this line\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"text\":\"**Given** two tickets carrying the same adoption label **When** the operator runs adopt **Then** the binding is refused with zero writes\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"attrs\":{\"level\":3},\"content\":[{\"text\":\"Acceptance Criteria\",\"type\":\"text\"}],\"type\":\"heading\"},{\"attrs\":{\"panelType\":\"info\"},\"content\":[{\"content\":[{\"text\":\"Given two tickets carrying the same adoption label\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"text\":\"When the operator runs adopt\",\"type\":\"text\"}],\"type\":\"paragraph\"},{\"content\":[{\"text\":\"Then the binding is refused with zero writes\",\"type\":\"text\"}],\"type\":\"paragraph\"}],\"type\":\"panel\"}],\"type\":\"doc\",\"version\":1},\"summary\":\"Adoption is fail-closed on ambiguity\"}}}}"
+      }
+    }
+  ]
+}

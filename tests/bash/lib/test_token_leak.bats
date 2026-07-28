@@ -52,3 +52,78 @@ teardown() {
   run grep -c "RAWSECRETXYZ0123456789" <<< "${out}"
   [ "$output" = "0" ]
 }
+
+# --- adopt at maximum verbosity (003 T142, FR-025, NFR-3) --------------------
+
+# adopt_corpus — a labelled corpus plus the adoption fixture, so the whole
+# discovery/classify/apply path runs for real rather than short-circuiting.
+adopt_corpus() {
+  printf '%s' '{"projects":{"ADO":"company"},"issues":{
+    "ADO-1":{"labels":["speckit-adopt:003-label-based-adoption"]},
+    "ADO-2":{"labels":["speckit-adopt:003-label-based-adoption:us1"],"parent":"ADO-1"},
+    "ADO-3":{"labels":["speckit-adopt:003-label-based-adoption:us2"],"parent":"ADO-1"},
+    "ADO-4":{"labels":["speckit-adopt:004-billing-export"]},
+    "ADO-5":{"labels":["speckit-adopt:004-billing-export:us1"],"parent":"ADO-4"},
+    "ADO-6":{"labels":["speckit-adopt:005-audit-trail"]},
+    "ADO-7":{"labels":["speckit-adopt:005-audit-trail:us1"],"parent":"ADO-6"}}}'
+}
+
+adopt_workdir() {
+  local w
+  w="$(mktemp -d)"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-adoption/." "${w}/"
+  printf '%s' "${w}"
+}
+
+@test "the token never appears in a full adopt at max verbosity under set -x (T142)" {
+  mock_start_json "$(adopt_corpus)"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}" SPEC_KIT_JIRA_REPO="acme/app"
+  local wd out
+  wd="$(adopt_workdir)"
+  out="$( (cd "${wd}" && bash -x "${ENTRY_BASH}" adopt --yes --verbose --json) 2>&1 || true )"
+  rm -rf "${wd}"
+  run grep -c "RAWSECRETXYZ0123456789" <<< "${out}"
+  [ "$output" = "0" ]
+}
+
+@test "the site host never appears in adopt output at any verbosity (FR-025)" {
+  mock_start_json "$(adopt_corpus)"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}" SPEC_KIT_JIRA_REPO="acme/app"
+  local wd out
+  wd="$(adopt_workdir)"
+  # stdout + stderr WITHOUT the xtrace: the trace legitimately shows the URL it
+  # is about to request, but nothing the operator sees may carry the host.
+  out="$( (cd "${wd}" && bash "${ENTRY_BASH}" adopt --yes --verbose --json) 2>&1 || true )"
+  rm -rf "${wd}"
+  run grep -c "${MOCK_BASE_URL}" <<< "${out}"
+  [ "$output" = "0" ]
+  run grep -c "127.0.0.1" <<< "${out}"
+  [ "$output" = "0" ]
+}
+
+@test "the prose adopt output carries no credential and no host either (FR-025)" {
+  mock_start_json "$(adopt_corpus)"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}" SPEC_KIT_JIRA_REPO="acme/app"
+  local wd out
+  wd="$(adopt_workdir)"
+  out="$( (cd "${wd}" && bash "${ENTRY_BASH}" adopt --dry-run --verbose) 2>&1 || true )"
+  rm -rf "${wd}"
+  [[ "${out}" == *"Adoption plan"* ]]
+  run grep -c -e "RAWSECRETXYZ0123456789" -e "127.0.0.1" -e "user@example.com" <<< "${out}"
+  [ "$output" = "0" ]
+}
+
+@test "a refusal message carries no credential and no host (FR-025)" {
+  # Refusal messages name spec folders and issue keys — and nothing else.
+  mock_start_json '{"projects":{"ADO":"company"},"issues":{
+    "ADO-8":{"labels":["speckit-adopt:004-billing-export"]},
+    "ADO-9":{"labels":["speckit-adopt:004-billing-export"]}}}'
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}" SPEC_KIT_JIRA_REPO="acme/app"
+  local wd out
+  wd="$(adopt_workdir)"
+  out="$( (cd "${wd}" && bash "${ENTRY_BASH}" adopt --yes --verbose --json) 2>&1 || true )"
+  rm -rf "${wd}"
+  [[ "${out}" == *"several-candidates"* ]]
+  run grep -c -e "RAWSECRETXYZ0123456789" -e "127.0.0.1" <<< "${out}"
+  [ "$output" = "0" ]
+}

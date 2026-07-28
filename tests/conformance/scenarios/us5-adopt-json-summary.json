@@ -1,0 +1,27 @@
+{
+  "name": "us5-adopt-json-summary",
+  "description": "003 US5 (T145): a run that BINDS some targets and REFUSES others, so both halves of the summary are populated — applied bindings carrying their reason, refused bindings carrying their message and copy-pasteable remediation (FR-024). The summary conforms to 001's run-summary schema plus the 003 adoption delta, and carries no credential and no site host at any verbosity (FR-025). Exit 4.",
+  "mock": {
+    "projects": { "ADO": "company" },
+    "identity": {
+      "ADO-5": { "origin": "human", "repo": "acme/app", "spec_slug": "009-someone-elses-spec" }
+    },
+    "issues": {
+      "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+      "ADO-2": { "labels": ["speckit-adopt:003-label-based-adoption:us1"], "parent": "ADO-1" },
+      "ADO-3": { "labels": ["speckit-adopt:003-label-based-adoption:us2"], "parent": "ADO-1" },
+      "ADO-4": { "labels": ["speckit-adopt:004-billing-export"] },
+      "ADO-5": { "labels": ["speckit-adopt:004-billing-export:us1"], "parent": "ADO-4" },
+      "ADO-60": { "labels": ["speckit-adopt:005-audit-trail"] },
+      "ADO-61": { "labels": ["speckit-adopt:005-audit-trail"] }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption",
+  "argv": ["adopt", "--yes", "--json", "--verbose"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

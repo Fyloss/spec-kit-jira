@@ -66,6 +66,41 @@ setup() {
   [[ "$(jq -r '.notes[0]' <<< "$output")" == *"K-10"* ]]
 }
 
+# --- an ADOPTED ticket is never hard-deleted (003 T108, FR-017) --------------
+
+@test "an adopted ticket is never hard-deleted — the write path emits no DELETE at all" {
+  # An adopted ticket carries origin `human`, and a human-origin ticket is
+  # excluded from hard deletion for the rest of its life (003 FR-017). The
+  # guarantee is STRUCTURAL here: the bridge has no delete path whatsoever, so
+  # there is nothing an adopted ticket could fall through into.
+  local lc
+  lc="$(jq -cn '{order:["To Do","In Progress","Done"], base_url:"http://h",
+    tickets:{s1:{key:"K-1", origin:"human", status:"Done", category:"post-scope",
+                 target:"To Do", transition_id:"11"}}}')"
+  run plan_lifecycle "${ACTIONS}" "${DOC}" "${lc}"
+  [ "$status" -eq 0 ]
+  [ "$(jq '[.actions[] | select(.method == "DELETE")] | length' <<< "$output")" -eq 0 ]
+}
+
+@test "no module in the write path can emit a hard deletion (003 T108, FR-017)" {
+  # The exclusion cannot be forgotten because the capability does not exist:
+  # neither port's sources contain a DELETE verb anywhere.
+  run bash -c "grep -rlE '\"DELETE\"|'\''DELETE'\''|-Method[[:space:]]+DELETE' '${ROOT}/scripts' | wc -l | tr -d ' '"
+  [ "$output" = "0" ]
+}
+
+@test "the most a prune may do to an adopted ticket is detach its identity (FR-017)" {
+  # If a future prune ever runs, the ONLY endpoint it could touch on a
+  # human-origin ticket is the identity property — never the issue itself.
+  local lc
+  lc="$(jq -cn '{order:[], base_url:"http://h",
+    tickets:{s1:{key:"K-1", origin:"human"}}}')"
+  run plan_lifecycle "${ACTIONS}" "${DOC}" "${lc}"
+  [ "$status" -eq 0 ]
+  # Every emitted action targets the issue for CONTENT; none removes it.
+  [ "$(jq '[.actions[] | select(.method == "DELETE" or (.url | test("/archive|/delete")))] | length' <<< "$output")" -eq 0 ]
+}
+
 @test "the PowerShell port folds the lifecycle rules byte-identically (NFR-1)" {
   local ps_abs; ps_abs="$(cd "${ROOT}/scripts/powershell/sink/jira" && pwd)"
   local lc

@@ -1,0 +1,25 @@
+{
+  "name": "us4-adopt-pin-overrides",
+  "description": "003 US4 (T128, AS-5): a pin disagrees with what discovery found. The pin wins, and the plan states BOTH keys — the pinned one and the discovered one it overrode — so the operator can see exactly what their override displaced (FR-022). Exit 0.",
+  "mock": {
+    "projects": { "ADO": "company" },
+    "issues": {
+      "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+      "ADO-2": { "labels": ["speckit-adopt:003-label-based-adoption:us1"], "parent": "ADO-1" },
+      "ADO-3": { "labels": ["speckit-adopt:003-label-based-adoption:us2"], "parent": "ADO-1" },
+      "ADO-4": { "labels": ["speckit-adopt:004-billing-export"] },
+      "ADO-5": { "labels": ["speckit-adopt:004-billing-export:us1"], "parent": "ADO-4" },
+      "ADO-6": { "labels": ["speckit-adopt:005-audit-trail"] },
+      "ADO-7": { "labels": ["speckit-adopt:005-audit-trail:us1"], "parent": "ADO-6" },
+      "ADO-99": { "labels": [], "parent": "ADO-6" }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption",
+  "argv": ["adopt", "--bind", "005-audit-trail:us1=ADO-99", "--yes", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

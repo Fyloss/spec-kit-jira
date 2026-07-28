@@ -148,4 +148,27 @@ Describe 'after_* hook registration' {
         @($obj.hooks.before_specify).Count | Should -Be 1
         $obj.hooks.before_specify[0].enabled | Should -BeFalse
     }
+
+    # --- adoption is never fired by a hook (003 T014, FR-029) ----------------
+
+    It 'writes no adoption entry under any event (003 T014, FR-029)' {
+        # Adoption requires an operator confirmation and is a one-time deliberate
+        # transition; hooks are automatic and non-blocking, so the two never mix.
+        [void](Set-JiraHookRegistration -Path $Ext)
+        $obj = ConvertFrom-JiraConfigYaml -Path $Ext | ConvertFrom-Json
+        @($obj.hooks.PSObject.Properties.Name).Count | Should -Be 7
+        foreach ($e in $obj.hooks.PSObject.Properties.Name) {
+            @($obj.hooks.$e | Where-Object { $_.command -match 'adopt' }).Count | Should -Be 0
+        }
+    }
+
+    It 'leaves register_hooks free of any adoption vocabulary (003 T014, FR-029)' {
+        $src = Get-Content -Raw -LiteralPath (Join-Path $HookDir 'RegisterHooks.psm1')
+        $src | Should -Not -Match 'adopt'
+    }
+
+    It 'reports no adoption hook as missing (003 T014, FR-029)' {
+        $h = Get-JiraHookHealth -Path (Join-Path $Work 'absent.yml') | ConvertFrom-Json
+        @($h.missing | Where-Object { $_ -match 'adopt' }).Count | Should -Be 0
+    }
 }

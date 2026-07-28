@@ -16,8 +16,57 @@ Import-Module (Join-Path $PSScriptRoot '../engine/Parse.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../engine/Interchange.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/PlanApply.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force # hook health + repair (US9)
+# Imported for the 003 FR-018 adoption report: the panel marker and the neutral
+# split that decides whether this run ADDS the panel or updates it.
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/Adf.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../engine/ManagedSection.psm1') -Force
 
 $script:ReconcileExitConfig = 4
+
+function Get-JiraReconcileAdoptedReport {
+    <#
+    .SYNOPSIS
+      003 FR-018: report, per ADOPTED ticket, that it was adopted and what this
+      reconcile added to it. A ticket is adopted when its plan context declares a
+      non-bridge origin — the marker adoption stamped. Whether the panel is being
+      ADDED or updated is decided by the existing description's marker; either
+      way nothing outside the panel is touched. Mirror of
+      _reconcile_adopted_report.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $NeutralDocJson, [Parameter(Mandatory)] [string] $PlanContextJson)
+
+    # `.PSObject.Properties[$name]` is used rather than `.Properties.Name -contains`
+    # because an object parsed from `{}` has an EMPTY property collection, and
+    # reading `.Name` off that throws under StrictMode.
+    $prop = { param($o, $n) if ($null -eq $o) { $null } else { $o.PSObject.Properties[$n] } }
+
+    $doc = $NeutralDocJson | ConvertFrom-Json -Depth 100
+    $ctx = $PlanContextJson | ConvertFrom-Json -Depth 100
+    $origins = (& $prop $ctx 'ticket_origins')?.Value
+    $tickets = (& $prop $ctx 'tickets')?.Value
+    $descs = (& $prop $ctx 'ticket_descriptions')?.Value
+
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($story in @($doc.stories)) {
+        $sid = [string]$story.local_id
+        $origin = [string]((& $prop $origins $sid)?.Value)
+        $ticket = [string]((& $prop $tickets $sid)?.Value)
+        if ([string]::IsNullOrEmpty($ticket) -or [string]::IsNullOrEmpty($origin) -or $origin -ceq 'bridge-created') { continue }
+
+        $existing = (& $prop $descs $sid)?.Value
+        $existingContent = (& $prop $existing 'content')?.Value
+        $content = if ($null -ne $existingContent) { ConvertTo-JiraJsonValue $existingContent } else { '[]' }
+        $split = Split-JiraManagedSectionPanel -ContentJson $content -Marker (Get-JiraManagedMarker) | ConvertFrom-Json -Depth 100
+        $action = if ($split.had_marker) {
+            'adopted ticket: the managed panel was updated; nothing outside it was touched'
+        } else {
+            'adopted ticket: the managed panel was added below the existing description; nothing outside it was touched'
+        }
+        $out.Add([ordered]@{ ticket = $ticket; action = $action })
+    }
+    return (ConvertTo-JiraJsonValue $out.ToArray())
+}
 
 function Get-JiraReconcilePlanContext {
     # The plan context: base_url plus any caller overrides from
@@ -201,6 +250,11 @@ function Invoke-JiraReconcile {
         $summaryObj['warnings'] = @($warnsJson | ConvertFrom-Json -Depth 100)
         $summaryObj['notes'] = @($notesJson | ConvertFrom-Json -Depth 100)
     }
+    # 003 FR-018: adopted tickets are reported by name, with what was added. The
+    # key appears only when at least one ticket is adopted, so a reconcile over a
+    # purely bridge-created corpus keeps its summary byte-for-byte unchanged.
+    $adopted = @((Get-JiraReconcileAdoptedReport -NeutralDocJson $built.Document -PlanContextJson $planCtx) | ConvertFrom-Json -Depth 100)
+    if ($adopted.Count -gt 0) { $summaryObj['adopted'] = $adopted }
     $summaryObj['hook_health'] = $hooksHealth
     $summaryObj['exit_code'] = $rc
     $summary = ConvertTo-JiraJsonValue $summaryObj
@@ -214,4 +268,4 @@ function Invoke-JiraReconcile {
     return $rc
 }
 
-Export-ModuleMember -Function Invoke-JiraReconcile
+Export-ModuleMember -Function Invoke-JiraReconcile, Get-JiraReconcileAdoptedReport

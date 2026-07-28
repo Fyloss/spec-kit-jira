@@ -15,6 +15,15 @@
 #   fixture (string, opt)    repo dir (relative to repo root) copied into the workdir
 #   argv    (array,  opt)    arguments passed to the entry point
 #   env     (object, opt)    extra environment variables for the run
+#   steps   (array,  opt)    MULTI-COMMAND scenarios: [{argv:[...], env:{...}}, …]
+#                            run in order against the SAME workdir and the SAME
+#                            mock, so a sequence such as adopt -> reconcile ->
+#                            reconcile is one comparable capture. Each step's
+#                            `env` is layered over the scenario's. stdout and
+#                            stderr accumulate; `exit` carries one code per step,
+#                            LF-separated. `argv` and `steps` are mutually
+#                            exclusive; with `argv` the capture is exactly as
+#                            before (one command, one exit line).
 #
 # The entry point defaults to the canonical port path but can be overridden with
 # SPEC_KIT_JIRA_ENTRY_BASH / SPEC_KIT_JIRA_ENTRY_PWSH (used to pin paths in CI
@@ -94,33 +103,61 @@ while IFS=$'\t' read -r key value; do
   [ -n "${key}" ] && export "${key}=${value}"
 done < <(jq -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv' "${SCENARIO}")
 
-# --- Argv --------------------------------------------------------------------
-ARGV=()
-while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq -r '.argv[]? // empty' "${SCENARIO}")
-
 # --- Run and capture ---------------------------------------------------------
-set +e
-if [ "${PORT}" = "bash" ]; then
-  if [ -n "${SPEC_KIT_JIRA_COVERAGE_INPROCESS:-}" ]; then
-    # Coverage mode only (T097): kcov's bash tracing follows forked subshells but
-    # NOT execve'd children, so `bash "${ENTRY}"` measures nothing. Sourcing the
-    # entry point in a subshell keeps every observable identical — own cwd, own
-    # argv, own redirections, own exit status, and `set -euo pipefail` scoped to
-    # the subshell — while making scripts/bash/** visible to the tracer.
-    # stderr is deliberately NOT captured in this mode: the tracer streams its
-    # PS4 trace on fd 2, so redirecting fd 2 to a file would hide every executed
-    # line from it. Coverage mode asserts nothing about stderr.
-    # shellcheck source=/dev/null
-    ( cd "${WORKDIR}" && source "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout"
-    : > "${OUTDIR}/stderr"
+# run_step <step-json> — execute one command, APPENDING its stdout/stderr to the
+# capture and its exit code to the exit file. The step's own `env` is exported
+# for that command only, so a sequence can vary the seams (plan context,
+# lifecycle facts) between steps.
+run_step() {
+  local step="$1"
+  local -a argv=()
+  while IFS= read -r arg; do argv+=("${arg}"); done < <(jq -r '.argv[]? // empty' <<< "${step}")
+
+  local -a envkeys=()
+  while IFS=$'\t' read -r key value; do
+    [ -n "${key}" ] || continue
+    envkeys+=("${key}")
+    export "${key}=${value}"
+  done < <(jq -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv' <<< "${step}")
+
+  set +e
+  if [ "${PORT}" = "bash" ]; then
+    if [ -n "${SPEC_KIT_JIRA_COVERAGE_INPROCESS:-}" ]; then
+      # Coverage mode only (T097): kcov's bash tracing follows forked subshells
+      # but NOT execve'd children, so `bash "${ENTRY}"` measures nothing.
+      # Sourcing the entry point in a subshell keeps every observable identical —
+      # own cwd, own argv, own redirections, own exit status, and
+      # `set -euo pipefail` scoped to the subshell — while making
+      # scripts/bash/** visible to the tracer. stderr is deliberately NOT
+      # captured in this mode: the tracer streams its PS4 trace on fd 2, so
+      # redirecting fd 2 to a file would hide every executed line from it.
+      # shellcheck source=/dev/null
+      ( cd "${WORKDIR}" && source "${ENTRY}" ${argv[@]+"${argv[@]}"} ) >> "${OUTDIR}/stdout"
+    else
+      ( cd "${WORKDIR}" && bash "${ENTRY}" ${argv[@]+"${argv[@]}"} ) >> "${OUTDIR}/stdout" 2>> "${OUTDIR}/stderr"
+    fi
   else
-    ( cd "${WORKDIR}" && bash "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout" 2> "${OUTDIR}/stderr"
+    ( cd "${WORKDIR}" && pwsh -NoProfile -File "${ENTRY}" ${argv[@]+"${argv[@]}"} ) >> "${OUTDIR}/stdout" 2>> "${OUTDIR}/stderr"
   fi
+  echo "$?" >> "${OUTDIR}/exit"
+  set -e
+
+  local k
+  for k in ${envkeys[@]+"${envkeys[@]}"}; do unset "${k}"; done
+}
+
+: > "${OUTDIR}/stdout"
+: > "${OUTDIR}/stderr"
+: > "${OUTDIR}/exit"
+
+if [ "$(jq -r 'has("steps")' "${SCENARIO}")" = "true" ]; then
+  while IFS= read -r step; do
+    [ -n "${step}" ] || continue
+    run_step "${step}"
+  done < <(jq -c '.steps[]' "${SCENARIO}")
 else
-  ( cd "${WORKDIR}" && pwsh -NoProfile -File "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout" 2> "${OUTDIR}/stderr"
+  run_step "$(jq -c '{argv: (.argv // [])}' "${SCENARIO}")"
 fi
-echo "$?" > "${OUTDIR}/exit"
-set -e
 
 mock_stop
 cp "${MOCK_CALLLOG}" "${OUTDIR}/calls.log" 2> /dev/null || : > "${OUTDIR}/calls.log"

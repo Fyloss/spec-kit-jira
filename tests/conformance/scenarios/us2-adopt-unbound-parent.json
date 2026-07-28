@@ -1,0 +1,23 @@
+{
+  "name": "us2-adopt-unbound-parent",
+  "description": "003 US2 (T088): a story-labelled candidate exists but its spec's feature-level ticket is neither already bound nor bound in this run (no ticket carries the feature label). Adopting the story alone would leave an orphan under a parent the bridge does not own, so the binding refuses with `unbound-parent` and points at the --bind that fixes it. Exit 4 (FR-014).",
+  "mock": {
+    "projects": { "ADO": "company" },
+    "issues": {
+      "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+      "ADO-2": { "labels": ["speckit-adopt:003-label-based-adoption:us1"], "parent": "ADO-1" },
+      "ADO-3": { "labels": ["speckit-adopt:003-label-based-adoption:us2"], "parent": "ADO-1" },
+      "ADO-4": { "labels": ["speckit-adopt:004-billing-export"] },
+      "ADO-5": { "labels": ["speckit-adopt:004-billing-export:us1"], "parent": "ADO-4" },
+      "ADO-7": { "labels": ["speckit-adopt:005-audit-trail:us1"], "parent": "ADO-6" }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption",
+  "argv": ["adopt", "--yes", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

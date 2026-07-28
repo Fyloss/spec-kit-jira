@@ -1,0 +1,16 @@
+{
+  "name": "us6-adopt-unknown-scope",
+  "description": "003 US6 (T163): a --spec naming a spec folder absent from disk. The bridge will not invent a spec, so the WHOLE run stops as a usage error with exit 1 and zero writes, before anything is searched (FR-026, US6 AS-3).",
+  "mock": {
+    "projects": { "ADO": "company" },
+    "issues": { "ADO-1": { "labels": ["speckit-adopt:003-alpha-report"] } }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption-multi",
+  "argv": ["adopt", "--spec", "009-never-on-disk", "--yes", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

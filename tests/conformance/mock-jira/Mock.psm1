@@ -3,6 +3,13 @@
 # Imported by Pester suites (and the conformance harness) to start/stop the mock
 # server and read its recorded call sequence. Mirror of lib.sh so both ports
 # drive the identical mock over HTTP.
+#
+# The config object is passed through verbatim, so every field the server knows is
+# available here — including the 003 `issues` corpus (per-key labels / parent /
+# project) the JQL label search and the per-issue context read are served from,
+# and the `identity` markers the claim read consumes. `-ConfigJson` seeds the
+# same object inline, which is how a suite builds a candidate corpus without
+# committing a config file; lib.sh's mock_start_json is its twin.
 
 Set-StrictMode -Version Latest
 
@@ -10,6 +17,7 @@ function Start-JiraMock {
     [CmdletBinding()]
     param(
         [string]$ConfigPath,
+        [string]$ConfigJson,
         [string]$FixtureDir
     )
     $mockDir = $PSScriptRoot
@@ -20,6 +28,11 @@ function Start-JiraMock {
     $callLog = Join-Path $tmp 'calls.log'
     $ready = Join-Path $tmp 'ready'
     New-Item -ItemType File -Path $callLog | Out-Null
+
+    if ($ConfigJson) {
+        $ConfigPath = Join-Path $tmp 'config.json'
+        [System.IO.File]::WriteAllText($ConfigPath, $ConfigJson, [System.Text.UTF8Encoding]::new($false))
+    }
 
     $server = Join-Path $mockDir 'mock-server.ps1'
     $argList = @('-NoProfile', '-File', $server, '-CallLogPath', $callLog, '-ReadyFile', $ready, '-FixtureDir', $FixtureDir)

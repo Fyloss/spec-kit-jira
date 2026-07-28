@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-27
+
+Label-based adoption of pre-existing Jira tickets (003).
+
+### Added
+
+- New `adopt` command: binds tickets that already exist in Jira to the spec
+  folders they belong to. Strictly two-phase — a read-only discovery that
+  prints the plan and writes nothing, then an apply phase that runs only after
+  an explicit confirmation. The **only** write it ever emits is the identity
+  marker: no create, delete, transition, comment, link, relabel, description or
+  summary write (FR-006, FR-007).
+- Two committable config keys under a new `adoption:` section, self-documented
+  in `templates/config.yml.template`: `adoption.enabled` (default `false` — the
+  feature is opt-in and enabling it is a PR-reviewable team decision) and
+  `adoption.label_prefix` (default `speckit-adopt:`). While adoption is
+  disabled a labelled ticket is never even read (FR-001, FR-002, SC-009).
+- Three label forms, all of which must **name** a spec: `<prefix><folder>`,
+  `<prefix><folder>:us<N>`, and the short `<prefix><NNN>` accepted only while
+  exactly one spec folder in scope carries that numbering component. A label
+  carrying the prefix alone adopts nothing — the bridge never guesses which
+  spec a ticket belongs to (FR-003).
+- Fail-closed classification with eight named refusal classes —
+  `no-candidate`, `several-candidates`, `already-claimed`,
+  `spec-owns-bridge-ticket`, `wrong-project`, `unbound-parent`, `wrong-parent`,
+  `ambiguous-short-number`. Each refuses **that binding** with zero writes while
+  the unambiguous bindings in the same run still apply, and each message names
+  the spec folder, every ticket involved, and a copy-pasteable remediation
+  (FR-009…FR-015, SC-005).
+- No similarity, order, recency or issue-type tie-break exists in any code
+  path: two candidates whose titles match the spec exactly are still refused
+  (FR-012).
+- Three new flags: `--bind <folder>[:us<N>]=<KEY>` to pin a target to a specific
+  ticket (validated exactly like a discovered candidate, and the documented
+  answer to every refusal), `--spec <folder>` to scope a run to a subset of spec
+  folders (the rest contribute no label to any query, so their tickets are never
+  read), and `--yes` to pre-confirm the apply phase (FR-020…FR-022, FR-026).
+- Adopted tickets are recorded as human-authored, permanently: the first
+  `reconcile` afterwards **adds** its managed panel below the existing prose
+  with every pre-existing byte intact and reports, per adopted ticket, what it
+  added; the reconcile after that writes nothing (FR-016, FR-018, SC-002,
+  SC-006).
+- Re-running `adopt` over an already-adopted backlog performs zero writes of
+  every kind and exits 0, so an interrupted adoption completes on re-run with
+  exactly one stamp per ticket (FR-019, FR-027, SC-004, SC-007).
+
+### Changed
+
+- The mocked Jira double gained a real JQL-aware `GET /search/jql` handler with
+  `nextPageToken` cursor pagination, a per-issue context read, and in-run
+  persistence of written entity properties, so the conformance corpus can prove
+  idempotency rather than assume it. The scenario harness gained multi-command
+  `steps`, which is how `adopt → reconcile → reconcile` is captured and diffed
+  as one sequence.
+- `run-summary.schema.json` accepts `adopt` as a command and documents the
+  `adoption` block and the `adopted` report (003 delta).
+
+### Fixed
+
+- **Cross-port URI encoding.** The PowerShell port's `ConvertTo-JiraUriComponent`
+  used JavaScript's `encodeURIComponent` unreserved set, which leaves `!*'()`
+  intact, where `jq`'s `@uri` escapes them. Any query carrying a parenthesis —
+  such as the adoption JQL's `labels IN (…)` — produced a different request URL
+  on each port. The unreserved set is now RFC 3986's `A-Za-z0-9-_.~`, matching
+  `jq` exactly (NFR-1).
+- **PowerShell `--verbose` handling.** `pwsh -File <entry> … --verbose` bound
+  that token to the engine's `-Verbose` common parameter, which streamed every
+  module load to stdout (corrupting a `--json` summary) *and* consumed the token
+  so the extension's own parser never saw it. The engine stream is now silenced
+  and the flag handed back to the arguments it was taken from (NFR-1).
+
 ## [0.2.0] - 2026-07-27
 
 Reliable automatic Jira discovery & team-based feature prefix (002).
@@ -144,6 +215,7 @@ First public release.
   repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Fyloss/spec-kit-jira/releases/tag/v0.1.0

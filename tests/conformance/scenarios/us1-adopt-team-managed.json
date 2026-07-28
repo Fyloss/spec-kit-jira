@@ -1,0 +1,24 @@
+{
+  "name": "us1-adopt-team-managed",
+  "description": "003 US1 (T050): the SAME labelled corpus served by a TEAM-MANAGED project. Adoption reads labels, project, parent and the identity property, and writes only the identity property — it asserts nothing about issue types, statuses, transitions, priorities or custom fields, so it carries no project-style branch and must bind and stamp identically to the company-managed run (NFR-5, Principle VII). Diffing this capture against us1-adopt-hierarchy proves it.",
+  "mock": {
+    "projects": { "ADO": "team" },
+    "issues": {
+      "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+      "ADO-2": { "labels": ["speckit-adopt:003-label-based-adoption:us1"], "parent": "ADO-1" },
+      "ADO-3": { "labels": ["speckit-adopt:003-label-based-adoption:us2"], "parent": "ADO-1" },
+      "ADO-4": { "labels": ["speckit-adopt:004-billing-export"] },
+      "ADO-5": { "labels": ["speckit-adopt:004-billing-export:us1"], "parent": "ADO-4" },
+      "ADO-6": { "labels": ["speckit-adopt:005-audit-trail"] },
+      "ADO-7": { "labels": ["speckit-adopt:005-audit-trail:us1"], "parent": "ADO-6" }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption",
+  "argv": ["adopt", "--yes", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

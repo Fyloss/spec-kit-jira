@@ -1,0 +1,19 @@
+{
+  "name": "us1-adopt-invalid-prefix",
+  "description": "003 US1 (T051): a whitespace-bearing adoption.label_prefix. Labels reject whitespace, so the run stops with a located configuration error — exit 4, nothing searched and nothing written (FR-002, SC-005). JIRA_CONFIG_DIR selects the invalid-prefix config layer of the same fixture.",
+  "mock": {
+    "projects": { "ADO": "company" },
+    "issues": {
+      "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption",
+  "argv": ["adopt", "--yes", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "JIRA_CONFIG_DIR": ".specify/jira-invalid-prefix",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

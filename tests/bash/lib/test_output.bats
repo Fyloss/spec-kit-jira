@@ -11,6 +11,29 @@ setup() {
   source "${LIB_DIR}/output.sh"
 }
 
+# --- uri_encode (byte-parity contract, research §11) -------------------------
+
+@test "uri_encode leaves only the unreserved set A-Za-z0-9-_.~ intact" {
+  # Regression (003): jq's @uri escapes ! * ' ( and ), which an encoder modelled
+  # on encodeURIComponent leaves alone. The adoption JQL carries parentheses, so
+  # a divergence there desynchronises the two ports' Jira call logs.
+  [ "$(uri_encode "a(b)c!~*'d")" = "a%28b%29c%21~%2A%27d" ]
+  [ "$(uri_encode '-_.~')" = '-_.~' ]
+  [ "$(uri_encode 'a b')" = 'a+b' ]
+}
+
+@test "uri_encode is byte-identical across ports" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local sample='project = "ADO" AND labels IN ("speckit-adopt:003", '"'"'x!*~-_.'"'"')'
+  local bash_out ps_out
+  bash_out="$(uri_encode "${sample}")"
+  ps_out="$(SAMPLE="${sample}" pwsh -NoProfile -Command "
+    Import-Module '${PS_LIB}/Output.psm1' -Force
+    [Console]::Out.Write((ConvertTo-JiraUriComponent \$env:SAMPLE))
+  ")"
+  [ "$bash_out" = "$ps_out" ]
+}
+
 @test "summary_build_json emits canonical JSON with required keys" {
   run summary_build_json reconcile false 1 2 0 0 0 0
   echo "$output" | jq -e '.schema_version=="1.0" and .command=="reconcile" and .counts.created==1 and .counts.updated==2 and .exit_code==0' > /dev/null

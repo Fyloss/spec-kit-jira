@@ -35,7 +35,14 @@ Describe 'ConvertTo-JiraUriComponent' {
         ConvertTo-JiraUriComponent 'a b/c' | Should -BeExactly 'a+b%2Fc'
     }
 
-    It 'uppercases hex and leaves unreserved chars' {
-        ConvertTo-JiraUriComponent "x-y_z.1~a'b" | Should -BeExactly "x-y_z.1~a'b"
+    It 'uppercases hex and leaves the RFC 3986 unreserved chars alone' {
+        # The unreserved set is jq's, which is RFC 3986's — A-Za-z0-9 plus
+        # `-_.~` and nothing else. This case previously asserted that `'`
+        # survives, which is JavaScript's encodeURIComponent behaviour, not
+        # jq's: the two ports then produced different request URLs for any
+        # query carrying `!*'()` (003 found it via the adoption JQL's
+        # `labels IN (…)`). The Bash side is the reference here.
+        ConvertTo-JiraUriComponent 'x-y_z.1~ab' | Should -BeExactly 'x-y_z.1~ab'
+        ConvertTo-JiraUriComponent "a(b)c!~*'d" | Should -BeExactly 'a%28b%29c%21~%2A%27d'
     }
 }
