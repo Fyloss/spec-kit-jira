@@ -1,0 +1,14 @@
+# A second, alternative config layer for the SAME spec folders, selected with
+# JIRA_CONFIG_DIR. Adoption is left at its default — disabled — so a scenario can
+# prove the enablement gate short-circuits the whole command against a fully
+# labelled backlog (003 FR-001, SC-009) without duplicating the spec tree.
+projects:
+  - key: ADO
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+routing_default: ADO
+
+adoption:
+  enabled: false
+  label_prefix: "speckit-adopt:"

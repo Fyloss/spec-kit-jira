@@ -8,7 +8,10 @@
   "required": ["schema_version", "command", "counts", "exit_code"],
   "properties": {
     "schema_version": { "type": "string", "const": "1.0" },
-    "command": { "enum": ["config", "reconcile", "mention"] },
+    "command": {
+      "enum": ["config", "reconcile", "mention", "adopt"],
+      "description": "`adopt` was added by 003 (see 003/contracts/adoption-plan.schema.json): the label-based adoption command emits this same summary, with an `adoption` block carrying its plan."
+    },
     "dry_run": { "type": "boolean", "description": "True when produced by a --dry-run twin; the action set MUST equal the real run's (FR-033)." },
     "counts": {
       "type": "object",
@@ -99,6 +102,23 @@
         "missing": { "type": "array", "items": { "type": "string" } },
         "disabled": { "type": "array", "items": { "type": "string" } },
         "repair_hint": { "type": "string", "description": "One-command repair instruction when any hook is missing (FR-047)." }
+      }
+    },
+    "adoption": {
+      "type": "object",
+      "description": "003 delta — the adoption plan of an `adopt` run: the effective configuration, whether the apply phase ran, the applied bindings with their reason, the refused bindings with their remediation, and the out-of-scope folders. Its full shape is defined by 003/contracts/adoption-plan.schema.json, which this reference deliberately does not duplicate."
+    },
+    "adopted": {
+      "type": "array",
+      "description": "003 FR-018 — reported by the FIRST reconcile after an adoption: per adopted ticket, that it was adopted and what the reconcile added to it. The reconcile adds nothing outside the managed panel, so the entry names the panel, never the human prose above it.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ticket", "action"],
+        "properties": {
+          "ticket": { "type": "string" },
+          "action": { "type": "string" }
+        }
       }
     },
     "mutations": {

@@ -401,7 +401,7 @@ def branchpattern:
    then "projects must be a non-empty array" else empty end),
   (if (.routing_default|type) != "string" or ((.routing_default|projkey) != true)
    then "routing_default must be a valid project key" else empty end),
-  (keys_unsorted[] | select(IN("version_compat","projects","routing","routing_default","privacy","teams")|not)
+  (keys_unsorted[] | select(IN("version_compat","projects","routing","routing_default","privacy","teams","adoption")|not)
    | "unknown top-level key: \(.)"),
   ((.teams // []) | to_entries[] | .key as $i | .value as $t |
     ( [ (if (($t.id // "") | test("^[a-z][a-z0-9]*$") | not)
@@ -418,6 +418,22 @@ def branchpattern:
        then "teams[\($i)].id duplicates an earlier team id" else empty end),
       (if ([$ts[0:$i][].folder_prefix] | index($ts[$i].folder_prefix)) != null
        then "teams[\($i)].folder_prefix duplicates an earlier folder_prefix" else empty end) ))),
+  (if has("adoption") then
+     ( .adoption
+       | ( (keys_unsorted[] | select(IN("enabled","label_prefix")|not)
+            | "unknown adoption key: \(.)"),
+           (if has("enabled") and ((.enabled|type) != "boolean")
+            then "adoption.enabled must be true or false" else empty end),
+           (if has("label_prefix")
+            then ( if ((.label_prefix|type) != "string") or ((.label_prefix|length) < 1)
+                   then "adoption.label_prefix must be a non-empty string"
+                   elif (.label_prefix | test("\\s"))
+                   then "adoption.label_prefix must not contain whitespace"
+                   elif ((.label_prefix|length) > 200)
+                   then "adoption.label_prefix must be at most 200 characters"
+                   else empty end )
+            else empty end) ) )
+   else empty end),
   ((.projects // []) | to_entries[] | .key as $i | .value as $p |
     ( [ (if (($p.key // "")|projkey) != true then "projects[\($i)].key is not a valid project key" else empty end),
         (if ($p | has("style")) and ($p.style|IN("company_managed","team_managed")|not) then "projects[\($i)].style is invalid" else empty end),

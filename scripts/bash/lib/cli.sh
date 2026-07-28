@@ -38,19 +38,51 @@ cli_exit_code() {
 
 # cli_parse <args...> — parse the command line; print key=value state lines.
 cli_parse() {
-  local command="" dry_run=false json=false on_drift=abort
-  local verbose=false repair_hooks=false help=false error="" use_team=""
-  local -a positional=() styles=()
+  local command="" dry_run=false json=false on_drift=abort on_drift_set=false
+  local verbose=false repair_hooks=false help=false error="" use_team="" yes=false
+  local -a positional=() styles=() binds=() specs=()
 
   while (($#)); do
     case "$1" in
-      config | reconcile | mention | feature)
+      config | reconcile | mention | feature | adopt)
         if [[ -z "${command}" ]]; then command="$1"; else positional+=("$1"); fi
         ;;
       --dry-run) dry_run=true ;;
       --json) json=true ;;
       --verbose) verbose=true ;;
       --repair-hooks) repair_hooks=true ;;
+      # `adopt` pre-confirms the apply phase with --yes (003 research §6); the
+      # plan is still printed first.
+      --yes) yes=true ;;
+      --bind)
+        # Repeatable explicit binding (003 US4): <folder>[:us<N>]=<KEY>. Only the
+        # STRUCTURE is checked here — non-empty on both sides of `=`. The key's
+        # SHAPE is validated in the sink, so no key-shaped literal enters the
+        # neutral layers (research §9).
+        if [[ $# -lt 2 ]]; then
+          error="--bind requires a value (--bind <folder>[:us<N>]=<KEY>)"
+        else
+          shift
+          if [[ "$1" == *=* && -n "${1%%=*}" && -n "${1#*=}" ]]; then
+            binds+=("$1")
+          else
+            error="invalid --bind value: $1 (expected <folder>[:us<N>]=<KEY>)"
+          fi
+        fi
+        ;;
+      --spec)
+        # Repeatable adoption scope (003 US6): the spec folders a run considers.
+        if [[ $# -lt 2 ]]; then
+          error="--spec requires a value (--spec <folder>)"
+        else
+          shift
+          if [[ -n "$1" ]]; then
+            specs+=("$1")
+          else
+            error="--spec requires a non-empty folder name"
+          fi
+        fi
+        ;;
       --help | -h) help=true ;;
       --style)
         # Repeatable operator answer to the closed style question (002 US1):
@@ -77,6 +109,7 @@ cli_parse() {
         ;;
       --on-drift=*)
         on_drift="${1#*=}"
+        on_drift_set=true
         if [[ "${on_drift}" != abort && "${on_drift}" != proceed ]]; then
           error="invalid --on-drift value: ${on_drift} (expected abort|proceed)"
         fi
@@ -89,13 +122,20 @@ cli_parse() {
     shift
   done
 
+  # `adopt` performs no transition and reads no status, so drift has no meaning
+  # for it. The check runs after the loop because the command may be declared
+  # after the flag (adopt-cli-contract §Flags).
+  if [[ -z "${error}" && "${command}" == "adopt" && "${on_drift_set}" == "true" ]]; then
+    error="--on-drift is not accepted by adopt (adoption performs no transition)"
+  fi
+
   if [[ -n "${error}" ]]; then
     printf 'exit=%s\n' "${EXIT_USAGE}"
     printf 'error=%s\n' "${error}"
     return 0
   fi
 
-  local args_joined styles_joined
+  local args_joined styles_joined binds_joined specs_joined
   args_joined="$(
     IFS=' '
     printf '%s' "${positional[*]}"
@@ -103,6 +143,14 @@ cli_parse() {
   styles_joined="$(
     IFS=' '
     printf '%s' "${styles[*]-}"
+  )"
+  binds_joined="$(
+    IFS=' '
+    printf '%s' "${binds[*]-}"
+  )"
+  specs_joined="$(
+    IFS=' '
+    printf '%s' "${specs[*]-}"
   )"
 
   printf 'command=%s\n' "${command}"
@@ -114,6 +162,9 @@ cli_parse() {
   printf 'help=%s\n' "${help}"
   printf 'styles=%s\n' "${styles_joined}"
   printf 'use_team=%s\n' "${use_team}"
+  printf 'yes=%s\n' "${yes}"
+  printf 'binds=%s\n' "${binds_joined}"
+  printf 'specs=%s\n' "${specs_joined}"
   printf 'args=%s\n' "${args_joined}"
   printf 'exit=%s\n' "${EXIT_OK}"
 }

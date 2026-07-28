@@ -1,0 +1,13 @@
+# A third alternative config layer, selected with JIRA_CONFIG_DIR. The label
+# prefix carries whitespace, which labels reject: the run must stop with a located
+# configuration error before anything is searched or written (003 FR-002, SC-005).
+projects:
+  - key: ADO
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+routing_default: ADO
+
+adoption:
+  enabled: true
+  label_prefix: "speckit adopt:"

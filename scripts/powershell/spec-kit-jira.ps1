@@ -24,6 +24,20 @@ param([Parameter(ValueFromRemainingArguments = $true)] [string[]] $Arguments = @
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# `pwsh -File <script> … --verbose` binds that token to the ENGINE's -Verbose
+# common parameter. That does two harmful things the Bash port cannot do:
+#   1. it streams every module load and export to stdout, corrupting a --json
+#      summary, and
+#   2. it CONSUMES the token, so the extension's own --verbose never reaches the
+#      parser and the two ports disagree on the parsed state.
+# So the engine stream is silenced unconditionally, and the flag is handed back
+# to the arguments it was taken from (NFR-1).
+$VerbosePreference = 'SilentlyContinue'
+$InformationPreference = 'SilentlyContinue'
+if ($PSBoundParameters.ContainsKey('Verbose') -and ($Arguments -cnotcontains '--verbose')) {
+    $Arguments = @($Arguments) + '--verbose'
+}
+
 $EntryDir = $PSScriptRoot
 Import-Module (Join-Path $EntryDir 'lib/Cli.psm1') -Force
 Import-Module (Join-Path $EntryDir 'lib/Prereq.psm1') -Force
@@ -37,7 +51,7 @@ $CommandsDir = if ($env:SPEC_KIT_JIRA_COMMANDS_DIR) {
 # Usage block emitted with explicit LF so both ports produce byte-identical bytes
 # regardless of host line-ending conventions (NFR-1).
 $UsageLines = @(
-    'usage: spec-kit-jira <config|reconcile|mention|feature> [options]'
+    'usage: spec-kit-jira <config|reconcile|mention|feature|adopt> [options]'
     '  --dry-run                 predict actions without writing'
     '  --json                    machine-readable run summary'
     '  --on-drift=abort|proceed  drift handling (default: abort)'
@@ -76,7 +90,7 @@ if ($state['help'] -eq 'true') {
 
 $command = $state['command']
 if ([string]::IsNullOrEmpty($command)) {
-    [Console]::Error.WriteLine('spec-kit-jira: a command is required (config|reconcile|mention|feature)')
+    [Console]::Error.WriteLine('spec-kit-jira: a command is required (config|reconcile|mention|feature|adopt)')
     [Console]::Error.Write($UsageText)
     exit (Get-JiraExitCode 'usage')
 }

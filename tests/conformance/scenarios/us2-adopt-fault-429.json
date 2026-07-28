@@ -1,0 +1,20 @@
+{
+  "name": "us2-adopt-fault-429",
+  "description": "003 US2 (T092, AS-6): an exhausted retry budget is injected during discovery. An unreliable read means the candidate corpus is incomplete, and an incomplete corpus turns an ambiguity that must be refused into a binding that would be applied — so the WHOLE run aborts BEFORE any write, with zero property PUTs in the call log and exit 2 (FR-008, Constitution III).",
+  "mock": {
+    "projects": { "ADO": "company" },
+    "fault": {"status":429,"retryAfter":1},
+    "issues": {
+      "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+      "ADO-2": { "labels": ["speckit-adopt:003-label-based-adoption:us1"], "parent": "ADO-1" }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption",
+  "argv": ["adopt", "--yes", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

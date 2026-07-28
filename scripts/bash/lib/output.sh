@@ -93,6 +93,17 @@ summary_render_prose() {
       fi
     done
   fi
+  # Adopted tickets and what this run added to each (003 FR-018). The default
+  # output is what a Product Owner reads, so the reassurance that nothing outside
+  # the managed panel was touched belongs here, not only in --json.
+  if [[ "$(jq -r 'has("adopted") and ((.adopted | length) > 0)' <<< "${json}")" == "true" ]]; then
+    printf 'Adopted:\n'
+    local aline
+    while IFS= read -r aline; do
+      [[ -z "${aline}" ]] && continue
+      printf '  %s\n' "${aline}"
+    done <<< "$(jq -r '.adopted[] | "\(.ticket): \(.action)"' <<< "${json}")"
+  fi
   # The degraded run's provisional team proposals and copy-pasteable re-run
   # guidance (FR-008/FR-009): the agent command doc relays them verbatim, so
   # they must exist in the default output, not only in --json.

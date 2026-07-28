@@ -1,0 +1,13 @@
+{
+  "projects": {
+    "ADO": "company",
+    "BILL": "team"
+  },
+  "issues": {
+    "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+    "ADO-2": { "labels": ["speckit-adopt:003-label-based-adoption:us1"], "parent": "ADO-1" },
+    "ADO-3": { "labels": ["speckit-adopt:004-billing-export"] },
+    "ADO-9": { "labels": ["unrelated-label"] },
+    "BILL-4": { "labels": ["speckit-adopt:005-audit-trail"] }
+  }
+}

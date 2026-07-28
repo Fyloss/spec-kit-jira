@@ -43,6 +43,40 @@ _reconcile_plan_context() {
   jq -cn --arg b "${base}" --argjson e "${extra}" '$e + {base_url:$b}'
 }
 
+# _reconcile_adopted_report <neutral-doc-json> <plan-context-json>
+#   003 FR-018: report, per ADOPTED ticket, that it was adopted and what this
+#   reconcile added to it. A ticket is adopted when its plan context declares a
+#   non-bridge origin — the marker adoption stamped. What was added is decided by
+#   whether the existing description already carried the managed-panel marker:
+#   absent means this is the FIRST reconcile after adoption and the panel is
+#   being added BELOW the human prose; present means the panel is being updated
+#   in place. Either way nothing outside the panel is touched, which is what the
+#   wording has to convey to a Product Owner reading the summary.
+#   Prints the canonical array (empty when no ticket is adopted).
+_reconcile_adopted_report() {
+  local doc="$1" ctx="$2" n i out='[]'
+  n="$(jq '.stories | length' <<< "${doc}")"
+  for ((i = 0; i < n; i++)); do
+    local sid origin ticket
+    sid="$(jq -r ".stories[${i}].local_id" <<< "${doc}")"
+    origin="$(jq -r --arg s "${sid}" '.ticket_origins[$s] // ""' <<< "${ctx}")"
+    ticket="$(jq -r --arg s "${sid}" '.tickets[$s] // ""' <<< "${ctx}")"
+    if [[ -n "${ticket}" && -n "${origin}" && "${origin}" != "bridge-created" ]]; then
+      local existing had_marker action
+      existing="$(jq -c --arg s "${sid}" '.ticket_descriptions[$s] // {}' <<< "${ctx}")"
+      had_marker="$(jq -c '.content // []' <<< "${existing}" \
+        | managed_section_panel_split "$(adf_managed_marker)" | jq -r '.had_marker')"
+      if [[ "${had_marker}" == "true" ]]; then
+        action="adopted ticket: the managed panel was updated; nothing outside it was touched"
+      else
+        action="adopted ticket: the managed panel was added below the existing description; nothing outside it was touched"
+      fi
+      out="$(jq -c --arg t "${ticket}" --arg a "${action}" '. + [{ticket:$t, action:$a}]' <<< "${out}")"
+    fi
+  done
+  json_canonical <<< "${out}"
+}
+
 # cmd_reconcile <argv...> — reconcile one specification into its Jira project.
 # Echoes the run summary to stdout; returns the exit code.
 cmd_reconcile() {
@@ -182,16 +216,24 @@ cmd_reconcile() {
 
   # The warnings/notes keys appear only when the lifecycle facts were supplied, so
   # the content-only reconcile (US3) summary is byte-for-byte unchanged.
+  # 003 FR-018: adopted tickets are reported by name, with what was added. The
+  # key appears only when at least one ticket is adopted, so a reconcile over a
+  # purely bridge-created corpus keeps its summary byte-for-byte unchanged.
+  local adopted
+  adopted="$(_reconcile_adopted_report "${doc}" "${plan_ctx}")"
+
   local summary
   summary="$(jq -cn \
     --argjson dry "${dry_run}" --argjson c "${created}" --argjson u "${updated}" \
     --argjson x "${rc}" --argjson actions "${disp_actions}" \
     --argjson wc "${warn_count}" --argjson w "${warns}" --argjson no "${notes}" \
-    --argjson hl "${has_lifecycle}" --argjson hooks "${hooks_health}" '
+    --argjson hl "${has_lifecycle}" --argjson hooks "${hooks_health}" \
+    --argjson ad "${adopted}" '
     {schema_version:"1.0", command:"reconcile", dry_run:$dry,
      counts:{created:$c, updated:$u, skipped:0, warnings:$wc, errors:0},
      actions:$actions}
     + (if $hl then {warnings:$w, notes:$no} else {} end)
+    + (if ($ad | length) > 0 then {adopted:$ad} else {} end)
     + {hook_health:$hooks, exit_code:$x}' | json_canonical)"
 
   if [[ "${json}" == "true" ]]; then

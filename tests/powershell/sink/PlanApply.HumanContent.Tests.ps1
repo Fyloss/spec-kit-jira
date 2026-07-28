@@ -69,3 +69,44 @@ Describe 'Get-JiraManagedDescriptionStatus (FR-039)' {
         Get-JiraManagedDescriptionStatus -CurrentDescJson $a -NewDescJson $b | Should -Be 'changed'
     }
 }
+
+Describe 'Adoption selects the preservation behaviour (003 T105)' {
+    # US3 is mostly PROOF, not new code: stamping origin `human` is what SELECTS
+    # the managed-panel splice and the managed-section-only churn diff. These
+    # cases assert that selection from the adoption side, so a change to either
+    # half cannot silently break the promise.
+
+    It 'adds the panel BELOW the human prose, leaving every byte intact (SC-002)' {
+        $desc = ConvertTo-JiraManagedAdfDocument -ContentJson (
+            '{"local_id":"s1","title":"S","priority_logical":"P2","description":{"blocks":[{"type":"paragraph","text":"Managed body."}]}}'
+        ) -Origin 'human' -ExistingJson '{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"PO note."}]}]}' | ConvertFrom-Json
+        $texts = @($desc.content | ForEach-Object { ($_ | ConvertTo-Json -Depth 20) })
+        @($desc.content)[0].content[0].text | Should -Be 'PO note.'
+        ($texts -join ' ') | Should -BeLike "*$($script:Marker)*"
+    }
+
+    It 'does NOT splice a bridge-created ticket — the origin is what decides' {
+        $desc = ConvertTo-JiraManagedAdfDocument -ContentJson (
+            '{"local_id":"s1","title":"S","priority_logical":"P2","description":{"blocks":[{"type":"paragraph","text":"Managed body."}]}}'
+        ) -Origin 'bridge-created' -ExistingJson '{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"PO note."}]}]}'
+        $desc | Should -Not -BeLike '*PO note.*'
+        $desc | Should -Not -BeLike "*$($script:Marker)*"
+    }
+
+    It 'converges: rendering twice from its own output never duplicates the panel' {
+        $story = '{"local_id":"s1","title":"S","priority_logical":"P2","description":{"blocks":[{"type":"paragraph","text":"Managed body."}]}}'
+        $existing = '{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"PO note."}]}]}'
+        $first = ConvertTo-JiraManagedAdfDocument -ContentJson $story -Origin 'human' -ExistingJson $existing
+        $second = ConvertTo-JiraManagedAdfDocument -ContentJson $story -Origin 'human' -ExistingJson $first
+        $third = ConvertTo-JiraManagedAdfDocument -ContentJson $story -Origin 'human' -ExistingJson $second
+        $second | Should -Be $third
+        $doc = $third | ConvertFrom-Json
+        @($doc.content | Where-Object { (($_ | ConvertTo-Json -Depth 20) -like "*$($script:Marker)*") }).Count | Should -Be 1
+    }
+
+    It 'emits NO identity write on a later reconcile, so the stamped origin is permanent (FR-016)' {
+        $ctx = '{"base_url":"http://h","tickets":{"s1":"ADO-1"},"ticket_origins":{"s1":"human"},"ticket_descriptions":{"s1":{"type":"doc","version":1,"content":[]}}}'
+        $actions = @((Get-JiraPlanWriteSet -NeutralDocJson $script:Doc -PlanContextJson $ctx) | ConvertFrom-Json)
+        @($actions | Where-Object { $_.url -like '*/properties/*' }).Count | Should -Be 0
+    }
+}

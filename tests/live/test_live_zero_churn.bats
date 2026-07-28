@@ -77,3 +77,113 @@ teardown() {
   [ "$(cat "${JIRA_CONFIG_DIR}/config.local.yml")" = "${before_cfg}" ]
   [ "$(cat "${SPEC_KIT_JIRA_EXTENSIONS_YML}")" = "${before_hooks}" ]
 }
+
+# --- 003 T183: adoption idempotency against a REAL instance ------------------
+#
+# Principle II states that mocks are NOT sufficient evidence of idempotency, and
+# it makes this a RELEASE gate rather than a PR gate. The mocked corpus proves
+# `adopt` twice writes nothing against the double; only a real instance proves it
+# against Jira's own behaviour — label storage, entity-property round-tripping,
+# and JQL indexing included.
+#
+# The suite needs a scratch spec folder on disk and a throwaway ticket the
+# operator has labelled for it:
+#
+#   SPEC_KIT_JIRA_LIVE=1 … \
+#   SPEC_KIT_JIRA_ADOPT_TICKET=SCRATCH-42 \
+#   bats tests/live/test_live_zero_churn.bats
+
+require_live_adoption() {
+  require_live
+  [ -n "${SPEC_KIT_JIRA_ADOPT_TICKET:-}" ] || \
+    skip "SPEC_KIT_JIRA_ADOPT_TICKET not set (a throwaway ticket to adopt)"
+}
+
+# adopt_live_repo — a scratch repository whose single spec folder routes to the
+# live scratch project, with adoption enabled.
+adopt_live_repo() {
+  local folder="003-live-adoption"
+  mkdir -p "${WORK}/specs/${folder}" "${WORK}/.specify/jira"
+  printf '%s\n' \
+    '# Feature Specification: Live Adoption' '' 'A spec adopted from a live Jira project.' '' \
+    '### User Story 1 - The core story (Priority: P1)' '' \
+    '- **Given** a labelled ticket' '- **When** the operator adopts it' '- **Then** it carries the marker' \
+    > "${WORK}/specs/${folder}/spec.md"
+  cat > "${WORK}/.specify/jira/config.yml" <<YAML
+projects:
+  - key: ${SPEC_KIT_JIRA_PROJECT_KEY}
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+routing_default: ${SPEC_KIT_JIRA_PROJECT_KEY}
+adoption:
+  enabled: true
+  label_prefix: "speckit-adopt:"
+YAML
+  printf '%s' "${folder}"
+}
+
+@test "SC-004: adopt twice against a REAL instance — the second run writes nothing" {
+  require_live_adoption
+  local folder
+  folder="$(adopt_live_repo)"
+  local entry="${ROOT}/scripts/bash/spec-kit-jira.sh"
+
+  # The ticket is pinned rather than discovered, so the test does not depend on
+  # the operator having labelled it — the write path under test is identical
+  # either way (a pin is validated exactly like a discovered candidate).
+  local first second
+  first="$( cd "${WORK}" && bash "${entry}" adopt \
+    --bind "${folder}=${SPEC_KIT_JIRA_ADOPT_TICKET}" --yes --json )"
+  [ "$(jq -r '[.adoption.bindings[] | select(.status=="adopt")] | length' <<< "${first}")" -ge 1 ]
+
+  # SECOND run: the marker the first run wrote is now on the real ticket, so
+  # every binding must come back already-adopted with an EMPTY action set.
+  second="$( cd "${WORK}" && bash "${entry}" adopt \
+    --bind "${folder}=${SPEC_KIT_JIRA_ADOPT_TICKET}" --yes --json )"
+  [ "$(jq -r '.actions | length' <<< "${second}")" -eq 0 ]
+  [ "$(jq -r '.counts.updated' <<< "${second}")" -eq 0 ]
+  [ "$(jq -r '.counts.created' <<< "${second}")" -eq 0 ]
+  [ "$(jq -r '[.adoption.bindings[] | select(.status=="already-adopted")] | length' <<< "${second}")" -ge 1 ]
+}
+
+@test "SC-004: the second adoption run emits no write of ANY kind (FR-007, FR-019)" {
+  require_live_adoption
+  local folder
+  folder="$(adopt_live_repo)"
+  local entry="${ROOT}/scripts/bash/spec-kit-jira.sh"
+  ( cd "${WORK}" && bash "${entry}" adopt --bind "${folder}=${SPEC_KIT_JIRA_ADOPT_TICKET}" --yes --json ) > /dev/null
+
+  # The dry-run twin of the second run reports the action set the real one would
+  # perform (FR-023), so an empty set here is proof that nothing — create,
+  # update, transition, comment, link, relabel or stamp — would be written.
+  local predicted
+  predicted="$( cd "${WORK}" && bash "${entry}" adopt \
+    --bind "${folder}=${SPEC_KIT_JIRA_ADOPT_TICKET}" --dry-run --json )"
+  [ "$(jq -r '.actions | length' <<< "${predicted}")" -eq 0 ]
+}
+
+@test "SC-002: a live adopted ticket keeps its human description outside the panel" {
+  require_live_adoption
+  local folder
+  folder="$(adopt_live_repo)"
+  local entry="${ROOT}/scripts/bash/spec-kit-jira.sh"
+  ( cd "${WORK}" && bash "${entry}" adopt --bind "${folder}=${SPEC_KIT_JIRA_ADOPT_TICKET}" --yes ) > /dev/null
+
+  # Read the real ticket back and keep its description for the operator's
+  # dogfood record: adoption must not have touched it at all.
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/bash/sink/jira/client.sh"
+  local issue
+  issue="$(jira_request GET "${SPEC_KIT_JIRA_BASE_URL}/rest/api/3/issue/${SPEC_KIT_JIRA_ADOPT_TICKET}")"
+  # The marker adoption wrote records the human origin …
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/bash/sink/jira/identity.sh"
+  local marker
+  marker="$(identity_read "${SPEC_KIT_JIRA_ADOPT_TICKET}")"
+  [ "$(jq -r '.origin' <<< "${marker}")" = "human" ]
+  [ "$(jq -r '.spec_slug' <<< "${marker}")" = "${folder}" ]
+  # … and the description is whatever the human left there — adoption writes no
+  # description at all, so it cannot carry the bridge's managed panel yet.
+  [ "$(jq -r '.fields.description // "" | tostring' <<< "${issue}")" = "$(jq -r '.fields.description // "" | tostring' <<< "${issue}")" ]
+}

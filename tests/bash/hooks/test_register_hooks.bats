@@ -189,6 +189,33 @@ teardown() {
   done
 }
 
+# --- adoption is never fired by a hook (003 T013, FR-029) --------------------
+
+@test "adopt appears in no hook registration table (003 T013, FR-029)" {
+  # Adoption requires an operator confirmation and is a one-time deliberate
+  # transition; hooks are automatic and non-blocking, so the two never mix.
+  [ "${HOOK_COMMAND}" != "speckit.jira.adopt" ]
+  [ "${HOOK_BEFORE_COMMAND}" != "speckit.jira.adopt" ]
+  run grep -c 'adopt' "${HOOK_DIR}/register_hooks.sh"
+  [ "$output" = "0" ]
+}
+
+@test "register_hooks writes no adoption entry under any event (003 T013, FR-029)" {
+  register_hooks_write "${EXT}" > /dev/null
+  local json
+  json="$(config_yaml_to_json "${EXT}")"
+  [ "$(jq -r '[.hooks[][] | select(.command | test("adopt"))] | length' <<< "$json")" -eq 0 ]
+  # The registered surface is exactly the seven known events (six after_* plus
+  # before_specify) — this feature adds none.
+  [ "$(jq -r '.hooks | keys | length' <<< "$json")" -eq 7 ]
+}
+
+@test "health reports no adoption hook as missing (003 T013, FR-029)" {
+  local h
+  h="$(register_hooks_health "${WORK}/absent.yml")"
+  [ "$(jq -r '[.missing[] | select(test("adopt"))] | length' <<< "$h")" -eq 0 ]
+}
+
 @test "an operator-disabled feature hook is never re-added or re-enabled (T046, FR-048)" {
   register_hooks_write "${EXT}" > /dev/null
   local disabled

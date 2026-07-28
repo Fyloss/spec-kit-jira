@@ -44,3 +44,19 @@ Describe 'Get-JiraLifecyclePlan' {
         $r.notes[0] | Should -BeLike '*K-10*'
     }
 }
+
+Describe 'An adopted ticket is never hard-deleted (003 T109, FR-017)' {
+    It 'emits no DELETE for a human-origin (adopted) ticket' {
+        $lc = '{"order":["To Do","In Progress","Done"],"base_url":"http://h","tickets":{"s1":{"key":"K-1","origin":"human","status":"Done","category":"post-scope","target":"To Do","transition_id":"11"}}}'
+        $r = Invoke-Lifecycle $lc
+        @($r.actions | Where-Object { $_.method -eq 'DELETE' }).Count | Should -Be 0
+    }
+
+    It 'has no delete capability at all in either port (structural)' {
+        # The exclusion cannot be forgotten because the verb does not exist.
+        $root = Join-Path $PSScriptRoot '../../../scripts'
+        $hits = @(Get-ChildItem -Recurse -File -LiteralPath $root |
+                Where-Object { (Get-Content -Raw -LiteralPath $_.FullName) -cmatch "(`"DELETE`"|'DELETE'|-Method\s+DELETE)" })
+        $hits.Count | Should -Be 0
+    }
+}

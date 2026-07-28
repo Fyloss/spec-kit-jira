@@ -429,7 +429,7 @@ function Test-JiraTeamConfig {
         $errs.Add('routing_default must be a valid project key')
     }
 
-    $allowedTop = @('version_compat', 'projects', 'routing', 'routing_default', 'privacy', 'teams')
+    $allowedTop = @('version_compat', 'projects', 'routing', 'routing_default', 'privacy', 'teams', 'adoption')
     if ($Object -is [System.Collections.IDictionary]) {
         foreach ($k in (Get-JiraOrdinalSorted $Object.Keys)) {
             if ($allowedTop -cnotcontains [string]$k) { $errs.Add("unknown top-level key: $k") }
@@ -459,6 +459,34 @@ function Test-JiraTeamConfig {
             $seenIds.Add($tid)
             $seenPrefixes.Add($tprefix)
             $ti++
+        }
+    }
+
+    # Adoption of pre-existing tickets (003 FR-001/FR-002) — optional. Mirror of
+    # the Bash port's `adoption` branch in _CFG_TEAM_ERRORS_JQ; the error strings
+    # are byte-identical across ports. The 255-character label check needs the
+    # folders in scope, so it lives in the engine and runs before discovery.
+    if ($Object -is [System.Collections.IDictionary] -and $Object.Contains('adoption')) {
+        $ad = $Object['adoption']
+        if ($ad -is [System.Collections.IDictionary]) {
+            foreach ($k in (Get-JiraOrdinalSorted $ad.Keys)) {
+                if (@('enabled', 'label_prefix') -cnotcontains [string]$k) { $errs.Add("unknown adoption key: $k") }
+            }
+            if ($ad.Contains('enabled') -and ($ad['enabled'] -isnot [bool])) {
+                $errs.Add('adoption.enabled must be true or false')
+            }
+            if ($ad.Contains('label_prefix')) {
+                $lp = $ad['label_prefix']
+                if (($lp -isnot [string]) -or ([string]$lp).Length -lt 1) {
+                    $errs.Add('adoption.label_prefix must be a non-empty string')
+                }
+                elseif ([string]$lp -cmatch '\s') {
+                    $errs.Add('adoption.label_prefix must not contain whitespace')
+                }
+                elseif (([string]$lp).Length -gt 200) {
+                    $errs.Add('adoption.label_prefix must be at most 200 characters')
+                }
+            }
         }
     }
 

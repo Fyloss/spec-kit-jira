@@ -102,11 +102,17 @@ function ConvertTo-JiraUriComponent {
     <#
     .SYNOPSIS
       Percent-encode a query component exactly as `jq @uri` does, then apply the
-      %20->+ normalisation (research §11). Unreserved set matches jq/encodeURIComponent.
+      %20->+ normalisation (research §11).
+
+      jq's unreserved set is the RFC 3986 one — A-Za-z0-9 plus `-_.~` — and is
+      NARROWER than JavaScript's encodeURIComponent, which additionally leaves
+      `!*'()` alone. Widening it here desynchronises the two ports' request URLs
+      the moment a query carries a parenthesis (as the adoption JQL's
+      `labels IN (...)` does).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Value)
-    $unreserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
+    $unreserved = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~'
     $sb = [System.Text.StringBuilder]::new()
     foreach ($b in [System.Text.Encoding]::UTF8.GetBytes($Value)) {
         $ch = [char]$b
@@ -208,6 +214,16 @@ function ConvertTo-JiraSummaryProse {
                     $lines.Add("    ${pkey}: $pstyle ($psource)")
                 }
             }
+        }
+    }
+    # Adopted tickets and what this run added to each (003 FR-018). The default
+    # output is what a Product Owner reads, so the reassurance that nothing
+    # outside the managed panel was touched belongs here, not only in --json.
+    if ($s.PSObject.Properties.Name -contains 'adopted') {
+        $adopted = @($s.adopted | Where-Object { $null -ne $_ })
+        if ($adopted.Count -gt 0) {
+            $lines.Add('Adopted:')
+            foreach ($a in $adopted) { $lines.Add("  $($a.ticket): $($a.action)") }
         }
     }
     # The degraded run's provisional team proposals and copy-pasteable re-run

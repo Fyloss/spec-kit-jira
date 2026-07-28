@@ -1,0 +1,25 @@
+{
+  "name": "us1-adopt-disabled",
+  "description": "003 US1 (T046): adoption.enabled is false against a FULLY labelled backlog. The enablement gate short-circuits the whole command — exit 4 naming the configuration key, ZERO reads against candidate tickets and zero writes (FR-001, SC-009). JIRA_CONFIG_DIR selects the disabled config layer of the same fixture.",
+  "mock": {
+    "projects": { "ADO": "company" },
+    "issues": {
+      "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+      "ADO-2": { "labels": ["speckit-adopt:003-label-based-adoption:us1"], "parent": "ADO-1" },
+      "ADO-3": { "labels": ["speckit-adopt:003-label-based-adoption:us2"], "parent": "ADO-1" },
+      "ADO-4": { "labels": ["speckit-adopt:004-billing-export"] },
+      "ADO-5": { "labels": ["speckit-adopt:004-billing-export:us1"], "parent": "ADO-4" },
+      "ADO-6": { "labels": ["speckit-adopt:005-audit-trail"] },
+      "ADO-7": { "labels": ["speckit-adopt:005-audit-trail:us1"], "parent": "ADO-6" }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption",
+  "argv": ["adopt", "--yes", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "JIRA_CONFIG_DIR": ".specify/jira-disabled",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

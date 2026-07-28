@@ -1,0 +1,29 @@
+{
+  "name": "us4-adopt-explicit-binding",
+  "description": "003 US4 (T125): two targets pinned with --bind. One had NO candidate at all and one had TWO — the exact situations US2 refuses — and both now bind with reason `explicit-binding`. The pinned tickets carry NO adoption label, and adoption never adds one: it reads labels, it does not apply them (FR-020, Out of Scope). Exit 0.",
+  "mock": {
+    "projects": { "ADO": "company" },
+    "issues": {
+      "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+      "ADO-2": { "labels": ["speckit-adopt:003-label-based-adoption:us1"], "parent": "ADO-1" },
+      "ADO-3": { "labels": ["speckit-adopt:003-label-based-adoption:us2"], "parent": "ADO-1" },
+      "ADO-4": { "labels": ["speckit-adopt:004-billing-export"] },
+      "ADO-50": { "labels": ["speckit-adopt:004-billing-export:us1"], "parent": "ADO-4" },
+      "ADO-51": { "labels": ["speckit-adopt:004-billing-export:us1"], "parent": "ADO-4" },
+      "ADO-60": { "labels": [] },
+      "ADO-61": { "labels": [], "parent": "ADO-60" }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption",
+  "argv": ["adopt",
+           "--bind", "004-billing-export:us1=ADO-50",
+           "--bind", "005-audit-trail=ADO-60",
+           "--bind", "005-audit-trail:us1=ADO-61",
+           "--yes", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

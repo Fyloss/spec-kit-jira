@@ -1,0 +1,24 @@
+# Team config: five spec folders routed across two Jira projects, with two
+# folders deliberately sharing the leading numbering component `004` so the
+# short-form adoption label is ambiguous over them (003 fixtures).
+projects:
+  - key: ADO
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+  - key: BILL
+    style: team_managed
+    epic_strategy: per_feature
+    task_strategy: subtask
+routing:
+  - match:
+      folder_prefix: "005-"
+    project: BILL
+  - match:
+      folder_prefix: "006-"
+    project: BILL
+routing_default: ADO
+
+adoption:
+  enabled: true
+  label_prefix: "speckit-adopt:"

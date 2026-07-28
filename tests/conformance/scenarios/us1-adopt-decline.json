@@ -1,0 +1,25 @@
+{
+  "name": "us1-adopt-decline",
+  "description": "003 US1 (T047): the operator is shown the plan and declines. A decline is an operator CHOICE, not a failure — zero writes, the summary reports the cancellation, exit 0 (research §6, US1 AS-3). SPEC_KIT_JIRA_ADOPT_ANSWER supplies the answer where the corpus has no terminal.",
+  "mock": {
+    "projects": { "ADO": "company" },
+    "issues": {
+      "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+      "ADO-2": { "labels": ["speckit-adopt:003-label-based-adoption:us1"], "parent": "ADO-1" },
+      "ADO-3": { "labels": ["speckit-adopt:003-label-based-adoption:us2"], "parent": "ADO-1" },
+      "ADO-4": { "labels": ["speckit-adopt:004-billing-export"] },
+      "ADO-5": { "labels": ["speckit-adopt:004-billing-export:us1"], "parent": "ADO-4" },
+      "ADO-6": { "labels": ["speckit-adopt:005-audit-trail"] },
+      "ADO-7": { "labels": ["speckit-adopt:005-audit-trail:us1"], "parent": "ADO-6" }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption",
+  "argv": ["adopt"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_ADOPT_ANSWER": "n"
+  }
+}

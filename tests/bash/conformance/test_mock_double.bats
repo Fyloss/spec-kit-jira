@@ -62,6 +62,98 @@ teardown() {
   [ "$status" -ne 0 ]
 }
 
+# --- JQL-aware /search/jql (003 T024) ----------------------------------------
+
+# jql_get <jql> [extra query] — issue a search against the mock, URL-encoding the
+# JQL exactly as the sink's transport does.
+jql_get() {
+  curl -s --get --data-urlencode "jql=$1" --data "fields=labels,parent,project" \
+    --data "maxResults=100" ${2:+--data "$2"} "${MOCK_BASE_URL}/rest/api/3/search/jql"
+}
+
+@test "search/jql filters by the JQL project term (003 T024)" {
+  mock_start "${MOCK}/configs/adoption.json"
+  run jql_get 'project = "BILL" AND labels IN ("speckit-adopt:005-audit-trail")'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.issues[].key] | join(",")' <<< "$output")" = "BILL-4" ]
+}
+
+@test "search/jql filters by the labels IN term (003 T024)" {
+  mock_start "${MOCK}/configs/adoption.json"
+  run jql_get 'project = "ADO" AND labels IN ("speckit-adopt:004-billing-export")'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.issues[].key] | join(",")' <<< "$output")" = "ADO-3" ]
+}
+
+@test "search/jql matches any one of several labels, in key order (003 T024)" {
+  mock_start "${MOCK}/configs/adoption.json"
+  run jql_get 'project = "ADO" AND labels IN ("speckit-adopt:003-label-based-adoption", "speckit-adopt:004-billing-export")'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.issues[].key] | join(",")' <<< "$output")" = "ADO-1,ADO-3" ]
+}
+
+@test "search/jql label matching is case-sensitive (003 T024, research §3)" {
+  mock_start "${MOCK}/configs/adoption.json"
+  run jql_get 'project = "ADO" AND labels IN ("SPECKIT-ADOPT:003-label-based-adoption")'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.issues | length' <<< "$output")" -eq 0 ]
+}
+
+@test "search/jql serves key, labels, parent and project only (003 T024)" {
+  mock_start "${MOCK}/configs/adoption.json"
+  run jql_get 'project = "ADO" AND labels IN ("speckit-adopt:003-label-based-adoption:us1")'
+  [ "$status" -eq 0 ]
+  local issue
+  issue="$(jq -c '.issues[0]' <<< "$output")"
+  [ "$(jq -r '.key' <<< "$issue")" = "ADO-2" ]
+  [ "$(jq -r '.fields.parent.key' <<< "$issue")" = "ADO-1" ]
+  [ "$(jq -r '.fields.project.key' <<< "$issue")" = "ADO" ]
+  [ "$(jq -r '.fields | keys | sort | join(",")' <<< "$issue")" = "labels,parent,project" ]
+}
+
+@test "search/jql omits parent when the issue has none (003 T024)" {
+  mock_start "${MOCK}/configs/adoption.json"
+  run jql_get 'project = "ADO" AND labels IN ("speckit-adopt:003-label-based-adoption")'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.issues[0].fields | has("parent")' <<< "$output")" = "false" ]
+}
+
+@test "search/jql pages with nextPageToken and omits it on the last page (003 T024, NFR-6)" {
+  mock_start "${MOCK}/configs/adoption-paged.json"
+  local jql='project = "ADO" AND labels IN ("speckit-adopt:003-label-based-adoption")'
+
+  run jql_get "${jql}"
+  [ "$(jq -r '[.issues[].key] | join(",")' <<< "$output")" = "ADO-1,ADO-2" ]
+  [ "$(jq -r 'has("nextPageToken")' <<< "$output")" = "true" ]
+  [ "$(jq -r '.isLast' <<< "$output")" = "false" ]
+  local t1
+  t1="$(jq -r '.nextPageToken' <<< "$output")"
+
+  run jql_get "${jql}" "nextPageToken=${t1}"
+  [ "$(jq -r '[.issues[].key] | join(",")' <<< "$output")" = "ADO-3,ADO-4" ]
+  local t2
+  t2="$(jq -r '.nextPageToken' <<< "$output")"
+
+  run jql_get "${jql}" "nextPageToken=${t2}"
+  [ "$(jq -r '[.issues[].key] | join(",")' <<< "$output")" = "ADO-5" ]
+  [ "$(jq -r 'has("nextPageToken")' <<< "$output")" = "false" ]
+  [ "$(jq -r '.isLast' <<< "$output")" = "true" ]
+}
+
+@test "a per-issue read serves the seeded corpus context (003 T024, US4 pins)" {
+  mock_start "${MOCK}/configs/adoption.json"
+  run curl -s "${MOCK_BASE_URL}/rest/api/3/issue/ADO-2?fields=labels,parent,project"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.fields.parent.key' <<< "$output")" = "ADO-1" ]
+  [ "$(jq -r '.fields.project.key' <<< "$output")" = "ADO" ]
+}
+
+@test "a per-issue read of a key absent from the corpus is a 404 (003 T024)" {
+  mock_start "${MOCK}/configs/adoption.json"
+  run curl -s -o /dev/null -w '%{http_code}' "${MOCK_BASE_URL}/rest/api/3/issue/ADO-404?fields=labels,parent,project"
+  [ "$output" = "404" ]
+}
+
 @test "records the API call sequence with query strings" {
   mock_start "${MOCK}/configs/default.json"
   curl -s "${MOCK_BASE_URL}/rest/api/3/project/COMP" > /dev/null

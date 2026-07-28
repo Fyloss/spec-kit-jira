@@ -74,6 +74,35 @@ routing_default: PROJ
 #     folder_prefix: "wex-"
 #     branch_pattern: "wex-<ID>/<FEATURE_NAME>"
 
+# Adopting tickets that already exist in Jira.
+#
+# Normally the specs on disk are the source of truth and the bridge only mirrors
+# them. Adoption is the one deliberate exception: it binds tickets a human
+# already wrote to the spec folders they belong to, and the ONLY thing it ever
+# writes is the marker that records the binding. It never creates, deletes,
+# re-parents, re-labels, transitions or rewrites a ticket.
+#
+# It is off by default, and turning it on is a team decision worth reviewing —
+# which is why the switch lives in this committed file.
+adoption:
+  # Turn adoption on. While this is false, `spec-kit-jira adopt` refuses and
+  # reads nothing at all, however the backlog is labelled.
+  enabled: false
+
+  # The start of the label a person types in Jira to say which spec a ticket
+  # belongs to. The label must NAME the spec — the bridge never guesses — and
+  # three forms are understood (shown here with the default prefix):
+  #
+  #   speckit-adopt:007-invoice-export       the spec's own top-level ticket
+  #   speckit-adopt:007-invoice-export:us2   user story 2 of that spec
+  #   speckit-adopt:007                      short form: the spec numbered 007,
+  #                                          accepted only while exactly one
+  #                                          spec folder carries that number
+  #
+  # A label carrying the prefix alone never adopts anything. Labels reject
+  # whitespace, so this value may not contain any.
+  label_prefix: "speckit-adopt:"
+
 # Privacy allowlist: hosts/domains that never block or warn (e.g. your public
 # documentation Confluence host).
 privacy:

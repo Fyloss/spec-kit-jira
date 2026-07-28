@@ -97,3 +97,103 @@ setup() {
   [ -n "${b}" ]
   [ "${b}" = "${p}" ]
 }
+
+# --- adoption reporting (003 T110, FR-018) -----------------------------------
+
+# adopted_ctx <existing-description-json> — a plan context describing one
+# ADOPTED ticket: an existing key, the human origin adoption stamps, and its
+# current description.
+adopted_ctx() {
+  jq -cn --argjson d "${1}" '
+    {tickets:{s1:"ADO-1"}, ticket_origins:{s1:"human"}, ticket_descriptions:{s1:$d}}'
+}
+
+@test "the first reconcile after adoption reports the ticket and what was ADDED (FR-018)" {
+  # A hand-written description with no managed panel yet: the panel is about to
+  # be added below it for the first time.
+  local existing
+  existing='{"type":"doc","version":1,"content":[
+    {"type":"paragraph","content":[{"type":"text","text":"PO handwritten note."}]}]}'
+  SPEC_KIT_JIRA_PLAN_CONTEXT="$(adopted_ctx "${existing}")" \
+    run cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.adopted | length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.adopted[0].ticket' <<< "$output")" = "ADO-1" ]
+  [[ "$(jq -r '.adopted[0].action' <<< "$output")" == *"adopted ticket"* ]]
+  [[ "$(jq -r '.adopted[0].action' <<< "$output")" == *"added below the existing description"* ]]
+  [[ "$(jq -r '.adopted[0].action' <<< "$output")" == *"nothing outside it was touched"* ]]
+}
+
+@test "a later reconcile reports the panel as UPDATED, not added (FR-018)" {
+  # The same ticket once the panel exists: the wording must not claim a second
+  # addition.
+  local marker existing
+  marker="$(adf_managed_marker)"
+  existing="$(jq -cn --arg m "${marker}" '
+    {type:"doc", version:1, content:[
+      {type:"paragraph", content:[{type:"text", text:"PO handwritten note."}]},
+      {type:"paragraph", content:[{type:"text", text:$m, marks:[{type:"strong"}]}]},
+      {type:"paragraph", content:[{type:"text", text:"previous managed body"}]}]}')"
+  SPEC_KIT_JIRA_PLAN_CONTEXT="$(adopted_ctx "${existing}")" \
+    run cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}"
+  [ "$status" -eq 0 ]
+  [[ "$(jq -r '.adopted[0].action' <<< "$output")" == *"updated"* ]]
+  [[ "$(jq -r '.adopted[0].action' <<< "$output")" != *"added below"* ]]
+}
+
+@test "the first reconcile after adoption adds NOTHING outside the managed panel (SC-002)" {
+  local existing
+  existing='{"type":"doc","version":1,"content":[
+    {"type":"paragraph","content":[{"type":"text","text":"PO handwritten note."}]}]}'
+  SPEC_KIT_JIRA_PLAN_CONTEXT="$(adopted_ctx "${existing}")" \
+    run cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}"
+  local desc
+  desc="$(jq -c '.actions[0].body.fields.description' <<< "$output")"
+  # The human paragraph is still the FIRST node, byte-for-byte.
+  [ "$(jq -r '.content[0].content[0].text' <<< "${desc}")" = "PO handwritten note." ]
+  # And the run performs no create, no transition and no second write.
+  [ "$(jq -r '[.actions[] | select(.method != "PUT")] | length' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.actions | length' <<< "$output")" -eq 1 ]
+}
+
+@test "a bridge-created ticket is NOT reported as adopted, and the key is absent" {
+  local existing
+  existing='{"type":"doc","version":1,"content":[]}'
+  SPEC_KIT_JIRA_PLAN_CONTEXT="$(jq -cn --argjson d "${existing}" '
+    {tickets:{s1:"ADO-1"}, ticket_origins:{s1:"bridge-created"}, ticket_descriptions:{s1:$d}}')" \
+    run cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("adopted")' <<< "$output")" = "false" ]
+}
+
+@test "a reconcile with no adopted ticket keeps its summary key-for-key unchanged" {
+  run cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("adopted")' <<< "$output")" = "false" ]
+}
+
+@test "the adoption report reaches the DEFAULT prose output, not only --json (XVI)" {
+  local existing
+  existing='{"type":"doc","version":1,"content":[
+    {"type":"paragraph","content":[{"type":"text","text":"PO handwritten note."}]}]}'
+  SPEC_KIT_JIRA_PLAN_CONTEXT="$(adopted_ctx "${existing}")" \
+    run cmd_reconcile reconcile --dry-run "${SPEC_WITH}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Adopted:"* ]]
+  [[ "$output" == *"ADO-1: adopted ticket"* ]]
+}
+
+@test "the adoption report is byte-identical across ports (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local existing ctx bash_out ps_out ps_abs
+  existing='{"type":"doc","version":1,"content":[
+    {"type":"paragraph","content":[{"type":"text","text":"PO handwritten note."}]}]}'
+  ctx="$(adopted_ctx "${existing}")"
+  bash_out="$(SPEC_KIT_JIRA_PLAN_CONTEXT="${ctx}" cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}")"
+  ps_abs="$(cd "${PS_CMD}" && pwd)"
+  ps_out="$(SPEC_KIT_JIRA_PLAN_CONTEXT="${ctx}" pwsh -NoProfile -Command "
+    Import-Module '${ps_abs}/Reconcile.psm1' -Force
+    [void](Invoke-JiraReconcile -Arguments @('reconcile','--dry-run','--json','${SPEC_WITH}'))
+  ")"
+  [ "$(jq -c '.adopted' <<< "${bash_out}")" = "$(jq -c '.adopted' <<< "${ps_out}")" ]
+}

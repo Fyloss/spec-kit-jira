@@ -1,0 +1,28 @@
+{
+  "name": "us2-adopt-mixed-refusals",
+  "description": "003 US2 (T091, AS-4): several refusal classes co-occur with valid bindings in ONE run — 003 binds cleanly, 004's story is claimed by another spec, and 005's story has two candidates. Every unambiguous binding still applies, every refused binding leaves zero writes of its own, and the run exits 4 (FR-013).",
+  "mock": {
+    "projects": { "ADO": "company" },
+    "identity": {
+      "ADO-5": { "origin": "human", "repo": "acme/app", "spec_slug": "009-someone-elses-spec" }
+    },
+    "issues": {
+      "ADO-1": { "labels": ["speckit-adopt:003-label-based-adoption"] },
+      "ADO-2": { "labels": ["speckit-adopt:003-label-based-adoption:us1"], "parent": "ADO-1" },
+      "ADO-3": { "labels": ["speckit-adopt:003-label-based-adoption:us2"], "parent": "ADO-1" },
+      "ADO-4": { "labels": ["speckit-adopt:004-billing-export"] },
+      "ADO-5": { "labels": ["speckit-adopt:004-billing-export:us1"], "parent": "ADO-4" },
+      "ADO-6": { "labels": ["speckit-adopt:005-audit-trail"] },
+      "ADO-70": { "labels": ["speckit-adopt:005-audit-trail:us1"], "parent": "ADO-6" },
+      "ADO-71": { "labels": ["speckit-adopt:005-audit-trail:us1"], "parent": "ADO-6" }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-adoption",
+  "argv": ["adopt", "--yes", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

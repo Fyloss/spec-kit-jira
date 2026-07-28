@@ -201,4 +201,58 @@ Describe 'Import-JiraConfig' {
         ($r.Errors -join "`n") | Should -Match 'unknown'
         Remove-Item -Recurse -Force $d
     }
+
+    # --- Adoption section (003 T004) -----------------------------------------
+
+    It 'accepts an adoption section (003 T004, FR-001)' {
+        $d = New-TempConfigDir
+        $team = "projects:`n  - key: ADO`n    style: company_managed`n    epic_strategy: per_repo`n    task_strategy: subtask`nrouting_default: ADO`nadoption:`n  enabled: true`n  label_prefix: `"speckit-adopt:`"`n"
+        Set-Content -Path (Join-Path $d 'config.yml') -Value $team -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 0
+        ($r.Errors -join "`n") | Should -Not -Match 'unknown top-level key'
+        $merged = $r.Json | ConvertFrom-Json
+        $merged.adoption.enabled | Should -BeTrue
+        $merged.adoption.label_prefix | Should -Be 'speckit-adopt:'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'treats an absent adoption section as disabled (003 FR-001)' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value $script:ValidTeam -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 0
+        ($r.Json | ConvertFrom-Json).PSObject.Properties.Name | Should -Not -Contain 'adoption'
+        Remove-Item -Recurse -Force $d
+    }
+
+    # --- adoption schema rules (003 T034, FR-002) ----------------------------
+
+    It 'refuses an adoption.enabled that is not a boolean (003 T034)' -TestCases @(
+        @{ Yaml = "adoption:`n  enabled: maybe`n"; Expect = 'adoption.enabled' }
+        @{ Yaml = "adoption:`n  enabled: true`n  label_prefix: `"`"`n"; Expect = 'adoption.label_prefix must be a non-empty string' }
+        @{ Yaml = "adoption:`n  enabled: true`n  label_prefix: `"speckit adopt:`"`n"; Expect = 'whitespace' }
+        @{ Yaml = "adoption:`n  enabled: true`n  mystery: nope`n"; Expect = 'unknown adoption key' }
+    ) {
+        param($Yaml, $Expect)
+        $d = New-TempConfigDir
+        $team = "projects:`n  - key: ADO`n    style: company_managed`n    epic_strategy: per_repo`n    task_strategy: subtask`nrouting_default: ADO`n$Yaml"
+        Set-Content -Path (Join-Path $d 'config.yml') -Value $team -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -BeLike "*$Expect*"
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'accepts the shipped template verbatim (003 T034)' {
+        $d = New-TempConfigDir
+        $tpl = Join-Path $PSScriptRoot '../../../templates/config.yml.template'
+        Copy-Item -LiteralPath $tpl -Destination (Join-Path $d 'config.yml')
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 0
+        $merged = $r.Json | ConvertFrom-Json
+        $merged.adoption.enabled | Should -BeFalse
+        $merged.adoption.label_prefix | Should -Be 'speckit-adopt:'
+        Remove-Item -Recurse -Force $d
+    }
 }
