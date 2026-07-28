@@ -117,7 +117,10 @@ Describe 'The registry is never written (FR-022, SC-007, SC-012)' {
     }
 
     It 'records a disabled entry in OUR file and leaves the registry alone (FR-007)' {
-        [System.IO.File]::WriteAllText($script:Ext, ($script:Seed -replace '(?m)^    enabled: true$', '    enabled: false'), (New-Object System.Text.UTF8Encoding($false)))
+        # \r? tolerates a CRLF-checked-out source file (e.g. a Windows runner
+        # without .gitattributes enforcing LF): $ sits right before \n, not \r,
+        # so a bare pattern silently matches nothing on such a checkout.
+        [System.IO.File]::WriteAllText($script:Ext, ($script:Seed -replace '(?m)^    enabled: true\r?$', '    enabled: false'), (New-Object System.Text.UTF8Encoding($false)))
         $before = Get-Content -Raw -LiteralPath $script:Ext
         Invoke-EveryCommand -Spec $script:Spec
         (Get-Content -Raw -LiteralPath $script:Ext) | Should -BeExactly $before

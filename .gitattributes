@@ -1,0 +1,9 @@
+# .gitattributes — enforce the LF policy .editorconfig already declares
+# (end_of_line = lf) at the git-checkout layer, which .editorconfig cannot
+# reach. Without this, a Windows checkout (core.autocrlf=true, the
+# windows-latest runner default) converts every text file to CRLF, silently
+# breaking any test that regex-matches literal here-string content anchored
+# on end-of-line ($) — e.g. RegistryNeverWritten.Tests.ps1's
+# `-replace '(?m)^    enabled: true$'`, which never matches a CRLF-terminated
+# line since `$` sits immediately before `\n`, not before `\r`.
+* text=auto eol=lf
