@@ -7,6 +7,124 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-28
+
+Hooks active from installation (003).
+
+The extension registered no lifecycle hook at install, registered them itself as
+*optional* (which the host reads as "offer this", not "perform it"), pointed them
+at a `speckit.jira.reconcile` command that did not exist, and told the assistant
+to invoke a bare `spec-kit-jira` executable the install never provides. Four
+independent breaks, each sufficient on its own to make the extension inert. This
+release closes all four.
+
+### ⚠ Behaviour changes for existing users
+
+- **`reconcile --repair-hooks` is REMOVED.** It existed only to write the hook
+  registry, which this release makes read-only to the extension. Passing it is now
+  a usage error (exit `1`) rather than a silent no-op: a flag named "repair" that
+  no longer repairs would be worse than none. Nothing replaces it — a genuinely
+  missing entry is restored by re-running the official install:
+  `specify extension add --dev <path-to-spec-kit-jira> --force`.
+
+- **A registry written by 0.2.0 or earlier needs a ONE-TIME MANUAL CLEANUP.**
+  Earlier versions wrote four-field hook entries carrying no owning-extension
+  field. The official install purges its own entries by matching on that field,
+  so it does not recognise them: instead of replacing each one it adds a second
+  entry beside it, and every lifecycle step fires twice. Neither the host nor this
+  extension can remove them.
+
+  The configuration ceremony reports this as `duplicated` and names every affected
+  event. The edit is: open `.specify/extensions.yml` and, under each named event,
+  delete the entry that has **no** `extension: jira` line. For example —
+
+  ```yaml
+  hooks:
+    after_plan:
+    - command: speckit.jira.reconcile   # ← DELETE this entry (no `extension:` field)
+      description: Mirror the updated spec-kit artifacts into Jira Cloud (non-blocking).
+      enabled: true
+      optional: true
+    - extension: jira                   # ← KEEP this one (written by the install)
+      command: speckit.jira.reconcile
+      enabled: true
+      optional: false
+      priority: 10
+      prompt: Execute speckit.jira.reconcile?
+      description: Mirror the implementation plan into Jira Cloud.
+      condition: null
+  ```
+
+### Added
+
+- The extension manifest declares all seven lifecycle events (`before_specify`
+  plus the six `after_*`) as a **top-level `hooks:` block**, so `specify extension
+  add` registers and activates them with no configuration ceremony. A block nested
+  under `provides:` validates and registers nothing, which is what shipped before.
+- `speckit.jira.reconcile` now **exists**: a declared, installed, assistant-
+  invocable command with an ordered procedure. Six `after_*` hooks had named it
+  since 0.1.0 without it ever being created.
+- Every hook entry is registered `optional: false`, so the assistant **performs**
+  the mirroring step as part of the host command instead of offering it. This
+  changes dispatch only — a hook failure still never fails a spec-kit command.
+- An operator disable record in the gitignored `.specify/jira/config.local.yml`
+  (`hooks.disabled`), honoured at dispatch. It exists because `specify extension
+  add` rewrites `enabled: true` unconditionally, so the registry cannot remember
+  the decision across a reinstall.
+- `/speckit.jira.config --enable-hook <event>` (repeatable) releases a held event.
+- The hook health report gains `held_disabled`, `duplicated` and `unreadable`, and
+  the ceremony reports its hook effect as `healthy` / `incomplete` /
+  `held_disabled` / `duplicated` / `unreadable` — a verification vocabulary,
+  because it no longer writes anything.
+- A scratch-repository install harness and conformance suites that drive the REAL
+  `specify extension add`, so what the install actually writes is verified rather
+  than assumed.
+
+### Changed
+
+- **The hook registry is read-only to this extension, in every state, from every
+  command.** `.specify/extensions.yml` is never created, modified, truncated,
+  reordered or reformatted; the operator's comments survive every run. The
+  registrar's writer is deleted rather than guarded — this extension's YAML reader
+  models a restricted subset and drops comments, so every write it performed
+  damaged a file it neither owns nor can faithfully reproduce.
+- Every documented procedure invokes the bridge by its **repository-relative
+  per-port path** (`.specify/extensions/jira/scripts/bash/spec-kit-jira.sh`, or
+  the `powershell/spec-kit-jira.ps1` twin) instead of a bare `spec-kit-jira`
+  name. The install places nothing on `PATH`, so the bare name resolved to nothing
+  — the source of the reported "spec-kit-jira CLI not installed" message.
+- Degraded runs name the true cause among six distinguished states, emit at most
+  one message per host command run, and cap the not-yet-configured notice at three
+  lines. Every command literal in every message is now checked mechanically to be
+  runnable exactly as spelled.
+- All three command documents carry a verbatim fallback block for the one state
+  the bridge cannot report on — its own entry point missing — with an instruction
+  to emit it exactly rather than improvise.
+- `INSTALL.md` and the managed README block state the corrected sequence: the
+  install registers and activates the hooks; the ceremony binds the project and
+  verifies the registration.
+
+### Fixed
+
+- **The bridge entry point ships executable.** `scripts/bash/spec-kit-jira.sh` was
+  committed `0644`, so every documented invocation by path failed with "permission
+  denied" in a freshly installed repository — indistinguishable, from the
+  developer's side, from "not installed".
+- **The YAML reader could not read the registry the install writes.** PyYAML emits
+  block sequences at their parent key's indentation; the reader required a greater
+  indent and stopped at the key. Every real installation's `.specify/extensions.yml`
+  parsed as `{"installed": null}`, so hook health reported a perfectly healthy
+  repository unreadable. Both ports fixed.
+- **The YAML writer was not a fixed point of the reader.** `key: []` and `key: {}`
+  were written for empty collections and read back as the strings `"[]"` and
+  `"{}"`. Both ports fixed.
+- A bridge fault that returned early — an unparseable spec, an invalid lifecycle
+  payload — failed the host command in hook context, because the non-blocking
+  downgrade only applied to faults reaching the end of the run. Every failure path
+  now goes through it.
+- An empty local binding (the state left by releasing the last held event) threw
+  on the PowerShell port where the Bash port tolerated it.
+
 ## [0.2.0] - 2026-07-27
 
 Reliable automatic Jira discovery & team-based feature prefix (002).

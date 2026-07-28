@@ -34,6 +34,33 @@ output_warn() {
   printf 'WARNING: %s\n' "$1" >&2
 }
 
+# =============================================================================
+# The bridge's runnable invocation (003 FR-014, FR-018, research R6)
+# =============================================================================
+#
+# `specify extension add` copies this repository into the consuming repository's
+# `.specify/extensions/jira/` and installs NOTHING on the machine — no binary, no
+# PATH entry, no profile edit. A message that tells the operator to run a bare
+# `spec-kit-jira` therefore names a command that does not exist, which is exactly
+# the reported "spec-kit-jira CLI not installed" symptom.
+#
+# Every message that tells someone to run the bridge goes through the helper
+# below. It names BOTH ports on purpose: the two ports emit byte-identical
+# output (Constitution VI), so a message cannot name only the port it happens to
+# be running on without breaking the conformance diff — and the operator reading
+# it may well be on the other one.
+JIRA_BRIDGE_BASH_ENTRY='.specify/extensions/jira/scripts/bash/spec-kit-jira.sh'
+JIRA_BRIDGE_PWSH_ENTRY='.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1'
+
+# output_bridge_invocation <args...> — the runnable, per-port invocation of the
+# bridge with the given arguments. Every literal it produces is runnable exactly
+# as spelled (FR-018), which tests/bash/ci/test_message_command_literals.bats
+# asserts mechanically.
+output_bridge_invocation() {
+  printf '%s %s (on Windows: %s %s)' \
+    "${JIRA_BRIDGE_BASH_ENTRY}" "$*" "${JIRA_BRIDGE_PWSH_ENTRY}" "$*"
+}
+
 # summary_build_json <command> <dry_run> <created> <updated> <skipped> <warnings> <errors> <exit_code>
 # Build the canonical --json run summary (run-summary.schema.json). Commands may
 # extend the object; this is the required core.

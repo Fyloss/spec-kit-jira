@@ -37,5 +37,8 @@ setup() {
 @test "the project-key closed question is asked over the discovered list only" {
   grep -q 'Closed question (project key)' "${DOC}"
   grep -q 'accessible projects' "${DOC}"
-  grep -q 'spec-kit-jira config <KEY>' "${DOC}"
+  # The re-invocation is named in the repository-relative per-port form: the
+  # install puts nothing on PATH, so a bare executable name would be unrunnable
+  # (003 FR-014, FR-018).
+  grep -q '.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config <KEY>' "${DOC}"
 }

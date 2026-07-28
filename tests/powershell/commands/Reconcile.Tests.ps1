@@ -83,3 +83,125 @@ Describe 'Invoke-JiraReconcile (dry-run)' {
         finally { $env:SPEC_KIT_JIRA_LIFECYCLE = $null }
     }
 }
+
+Describe 'Message discipline (T049 / T088, 003 US5)' {
+    # Under `optional: false` the assistant PERFORMS this step inside every
+    # lifecycle command, so whatever it says is said seven times a feature. Two
+    # limits follow, and neither is cosmetic: at most one message per run
+    # (FR-016), and the not-yet-configured notice — the state of every repository
+    # for its first hour — capped at three lines (FR-019).
+    #
+    # The causes must also be told apart. The reported defect's message named a
+    # machine-wide CLI that was never how this extension is delivered, which sent
+    # the developer to install something that does not exist.
+    BeforeAll {
+        Import-Module (Join-Path $PSScriptRoot '../../../scripts/powershell/lib/Config.psm1') -Force
+
+        function Invoke-Degraded {
+            param([string[]] $ArgList)
+            $sw = [System.IO.StringWriter]::new(); $se = [System.IO.StringWriter]::new()
+            $oo = [Console]::Out; $oe = [Console]::Error
+            [Console]::SetOut($sw); [Console]::SetError($se)
+            try { $code = Invoke-JiraReconcile -Arguments $ArgList }
+            finally { [Console]::SetOut($oo); [Console]::SetError($oe) }
+            return [pscustomobject]@{ ExitCode = [int]$code; Out = $sw.ToString(); Err = $se.ToString() }
+        }
+    }
+
+    BeforeEach {
+        $script:MdWork = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+        New-Item -ItemType Directory -Path (Join-Path $script:MdWork '.specify/jira') -Force | Out-Null
+        $env:JIRA_CONFIG_DIR = Join-Path $script:MdWork '.specify/jira'
+        $env:SPEC_KIT_JIRA_EXTENSIONS_YML = Join-Path $script:MdWork '.specify/extensions.yml'
+        $env:JIRA_NO_SLEEP = '1'
+        $env:JIRA_MAX_ATTEMPTS = '1'
+        $script:SavedBase = $env:SPEC_KIT_JIRA_BASE_URL
+    }
+    AfterEach {
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:SavedBase
+        Remove-Item Env:\JIRA_CONFIG_DIR -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_EXTENSIONS_YML -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_EXTENSION_ROOT -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $script:MdWork -ErrorAction SilentlyContinue
+    }
+
+    It 'reports "not yet configured" in at most THREE lines, exit 0 (FR-019)' {
+        Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
+        $r = Invoke-Degraded @('reconcile', '--json', $script:SpecWith)
+        $r.ExitCode | Should -Be 0
+        @($r.Err.TrimEnd("`n") -split "`n").Count | Should -BeLessOrEqual 3
+        $r.Err | Should -Match 'not bound to a Jira project yet'
+        # It names the configuration command, spelled as it is registered (FR-018)...
+        $r.Err | Should -Match ([regex]::Escape('/speckit.jira.config'))
+        # ...and does not read as a failure: the host command succeeded.
+        $r.Err | Should -Match 'completed normally'
+    }
+
+    It 'never reports the unconfigured state as a missing CLI (FR-017)' {
+        # The exact wording of the reported defect. It was wrong twice: the cause
+        # was not a missing CLI, and this extension is not delivered as one.
+        Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
+        $r = Invoke-Degraded @('reconcile', '--json', $script:SpecWith)
+        ($r.Out + $r.Err) | Should -Not -Match 'CLI not installed'
+        ($r.Out + $r.Err) | Should -Not -Match 'not installed'
+    }
+
+    It 'reports a missing entry point as its OWN cause (T088, T090, FR-017)' {
+        # A half-broken install: this port running while its twin is missing. The
+        # remedy is an install, not a configuration — so saying "not configured"
+        # here would send the operator to the wrong place entirely.
+        $env:SPEC_KIT_JIRA_BASE_URL = 'https://mock'
+        $fake = Join-Path $script:MdWork 'fake-root'
+        New-Item -ItemType Directory -Path (Join-Path $fake 'scripts/bash') -Force | Out-Null
+        Set-Content -Path (Join-Path $fake 'scripts/bash/spec-kit-jira.sh') -Value '#!/usr/bin/env bash' -NoNewline
+        # ...and no scripts/powershell/spec-kit-jira.ps1.
+        $env:SPEC_KIT_JIRA_EXTENSION_ROOT = $fake
+        $r = Invoke-Degraded @('reconcile', '--json', $script:SpecWith)
+        $r.ExitCode | Should -Be 0
+        $r.Err | Should -Match 'bridge entry point'
+        $r.Err | Should -Match ([regex]::Escape('powershell/spec-kit-jira.ps1'))
+        $r.Err | Should -Match 'install is incomplete'
+        # Distinguished from the not-configured cause...
+        $r.Err | Should -Not -Match 'not bound to a Jira project'
+        # ...and from the generic prerequisite gate.
+        $r.Err | Should -Not -Match 'missing required command'
+        # The remedy is the official install, in its runnable form (FR-018).
+        $r.Err | Should -Match ([regex]::Escape('specify extension add --dev <path-to-spec-kit-jira> --force'))
+    }
+
+    It 'emits exactly ONE message per run (FR-016)' {
+        Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
+        $r = Invoke-Degraded @('reconcile', '--json', $script:SpecWith)
+        @([regex]::Matches($r.Err, 'Jira mirror skipped')).Count | Should -Be 1
+        @([regex]::Matches($r.Err, 'WARNING:')).Count | Should -Be 0
+    }
+
+    It 'emits exactly one WARNING naming the true cause in hook context (FR-016, FR-017)' {
+        $env:SPEC_KIT_JIRA_BASE_URL = 'http://127.0.0.1:1'
+        $env:SPEC_KIT_JIRA_HOOK_CONTEXT = '1'
+        # Credentials must RESOLVE for the run to reach the apply step at all;
+        # this case is about the mirror failing, not about it being unconfigured.
+        $env:JIRA_EMAIL = 'user@example.com'
+        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+        $r = Invoke-Degraded @('reconcile', '--json', $script:SpecWith)
+        $r.ExitCode | Should -Be 0
+        @([regex]::Matches($r.Err, 'WARNING:')).Count | Should -Be 1
+        $r.Err | Should -Match 'Jira mirror not completed'
+        $r.Err | Should -Match 'This spec-kit command completed normally'
+        # It names only commands runnable as spelled — never the removed flag.
+        $r.Err | Should -Not -Match 'repair-hooks'
+        $r.Err | Should -Match ([regex]::Escape('/speckit.jira.config'))
+    }
+
+    It 'says NOTHING for a disabled event — not even that it was skipped (FR-020)' {
+        Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
+        $null = Add-JiraHooksDisabled -LifecycleEvent 'after_plan' -ConfigDir $env:JIRA_CONFIG_DIR
+        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+        $r = Invoke-Degraded @('reconcile', '--json', $script:SpecWith)
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -BeNullOrEmpty
+        $r.Err | Should -BeNullOrEmpty
+    }
+}

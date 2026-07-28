@@ -41,27 +41,98 @@ credential-shaped values in either YAML layer are rejected at config time (exit 
    ```sh
    specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/archive/refs/heads/main.zip
    # or, while developing the extension itself:
-   specify extension add --dev /path/to/spec-kit-jira
+   specify extension add --dev <path-to-spec-kit-jira> --force
    ```
 
-2. Run the deterministic install ceremony:
+   **This step registers the lifecycle hooks and activates them.** See below.
+
+2. Run the deterministic configuration ceremony — the one remaining step before
+   anything reaches Jira:
 
    ```
    /speckit.jira.config
    ```
 
-   In one run it performs — and reports as three separate effects — metadata
-   discovery, idempotent `after_*` hook registration in `.specify/extensions.yml`,
-   and creation/update of the managed README block (FR-054).
+   It binds the repository to a Jira project (metadata discovery), manages the
+   README block, ensures `.gitignore` coverage, and **verifies** the hook
+   registration the install performed. Each effect is reported separately.
 
 3. Mirror your specs: `spec.md` / `plan.md` / `tasks.md` reconcile into Jira
-   automatically at each Spec Kit lifecycle step, or run `reconcile` manually.
+   automatically at each Spec Kit lifecycle step, or run a reconcile manually.
+
+## The lifecycle hooks: active from install
+
+Four properties, and they are worth stating plainly because the previous release
+got all four wrong:
+
+- **Registered and active from the install itself.** The extension manifest
+  declares all seven lifecycle events, so `specify extension add` writes them
+  into your `.specify/extensions.yml` and they are live immediately. No
+  configuration ceremony is needed to wire them up, and none can: registration
+  belongs to the install.
+
+- **Performed, not offered.** Each entry is registered non-optional, so your
+  assistant performs the mirroring step as part of the host `/speckit.*` command
+  rather than printing a suggestion for you to run later.
+
+- **A hook failure never fails a spec-kit command.** Non-optional decides whether
+  the step *happens*, not whether a failure propagates. Whatever the bridge finds
+  — no binding yet, no credentials, Jira unreachable — the host command completes
+  with its normal outcome and you get at most one message saying why.
+
+- **The extension never modifies the hook registry.** `.specify/extensions.yml` is
+  read-only to this extension in every state, from every command: it is not
+  created, modified, reordered or reformatted, and your comments survive every
+  run. The official install is that file's only writer. What the configuration
+  ceremony does instead is read it, classify every event, and report:
+
+  | Report | What it means, and what to do |
+  | --- | --- |
+  | `healthy` | All seven events present and enabled |
+  | `incomplete` | An event has no entry. Re-run `specify extension add --dev <path-to-spec-kit-jira> --force` |
+  | `held_disabled` | You disabled an event. No mirroring runs for it, whatever the registry says. Release it with `/speckit.jira.config --enable-hook <event>` |
+  | `duplicated` | A leftover entry from a version before manifest-declared hooks. Neither the install nor the extension can remove it — the report gives you the exact edit |
+  | `unreadable` | The registry could not be read. The file is named; no claim is made about the hooks |
+
+### Disabling one event
+
+Set `enabled: false` on its entry in `.specify/extensions.yml` and run
+`/speckit.jira.config` once. The ceremony records your decision in the gitignored
+`.specify/jira/config.local.yml`, and from then on no mirroring runs for that
+event **even though a later `specify extension add` will set `enabled: true` back
+in the registry** — the official install rewrites that field unconditionally and
+this extension may not correct it. Release the event with
+`/speckit.jira.config --enable-hook <event>`.
+
+### Upgrading from a release that registered its own hooks
+
+Versions before manifest-declared hooks registered them themselves, in a
+four-field shape carrying no owning-extension field. The official install matches on that field when it
+purges, so those entries are **not replaced** — a second entry is added beside
+each one, and every lifecycle step fires twice.
+
+The extension reports this as `duplicated` and names each affected event. Removing
+it is a one-time manual edit: open `.specify/extensions.yml` and delete, under
+each named event, the entry that has **no** `extension: jira` line. The remaining
+entry is the canonical one the install wrote.
 
 ## Verifying the install
 
+- Inspect `.specify/extensions.yml` straight after installing: seven events, one
+  `jira` entry each, `enabled: true`, `optional: false`.
+- Run the bridge by its repository-relative path with nothing done in between —
+  the install places nothing on your `PATH`, by design:
+
+  ```sh
+  .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+  # on Windows:
+  .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 --help
+  ```
+
 - Re-run `/speckit.jira.config` on an unchanged project: the produced
-  `config.local.yml` is **byte-identical** (determinism, SC-004).
-- Re-run `reconcile` on an unchanged corpus: **zero writes** of every kind
+  `config.local.yml` is **byte-identical** (determinism, SC-004), and
+  `.specify/extensions.yml` is byte-identical too — comments included.
+- Re-run a reconcile on an unchanged corpus: **zero writes** of every kind
   (zero-churn idempotency, SC-001).
-- A forced reinstall preserves the team config and the registered hooks, with
-  self-repair on the next run (SC-008).
+- A forced reinstall preserves the team config and re-registers the seven events
+  without duplicating them.

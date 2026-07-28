@@ -65,9 +65,15 @@ setup() {
   [[ "$output" == *"args=PROJ-123"* ]]
 }
 
-@test "config accepts --repair-hooks" {
+@test "--repair-hooks is REJECTED as an unknown flag (003 T073, FR-022)" {
+  # The flag existed only to perform a registry write FR-022 now forbids. It is
+  # removed rather than kept as a no-op: a flag named "repair" that no longer
+  # repairs anything would be worse than none (Principle XV, XVI). Rejecting it
+  # loudly also tells an operator with it in a script exactly what happened.
   run cli_parse config --repair-hooks
-  [[ "$output" == *"repair_hooks=true"* ]]
+  [[ "$output" == *"exit=1"* ]]
+  [[ "$output" == *"unknown flag: --repair-hooks"* ]]
+  [[ "$output" != *"repair_hooks="* ]]
 }
 
 @test "parse output is byte-identical across ports" {

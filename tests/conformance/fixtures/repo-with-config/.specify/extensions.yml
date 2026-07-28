@@ -1,0 +1,84 @@
+# The hook registry exactly as `specify extension add` writes it: PyYAML's
+# block style, sequences at their parent key's indentation, and the canonical
+# EIGHT-field entry per event (003 contracts/hook-registry-entry.md).
+#
+# This comment is a canary. This extension's YAML reader drops comments, so if
+# any command ever re-serialises this file these lines disappear — which is
+# exactly why the writer was removed rather than narrowed (003 FR-022, R3).
+installed:
+- jira
+- git
+settings:
+  auto_execute_hooks: true
+hooks:
+  before_specify:
+  - extension: jira
+    command: speckit.jira.feature
+    enabled: true
+    optional: false
+    priority: 10
+    prompt: Execute speckit.jira.feature?
+    description: Resolve the Jira ticket and name the feature before creation.
+    condition: null
+  after_specify:
+  - extension: jira
+    command: speckit.jira.reconcile
+    enabled: true
+    optional: false
+    priority: 10
+    prompt: Execute speckit.jira.reconcile?
+    description: Mirror the new specification into Jira Cloud.
+    condition: null
+  after_clarify:
+  - extension: jira
+    command: speckit.jira.reconcile
+    enabled: true
+    optional: false
+    priority: 10
+    prompt: Execute speckit.jira.reconcile?
+    description: Mirror the recorded clarifications into Jira Cloud.
+    condition: null
+  after_plan:
+  - extension: git
+    command: speckit.git.commit
+    enabled: true
+    optional: true
+    priority: 10
+    prompt: Execute speckit.git.commit?
+    description: Commit the plan.
+    condition: null
+  - extension: jira
+    command: speckit.jira.reconcile
+    enabled: true
+    optional: false
+    priority: 10
+    prompt: Execute speckit.jira.reconcile?
+    description: Mirror the implementation plan into Jira Cloud.
+    condition: null
+  after_tasks:
+  - extension: jira
+    command: speckit.jira.reconcile
+    enabled: true
+    optional: false
+    priority: 10
+    prompt: Execute speckit.jira.reconcile?
+    description: Mirror the task breakdown into Jira Cloud.
+    condition: null
+  after_implement:
+  - extension: jira
+    command: speckit.jira.reconcile
+    enabled: true
+    optional: false
+    priority: 10
+    prompt: Execute speckit.jira.reconcile?
+    description: Mirror the implementation outcome into Jira Cloud.
+    condition: null
+  after_analyze:
+  - extension: jira
+    command: speckit.jira.reconcile
+    enabled: true
+    optional: false
+    priority: 10
+    prompt: Execute speckit.jira.reconcile?
+    description: Mirror the analysis outcome into Jira Cloud.
+    condition: null

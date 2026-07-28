@@ -1,6 +1,6 @@
 {
   "name": "us6-zero-churn",
-  "description": "US6 zero-churn idempotency (FR-030, SC-001). The spec already exists as a ticket (the plan context maps its local id to an issue key, so the plan is an UPDATE) and its current Jira fields exactly match what the bridge would write (the lifecycle context supplies them — the seam the discovery integration fills from a fail-closed read). The idempotency diff therefore drops the update: a real run (NOT dry-run) plans zero actions and performs zero Jira writes of any kind. Both ports emit a byte-identical empty action set and make zero mock calls (NFR-1).",
+  "description": "US6 zero-churn idempotency (FR-030, SC-001), extended by 003 T074 to the UNCONDITIONAL registry guarantee. The spec already has its ticket and the current Jira fields exactly match what the bridge would write, so the idempotency diff drops the update: the real run plans zero actions and performs zero Jira writes of any kind. Both ports emit a byte-identical empty action set and make zero mock calls (NFR-1). The fixture now also carries the hook registry as the host install writes it \u2014 comments, a foreign extension's entry, PyYAML indentation \u2014 so \"zero churn\" covers that file too: the post-run workdir diff fails if either port re-serialises it (003 FR-022, FR-023, SC-012).",
   "mock": {
     "projects": {
       "PROJ": "company"

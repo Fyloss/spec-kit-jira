@@ -274,3 +274,195 @@ YAML
   [ "$(printf '%s' "${json}" | jq -r '.resolved_ids.TEAM.style')" = "team_managed" ]
   [ "$(printf '%s' "${json}" | jq -r '.resolved_ids.TEAM.style_source')" = "api" ]
 }
+
+# =============================================================================
+# T008 [003] — The operator disable record (FR-007, FR-029, data-model)
+# =============================================================================
+#
+# `specify extension add` writes `enabled: true` unconditionally on every
+# install and upgrade (research R5), so the hook registry cannot carry the
+# operator's decision across a reinstall. The decision is recorded HERE instead,
+# in the gitignored local binding, which lives outside .specify/extensions/ and
+# therefore survives (Constitution V). The registry is never edited to match —
+# that would be a write, and FR-022 forbids it.
+
+@test "reading an absent disable record yields the empty set" {
+  [ "$(config_hooks_disabled_read "${DIR}")" = "[]" ]
+}
+
+@test "reading a local binding with no hooks key yields the empty set" {
+  printf 'site_alias: "prod"\n' > "${DIR}/config.local.yml"
+  [ "$(config_hooks_disabled_read "${DIR}")" = "[]" ]
+}
+
+@test "a written disable record round-trips" {
+  run config_hooks_disabled_add after_implement "${DIR}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "recorded" ]
+  [ "$(config_hooks_disabled_read "${DIR}")" = '["after_implement"]' ]
+}
+
+@test "recording an already-recorded event is unchanged, and never duplicates it" {
+  config_hooks_disabled_add after_implement "${DIR}" > /dev/null
+  run config_hooks_disabled_add after_implement "${DIR}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "unchanged" ]
+  [ "$(config_hooks_disabled_read "${DIR}" | jq 'length')" -eq 1 ]
+}
+
+@test "the record is ordered so two runs write byte-identical bytes (FR-003)" {
+  config_hooks_disabled_add after_tasks "${DIR}" > /dev/null
+  config_hooks_disabled_add after_clarify "${DIR}" > /dev/null
+  [ "$(config_hooks_disabled_read "${DIR}")" = '["after_clarify","after_tasks"]' ]
+}
+
+@test "an unknown event name is reported and IGNORED rather than failing the run" {
+  # The file is human-editable; a typo must not break mirroring (data-model).
+  printf 'hooks:\n  disabled:\n    - after_implement\n    - after_typo\n' > "${DIR}/config.local.yml"
+  # `run` folds stderr into $output, so read the value through a plain
+  # substitution and the report through a separate, stderr-only run.
+  [ "$(config_hooks_disabled_read "${DIR}" 2> /dev/null)" = '["after_implement"]' ]
+  # The report goes to stderr, naming the offending value.
+  run bash -c "source '${LIB_DIR}/config.sh'; config_hooks_disabled_read '${DIR}' 2>&1 >/dev/null"
+  [[ "$output" == *"after_typo"* ]]
+}
+
+@test "recording an unknown event name is reported and does not fail the run" {
+  run config_hooks_disabled_add not_an_event "${DIR}"
+  [ "$status" -eq 0 ]
+  [ "$(config_hooks_disabled_read "${DIR}")" = "[]" ]
+}
+
+@test "--dry-run predicts the record write without performing it (Constitution XI)" {
+  run config_hooks_disabled_add after_plan "${DIR}" true
+  [ "$status" -eq 0 ]
+  [ "$output" = "recorded" ]
+  [ ! -f "${DIR}/config.local.yml" ]
+  [ "$(config_hooks_disabled_read "${DIR}")" = "[]" ]
+}
+
+@test "releasing an event clears it from the record (FR-007, FR-029)" {
+  config_hooks_disabled_add after_implement "${DIR}" > /dev/null
+  config_hooks_disabled_add after_plan "${DIR}" > /dev/null
+  run config_hooks_disabled_remove after_implement "${DIR}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "released" ]
+  [ "$(config_hooks_disabled_read "${DIR}")" = '["after_plan"]' ]
+}
+
+@test "releasing an unrecorded event is a no-op reported as such" {
+  run config_hooks_disabled_remove after_implement "${DIR}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "unrecorded" ]
+}
+
+@test "--dry-run predicts the release without performing it (Constitution XI)" {
+  config_hooks_disabled_add after_implement "${DIR}" > /dev/null
+  run config_hooks_disabled_remove after_implement "${DIR}" true
+  [ "$status" -eq 0 ]
+  [ "$output" = "released" ]
+  [ "$(config_hooks_disabled_read "${DIR}")" = '["after_implement"]' ]
+}
+
+@test "the record preserves the operator's site_alias and overrides" {
+  printf 'overrides:\n  routing_default: OPS\nsite_alias: "prod"\n' > "${DIR}/config.local.yml"
+  config_hooks_disabled_add after_implement "${DIR}" > /dev/null
+  json="$(config_yaml_to_json "${DIR}/config.local.yml")"
+  [ "$(jq -r '.site_alias' <<< "$json")" = "prod" ]
+  [ "$(jq -r '.overrides.routing_default' <<< "$json")" = "OPS" ]
+  [ "$(jq -r '.hooks.disabled[0]' <<< "$json")" = "after_implement" ]
+}
+
+@test "schema validation accepts the hooks key in the local binding (T012)" {
+  write_valid_team
+  printf 'hooks:\n  disabled:\n    - after_implement\n' > "${DIR}/config.local.yml"
+  run config_load "${DIR}"
+  [ "$status" -eq 0 ]
+}
+
+@test "an empty collection survives the YAML round-trip — the writer is a fixed point of the reader" {
+  # Regression (003 T010): config_to_yaml emits `key: []` and `key: {}` for empty
+  # collections, but the reader returned them as the STRINGS "[]" and "{}". The
+  # module header claims the writer is "a FIXED POINT of the reader", and it was
+  # not. The hook-registry reader tripped over it: a registry carrying
+  # `after_plan: []` — which is what our own serialiser writes — classified as
+  # unreadable instead of as an event with no entries.
+  printf '%s' '{"a":[],"b":{},"c":"x"}' | config_to_yaml > "${DIR}/rt.yml"
+  json="$(config_yaml_to_json "${DIR}/rt.yml")"
+  [ "$(jq -r '.a | type' <<< "$json")" = "array" ]
+  [ "$(jq -r '.a | length' <<< "$json")" -eq 0 ]
+  [ "$(jq -r '.b | type' <<< "$json")" = "object" ]
+  [ "$(jq -r '.b | length' <<< "$json")" -eq 0 ]
+  [ "$(jq -r '.c' <<< "$json")" = "x" ]
+}
+
+@test "a quoted [] is still a STRING — only the bare flow form is a collection" {
+  printf 'a: "[]"\nb: "{}"\n' > "${DIR}/q.yml"
+  json="$(config_yaml_to_json "${DIR}/q.yml")"
+  [ "$(jq -r '.a | type' <<< "$json")" = "string" ]
+  [ "$(jq -r '.b | type' <<< "$json")" = "string" ]
+}
+
+@test "a block sequence at its parent key's indentation is read (003 T010 regression)" {
+  # THE registry-reading bug. PyYAML — which is what `specify extension add`
+  # serialises the hook registry with — emits block sequences at the SAME
+  # indentation as their parent key, not indented under it. Both forms are valid
+  # YAML and the second is PyYAML's default:
+  #
+  #     hooks:
+  #       before_specify:
+  #       - extension: jira        <- indent 2, same as the key
+  #
+  # This reader required a GREATER indent, so it stopped at the key and returned
+  # null for its value. The consequence was not subtle: the hook registry of every
+  # real installation parsed as `{"installed":null}`, so hook health reported the
+  # file unreadable on a perfectly healthy repository.
+  printf '%s\n' \
+    'installed:' \
+    '- jira' \
+    'settings:' \
+    '  auto_execute_hooks: true' \
+    'hooks:' \
+    '  before_specify:' \
+    '  - extension: jira' \
+    '    command: speckit.jira.feature' \
+    '    enabled: true' \
+    '  after_plan:' \
+    '  - extension: jira' \
+    '    command: speckit.jira.reconcile' \
+    > "${DIR}/pyyaml.yml"
+  json="$(config_yaml_to_json "${DIR}/pyyaml.yml")"
+  [ "$(jq -r '.installed[0]' <<< "$json")" = "jira" ]
+  [ "$(jq -r '.settings.auto_execute_hooks' <<< "$json")" = "true" ]
+  [ "$(jq -r '.hooks.before_specify | length' <<< "$json")" -eq 1 ]
+  [ "$(jq -r '.hooks.before_specify[0].command' <<< "$json")" = "speckit.jira.feature" ]
+  [ "$(jq -r '.hooks.before_specify[0].enabled' <<< "$json")" = "true" ]
+  [ "$(jq -r '.hooks.after_plan[0].command' <<< "$json")" = "speckit.jira.reconcile" ]
+}
+
+@test "both sequence indentations produce the SAME parse — the forms are equivalent" {
+  printf '%s\n' 'hooks:' '  after_plan:' '  - command: a' '  - command: b' > "${DIR}/flat.yml"
+  printf '%s\n' 'hooks:' '  after_plan:' '    - command: a' '    - command: b' > "${DIR}/deep.yml"
+  [ "$(config_yaml_to_json "${DIR}/flat.yml")" = "$(config_yaml_to_json "${DIR}/deep.yml")" ]
+}
+
+@test "an EMPTY local binding is tolerated, not a config error (003 T013)" {
+  # Releasing the last held event leaves the local binding with nothing in it, so
+  # the writer emits an empty document. Reading that back must be a no-op, not a
+  # refusal — otherwise clearing the last disabled hook would break every
+  # subsequent run of the ceremony.
+  write_valid_team
+  printf '\n' > "${DIR}/config.local.yml"
+  run config_load "${DIR}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.routing_default' <<< "$output")" = "PROJ" ]
+}
+
+@test "releasing the last held event leaves a loadable local binding (003 T012)" {
+  write_valid_team
+  config_hooks_disabled_add after_implement "${DIR}" > /dev/null
+  config_hooks_disabled_remove after_implement "${DIR}" > /dev/null
+  run config_load "${DIR}"
+  [ "$status" -eq 0 ]
+  [ "$(config_hooks_disabled_read "${DIR}")" = "[]" ]
+}

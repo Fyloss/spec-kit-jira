@@ -14,7 +14,7 @@ schema_version: "1.0"
 extension:
   id: jira
   name: Jira Reconcile Engine
-  version: 0.2.0
+  version: 0.3.0
   description: >-
     Mirrors a repository's Spec Kit artifacts (spec.md, plan.md, tasks.md) into
     Jira Cloud as a self-healing, idempotent, fail-closed bridge. Twin native
@@ -34,15 +34,74 @@ provides:
     - name: speckit.jira.config
       file: commands/speckit.jira.config.md
       description: >-
-        Deterministic install ceremony — per-project metadata discovery,
-        idempotent after_* hook registration, and the managed README block,
-        reported as three separate effects.
+        Deterministic install ceremony — per-project metadata discovery, the
+        managed README block, and a read-only verification of the lifecycle
+        hooks the install registered, reported as separate effects.
     - name: speckit.jira.feature
       file: commands/speckit.jira.feature.md
       description: >-
         Ticket-first feature naming — resolve or create the Jira ticket, then
         name the branch and flat spec folder by the developer's selected team
         convention; non-blocking before_specify step.
+    - name: speckit.jira.reconcile
+      file: commands/speckit.jira.reconcile.md
+      description: >-
+        Mirror the current feature's spec-kit artifacts into Jira — the
+        deterministic, non-blocking reconcile every after_* lifecycle event
+        fires.
+
+# Lifecycle hooks — a TOP-LEVEL key, a sibling of `provides:`.
+#
+# Placement is load-bearing and its failure mode is silent:
+# `ExtensionManifest.validate()` reads `hooks` from the manifest ROOT, so a block
+# nested under `provides:` still validates (the manifest has commands) and
+# registers nothing at all. That is the defect this block fixes — before it, the
+# manifest declared no hooks, so `specify extension add` wired up nothing and the
+# extension was inert from install (003 FR-001, research R1).
+#
+# `optional: false` on every entry decides whether the step HAPPENS, not whether
+# a failure propagates: the host emits `EXECUTE_COMMAND:` and invokes the hook,
+# where an optional entry is merely printed with a prompt for the operator to run
+# later (research R4). Non-blocking outcome remains where it belongs — inside the
+# bridge, which returns success with one warning (Constitution III, FR-015).
+#
+# `priority` and `prompt` are omitted: the host writes its defaults (10, and the
+# f-string-expanded "Execute <command>?"). `condition` is omitted DELIBERATELY —
+# a non-empty condition makes agent-driven dispatch skip the hook entirely, which
+# would reintroduce the defect through a different door (research R8).
+#
+# These seven events are the complete set. The install purges this extension's
+# entries from events the manifest no longer declares, so the block is
+# self-cleaning; adding an eighth requires a spec (Principle XV, research R9).
+hooks:
+  before_specify:
+    command: speckit.jira.feature
+    optional: false
+    description: Resolve the Jira ticket and name the feature before creation.
+  after_specify:
+    command: speckit.jira.reconcile
+    optional: false
+    description: Mirror the new specification into Jira Cloud.
+  after_clarify:
+    command: speckit.jira.reconcile
+    optional: false
+    description: Mirror the recorded clarifications into Jira Cloud.
+  after_plan:
+    command: speckit.jira.reconcile
+    optional: false
+    description: Mirror the implementation plan into Jira Cloud.
+  after_tasks:
+    command: speckit.jira.reconcile
+    optional: false
+    description: Mirror the task breakdown into Jira Cloud.
+  after_implement:
+    command: speckit.jira.reconcile
+    optional: false
+    description: Mirror the implementation outcome into Jira Cloud.
+  after_analyze:
+    command: speckit.jira.reconcile
+    optional: false
+    description: Mirror the analysis outcome into Jira Cloud.
 
 tags:
   - jira

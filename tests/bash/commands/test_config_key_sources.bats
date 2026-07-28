@@ -84,7 +84,7 @@ boot() {
   # The error lists the accessible projects the closed question offers.
   [[ "$output" == *"COMP"* ]]
   [[ "$output" == *"TEAM"* ]]
-  [[ "$output" == *"spec-kit-jira config <KEY>"* ]]
+  [[ "$output" == *".specify/extensions/jira/scripts/bash/spec-kit-jira.sh config <KEY>"* ]]
 }
 
 @test "a committed non-placeholder key still binds without an argument" {

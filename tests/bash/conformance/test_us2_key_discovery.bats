@@ -49,7 +49,7 @@ parity() {
   grep -q 'COMP' "${TMP}/out-bash/stderr"
   grep -q 'TEAM' "${TMP}/out-bash/stderr"
   grep -q 'AMBI' "${TMP}/out-bash/stderr"
-  grep -q 'spec-kit-jira config <KEY>' "${TMP}/out-bash/stderr"
+  grep -q '.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config <KEY>' "${TMP}/out-bash/stderr"
 }
 
 @test "list-projects is byte-identical across ports (FR-020)" {

@@ -40,6 +40,18 @@ jobs:
         # /opt/homebrew/bin, ahead of /bin in the image PATH.
         run: brew install bats-core jq shellcheck bash
 
+      # T003 — the install harness (tests/conformance/install-harness.sh and its
+      # PowerShell twin) drives the REAL `specify extension add`. Without the CLI
+      # on PATH every US1/US4 conformance case skips, and the one claim this
+      # feature makes — that the official install alone registers the seven
+      # events — would go unverified on every push. Installed on all three hosts
+      # so both ports' harnesses run.
+      - name: Install the Spec Kit CLI (install-harness dependency)
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install specify-cli
+        run: uv tool install specify-cli --from git+https://github.com/github/spec-kit.git
+
       - name: Run bats (Bash port — POSIX hosts only)
         if: runner.os != 'Windows'
         run: bats -r tests/bash
@@ -52,6 +64,40 @@ jobs:
               Install-Module Pester -MinimumVersion 5.0.0 -Force -SkipPublisherCheck -Scope CurrentUser
           }
           $r = Invoke-Pester -Path tests/powershell -PassThru -Output Detailed
+          if ($r.FailedCount -gt 0) { exit 1 }
+
+  static-checks:
+    # T003 — the three static guarantees of feature 003, named as their own job
+    # so a regression reports which guarantee broke rather than "a bats test
+    # failed somewhere". They are cheap, they need no scratch install, and each
+    # one is the mechanical enforcement of a requirement no runtime test can
+    # reach:
+    #   * manifest ↔ registry — the seven events are declared at the manifest
+    #     root, non-optional, condition-free (FR-001..FR-004), and every
+    #     hooks[].command resolves to a declared command (FR-009, SC-002);
+    #   * message ↔ command — every command literal in every emitted message is
+    #     runnable as spelled (FR-018, FR-030, SC-009);
+    #   * no registry write — no code path in either port can open the consuming
+    #     repository's hook registry for writing (FR-022, SC-011).
+    name: Static checks (manifest, messages, registry writes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y bats jq
+
+      - name: Bash port
+        run: bats -r tests/bash/ci
+
+      - name: PowerShell port
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+          if (-not (Get-Module -ListAvailable Pester | Where-Object Version -ge '5.0.0')) {
+              Install-Module Pester -MinimumVersion 5.0.0 -Force -SkipPublisherCheck -Scope CurrentUser
+          }
+          $r = Invoke-Pester -Path tests/powershell/ci -PassThru -Output Detailed
           if ($r.FailedCount -gt 0) { exit 1 }
 
   conformance:
@@ -94,58 +140,3 @@ jobs:
             fi
           done
           exit "${failed}"
-
-  bash-coverage:
-    name: Bash coverage (>= 80%)
-    # Linux only, on purpose: kcov drives the traced script under /bin/bash, and
-    # on macOS that is Apple's 3.2 (which this port refuses by design) while
-    # pointing kcov at a Homebrew bash 5 aborts with "Failed to exchange stderr
-    # for pipe". Ubuntu's /bin/bash is >= 4, so this is the only host where the
-    # Bash twin of Pester's CodeCoverage can be measured faithfully.
-    #
-    # Pinned to 22.04 rather than ubuntu-latest: kcov was dropped from the Ubuntu
-    # 24.04 (noble) archive, so `apt-get install kcov` there fails with "Unable to
-    # locate package kcov". 22.04 (jammy) still ships it in universe — the same
-    # pin the Gates workflow's coverage-bash job carries, guarded by
-    # tests/bash/ci/test_workflow_kcov_runner.bats and its Pester twin.
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install toolchain
-        run: |
-          sudo apt-get update && sudo apt-get install -y kcov jq curl
-          # Jammy's apt bats is 1.2.1, which predates BATS_TEST_TMPDIR (bats
-          # 1.4.0) — the suite's tmpdir fixtures silently resolve to `/` on it.
-          # Install the same pinned bats-core the Gates workflow uses.
-          curl -sSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.13.0.tar.gz | tar xz -C /tmp
-          sudo /tmp/bats-core-1.13.0/install.sh /usr/local
-
-      # Two collectors, because kcov cannot run bats: it instruments bats-core's
-      # own DEBUG-trap tracing and the two feed each other an unbounded trace
-      # (91.7 GB observed before a disk filled). So kcov measures the conformance
-      # corpus and owns the denominator — which lines are statements — while the
-      # unit suites Constitution XIII actually gates on are traced on a dedicated
-      # fd and merged in. Each phase carries its own wall clock and prints the
-      # exercise progress when it fires, so a stall names the phase it stalled
-      # in. This step budget stays comfortably above both bounds on purpose: if
-      # GitHub kills the step first, the diagnostics die with it — which is
-      # exactly how the first run of this job reported nothing but "timed out
-      # after 20 minutes".
-      - name: Measure statement coverage (Constitution XIII)
-        timeout-minutes: 35
-        env:
-          SPEC_KIT_JIRA_COVERAGE_TIMEOUT: 600
-          SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT: 1200
-        run: ./tests/coverage/bash-coverage.sh --mode full --threshold 80
-
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bash-coverage
-          # coverage/ not coverage/bash: the exercise scratch (progress.log) is
-          # a sibling of kcov's report dir, and it is the only artefact a
-          # stalled run leaves behind.
-          path: coverage
-          if-no-files-found: ignore

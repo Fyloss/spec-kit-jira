@@ -97,3 +97,129 @@ setup() {
   [ -n "${b}" ]
   [ "${b}" = "${p}" ]
 }
+
+# =============================================================================
+# T048 / T087 [003 US5] — Message discipline (FR-016 – FR-020, FR-030)
+# =============================================================================
+#
+# Under `optional: false` the assistant PERFORMS this step inside every lifecycle
+# command, so whatever it says is said seven times a feature. Two limits follow,
+# and neither is cosmetic: at most one message per run (FR-016), and the
+# not-yet-configured notice — the state of every repository for its first hour —
+# capped at three lines (FR-019, US5 scenario 3).
+#
+# The causes must also be told apart. The reported defect's message named a
+# machine-wide CLI that was never how this extension is delivered, which sent the
+# developer to install something that does not exist. FR-017 lists six causes and
+# requires the message to name the true one; the sixth — the entry point missing
+# — is the one the bridge cannot report from inside a run that never started, so
+# what is testable here is the half-broken install it CAN detect.
+
+_md_work() {
+  MDWORK="$(mktemp -d)"
+  mkdir -p "${MDWORK}/.specify/jira"
+  export JIRA_CONFIG_DIR="${MDWORK}/.specify/jira"
+  export SPEC_KIT_JIRA_EXTENSIONS_YML="${MDWORK}/.specify/extensions.yml"
+  export JIRA_NO_SLEEP=1
+  export JIRA_MAX_ATTEMPTS=1
+}
+
+@test "not yet configured: exit 0, one notice, at most THREE lines (FR-019)" {
+  _md_work
+  unset SPEC_KIT_JIRA_BASE_URL
+  run cmd_reconcile reconcile --json "${SPEC_WITH}"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <<< "$output" | tr -d ' ')" -le 3 ]
+  [[ "$output" == *"not bound to a Jira project yet"* ]]
+  # It names the configuration command, spelled as it is registered (FR-018).
+  [[ "$output" == *"/speckit.jira.config"* ]]
+  # And it does NOT read as a failure: the host command succeeded.
+  [[ "$output" == *"completed normally"* ]]
+  rm -rf "${MDWORK}"
+}
+
+@test "not yet configured is NOT reported as a missing CLI (FR-017)" {
+  # The exact wording of the reported defect. It was wrong twice: the cause was
+  # not a missing CLI, and this extension is not delivered as one.
+  _md_work
+  unset SPEC_KIT_JIRA_BASE_URL
+  run cmd_reconcile reconcile --json "${SPEC_WITH}"
+  [[ "$output" != *"CLI not installed"* ]]
+  [[ "$output" != *"not installed"* ]]
+  rm -rf "${MDWORK}"
+}
+
+@test "bridge unavailable is its OWN cause, never folded into 'not configured' (T090, FR-017)" {
+  # A half-broken install: this port running while its twin is missing. The
+  # remedy is an install, not a configuration — so saying "not configured" here
+  # would send the operator to the wrong place entirely.
+  _md_work
+  export SPEC_KIT_JIRA_BASE_URL="https://mock"
+  local fake="${MDWORK}/fake-root"
+  mkdir -p "${fake}/scripts/bash"
+  cp "${ROOT}/scripts/bash/spec-kit-jira.sh" "${fake}/scripts/bash/"
+  # ...and no scripts/powershell/spec-kit-jira.ps1.
+  SPEC_KIT_JIRA_EXTENSION_ROOT="${fake}" run cmd_reconcile reconcile --json "${SPEC_WITH}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bridge entry point"* ]]
+  [[ "$output" == *"powershell/spec-kit-jira.ps1"* ]]
+  [[ "$output" == *"install is incomplete"* ]]
+  # Distinguished from the not-configured cause...
+  [[ "$output" != *"not bound to a Jira project"* ]]
+  # ...and from the generic prerequisite gate.
+  [[ "$output" != *"missing required command"* ]]
+  # The remedy is the official install, in its runnable form (FR-018).
+  [[ "$output" == *"specify extension add --dev <path-to-spec-kit-jira> --force"* ]]
+  rm -rf "${MDWORK}"
+}
+
+@test "a bridge-unavailable run still completes the host command successfully (FR-015)" {
+  _md_work
+  export SPEC_KIT_JIRA_BASE_URL="https://mock"
+  local fake="${MDWORK}/fake-root"
+  mkdir -p "${fake}/scripts/bash"
+  SPEC_KIT_JIRA_EXTENSION_ROOT="${fake}" run cmd_reconcile reconcile --json "${SPEC_WITH}"
+  [ "$status" -eq 0 ]
+  rm -rf "${MDWORK}"
+}
+
+@test "at most ONE message per host command run (FR-016)" {
+  # Every degraded path emits its notice and stops. Counting the distinct notice
+  # prefixes is the check that a second one has not crept in beside the first.
+  _md_work
+  unset SPEC_KIT_JIRA_BASE_URL
+  run cmd_reconcile reconcile --json "${SPEC_WITH}"
+  [ "$(grep -c 'Jira mirror skipped' <<< "$output")" -eq 1 ]
+  [ "$(grep -c 'WARNING:' <<< "$output" || true)" -eq 0 ]
+  rm -rf "${MDWORK}"
+}
+
+@test "a hook-context failure emits exactly one WARNING naming the true cause (FR-016, FR-017)" {
+  _md_work
+  export SPEC_KIT_JIRA_BASE_URL="http://127.0.0.1:1"
+  export SPEC_KIT_JIRA_HOOK_CONTEXT=1
+  run cmd_reconcile reconcile --json "${SPEC_WITH}"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'WARNING:' <<< "$output")" -eq 1 ]
+  [[ "$output" == *"Jira mirror not completed"* ]]
+  [[ "$output" == *"This spec-kit command completed normally"* ]]
+  # And it names only commands runnable as spelled — never the removed flag.
+  [[ "$output" != *"repair-hooks"* ]]
+  [[ "$output" == *"/speckit.jira.config"* ]]
+  unset SPEC_KIT_JIRA_HOOK_CONTEXT
+  rm -rf "${MDWORK}"
+}
+
+@test "a disabled event says NOTHING — not even that it was skipped (FR-020)" {
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/bash/lib/config.sh"
+  _md_work
+  unset SPEC_KIT_JIRA_BASE_URL
+  config_hooks_disabled_add after_plan "${JIRA_CONFIG_DIR}" > /dev/null
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile --json "${SPEC_WITH}"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  rm -rf "${MDWORK}"
+}

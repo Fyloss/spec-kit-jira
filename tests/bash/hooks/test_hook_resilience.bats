@@ -1,11 +1,23 @@
 #!/usr/bin/env bats
-# T081 [US9] — Hook resilience (FR-046, FR-048, SC-008).
+# T021 [003 US2] — Hook resilience under `optional: false` (FR-015, FR-020, SC-008).
 #
-# A bridge failure during a hook-triggered reconcile surfaces at most one
-# actionable WARNING and NEVER fails the host command: in hook context the
-# non-zero exit is downgraded to 0. A hook the operator explicitly disabled stays
-# disabled across every upgrade / reinstall / repair — no re-registration ever
-# re-enables it. The PowerShell port behaves identically (NFR-1).
+# Two guarantees that are easy to confuse, and this suite keeps them apart.
+#
+# 1. NON-BLOCKING OUTCOME survives the switch to `optional: false`. That flag
+#    decides whether the agent PERFORMS the hook, not whether a failure
+#    propagates (research R4). Every bridge fault must still leave the host
+#    command's exit code untouched: in hook context a non-zero exit is downgraded
+#    to 0 after exactly one actionable warning.
+#
+# 2. AN OPERATOR'S DISABLE SURVIVES A REINSTALL — as an EFFECT, not as a field.
+#    `specify extension add` rewrites `enabled: true` unconditionally and this
+#    extension may not correct it (FR-022), so the old assertion — that the
+#    registry still reads `enabled: false` after a repair — was asserting
+#    something upstream makes impossible (research R5). What is guaranteed
+#    instead, and what these cases assert, is that NO BRIDGE STEP RUNS for a
+#    recorded event whatever the registry currently says.
+#
+# The PowerShell port behaves identically (NFR-1).
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
@@ -57,20 +69,76 @@ teardown() {
   [ "$(jq -r '.exit_code' <<< "$(grep '^{' <<< "$output")")" = "0" ]
 }
 
-@test "an operator-disabled hook stays disabled across repeated repair (FR-048, SC-008)" {
-  register_hooks_write "${SPEC_KIT_JIRA_EXTENSIONS_YML}" > /dev/null
-  # Operator disables the specify hook.
-  local disabled
-  disabled="$(config_yaml_to_json "${SPEC_KIT_JIRA_EXTENSIONS_YML}" | jq -c '.hooks.after_specify[0].enabled = false')"
-  printf '%s' "$disabled" | config_to_yaml > "${SPEC_KIT_JIRA_EXTENSIONS_YML}"
-  # Simulate three upgrade/reinstall/repair cycles.
-  register_hooks_write "${SPEC_KIT_JIRA_EXTENSIONS_YML}" > /dev/null
-  register_hooks_write "${SPEC_KIT_JIRA_EXTENSIONS_YML}" > /dev/null
-  register_hooks_write "${SPEC_KIT_JIRA_EXTENSIONS_YML}" > /dev/null
-  local json
-  json="$(config_yaml_to_json "${SPEC_KIT_JIRA_EXTENSIONS_YML}")"
-  [ "$(jq -r '.hooks.after_specify | length' <<< "$json")" -eq 1 ]
-  [ "$(jq -r '.hooks.after_specify[0].enabled' <<< "$json")" = "false" ]
+@test "every bridge fault leaves the host exit code untouched under optional:false (FR-015)" {
+  # The faults reachable without a live Jira: an unreachable base (fail-closed
+  # write), an unparseable spec, and a malformed lifecycle payload. Under
+  # `optional: false` the agent performs the hook, so each of these now happens
+  # inside a host command that must still succeed.
+  export SPEC_KIT_JIRA_HOOK_CONTEXT=1
+
+  run cmd_reconcile reconcile --json "${SPEC}"
+  [ "$status" -eq 0 ]
+
+  local bad="${WORK}/bad.md"
+  printf '%s\n' 'not a specification at all' > "${bad}"
+  run cmd_reconcile reconcile --json "${bad}"
+  [ "$status" -eq 0 ]
+
+  SPEC_KIT_JIRA_LIFECYCLE='{not json' run cmd_reconcile reconcile --json "${SPEC}"
+  [ "$status" -eq 0 ]
+}
+
+@test "a recorded event is inert at dispatch — no Jira call, no warning (FR-020)" {
+  # The operator's decision lives in OUR file, so it survives the reinstall that
+  # rewrote the registry to `enabled: true`.
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/bash/lib/config.sh"
+  export JIRA_CONFIG_DIR="${WORK}/.specify/jira"
+  mkdir -p "${JIRA_CONFIG_DIR}"
+  config_hooks_disabled_add after_specify "${JIRA_CONFIG_DIR}" > /dev/null
+
+  export SPEC_KIT_JIRA_HOOK_CONTEXT=1
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_specify
+  run cmd_reconcile reconcile --json "${SPEC}"
+  [ "$status" -eq 0 ]
+  # Inert means SILENT: no warning, no summary, nothing at all. A notice on every
+  # lifecycle command for an event the operator deliberately turned off is exactly
+  # the noise FR-020 forbids.
+  [ -z "$output" ]
+}
+
+@test "the guard is honoured whatever the registry currently says (FR-007, SC-005)" {
+  # Reproduce the state a reinstall leaves behind: the registry says enabled,
+  # the record says the operator disabled it. The record wins at dispatch.
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/bash/lib/config.sh"
+  export JIRA_CONFIG_DIR="${WORK}/.specify/jira"
+  mkdir -p "${JIRA_CONFIG_DIR}" "$(dirname "${SPEC_KIT_JIRA_EXTENSIONS_YML}")"
+  printf '%s\n' \
+    'hooks:' \
+    '  after_specify:' \
+    '    - extension: jira' \
+    '      command: speckit.jira.reconcile' \
+    '      enabled: true' > "${SPEC_KIT_JIRA_EXTENSIONS_YML}"
+  config_hooks_disabled_add after_specify "${JIRA_CONFIG_DIR}" > /dev/null
+
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_specify
+  run cmd_reconcile reconcile --json "${SPEC}"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # An event that is NOT recorded still runs — the guard is per event, not global.
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile --dry-run --json "${SPEC}"
+  [ -n "$output" ]
+}
+
+@test "no run of any kind brings the registry into existence (FR-022, SC-011)" {
+  rm -f "${SPEC_KIT_JIRA_EXTENSIONS_YML}"
+  export SPEC_KIT_JIRA_HOOK_CONTEXT=1
+  cmd_reconcile reconcile --json "${SPEC}" > /dev/null 2>&1 || true
+  cmd_reconcile reconcile --dry-run --json "${SPEC}" > /dev/null 2>&1 || true
+  [ ! -f "${SPEC_KIT_JIRA_EXTENSIONS_YML}" ]
 }
 
 @test "the PowerShell port downgrades a hook-context failure identically (NFR-1)" {

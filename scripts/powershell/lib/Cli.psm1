@@ -37,12 +37,12 @@ function Invoke-JiraCliParse {
     $json = 'false'
     $onDrift = 'abort'
     $verbose = 'false'
-    $repairHooks = 'false'
     $help = 'false'
     $parseError = ''
     $useTeam = ''
     $positional = [System.Collections.Generic.List[string]]::new()
     $styles = [System.Collections.Generic.List[string]]::new()
+    $enableHooks = [System.Collections.Generic.List[string]]::new()
 
     for ($idx = 0; $idx -lt $Arguments.Count; $idx++) {
         $arg = $Arguments[$idx]
@@ -54,7 +54,6 @@ function Invoke-JiraCliParse {
             '^--dry-run$' { $dryRun = 'true'; break }
             '^--json$' { $json = 'true'; break }
             '^--verbose$' { $verbose = 'true'; break }
-            '^--repair-hooks$' { $repairHooks = 'true'; break }
             '^(--help|-h)$' { $help = 'true'; break }
             '^--style$' {
                 # Repeatable operator answer to the closed style question (002 US1).
@@ -77,6 +76,23 @@ function Invoke-JiraCliParse {
                 else {
                     $idx++
                     $useTeam = $Arguments[$idx]
+                }
+                break
+            }
+            '^--enable-hook$' {
+                # The operator's explicit release of a held lifecycle event (003
+                # FR-007, FR-029). Repeatable. It exists because `specify
+                # extension add` rewrites `enabled: true` unconditionally, so the
+                # extension cannot tell an operator's re-enable from the
+                # install's — and guessing would silently discard a deliberate
+                # choice (research R5). One explicit flag, named in the
+                # ceremony's own report, is the honest mechanism.
+                if ($idx + 1 -ge $Arguments.Count) {
+                    $parseError = '--enable-hook requires a lifecycle event (--enable-hook <event>)'
+                }
+                else {
+                    $idx++
+                    $enableHooks.Add($Arguments[$idx])
                 }
                 break
             }
@@ -105,10 +121,10 @@ function Invoke-JiraCliParse {
         $lines.Add("json=$json")
         $lines.Add("on_drift=$onDrift")
         $lines.Add("verbose=$verbose")
-        $lines.Add("repair_hooks=$repairHooks")
         $lines.Add("help=$help")
         $lines.Add("styles=$($styles -join ' ')")
         $lines.Add("use_team=$useTeam")
+        $lines.Add("enable_hooks=$($enableHooks -join ' ')")
         $lines.Add("args=$($positional -join ' ')")
         $lines.Add("exit=$($script:ExitCodes.ok)")
     }

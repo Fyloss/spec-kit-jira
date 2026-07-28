@@ -103,6 +103,21 @@
 - **[Entity 1]**: [What it represents, key attributes without implementation]
 - **[Entity 2]**: [What it represents, relationships to other entities]
 
+## Constitution Check *(mandatory)*
+
+<!--
+  ACTION REQUIRED: list EVERY principle in .specify/memory/constitution.md with
+  its proof of compliance at the specification level. Governance rejects a spec
+  that omits this section or leaves a principle unaddressed. "Unaffected" is a
+  valid proof — say why. A principle this feature conflicts with is not diluted
+  here: the feature is redesigned, or the constitution is amended separately.
+-->
+
+| # | Principle | Proof of compliance |
+| --- | --- | --- |
+| I | [Principle title] | [How this spec complies, or why it is unaffected] |
+| II | [Principle title] | [...] |
+
 ## Success Criteria *(mandatory)*
 
 <!--

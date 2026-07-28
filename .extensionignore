@@ -13,3 +13,9 @@ specs/
 .shellcheckrc
 PSScriptAnalyzerSettings.psd1
 coverage.xml
+# The coverage runner's output directory. It is gitignored, so it exists only on
+# a machine that has measured coverage — but `specify extension add --dev` copies
+# the working tree, not the git index, and this directory holds a NAMED PIPE
+# (the xtrace fifo). Python's copytree refuses to copy one, so the install fails
+# outright on any developer machine where the gate has been run.
+coverage/
