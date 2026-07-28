@@ -20,6 +20,9 @@ BeforeAll {
     $script:PwshEntry = '.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1'
     $script:Available = Test-HarnessAvailable
     $script:Skip = Get-HarnessSkipReason
+    # Set even on the skip path below — AfterEach reads it under Set-StrictMode,
+    # which throws on an unset variable rather than treating it as falsy.
+    $script:Repo = $null
 
     function Get-EnvironmentSnapshot {
         # A digest of every location a machine-wide install would have to touch on

@@ -19,6 +19,9 @@ BeforeAll {
         'after_tasks', 'after_implement', 'after_analyze')
     $script:Available = Test-HarnessAvailable
     $script:Skip = Get-HarnessSkipReason
+    # Set even on the skip path below — AfterEach reads it under Set-StrictMode,
+    # which throws on an unset variable rather than treating it as falsy.
+    $script:Repo = $null
 }
 
 Describe 'The official install registers the hooks' {
