@@ -557,11 +557,26 @@ Task: "Conformance scenario tests/conformance/scenarios/us1-adopt-invalid-prefix
 > satisfies. T177, T184, and T185 remain open above and are NOT duplicated here —
 > they need Linux CI, the three-OS matrix, and live credentials respectively.
 
-- [ ] T186 [P] Add failing cases to `tests/bash/engine/test_adoption_classify.bats` asserting that a **story-level** `no-candidate` refusal names the ordinary reconcile as a supported outcome (the child is created as a bridge-created ticket under the adopted parent) alongside the existing label/`--bind` remediation, while a **feature-level** `no-candidate` keeps its current remediation unchanged per FR-014 (partial)
-- [ ] T187 [P] Add the twin failing cases to `tests/powershell/engine/Adoption.Classify.Tests.ps1` per FR-014 (partial)
-- [ ] T188 Extend the `no-candidate` remediation builder in `scripts/bash/engine/adoption.sh` so a story-level target states the ordinary-reconcile outcome, leaving the exit code at 4 per FR-013 and carrying no issue-key-shaped literal (boundary grep), per FR-014 (partial)
-- [ ] T189 Implement the twin remediation in `scripts/powershell/engine/Adoption.psm1`, byte-identical for identical inputs, per FR-014 (partial)
-- [ ] T190 [P] Add failing cases to `tests/bash/commands/test_adopt.bats` for a run with zero targets in scope — exit 0, zero reads, zero writes, and a plan/summary that states nothing was found — per spec Edge Cases (partial)
-- [ ] T191 [P] Add the twin failing cases to `tests/powershell/commands/Adopt.Tests.ps1` per spec Edge Cases (partial)
-- [ ] T192 Print a "nothing was found" statement from `_adopt_print_plan` in `scripts/bash/commands/adopt.sh` when the plan carries no binding, no refusal, and no out-of-scope folder, per spec Edge Cases and Constitution XVI (partial)
-- [ ] T193 Implement the twin statement in `scripts/powershell/commands/Adopt.psm1`, byte-identical across ports per NFR-1/SC-008, per spec Edge Cases and Constitution XVI (partial)
+- [X] T186 [P] Add failing cases to `tests/bash/engine/test_adoption_classify.bats` asserting that a **story-level** `no-candidate` refusal names the ordinary reconcile as a supported outcome (the child is created as a bridge-created ticket under the adopted parent) alongside the existing label/`--bind` remediation, while a **feature-level** `no-candidate` keeps its current remediation unchanged per FR-014 (partial)
+- [X] T187 [P] Add the twin failing cases to `tests/powershell/engine/Adoption.Classify.Tests.ps1` per FR-014 (partial)
+- [X] T188 Extend the `no-candidate` remediation builder in `scripts/bash/engine/adoption.sh` so a story-level target states the ordinary-reconcile outcome, leaving the exit code at 4 per FR-013 and carrying no issue-key-shaped literal (boundary grep), per FR-014 (partial)
+- [X] T189 Implement the twin remediation in `scripts/powershell/engine/Adoption.psm1`, byte-identical for identical inputs, per FR-014 (partial)
+- [X] T190 [P] Add failing cases to `tests/bash/commands/test_adopt.bats` for a run with zero targets in scope — exit 0, zero reads, zero writes, and a plan/summary that states nothing was found — per spec Edge Cases (partial)
+- [X] T191 [P] Add the twin failing cases to `tests/powershell/commands/Adopt.Tests.ps1` per spec Edge Cases (partial)
+- [X] T192 Print a "nothing was found" statement from `_adopt_print_plan` in `scripts/bash/commands/adopt.sh` when the plan carries no binding, no refusal, and no out-of-scope folder, per spec Edge Cases and Constitution XVI (partial)
+- [X] T193 Implement the twin statement in `scripts/powershell/commands/Adopt.psm1`, byte-identical across ports per NFR-1/SC-008, per spec Edge Cases and Constitution XVI (partial)
+
+> **T192/T193 — verified at the function level; the end-to-end suite re-run is
+> still owed.** `_adopt_print_plan` and `Write-AdoptPlan` were driven directly
+> with a synthetic adoption block. Empty plan: both ports emit the statement and
+> are byte-identical (176 bytes). Populated plan: neither port emits it, and both
+> are byte-identical (153 bytes) — so NFR-1/SC-008 holds for both branches.
+> Their tests (T190/T191) were observed failing against the pre-change code, and
+> every other assertion in both suites — exit 0, zero reads, zero writes, empty
+> bindings/refusals/out_of_scope — already passed end-to-end before the stall.
+> What is NOT yet re-run is the full command suite through the real dispatcher:
+> it reads the tracked tree, and `git` on this machine fails after ~11 minutes
+> with `couldn't read .git/packed-refs: Operation canceled` (iCloud FileProvider
+> stall). Re-run `bats tests/bash/commands/test_adopt.bats` and
+> `Invoke-Pester tests/powershell/commands/Adopt.Tests.ps1` once the filesystem
+> responds.

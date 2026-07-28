@@ -375,12 +375,19 @@ adoption_classify() {
       fi
 
       if [[ "${count}" == "0" ]]; then
-        local searched msg
+        local searched msg rem
         searched="$(jq -r 'join(", ")' <<< "${labels}")"
         msg="$(printf 'no accessible ticket carries an adoption label for "%s" (searched: %s)' "${display}" "${searched}")"
+        rem="apply the label in the tracker, or $(_adoption_bind_hint "${display}")"
+        # FR 014: an unlabelled child under a labelled parent is a blessed
+        # outcome, not a dead end — the ordinary reconcile creates it. Only a
+        # story target has a parent to be created under, so the feature-level
+        # remediation is left exactly as it was.
+        if [[ "${level}" == "story" ]]; then
+          rem="${rem}, or leave it unlabelled and let the ordinary reconcile create it as a bridge-created ticket under the adopted parent"
+        fi
         refusals="$(jq -c --argjson r "$(_adoption_refusal "${folder}" "${level}" "${ordinal}" \
-          'no-candidate' '[]' "${msg}" \
-          "apply the label in the tracker, or $(_adoption_bind_hint "${display}")")" '. + [$r]' <<< "${refusals}")"
+          'no-candidate' '[]' "${msg}" "${rem}")" '. + [$r]' <<< "${refusals}")"
         continue
       fi
       if [[ "${count}" -gt 1 ]]; then

@@ -191,3 +191,47 @@ puts() {
   [[ "$output" != *"${MOCK_BASE_URL}"* ]]
   [[ "$output" != *"127.0.0.1"* ]]
 }
+
+# --- nothing in scope (T190, spec Edge Cases) --------------------------------
+#
+# A repository carrying no spec folder is not an error. The run completes, reads
+# nothing, writes nothing — and SAYS so, rather than printing a bare header the
+# operator is left to interpret as success (Constitution XVI).
+
+# empty_specs — the repository with adoption enabled and not one spec folder.
+empty_specs() {
+  rm -rf "${WORK:?}/specs"
+  mkdir -p "${WORK}/specs"
+}
+
+@test "zero targets in scope: exit 0, zero reads, zero writes" {
+  start
+  empty_specs
+  run adopt --yes
+  [ "$status" -eq 0 ]
+  [ -z "$(mock_calls)" ]
+  [ "$(puts)" -eq 0 ]
+}
+
+@test "zero targets in scope: the plan states that nothing was found" {
+  start
+  empty_specs
+  run adopt --yes
+  [[ "$output" == *"nothing was found"* ]]
+}
+
+@test "zero targets in scope: no binding, no refusal, no out-of-scope folder" {
+  start
+  empty_specs
+  run adopt --yes --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.adoption.bindings | length' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.adoption.refusals | length' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.adoption.out_of_scope | length' <<< "$output")" -eq 0 ]
+}
+
+@test "a plan that DOES carry targets never claims nothing was found" {
+  start
+  run adopt --dry-run
+  [[ "$output" != *"nothing was found"* ]]
+}

@@ -67,6 +67,42 @@ ONE_SPEC='[{"folder":"003-alpha","story_ordinals":[]}]'
   [ "$(jq -r '.refusals[] | select(.level=="story") | .story_ordinal' <<< "$output")" = "2" ]
 }
 
+# --- the story-level no-candidate outcome (T186, FR-014) ---------------------
+#
+# An unlabelled child under a labelled parent is the path FR-014 explicitly
+# blesses: the parent is adopted and the ordinary reconcile creates the child as
+# a bridge-created ticket under it. The refusal still stands (the label named
+# nothing), but the remediation must say so rather than implying the label or a
+# --bind pin are the only ways out.
+
+@test "a story-level no-candidate remediation names the ordinary reconcile as an outcome" {
+  run classify '[{"folder":"003-alpha","story_ordinals":[2]}]' '[]'
+  local rem
+  rem="$(jq -r '.refusals[] | select(.level=="story") | .remediation' <<< "$output")"
+  [[ "$rem" == *"ordinary reconcile"* ]]
+  [[ "$rem" == *"bridge-created"* ]]
+}
+
+@test "the story-level no-candidate remediation KEEPS the label and --bind routes" {
+  run classify '[{"folder":"003-alpha","story_ordinals":[2]}]' '[]'
+  local rem
+  rem="$(jq -r '.refusals[] | select(.level=="story") | .remediation' <<< "$output")"
+  [[ "$rem" == *"apply the label in the tracker"* ]]
+  [[ "$rem" == *"spec-kit-jira adopt --bind 003-alpha:us2=<ISSUE-KEY>"* ]]
+}
+
+@test "a story-level no-candidate still refuses — reason and exit class unchanged" {
+  run classify '[{"folder":"003-alpha","story_ordinals":[2]}]' '[]'
+  [ "$(jq -r '.refusals[] | select(.level=="story") | .reason' <<< "$output")" = "no-candidate" ]
+  [ "$(jq -c '.refusals[] | select(.level=="story") | .issue_keys' <<< "$output")" = "[]" ]
+}
+
+@test "a FEATURE-level no-candidate remediation is unchanged — no reconcile clause" {
+  run classify "${ONE_SPEC}" '[]'
+  [ "$(jq -r '.refusals[0].remediation' <<< "$output")" \
+    = "apply the label in the tracker, or spec-kit-jira adopt --bind 003-alpha=<ISSUE-KEY>" ]
+}
+
 # --- several-candidates (FR-010) ---------------------------------------------
 
 @test "more than one candidate refuses with several-candidates" {

@@ -469,9 +469,17 @@ function Get-JiraAdoptionPlan {
 
             if ($matchedSorted.Count -eq 0) {
                 $searched = $labels -join ', '
+                $rem = "apply the label in the tracker, or $(Get-AdoptBindHint $display)"
+                # FR 014: an unlabelled child under a labelled parent is a
+                # blessed outcome, not a dead end — the ordinary reconcile
+                # creates it. Only a story target has a parent to be created
+                # under, so the feature-level remediation is left as it was.
+                if ($level -ceq 'story') {
+                    $rem = "$rem, or leave it unlabelled and let the ordinary reconcile create it as a bridge-created ticket under the adopted parent"
+                }
                 $refusals.Add((New-AdoptRefusal $folder $level $ordinal 'no-candidate' @() `
                             "no accessible ticket carries an adoption label for `"$display`" (searched: $searched)" `
-                            "apply the label in the tracker, or $(Get-AdoptBindHint $display)"))
+                            $rem))
                 continue
             }
             if ($matchedSorted.Count -gt 1) {

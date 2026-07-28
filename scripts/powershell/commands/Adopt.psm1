@@ -139,6 +139,13 @@ function Write-AdoptPlan {
     $out.Add("Adoption plan (adoption.enabled: $(if ($ad.enabled) { 'true' } else { 'false' }), label prefix: $($ad.label_prefix))")
     $out.Add('')
 
+    # Spec Edge Cases: an empty plan is a success, but never a silent one.
+    # Without this line the operator reads a bare header and has to infer that
+    # nothing happened (Constitution XVI).
+    if (@($ad.bindings).Count -eq 0 -and @($ad.refusals).Count -eq 0 -and @($ad.out_of_scope).Count -eq 0) {
+        $out.Add('  nothing was found: no spec folder is in scope, so nothing was searched for and nothing will be written')
+    }
+
     foreach ($b in @($ad.bindings)) {
         $ordText = $(if ($null -eq $b.story_ordinal) { '' } else { [string][int]$b.story_ordinal })
         $display = Get-JiraAdoptionDisplayName -Folder ([string]$b.spec_folder) -Level ([string]$b.level) -Ordinal $ordText

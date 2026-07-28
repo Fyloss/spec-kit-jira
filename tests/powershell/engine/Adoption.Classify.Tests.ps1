@@ -66,6 +66,42 @@ Describe 'no-candidate (FR-009)' {
     }
 }
 
+# T187 — the story-level no-candidate outcome (FR-014). An unlabelled child
+# under a labelled parent is the path FR-014 blesses: the parent is adopted and
+# the ordinary reconcile creates the child as a bridge-created ticket under it.
+# The refusal stands; the remediation must name that outcome.
+Describe 'the story-level no-candidate outcome (FR-014)' {
+    BeforeAll {
+        $script:StorySpec = '[{"folder":"003-alpha","story_ordinals":[2]}]'
+    }
+
+    It 'names the ordinary reconcile as an outcome' {
+        $p = Get-Plan -Specs $script:StorySpec
+        $rem = @($p.refusals | Where-Object { $_.level -eq 'story' })[0].remediation
+        $rem | Should -BeLike '*ordinary reconcile*'
+        $rem | Should -BeLike '*bridge-created*'
+    }
+
+    It 'KEEPS the label and --bind routes' {
+        $p = Get-Plan -Specs $script:StorySpec
+        $rem = @($p.refusals | Where-Object { $_.level -eq 'story' })[0].remediation
+        $rem | Should -BeLike '*apply the label in the tracker*'
+        $rem | Should -BeLike '*spec-kit-jira adopt --bind 003-alpha:us2=<ISSUE-KEY>*'
+    }
+
+    It 'still refuses — reason and issue_keys unchanged' {
+        $p = Get-Plan -Specs $script:StorySpec
+        $story = @($p.refusals | Where-Object { $_.level -eq 'story' })[0]
+        $story.reason | Should -Be 'no-candidate'
+        @($story.issue_keys).Count | Should -Be 0
+    }
+
+    It 'leaves the FEATURE-level remediation unchanged — no reconcile clause' {
+        (Get-Plan -Specs $OneSpec).refusals[0].remediation |
+            Should -BeExactly 'apply the label in the tracker, or spec-kit-jira adopt --bind 003-alpha=<ISSUE-KEY>'
+    }
+}
+
 Describe 'several-candidates (FR-010)' {
     It 'refuses when more than one ticket carries the label' {
         $p = Get-Plan -Specs $OneSpec -Candidates (New-Candidates @('ADO-2', 'ADO-9'))

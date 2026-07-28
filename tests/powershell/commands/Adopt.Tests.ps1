@@ -152,6 +152,60 @@ Describe 'adopt phases' {
     }
 }
 
+# T191 — nothing in scope (spec Edge Cases). A repository carrying no spec
+# folder is not an error. The run completes, reads nothing, writes nothing —
+# and SAYS so, rather than printing a bare header the operator is left to
+# interpret as success (Constitution XVI).
+Describe 'nothing in scope' {
+    BeforeEach {
+        $script:Mock = Start-JiraMock -ConfigJson $script:Corpus
+        $script:Work = New-AdoptWorkdir
+        # The repository with adoption enabled and not one spec folder.
+        Remove-Item -Recurse -Force (Join-Path $script:Work 'specs') -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Path (Join-Path $script:Work 'specs') -Force | Out-Null
+    }
+    AfterEach {
+        Stop-JiraMock -Mock $script:Mock
+        Remove-Item -Recurse -Force $script:Work -ErrorAction SilentlyContinue
+    }
+
+    It 'exits 0 with zero reads and zero writes' {
+        $r = Invoke-Adopt -Workdir $script:Work -AdoptArgs @('--yes')
+        $r.ExitCode | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:Mock).Count | Should -Be 0
+        Get-PutCount | Should -Be 0
+    }
+
+    It 'states in the plan that nothing was found' {
+        (Invoke-Adopt -Workdir $script:Work -AdoptArgs @('--yes')).StdOut |
+            Should -BeLike '*nothing was found*'
+    }
+
+    It 'carries no binding, no refusal, and no out-of-scope folder' {
+        $r = Invoke-Adopt -Workdir $script:Work -AdoptArgs @('--yes', '--json')
+        $r.ExitCode | Should -Be 0
+        $j = $r.StdOut | ConvertFrom-Json
+        @($j.adoption.bindings).Count | Should -Be 0
+        @($j.adoption.refusals).Count | Should -Be 0
+        @($j.adoption.out_of_scope).Count | Should -Be 0
+    }
+}
+
+Describe 'a plan that DOES carry targets' {
+    It 'never claims nothing was found' {
+        $script:Mock = Start-JiraMock -ConfigJson $script:Corpus
+        $work = New-AdoptWorkdir
+        try {
+            (Invoke-Adopt -Workdir $work -AdoptArgs @('--dry-run')).StdOut |
+                Should -Not -BeLike '*nothing was found*'
+        }
+        finally {
+            Stop-JiraMock -Mock $script:Mock
+            Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 Describe 'the dry-run twin is exact (FR-023, SC-003)' {
     It 'reports the same action set as the real run for the same state' {
         $script:Mock = Start-JiraMock -ConfigJson $script:Corpus

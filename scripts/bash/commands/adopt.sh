@@ -106,6 +106,15 @@ _adopt_print_plan() {
   printf 'Adoption plan (adoption.enabled: %s, label prefix: %s)\n\n' \
     "$(jq -r '.enabled' <<< "${ad}")" "$(jq -r '.label_prefix' <<< "${ad}")"
 
+  # Spec Edge Cases: an empty plan is a success, but never a silent one. Without
+  # this line the operator reads a bare header and has to infer that nothing
+  # happened (Constitution XVI).
+  if [[ "$(jq '.bindings | length' <<< "${ad}")" -eq 0 &&
+        "$(jq '.refusals | length' <<< "${ad}")" -eq 0 &&
+        "$(jq '.out_of_scope | length' <<< "${ad}")" -eq 0 ]]; then
+    printf '  nothing was found: no spec folder is in scope, so nothing was searched for and nothing will be written\n'
+  fi
+
   n="$(jq '.bindings | length' <<< "${ad}")"
   for ((i = 0; i < n; i++)); do
     local b display key status reason
