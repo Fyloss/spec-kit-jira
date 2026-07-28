@@ -256,7 +256,12 @@ function Get-JiraHookRepairHint {
         $clauses.Add("held disabled: $($Held -join ', ') — no bridge step runs for these, whatever the registry says; release one with: $($script:HookReleaseCommand) $($Held[0])")
     }
     if ($Duplicated.Count -gt 0) {
-        $clauses.Add("duplicated: $($Duplicated -join ', ') — a pre-manifest entry names our command with no owning extension, so the official install adds a second entry beside it instead of replacing it; remove the entry that has no `"extension: jira`" field under each named event, by hand, from $Path")
+        # Forward-slash the path even on Windows: this is a copy-pasteable,
+        # human-read instruction, not a filesystem call, and every other
+        # user-facing message in this port names paths with '/' — the form the
+        # Bash twin always produces (Constitution VI, NFR-1).
+        $displayPath = $Path -replace '\\', '/'
+        $clauses.Add("duplicated: $($Duplicated -join ', ') — a pre-manifest entry names our command with no owning extension, so the official install adds a second entry beside it instead of replacing it; remove the entry that has no `"extension: jira`" field under each named event, by hand, from $displayPath")
     }
     if ($clauses.Count -eq 0) { return '' }
     return ($clauses -join '; ')
