@@ -33,7 +33,6 @@ _usage() {
     '  --json                    machine-readable run summary' \
     '  --on-drift=abort|proceed  drift handling (default: abort)' \
     '  --verbose                 verbose diagnostics' \
-    '  --repair-hooks            repair lifecycle hook registration' \
     '  -h, --help                show this help' >&"$1"
 }
 

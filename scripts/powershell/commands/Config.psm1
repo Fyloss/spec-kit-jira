@@ -116,7 +116,9 @@ function Invoke-JiraConfigDegraded {
     param(
         [bool] $Json = $false,
         [bool] $DryRun = $false,
-        [Parameter(Mandatory)] [string] $Missing
+        [Parameter(Mandatory)] [string] $Missing,
+        [string] $HooksStatus = 'skipped',
+        [string] $HooksDetail = ''
     )
     $branches = @()
     try { $branches = @(git for-each-ref refs/heads --format='%(refname:short)' 2> $null) }
@@ -131,7 +133,7 @@ function Invoke-JiraConfigDegraded {
     foreach ($p in $arr) { $proposals.Add([ordered]@{ team_prefix = $p; provisional = $true }) }
 
     [Console]::Error.WriteLine("WARNING: degraded mode — Jira introspection is unavailable (undefined: $Missing); team-name proposals are provisional and nothing was written")
-    $rerun = "define $Missing, then re-run: spec-kit-jira config"
+    $rerun = "define $Missing, then re-run: $(Get-JiraBridgeInvocation config)"
 
     $detail = 'degraded mode: Jira connection parameters undefined'
     $summaryObj = [ordered]@{
@@ -141,7 +143,12 @@ function Invoke-JiraConfigDegraded {
         counts         = [ordered]@{ created = 0; updated = 0; skipped = 0; warnings = 1; errors = 0 }
         effects        = [ordered]@{
             discovery = [ordered]@{ status = 'skipped'; detail = $detail }
-            hooks     = [ordered]@{ status = 'skipped'; detail = $detail }
+            # The hooks effect is reported even here. It needs no Jira at all — it
+            # reads two local files — and an operator running the ceremony to
+            # release a held event with --enable-hook is very likely to be doing it
+            # before the credentials are in place. Reporting it "skipped" would
+            # have been a lie about work that was in fact performed.
+            hooks     = [ordered]@{ status = $HooksStatus; detail = $HooksDetail }
             readme    = [ordered]@{ status = 'skipped'; detail = $detail }
             gitignore = [ordered]@{ status = 'skipped'; detail = $detail }
         }
@@ -262,6 +269,89 @@ function Set-JiraConfigGitignore {
     return 'written'
 }
 
+# =============================================================================
+# The hooks effect (003 US6, FR-021 – FR-025, FR-028, FR-029).
+# Mirror of _config_hooks_effect in commands/config.sh.
+# =============================================================================
+
+function Get-JiraConfigHooksEffect {
+    <#
+    .SYNOPSIS
+      Read the hook registry, classify every declared event, record what needs
+      recording in OUR file, and return { Status; Detail; Health }. The registry
+      itself is never opened for writing — in any state, including this one
+      (FR-022).
+
+      Two writes happen here, and both are to the gitignored local binding, never
+      to the registry:
+        * an entry the registry shows as `enabled: false` is RECORDED, so the
+          operator's decision survives the next `specify extension add`, which
+          rewrites `enabled: true` unconditionally (research R5 step 1);
+        * each `--enable-hook <event>` clears one recorded event (FR-029).
+      The health classification itself writes nothing anywhere; the ceremony
+      performs the write, on the same terms as its other writes — predicted by
+      --dry-run, never performed by it (Constitution XI).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $RegistryPath,
+        [Parameter(Mandatory)] [string] $ConfigDir,
+        [bool] $DryRun = $false,
+        [string] $EnableHooks = ''
+    )
+
+    # The operator's explicit releases come FIRST, so a release and the report
+    # that names it cannot disagree within one run.
+    $released = [System.Collections.Generic.List[string]]::new()
+    foreach ($ev in ($EnableHooks -split ' ')) {
+        if ([string]::IsNullOrEmpty($ev)) { continue }
+        if ((Remove-JiraHooksDisabled -LifecycleEvent $ev -ConfigDir $ConfigDir -DryRun $DryRun) -eq 'released') {
+            $released.Add($ev)
+        }
+    }
+
+    $health = Get-JiraHookHealth -Path $RegistryPath -DisabledJson (Get-JiraHooksDisabled -ConfigDir $ConfigDir)
+    $h = $health | ConvertFrom-Json -Depth 100
+
+    if ($h.unreadable) {
+        return [pscustomobject]@{ Status = 'unreadable'; Detail = $h.repair_hint; Health = $health }
+    }
+
+    # Record every entry the registry shows as disabled. This is the capture the
+    # whole disable record depends on: the extension only ever learns of the
+    # operator's decision by reading the file, and the next install erases the
+    # evidence (data-model § Operator disable record, Capture window).
+    foreach ($ev in @($h.disabled)) {
+        $null = Add-JiraHooksDisabled -LifecycleEvent $ev -ConfigDir $ConfigDir -DryRun $DryRun
+    }
+
+    # Re-read so the reported health reflects what this run just recorded.
+    $health = Get-JiraHookHealth -Path $RegistryPath -DisabledJson (Get-JiraHooksDisabled -ConfigDir $ConfigDir)
+    $h = $health | ConvertFrom-Json -Depth 100
+
+    $heldAll = [System.Collections.Generic.List[string]]::new()
+    foreach ($x in (@($h.disabled) + @($h.held_disabled))) { if (-not $heldAll.Contains($x)) { $heldAll.Add($x) } }
+    $hint = if ($h.PSObject.Properties['repair_hint']) { $h.repair_hint } else { '' }
+
+    # One status token, chosen by severity: a missing entry means the mirror is
+    # not wired at all, a leftover means the next install will duplicate it, and a
+    # held event is a deliberate operator choice rather than a fault. The detail
+    # carries every applicable clause, so nothing is hidden by the precedence.
+    $status =
+        if (@($h.missing).Count -gt 0) { 'incomplete' }
+        elseif (@($h.duplicated).Count -gt 0) { 'duplicated' }
+        elseif ($heldAll.Count -gt 0) { 'held_disabled' }
+        else { 'healthy' }
+
+    $detail = if ($status -eq 'healthy') {
+        'all seven lifecycle hooks present and enabled; the registry was not modified'
+    }
+    else { $hint }
+    if ($released.Count -gt 0) { $detail = "$detail; released: $($released -join ', ')" }
+
+    return [pscustomobject]@{ Status = $status; Detail = $detail; Health = $health }
+}
+
 function Invoke-JiraConfig {
     <#
     .SYNOPSIS
@@ -285,8 +375,20 @@ function Invoke-JiraConfig {
     $json = $state['json'] -eq 'true'
     $dryRun = $state['dry_run'] -eq 'true'
     $styles = if ($state.ContainsKey('styles')) { $state['styles'] } else { '' }
+    $enableHooks = if ($state.ContainsKey('enable_hooks')) { $state['enable_hooks'] } else { '' }
 
     $configdir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
+
+    # Hooks effect (003 US6): computed UP FRONT, because it needs no Jira and no
+    # committed config — it reads the registry and the local binding, and nothing
+    # else. Computing it here means the report is truthful in the degraded run too,
+    # and that `--enable-hook` works in a repository that is not yet connected,
+    # which is exactly where an operator is most likely to reach for it.
+    $extPath = if ($env:SPEC_KIT_JIRA_EXTENSIONS_YML) { $env:SPEC_KIT_JIRA_EXTENSIONS_YML } else { Join-Path (Get-CmdParentPath $configdir) 'extensions.yml' }
+    $hooksEffect = Get-JiraConfigHooksEffect -RegistryPath $extPath -ConfigDir $configdir -DryRun $dryRun -EnableHooks $enableHooks
+    $hooksStatus = $hooksEffect.Status
+    $hooksDetail = $hooksEffect.Detail
+    $hooksHealth = $hooksEffect.Health
 
     # Config read: load and validate the committed team config (US4).
     $cfg = Import-JiraConfig -ConfigDir $configdir
@@ -299,7 +401,8 @@ function Invoke-JiraConfig {
     if (-not $env:SPEC_KIT_JIRA_BASE_URL) { $missing.Add('SPEC_KIT_JIRA_BASE_URL') }
     if (-not (Resolve-JiraToken)) { $missing.Add('JIRA_API_TOKEN') }
     if ($missing.Count -gt 0) {
-        return [int](Invoke-JiraConfigDegraded -Json $json -DryRun $dryRun -Missing ($missing -join ', '))
+        return [int](Invoke-JiraConfigDegraded -Json $json -DryRun $dryRun -Missing ($missing -join ', ') `
+                -HooksStatus $hooksStatus -HooksDetail $hooksDetail)
     }
 
     # Project-key sourcing (002 US2, FR-004/FR-005): positional argument ->
@@ -352,7 +455,7 @@ function Invoke-JiraConfig {
         if ($lr.ExitCode -ne 0) { return [int] $lr.ExitCode }
         $placeholder = Get-JiraPlaceholderKey
         [Console]::Error.WriteLine("config: no usable project key — config.yml holds no bound key (the $placeholder placeholder counts as unset) and no key argument was given")
-        [Console]::Error.WriteLine('config: accessible projects (closed question — choose one and re-run: spec-kit-jira config <KEY>):')
+        [Console]::Error.WriteLine("config: accessible projects (closed question — choose one and re-run: $(Get-JiraBridgeInvocation 'config <KEY>')):")
         foreach ($entry in @($lr.List | ConvertFrom-Json -Depth 100)) {
             $styleText = if ($null -eq $entry.style) { 'style unknown' } else { [string]$entry.style }
             [Console]::Error.WriteLine("config:   $($entry.key) — $($entry.name) ($styleText)")
@@ -457,23 +560,10 @@ function Invoke-JiraConfig {
         default { $readmeStatus }
     }
 
-    # Hooks effect (US9, T085): register the after_* lifecycle hooks idempotently in
-    # .specify/extensions.yml (FR-054) — the same self-healing write reachable from a
-    # run via reconcile --repair-hooks. The path derives from the config dir's parent
-    # (.specify), overridable via SPEC_KIT_JIRA_EXTENSIONS_YML.
-    $extPath = if ($env:SPEC_KIT_JIRA_EXTENSIONS_YML) { $env:SPEC_KIT_JIRA_EXTENSIONS_YML } else { Join-Path (Get-CmdParentPath $configdir) 'extensions.yml' }
-    $hooksResult = Set-JiraHookRegistration -Path $extPath -DryRun ([bool]$dryRun)
-    $hooksStatus = $hooksResult.Status
-    $hooksDetail = switch ($hooksStatus) {
-        'created' { 'after_* lifecycle hooks registered' }
-        'repaired' { 'missing lifecycle hooks repaired' }
-        'unchanged' { 'lifecycle hooks already registered' }
-        'refused' { 'extensions.yml markers malformed; hooks not registered' }
-        default { $hooksStatus }
-    }
-
-    # Build the three-effect summary (FR-054), byte-identical to the Bash port:
-    # discovery, hooks, and README each reported as a distinct section.
+    # Build the effects summary (FR-054), byte-identical to the Bash port:
+    # discovery, hooks, README and gitignore each reported as a distinct section.
+    # The hooks effect was computed up front and is a READ-ONLY verification —
+    # nothing in this command writes the hook registry (003 FR-022).
     $effects = [ordered]@{
         discovery = [ordered]@{ status = $discStatus; detail = "$nproj project(s) discovered"; projects = $projStyles }
         hooks     = [ordered]@{ status = $hooksStatus; detail = $hooksDetail }
@@ -486,6 +576,7 @@ function Invoke-JiraConfig {
         dry_run        = [bool]$dryRun
         counts         = [ordered]@{ created = 0; updated = 0; skipped = 0; warnings = $runWarnings; errors = 0 }
         effects        = $effects
+        hook_health    = ($hooksHealth | ConvertFrom-Json -Depth 100)
         exit_code      = 0
     }
     $summary = ConvertTo-JiraJsonValue $summaryObj

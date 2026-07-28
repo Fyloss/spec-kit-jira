@@ -147,6 +147,84 @@ run_in_work() {
   run run_in_work config
   [ "$status" -eq 0 ]
   [[ "$output" == *"  gitignore: skipped"* ]]
+  # The hooks effect is NOT skipped: it reads two local files and needs no Jira,
+  # so reporting it skipped would be a lie about work that was performed (003 US6).
+  [[ "$output" != *"  hooks: skipped"* ]]
   [[ "$output" == *"Provisional teams: ijt, wex"* ]]
-  [[ "$output" == *"Rerun: define SPEC_KIT_JIRA_BASE_URL, then re-run: spec-kit-jira config"* ]]
+  # The re-run guidance names the bridge in the repository-relative per-port form
+  # (003 FR-014, FR-018) — a bare `spec-kit-jira` names nothing after install.
+  [[ "$output" == *"Rerun: define SPEC_KIT_JIRA_BASE_URL, then re-run: .specify/extensions/jira/scripts/bash/spec-kit-jira.sh config (on Windows: .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 config)"* ]]
+}
+
+# =============================================================================
+# T046 [003 US5] — The degraded causes are told APART (FR-017, SC-006)
+# =============================================================================
+#
+# The reported message named one cause ("CLI not installed") that was not the
+# real one and could not have been — this extension is not delivered as a
+# machine-wide CLI. FR-017 requires the message to name the TRUE cause, and lists
+# six that must be distinguishable. The ceremony can reach five of them; the
+# sixth, the entry point being absent, is asserted in test_reconcile.bats because
+# it is a property of the bridge's own availability rather than of the run.
+#
+# In every one of them the host command succeeds (SC-006): a ceremony that cannot
+# reach Jira is a report, not a failure.
+
+@test "not yet configured names the missing variables, not a missing CLI (FR-017)" {
+  unset SPEC_KIT_JIRA_BASE_URL
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  run run_in_work config --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SPEC_KIT_JIRA_BASE_URL"* ]]
+  # Never the wording of the reported defect.
+  [[ "$output" != *"CLI not installed"* ]]
+  [[ "$output" != *"not installed"* ]]
+}
+
+@test "credentials absent is distinguished from base URL absent (FR-017)" {
+  export SPEC_KIT_JIRA_BASE_URL="https://mock"
+  unset JIRA_API_TOKEN
+  run run_in_work config --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"JIRA_API_TOKEN"* ]]
+  [[ "$output" != *"SPEC_KIT_JIRA_BASE_URL"* ]]
+}
+
+@test "both absent are named together in ONE message (FR-016, FR-017)" {
+  unset SPEC_KIT_JIRA_BASE_URL
+  unset JIRA_API_TOKEN
+  run run_in_work config --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SPEC_KIT_JIRA_BASE_URL, JIRA_API_TOKEN"* ]]
+  # One warning, not two.
+  [ "$(grep -c 'WARNING:' <<< "$output")" -eq 1 ]
+}
+
+@test "the re-run guidance names a bridge invocation that is runnable (FR-018)" {
+  unset SPEC_KIT_JIRA_BASE_URL
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  run run_in_work config --json
+  local guidance
+  guidance="$(jq -r '.rerun_guidance' <<< "$(grep '^{' <<< "$output")")"
+  # The repository-relative per-port form, never a bare executable name.
+  [[ "${guidance}" == *".specify/extensions/jira/scripts/bash/spec-kit-jira.sh config"* ]]
+  [[ "${guidance}" == *".specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 config"* ]]
+  run grep -qE '(^|[^/])spec-kit-jira[[:space:]]+config' <<< "${guidance}"
+  [ "$status" -ne 0 ]
+}
+
+@test "an unreadable registry is a distinct cause from an unconfigured repository (FR-017, FR-024)" {
+  unset SPEC_KIT_JIRA_BASE_URL
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  mkdir -p "${WORK}/.specify"
+  printf '%s\n' 'hooks:' '  after_plan:' '   - broken' '     : : :' > "${WORK}/.specify/extensions.yml"
+  export SPEC_KIT_JIRA_EXTENSIONS_YML="${WORK}/.specify/extensions.yml"
+  run run_in_work config --json
+  [ "$status" -eq 0 ]
+  local summary
+  summary="$(grep '^{' <<< "$output")"
+  # The discovery effect is skipped for the connection; the hooks effect is
+  # unreadable for the file. Two causes, two reports, one run.
+  [ "$(jq -r '.effects.discovery.status' <<< "${summary}")" = "skipped" ]
+  [ "$(jq -r '.effects.hooks.status' <<< "${summary}")" = "unreadable" ]
 }

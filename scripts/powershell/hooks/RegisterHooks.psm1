@@ -1,105 +1,71 @@
-# hooks/RegisterHooks.psm1 — Idempotent after_* lifecycle-hook registration (US9).
-# Mirror of hooks/register_hooks.sh.
+# hooks/RegisterHooks.psm1 — The hook registry READER (003 FR-021 – FR-025, FR-028).
+# Mirror of hooks/register_hooks.sh; both ports produce the SAME report for the
+# same registry content (Constitution VI).
 #
-# Registers a non-blocking Jira reconcile under every spec-kit lifecycle event in
-# .specify/extensions.yml (FR-045). Registration is SET-not-append and idempotent
-# (FR-047): our reconcile hook appears at most once per event, a re-run rewrites
-# byte-identical bytes, and an operator-disabled hook is preserved and never
-# re-enabled (FR-048). Every existing entry survives; only a genuinely missing
-# reconcile hook is added. Reuses the deterministic YAML reader/writer from
-# lib/Config.psm1 (no yq). Emits byte-identical output to the Bash port (NFR-1).
+# The consuming repository's `.specify/extensions.yml` has exactly ONE writer and
+# it is not us: `specify extension add` writes it from the manifest's top-level
+# `hooks:` block. This module reads that file, recognises which entries are ours,
+# classifies every declared event, and reports. It never opens the file for
+# anything but reading (FR-022, SC-011) — there is no writer here, and adding one
+# back would fail tests/powershell/ci/NoRegistryWrite.Tests.ps1.
+#
+# Recognition has two rules, and they are not the same rule:
+#   * ours     — the entry carries `extension: jira`, the ownership key the host
+#                install writes and matches on when it purges and re-adds;
+#   * leftover — the entry carries one of our commands and NO `extension` field:
+#                the four-field shape every pre-manifest version of this
+#                extension wrote. The install's purge predicate never matches it,
+#                so the install adds a SECOND entry beside it rather than
+#                replacing it (research R2). Neither the host nor we can remove
+#                it — it is reported, with the manual edit (FR-028).
 
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force # YAML reader/writer
+Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force # YAML reader (READ only)
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force # canonical serialiser
 
-$script:HookCommand = 'speckit.jira.reconcile'
-$script:HookEvents = @('after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')
-$script:HookExitConfig = 4
+# The owning-extension id the host writes into every entry it registers for us.
+$script:HookExtensionId = 'jira'
 
-# The feature-naming command registered under the `before_specify` event (002
-# US3, FR-013): a non-blocking, optional hook that resolves the Jira ticket and
-# computes the team-based feature name before the host creates the spec.
+# The reconcile command the six after_* events fire.
+$script:HookCommand = 'speckit.jira.reconcile'
+
+# The feature-naming command the before_specify event fires (002 US3, FR-013).
 $script:HookBeforeEvent = 'before_specify'
 $script:HookBeforeCommand = 'speckit.jira.feature'
 
-function Get-JiraHookEntry {
-    # The canonical desired entry for our reconcile hook. `optional = true` makes it
-    # non-blocking: a bridge failure never fails the host command (FR-046).
-    return [ordered]@{
-        command     = $script:HookCommand
-        description = 'Mirror the updated spec-kit artifacts into Jira Cloud (non-blocking).'
-        enabled     = $true
-        optional    = $true
-    }
-}
+$script:HookExitConfig = 4
 
-function Get-JiraHookBeforeEntry {
-    # The canonical desired entry for the before_specify feature hook (enabled +
-    # optional, so it never blocks feature creation). Mirror of
-    # _register_hooks_before_entry.
-    return [ordered]@{
-        command     = $script:HookBeforeCommand
-        description = 'Resolve the Jira ticket and compute the team-based feature name before spec creation (non-blocking).'
-        enabled     = $true
-        optional    = $true
-    }
-}
+# The remedies the report names. Each literal is runnable exactly as spelled —
+# tests/powershell/ci/MessageCommandLiterals.Tests.ps1 asserts it (FR-018).
+$script:HookInstallCommand = 'specify extension add --dev <path-to-spec-kit-jira> --force'
+$script:HookReleaseCommand = '/speckit.jira.config --enable-hook'
 
-function Get-JiraHookMerged {
+function Get-JiraHookEventList {
     <#
     .SYNOPSIS
-      Ensure our reconcile hook is present under every lifecycle event, set-not-
-      append (FR-047), never disturbing an entry the operator already placed or
-      disabled (FR-048). Returns the canonical merged JSON. Mirror of
-      _register_hooks_merge.
+      The seven declared lifecycle events (research R9) — one closed set, in
+      manifest declaration order. The set has ONE source per port: lib/Config.psm1
+      declares it as the `hooks.disabled` enum of config.local.schema.json, and
+      this module consumes it rather than redeclaring it.
     #>
-    param([Parameter(Mandatory)] [string] $ExistingJson)
-    $root = $ExistingJson | ConvertFrom-Json -Depth 100
+    return (Get-JiraHookEventNameList)
+}
 
-    # Copy the whole root into an ordered map so foreign top-level keys survive.
-    $rootMap = [ordered]@{}
-    if ($root -is [System.Management.Automation.PSCustomObject]) {
-        foreach ($prop in $root.PSObject.Properties) { $rootMap[$prop.Name] = $prop.Value }
-    }
+function Get-JiraHookCommandFor {
+    <#
+    .SYNOPSIS
+      The command the event must name. Mirror of register_hooks_command_for.
+    #>
+    param([Parameter(Mandatory)] [string] $LifecycleEvent)
+    if ($LifecycleEvent -ceq $script:HookBeforeEvent) { return $script:HookBeforeCommand }
+    return $script:HookCommand
+}
 
-    $hooksMap = [ordered]@{}
-    if ($rootMap.Contains('hooks') -and ($rootMap['hooks'] -is [System.Management.Automation.PSCustomObject])) {
-        foreach ($prop in $rootMap['hooks'].PSObject.Properties) { $hooksMap[$prop.Name] = $prop.Value }
-    }
-
-    foreach ($e in $script:HookEvents) {
-        $cur = [System.Collections.Generic.List[object]]::new()
-        if ($hooksMap.Contains($e) -and $null -ne $hooksMap[$e]) {
-            foreach ($x in @($hooksMap[$e])) { $cur.Add($x) }
-        }
-        $present = $false
-        foreach ($x in $cur) {
-            # Case-SENSITIVE like the bash twin's jq `==` (NFR-1).
-            if ((Get-JiraHookProp $x 'command') -ceq $script:HookCommand) { $present = $true; break }
-        }
-        if (-not $present) { $cur.Add((Get-JiraHookEntry)) }
-        $hooksMap[$e] = $cur.ToArray()
-    }
-
-    # before_specify feature hook (002 US3): same set-not-append rule — an entry
-    # the operator already placed (or disabled) is never re-added or re-enabled.
-    $bcur = [System.Collections.Generic.List[object]]::new()
-    if ($hooksMap.Contains($script:HookBeforeEvent) -and $null -ne $hooksMap[$script:HookBeforeEvent]) {
-        foreach ($x in @($hooksMap[$script:HookBeforeEvent])) { $bcur.Add($x) }
-    }
-    $bpresent = $false
-    foreach ($x in $bcur) {
-        # Case-SENSITIVE like the bash twin's jq `==` (NFR-1).
-        if ((Get-JiraHookProp $x 'command') -ceq $script:HookBeforeCommand) { $bpresent = $true; break }
-    }
-    if (-not $bpresent) { $bcur.Add((Get-JiraHookBeforeEntry)) }
-    $hooksMap[$script:HookBeforeEvent] = $bcur.ToArray()
-
-    $rootMap['hooks'] = $hooksMap
-
-    return (ConvertTo-JiraJsonValue $rootMap)
+function Get-JiraHookCommandList {
+    # Our two commands. This is the "one of ours" set the leftover predicate
+    # matches on. Mirror of register_hooks_commands_json.
+    return @($script:HookBeforeCommand, $script:HookCommand)
 }
 
 function Get-JiraHookProp {
@@ -110,103 +76,327 @@ function Get-JiraHookProp {
         $p = $Object.PSObject.Properties[$Name]
         if ($null -ne $p) { return $p.Value }
     }
+    if ($Object -is [System.Collections.IDictionary] -and $Object.Contains($Name)) { return $Object[$Name] }
     return $null
+}
+
+function Test-JiraHookProp {
+    # Whether the entry CARRIES the field at all — distinct from its value being
+    # $null, which is exactly the distinction `condition: null` turns on.
+    param($Object, [string] $Name)
+    if ($null -eq $Object) { return $false }
+    if ($Object -is [System.Management.Automation.PSCustomObject]) { return ($null -ne $Object.PSObject.Properties[$Name]) }
+    if ($Object -is [System.Collections.IDictionary]) { return $Object.Contains($Name) }
+    return $false
+}
+
+function Test-JiraHookEntryOwnership {
+    <#
+    .SYNOPSIS
+      $true when the entry carries our ownership key. This is how we RECOGNISE
+      our entries; it is not a licence to edit them. Mirror of
+      register_hooks_entry_is_ours.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $EntryJson)
+    $e = $EntryJson | ConvertFrom-Json -Depth 100
+    # Case-SENSITIVE like the Bash twin's jq `==` (NFR-1).
+    return ((Get-JiraHookProp $e 'extension') -ceq $script:HookExtensionId)
+}
+
+function Test-JiraHookEntryIsLeftover {
+    <#
+    .SYNOPSIS
+      $true when the entry names one of our commands and carries NO owning
+      extension: the pre-manifest shape the install cannot purge (FR-028,
+      research R2). Mirror of register_hooks_entry_is_leftover.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $EntryJson)
+    $e = $EntryJson | ConvertFrom-Json -Depth 100
+    if (Test-JiraHookProp $e 'extension') { return $false }
+    return ((Get-JiraHookCommandList) -ccontains (Get-JiraHookProp $e 'command'))
+}
+
+function Get-JiraHookEntryShapeError {
+    <#
+    .SYNOPSIS
+      Every deviation from the canonical eight-field shape
+      (contracts/hook-registry-entry.md), newline-joined; $null when the entry is
+      canonical. We ASSERT the shape when we read and REPORT a deviation; we never
+      correct one, because correcting it would mean writing the file.
+      Mirror of register_hooks_entry_shape_errors.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $EntryJson)
+
+    $e = $EntryJson | ConvertFrom-Json -Depth 100
+    $errs = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($f in @('extension', 'command', 'enabled', 'optional', 'priority', 'prompt', 'description', 'condition')) {
+        if (-not (Test-JiraHookProp $e $f)) { $errs.Add("missing field: $f") }
+    }
+    if ((Test-JiraHookProp $e 'extension') -and ((Get-JiraHookProp $e 'extension') -cne $script:HookExtensionId)) {
+        $errs.Add("extension is not $($script:HookExtensionId)")
+    }
+    if ((Test-JiraHookProp $e 'enabled') -and ((Get-JiraHookProp $e 'enabled') -isnot [bool])) {
+        $errs.Add('enabled is not a boolean')
+    }
+    if ((Test-JiraHookProp $e 'optional') -and ((Get-JiraHookProp $e 'optional') -ne $false)) {
+        $errs.Add('optional must be false — a true entry is offered, not performed')
+    }
+    if (Test-JiraHookProp $e 'priority') {
+        $p = Get-JiraHookProp $e 'priority'
+        if (-not (($p -is [int]) -or ($p -is [long]) -or ($p -is [double]) -or ($p -is [decimal]))) {
+            $errs.Add('priority is not a number')
+        }
+    }
+    # `prompt` is the fussy one on purpose: the host builds its default with an
+    # f-string, `f"Execute {command}?"`, so the file receives the EXPANDED string
+    # and never a literal `{command}` placeholder (research R2, verified at
+    # specify_cli/extensions/__init__.py:3866). An entry carrying the unexpanded
+    # template did not come from the host, and saying so is the point of reading it.
+    if ((Test-JiraHookProp $e 'prompt') -and (Test-JiraHookProp $e 'command')) {
+        $cmd = Get-JiraHookProp $e 'command'
+        $want = "Execute $cmd" + '?'
+        if ((Get-JiraHookProp $e 'prompt') -cne $want) {
+            $errs.Add("prompt is not the host default `"$want`" — the host expands it with an f-string, so a {command} placeholder never reaches the file")
+        }
+    }
+    if ((Test-JiraHookProp $e 'description') -and ((Get-JiraHookProp $e 'description') -isnot [string])) {
+        $errs.Add('description is not a string')
+    }
+    if ((Test-JiraHookProp $e 'condition') -and ($null -ne (Get-JiraHookProp $e 'condition'))) {
+        $errs.Add('condition is set — a non-empty condition makes agent-driven dispatch skip the hook entirely')
+    }
+
+    if ($errs.Count -eq 0) { return $null }
+    return ($errs -join "`n")
+}
+
+function Get-CfgUnsupportedConstruct {
+    <#
+    .SYNOPSIS
+      Name the YAML construct that puts the file outside this reader's subset, or
+      return ''. Mirror of _register_hooks_unsupported_construct.
+
+      The reader is lenient rather than strict: it would happily parse
+      `key: &anchor` as the string "&anchor", producing a confidently WRONG
+      classification. FR-024 requires the opposite — say we cannot read it, and
+      name what defeated us — so the constructs are detected explicitly here
+      rather than inferred from a parse failure that never comes.
+
+      `[]` and `{}` are excluded: ConvertTo-JiraConfigYaml emits exactly those for
+      empty collections, and calling our own output unreadable would be absurd.
+    #>
+    param([Parameter(Mandatory)] [string] $Path)
+
+    foreach ($raw in ((Get-Content -Raw -LiteralPath $Path) -split "`r?`n")) {
+        $body = $raw.TrimStart()
+        if ([string]::IsNullOrEmpty($body) -or $body.StartsWith('#')) { continue }
+        if ($body.StartsWith('<<:')) { return 'a YAML merge key (<<:)' }
+
+        $value = ''
+        $sep = $body.IndexOf(': ')
+        if ($sep -ge 0) { $value = $body.Substring($sep + 2) }
+        elseif ($body.StartsWith('- ')) { $value = $body.Substring(2) }
+        $value = $value.TrimStart()
+        if ([string]::IsNullOrEmpty($value)) { continue }
+
+        $first = $value.Split(' ')[0]
+        if ($value.StartsWith('&')) { return "a YAML anchor ($first)" }
+        if ($value.StartsWith('*')) { return "a YAML alias ($first)" }
+        if ($value -eq '{}' -or $value -eq '[]') { continue }
+        if ($value.StartsWith('{')) { return 'a flow collection ({…)' }
+        if ($value.StartsWith('[')) { return 'a flow collection ([…)' }
+    }
+    return ''
+}
+
+function New-JiraHookUnreadable {
+    # The FR-024 result: `unreadable` true, the three partition lists EMPTY, and a
+    # hint naming the file and, where determinable, the construct. It MUST NOT
+    # claim the hooks are missing: we have no evidence either way, and "your hooks
+    # are missing" about a file we merely failed to parse is exactly the false,
+    # expensive guidance FR-024 forbids. Mirror of _register_hooks_unreadable.
+    param([string] $Path, [string] $Detail)
+    $hint = "unreadable: $Path could not be read"
+    if ($Detail) { $hint += " ($Detail)" }
+    $hint += ' — no claim is made about the hooks; fix the file, then re-run /speckit.jira.config'
+    return (ConvertTo-JiraJsonValue ([ordered]@{
+                present       = @()
+                missing       = @()
+                disabled      = @()
+                held_disabled = @()
+                duplicated    = @()
+                unreadable    = $true
+                repair_hint   = $hint
+            }))
+}
+
+function Get-JiraHookRepairHint {
+    # The repair hint, naming the remedy for whatever is not `present` —
+    # literally, because every literal it contains is checked by the
+    # message↔command CI check (FR-018). The three remedies are genuinely
+    # different in kind:
+    #   * missing    — the official install DOES register it (one command);
+    #   * held       — the release flag on the configuration command;
+    #   * duplicated — a manual edit, because neither the host nor this extension
+    #                  can remove an entry the host does not recognise as ours.
+    #                  That is the one place Constitution X's "one-command repair"
+    #                  cannot be offered honestly (plan.md § Complexity Tracking).
+    # Mirror of _register_hooks_hint.
+    param([string[]] $Missing, [string[]] $Held, [string[]] $Duplicated, [string] $Path)
+
+    $clauses = [System.Collections.Generic.List[string]]::new()
+    if ($Missing.Count -gt 0) {
+        $clauses.Add("missing: $($Missing -join ', ') — register them with: $($script:HookInstallCommand)")
+    }
+    if ($Held.Count -gt 0) {
+        $clauses.Add("held disabled: $($Held -join ', ') — no bridge step runs for these, whatever the registry says; release one with: $($script:HookReleaseCommand) $($Held[0])")
+    }
+    if ($Duplicated.Count -gt 0) {
+        $clauses.Add("duplicated: $($Duplicated -join ', ') — a pre-manifest entry names our command with no owning extension, so the official install adds a second entry beside it instead of replacing it; remove the entry that has no `"extension: jira`" field under each named event, by hand, from $Path")
+    }
+    if ($clauses.Count -eq 0) { return '' }
+    return ($clauses -join '; ')
 }
 
 function Get-JiraHookHealth {
     <#
     .SYNOPSIS
-      READ-ONLY hook-health check for the run summary (FR-047). Returns the
-      canonical hook_health object of run-summary.schema.json:
-      { present; missing; disabled; repair_hint? }. `missing` lists lifecycle
-      events with no reconcile hook at all; an operator-disabled hook is listed
-      under `disabled` (never "missing"), so it is never re-added (FR-048).
-      Health covers EVERY event the writer registers — the six after_*
-      reconcile hooks AND the before_specify feature hook — so a deleted entry
-      is reported instead of silently re-added by the next repair.
-      `repair_hint` appears only when a hook is missing. A malformed file reports
-      every event missing. Mirror of register_hooks_health.
+      READ-ONLY classification of all seven declared events for the run summary.
+      Returns the canonical hook_health object of run-summary.schema.json:
+      { present; missing; disabled; held_disabled; duplicated; unreadable;
+        repair_hint? }.
+
+      `present`, `missing` and `disabled` partition the seven events ONLY when
+      `unreadable` is false. `held_disabled` and `duplicated` are cross-cutting
+      ANNOTATIONS, not further partitions: an event may be `present` and
+      `held_disabled` (an install re-enabled it and the operator has not released
+      it), or `present` and `duplicated` (the canonical entry exists beside a
+      leftover one).
+
+      Computing this writes NOTHING — not to the registry, not anywhere. The
+      operator disable record is written by the ceremony, not by this
+      classification (research R5 step 1). Mirror of register_hooks_health.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] [string] $Path)
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [string] $DisabledJson = '[]'
+    )
 
-    $existingJson = '{}'
+    $events = @(Get-JiraHookEventList)
+    $root = $null
+
     if (Test-Path -LiteralPath $Path) {
-        try { $existingJson = ConvertFrom-JiraConfigYaml -Path $Path }
-        catch {
-            return (ConvertTo-JiraJsonValue ([ordered]@{
-                        present     = @()
-                        missing     = @(@($script:HookEvents) + $script:HookBeforeEvent)
-                        disabled    = @()
-                        repair_hint = 'extensions.yml is not valid YAML — fix it, then run /speckit.jira.config or reconcile --repair-hooks'
-                    }))
+        $construct = Get-CfgUnsupportedConstruct -Path $Path
+        if ($construct) { return (New-JiraHookUnreadable -Path $Path -Detail $construct) }
+        try { $root = ConvertFrom-JiraConfigYaml -Path $Path | ConvertFrom-Json -Depth 100 }
+        catch { return (New-JiraHookUnreadable -Path $Path -Detail "not valid YAML in this reader's subset") }
+
+        # Parsing succeeding is not the same as the file being a registry. The
+        # reader is lenient by design, so a genuinely broken file can parse into a
+        # confidently WRONG structure — `- broken` under an event becomes the
+        # string "broken" where a mapping belongs. Checking the shape of what came
+        # back is how a broken file is distinguished from an unsupported construct
+        # (FR-024), and it is checked only for the events we classify: another
+        # extension's event is none of our business.
+        # `@(...)` normalises the two forms the host accepts for an event — a
+        # single mapping and a list of mappings (`coerce_hook_entries`, research
+        # R1) — into one list. Here it is also unavoidable: PowerShell unwraps a
+        # single-element array on return, so a one-entry event arrives as a bare
+        # mapping whatever the file said. The Bash twin normalises the same way,
+        # which is what keeps the two reports identical (Constitution VI).
+        $hooks = Get-JiraHookProp $root 'hooks'
+        if ((Test-JiraHookProp $root 'hooks') -and ($hooks -isnot [System.Management.Automation.PSCustomObject])) {
+            return (New-JiraHookUnreadable -Path $Path -Detail 'hooks is not a mapping')
+        }
+        foreach ($e in $events) {
+            if (-not (Test-JiraHookProp $hooks $e)) { continue }
+            $v = Get-JiraHookProp $hooks $e
+            if ($null -eq $v) { continue }
+            foreach ($x in @($v)) {
+                if ($x -isnot [System.Management.Automation.PSCustomObject]) {
+                    return (New-JiraHookUnreadable -Path $Path -Detail "hooks.$e carries an entry that is not a mapping")
+                }
+            }
         }
     }
-    $root = $existingJson | ConvertFrom-Json -Depth 100
+
+    # An absent registry is NOT unreadable: we read it successfully and found no
+    # entries. Every declared event is genuinely missing, and the official install
+    # is the remedy.
     $hooks = Get-JiraHookProp $root 'hooks'
+    $ourCommands = Get-JiraHookCommandList
 
     $present = [System.Collections.Generic.List[string]]::new()
     $missing = [System.Collections.Generic.List[string]]::new()
     $disabled = [System.Collections.Generic.List[string]]::new()
-    foreach ($e in (@($script:HookEvents) + $script:HookBeforeEvent)) {
-        $cmd = if ($e -ceq $script:HookBeforeEvent) { $script:HookBeforeCommand } else { $script:HookCommand }
+    $duplicated = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($e in $events) {
+        $cmd = Get-JiraHookCommandFor -LifecycleEvent $e
+        $all = @()
+        $v = Get-JiraHookProp $hooks $e
+        if ($null -ne $v) { $all = @($v) }
+
         $ours = [System.Collections.Generic.List[object]]::new()
-        foreach ($x in @(Get-JiraHookProp $hooks $e)) {
-            # Case-SENSITIVE like the bash twin's jq `==` (NFR-1).
-            if ((Get-JiraHookProp $x 'command') -ceq $cmd) { $ours.Add($x) }
+        $leftovers = 0
+        foreach ($x in $all) {
+            # Case-SENSITIVE like the Bash twin's jq `==` (NFR-1).
+            $xExt = Get-JiraHookProp $x 'extension'
+            $xCmd = Get-JiraHookProp $x 'command'
+            if (($xExt -ceq $script:HookExtensionId) -and ($xCmd -ceq $cmd)) { $ours.Add($x); continue }
+            if ((-not (Test-JiraHookProp $x 'extension')) -and ($ourCommands -ccontains $xCmd)) { $leftovers++ }
         }
+        if ($leftovers -gt 0) { $duplicated.Add($e) }
+
         if ($ours.Count -eq 0) { $missing.Add($e); continue }
         $enabled = $false
         foreach ($x in $ours) {
             $en = Get-JiraHookProp $x 'enabled'
-            if (-not ($en -is [bool] -and $en -eq $false)) { $enabled = $true; break }
+            if (-not (($en -is [bool]) -and ($en -eq $false))) { $enabled = $true; break }
         }
         if ($enabled) { $present.Add($e) } else { $disabled.Add($e) }
     }
 
-    $out = [ordered]@{ present = $present.ToArray(); missing = $missing.ToArray(); disabled = $disabled.ToArray() }
-    if ($missing.Count -gt 0) { $out['repair_hint'] = 'run /speckit.jira.config or reconcile --repair-hooks' }
+    $held = [System.Collections.Generic.List[string]]::new()
+    foreach ($x in @($DisabledJson | ConvertFrom-Json -Depth 100)) {
+        $s = [string]$x
+        if (($events -ccontains $s) -and (-not $held.Contains($s))) { $held.Add($s) }
+    }
+    $heldArr = [string[]]@($held)
+    [System.Array]::Sort($heldArr, [System.StringComparer]::Ordinal)
+
+    # The "held disabled" clause covers BOTH sources of a withheld event: an entry
+    # the registry currently shows as `enabled: false`, and an event in the
+    # operator record that the last install re-enabled in the file. They are one
+    # situation from the operator's point of view — no bridge step runs — and one
+    # flag releases either, so they are reported as one list rather than two.
+    $heldClause = [System.Collections.Generic.List[string]]::new()
+    foreach ($s in (@($disabled) + @($heldArr))) { if (-not $heldClause.Contains($s)) { $heldClause.Add($s) } }
+    $heldClauseArr = [string[]]@($heldClause)
+    [System.Array]::Sort($heldClauseArr, [System.StringComparer]::Ordinal)
+
+    $out = [ordered]@{
+        present       = $present.ToArray()
+        missing       = $missing.ToArray()
+        disabled      = $disabled.ToArray()
+        held_disabled = $heldArr
+        duplicated    = $duplicated.ToArray()
+        unreadable    = $false
+    }
+
+    # `repair_hint` appears only when something is not `present` — a healthy run
+    # says nothing, so a hint in the summary always means there is work to do.
+    $hint = Get-JiraHookRepairHint -Missing $missing.ToArray() -Held $heldClauseArr -Duplicated $duplicated.ToArray() -Path $Path
+    if ($hint) { $out['repair_hint'] = $hint }
+
     return (ConvertTo-JiraJsonValue $out)
 }
 
-function Set-JiraHookRegistration {
-    <#
-    .SYNOPSIS
-      Idempotently register the reconcile hook under every lifecycle event, creating
-      the file (and its directory) if absent. Returns { ExitCode; Status } where
-      Status is created | repaired | unchanged | refused. In dry-run the status is
-      computed but no file is touched. Mirror of register_hooks_write.
-    #>
-    [CmdletBinding(SupportsShouldProcess)]
-    param([Parameter(Mandatory)] [string] $Path, [bool] $DryRun = $false)
-
-    $existingJson = '{}'
-    $existed = $false
-    if (Test-Path -LiteralPath $Path) {
-        $existed = $true
-        try { $existingJson = ConvertFrom-JiraConfigYaml -Path $Path }
-        catch { return [pscustomobject]@{ ExitCode = $script:HookExitConfig; Status = 'refused' } }
-    }
-
-    $merged = Get-JiraHookMerged -ExistingJson $existingJson
-    $yaml = ConvertTo-JiraConfigYaml -Json $merged
-
-    $status = 'repaired'
-    if (-not $existed) {
-        $status = 'created'
-    }
-    elseif (((Get-Content -Raw -LiteralPath $Path) -replace "`r`n", "`n").TrimEnd("`n") -eq $yaml) {
-        $status = 'unchanged'
-    }
-
-    if (-not $DryRun -and $status -ne 'unchanged') {
-        if ($PSCmdlet.ShouldProcess($Path, 'register hooks')) {
-            $dir = Split-Path -Parent $Path
-            if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-            [System.IO.File]::WriteAllText($Path, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
-        }
-    }
-    return [pscustomobject]@{ ExitCode = 0; Status = $status }
-}
-
-Export-ModuleMember -Function Get-JiraHookHealth, Set-JiraHookRegistration
+Export-ModuleMember -Function Get-JiraHookHealth, Get-JiraHookEventList, Get-JiraHookCommandFor, `
+    Get-JiraHookCommandList, Test-JiraHookEntryOwnership, Test-JiraHookEntryIsLeftover, `
+    Get-JiraHookEntryShapeError

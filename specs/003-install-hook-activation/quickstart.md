@@ -20,7 +20,7 @@ turn green, and it fails today.
 
 ```sh
 scratch="$(mktemp -d)" && cd "$scratch"
-specify init --here --ai claude
+specify init --here --integration claude --force
 specify extension add --dev /path/to/spec-kit-jira
 cat .specify/extensions.yml
 ```

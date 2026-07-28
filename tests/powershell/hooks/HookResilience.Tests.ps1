@@ -1,4 +1,5 @@
-# T081 [US9] — Hook resilience, PowerShell side.
+# T022 [003 US2] — Hook resilience under `optional: false`. Twin of
+# tests/bash/hooks/test_hook_resilience.bats. Originally T081 [US9] — Hook resilience, PowerShell side.
 # Mirror of tests/bash/hooks/test_hook_resilience.bats. Cross-port byte agreement
 # is proven in bats; here we assert the resilience semantics (FR-046, FR-048, SC-008).
 
@@ -59,18 +60,49 @@ Describe 'Hook resilience' {
         $code | Should -Be 0
     }
 
-    It 'keeps an operator-disabled hook disabled across repeated repair (FR-048, SC-008)' {
+    It 'leaves the host exit code untouched for every bridge fault (FR-015)' {
+        # Under `optional: false` the agent PERFORMS this step as part of the host
+        # command, so a fault that returns early must be downgraded too — not only
+        # the ones that reach the end of the run.
+        $env:SPEC_KIT_JIRA_HOOK_CONTEXT = '1'
+        (Invoke-ReconcileCode @('reconcile', '--json', $Spec)) | Should -Be 0
+
+        $bad = Join-Path ([System.IO.Path]::GetTempPath()) "$([System.Guid]::NewGuid()).md"
+        Set-Content -Path $bad -Value 'not a specification at all' -NoNewline
+        (Invoke-ReconcileCode @('reconcile', '--json', $bad)) | Should -Be 0
+        Remove-Item -Force $bad -ErrorAction SilentlyContinue
+
+        $env:SPEC_KIT_JIRA_LIFECYCLE = '{not json'
+        try { (Invoke-ReconcileCode @('reconcile', '--json', $Spec)) | Should -Be 0 }
+        finally { Remove-Item Env:SPEC_KIT_JIRA_LIFECYCLE -ErrorAction SilentlyContinue }
+    }
+
+    It 'is inert at dispatch for a recorded event — no Jira call, no warning (FR-020)' {
+        # The operator's decision lives in OUR file, so it survives the reinstall
+        # that rewrote the registry to `enabled: true`. The guarantee is on the
+        # EFFECT (no bridge step runs), not on the registry field, which upstream
+        # rewrites unconditionally (research R5).
+        $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $env:JIRA_CONFIG_DIR = $dir
+        try {
+            $null = Add-JiraHooksDisabled -LifecycleEvent 'after_specify' -ConfigDir $dir
+            $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_specify'
+            (Invoke-ReconcileCode @('reconcile', '--json', $Spec)) | Should -Be 0
+        }
+        finally {
+            Remove-Item Env:SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
+            Remove-Item Env:JIRA_CONFIG_DIR -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'never brings the hook registry into existence (FR-022, SC-011)' {
         $ext = $env:SPEC_KIT_JIRA_EXTENSIONS_YML
-        [void](Set-JiraHookRegistration -Path $ext)
-        $obj = ConvertFrom-JiraConfigYaml -Path $ext | ConvertFrom-Json
-        $obj.hooks.after_specify[0].enabled = $false
-        $yaml = ConvertTo-JiraConfigYaml -Json (ConvertTo-JiraJsonValue $obj)
-        [System.IO.File]::WriteAllText($ext, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
-        [void](Set-JiraHookRegistration -Path $ext)
-        [void](Set-JiraHookRegistration -Path $ext)
-        [void](Set-JiraHookRegistration -Path $ext)
-        $json = ConvertFrom-JiraConfigYaml -Path $ext | ConvertFrom-Json
-        @($json.hooks.after_specify).Count | Should -Be 1
-        $json.hooks.after_specify[0].enabled | Should -BeFalse
+        Remove-Item -Force $ext -ErrorAction SilentlyContinue
+        $env:SPEC_KIT_JIRA_HOOK_CONTEXT = '1'
+        $null = Invoke-ReconcileCode @('reconcile', '--json', $Spec)
+        $null = Invoke-ReconcileCode @('reconcile', '--dry-run', '--json', $Spec)
+        Test-Path -LiteralPath $ext | Should -BeFalse
     }
 }

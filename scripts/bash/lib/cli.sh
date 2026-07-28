@@ -39,8 +39,8 @@ cli_exit_code() {
 # cli_parse <args...> — parse the command line; print key=value state lines.
 cli_parse() {
   local command="" dry_run=false json=false on_drift=abort
-  local verbose=false repair_hooks=false help=false error="" use_team=""
-  local -a positional=() styles=()
+  local verbose=false help=false error="" use_team=""
+  local -a positional=() styles=() enable_hooks=()
 
   while (($#)); do
     case "$1" in
@@ -50,7 +50,6 @@ cli_parse() {
       --dry-run) dry_run=true ;;
       --json) json=true ;;
       --verbose) verbose=true ;;
-      --repair-hooks) repair_hooks=true ;;
       --help | -h) help=true ;;
       --style)
         # Repeatable operator answer to the closed style question (002 US1):
@@ -75,6 +74,20 @@ cli_parse() {
           use_team="$1"
         fi
         ;;
+      --enable-hook)
+        # The operator's explicit release of a held lifecycle event (003 FR-007,
+        # FR-029). Repeatable. It exists because `specify extension add` rewrites
+        # `enabled: true` unconditionally, so the extension cannot tell an
+        # operator's re-enable from the install's — and guessing would silently
+        # discard a deliberate choice (research R5). One explicit flag, named in
+        # the ceremony's own report, is the honest mechanism.
+        if [[ $# -lt 2 ]]; then
+          error="--enable-hook requires a lifecycle event (--enable-hook <event>)"
+        else
+          shift
+          enable_hooks+=("$1")
+        fi
+        ;;
       --on-drift=*)
         on_drift="${1#*=}"
         if [[ "${on_drift}" != abort && "${on_drift}" != proceed ]]; then
@@ -95,7 +108,7 @@ cli_parse() {
     return 0
   fi
 
-  local args_joined styles_joined
+  local args_joined styles_joined enable_hooks_joined
   args_joined="$(
     IFS=' '
     printf '%s' "${positional[*]}"
@@ -104,16 +117,20 @@ cli_parse() {
     IFS=' '
     printf '%s' "${styles[*]-}"
   )"
+  enable_hooks_joined="$(
+    IFS=' '
+    printf '%s' "${enable_hooks[*]-}"
+  )"
 
   printf 'command=%s\n' "${command}"
   printf 'dry_run=%s\n' "${dry_run}"
   printf 'json=%s\n' "${json}"
   printf 'on_drift=%s\n' "${on_drift}"
   printf 'verbose=%s\n' "${verbose}"
-  printf 'repair_hooks=%s\n' "${repair_hooks}"
   printf 'help=%s\n' "${help}"
   printf 'styles=%s\n' "${styles_joined}"
   printf 'use_team=%s\n' "${use_team}"
+  printf 'enable_hooks=%s\n' "${enable_hooks_joined}"
   printf 'args=%s\n' "${args_joined}"
   printf 'exit=%s\n' "${EXIT_OK}"
 }

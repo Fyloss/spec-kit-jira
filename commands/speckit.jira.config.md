@@ -1,6 +1,6 @@
 ---
 name: "speckit.jira.config"
-description: "Configure the Jira reconcile bridge: discover project metadata, register lifecycle hooks, and manage the README block — a deterministic, model-independent ceremony."
+description: "Configure the Jira reconcile bridge: discover project metadata, verify the lifecycle hooks the install registered, and manage the README block — a deterministic, model-independent ceremony."
 argument-hint: "Optional: a project key to (re)bind, e.g. PROJ"
 ---
 
@@ -19,10 +19,45 @@ No step is left to model judgement. Because the ceremony reads only and persists
 through the canonical serialiser, running it twice against an unchanged project
 produces a **byte-identical** `config.local.yml` on both ports (FR-003, SC-004).
 
-The heavy lifting is performed by the deterministic entry point
-`spec-kit-jira config`; this file is the exact, ordered algorithm the agent
-follows to drive it. **Never invent a project key, an issue-type name, a status,
-a field id, or a strategy** — each comes from an API read or a closed question.
+The heavy lifting is performed by the deterministic entry point; this file is the
+exact, ordered algorithm the agent follows to drive it. **Never invent a project
+key, an issue-type name, a status, a field id, or a strategy** — each comes from
+an API read or a closed question.
+
+## Invoking the bridge — normative
+
+The install places **nothing** on `PATH`: `specify extension add` copies the
+extension into the consuming repository's `.specify/extensions/jira/` and
+installs no machine-wide executable. Invoke the entry point by its
+**repository-relative path**, selecting the port from the host:
+
+| Host | Entry point |
+| --- | --- |
+| macOS, Linux | `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` |
+| Windows | `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1` |
+
+```text
+.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config [PROJECT_KEY] [flags]
+```
+
+You MUST NOT invoke a bare `spec-kit-jira` command name. No such command exists
+in a consuming repository, and assuming it does is what produced the reported
+"spec-kit-jira CLI not installed" message.
+
+### When the entry point is missing — emit exactly as written
+
+When the entry point is not found or is not executable, emit the following text
+**exactly as written**. Do not paraphrase it, do not summarise it, and do not
+compose your own explanation of the situation:
+
+```text
+Jira bridge not available: the entry point
+.specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
+.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found or
+is not executable. This spec-kit command completed normally and nothing was
+mirrored to Jira. To restore the bridge, reinstall the extension with
+`specify extension add --dev <path-to-spec-kit-jira> --force`.
+```
 
 ## Git state is never a source (FR-004/FR-007) — normative
 
@@ -77,7 +112,10 @@ and never trigger the degraded mode — do not retry into it.
    and its error lists the accessible projects discovered via the paginated
    `GET /project/search` read (key, name, style). Ask the operator to choose
    **from that list only**, persist the choice into `config.yml`, and re-invoke
-   `spec-kit-jira config <KEY>`. An unknown or unresolvable key fails closed
+   the entry point by its repository-relative path with the chosen key:
+   `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config <KEY>` (on
+   Windows, the `powershell/spec-kit-jira.ps1` twin). An unknown or
+   unresolvable key fails closed
    with the transport's exit code — never substitute another key (FR-006).
 3. **Config read** — for each project, resolve its routing (`routing[]` /
    `routing_default`). A credential-shaped value in either YAML layer is refused
@@ -128,10 +166,33 @@ A single run's effects are each reported **separately** in the summary:
 
 - **discovery** — the resolved-id table written to `config.local.yml` (above),
   including the per-project style audit.
-- **hooks** — idempotent lifecycle-hook registration (US9).
+- **hooks** — a **read-only verification** of the lifecycle hooks (see below).
 - **readme** — the version-marked managed README block (US5).
 - **gitignore** — idempotent `.gitignore` coverage of the gitignored config
   layer (`config.local.yml`, `.env`, `personal.yml` — FR-019).
+
+## The hooks effect: verify and report, never write — normative
+
+The lifecycle hooks are declared in the extension manifest and registered by
+`specify extension add`. **They are already active before this ceremony runs.**
+This ceremony does not register them, and **never modifies
+`.specify/extensions.yml`** — not to register, not to repair, not to realign an
+entry it believes is wrong, not on first run, and not behind a flag. Every run
+leaves that file byte-identical, comments included.
+
+It reports one of five states, and names what the operator should do:
+
+| State | Meaning and remedy |
+| --- | --- |
+| `healthy` | All seven events present and enabled; nothing to do |
+| `incomplete` | One or more events have no entry. Re-run the official install: `specify extension add --dev <path-to-spec-kit-jira> --force` |
+| `held_disabled` | The operator disabled one or more events. No bridge step runs for them, whatever the registry currently says. Release one with `/speckit.jira.config --enable-hook <event>` |
+| `duplicated` | A leftover entry from a version that predates manifest-declared hooks: our command with no owning `extension` field. Neither the install nor this extension can remove it, so the report gives the exact manual edit |
+| `unreadable` | The registry could not be read. The file is named as the cause; **no claim is made about the hooks** |
+
+Relay the reported detail verbatim. Do not offer to edit
+`.specify/extensions.yml` on the operator's behalf, and do not describe a state
+in your own words when the report already names it.
 
 ## Flags
 
@@ -139,9 +200,11 @@ A single run's effects are each reported **separately** in the summary:
   first discovery read; fail-closed on an unknown key).
 - `--style <KEY>=<company_managed|team_managed>` — repeatable; the operator's
   answer to the closed style question.
+- `--enable-hook <event>` — repeatable; release one lifecycle event the operator
+  previously disabled. It clears the extension's own record and **does not touch
+  the hook registry**.
 - `--json` — emit the machine-readable run summary (`run-summary.schema.json`).
 - `--dry-run` — compute everything and report, but write nothing.
-- `--repair-hooks` — one-command repair of missing lifecycle hooks (US9).
 - `--verbose` — extra diagnostics (the token never appears, even here).
 - `--help` — usage; exits `0`.
 

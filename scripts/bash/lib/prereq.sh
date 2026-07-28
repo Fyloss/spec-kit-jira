@@ -17,6 +17,49 @@ _JIRA_LIB_PREREQ=1
 # Commands the Bash port requires at runtime.
 PREREQ_REQUIRED_CMDS=(curl jq git)
 
+# The bridge's repository-relative entry points, per port (003 FR-014, R6). The
+# install copies the extension into `.specify/extensions/jira/` and puts NOTHING
+# on PATH, so these paths — not a bare executable name — are what "the bridge"
+# means in every message.
+PREREQ_BRIDGE_BASH='.specify/extensions/jira/scripts/bash/spec-kit-jira.sh'
+PREREQ_BRIDGE_PWSH='.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1'
+
+# prereq_bridge_missing [extension-root] — print the entry point that is absent
+# or not executable, or nothing when both ports are intact.
+#
+# This is the SIXTH degraded cause (003 FR-017), and it is the only one the
+# bridge cannot report on from inside a run that never started. What it CAN
+# detect is the half-broken install: this port running while its twin is missing,
+# or an entry point that lost its executable bit. Reporting that as its own cause
+# — rather than folding it into "not configured" or the generic prerequisite gate
+# — is what FR-017 and T090 require. The state where NEITHER port starts is
+# covered by the verbatim fallback block in the command documents (FR-030),
+# because there is no code of ours left running to say anything.
+prereq_bridge_missing() {
+  local root="${1:-${SPEC_KIT_JIRA_EXTENSION_ROOT:-}}"
+  if [[ -z "${root}" ]]; then
+    # lib/ -> bash/ -> scripts/ -> <extension root>
+    root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+  fi
+  local rel
+  for rel in scripts/bash/spec-kit-jira.sh scripts/powershell/spec-kit-jira.ps1; do
+    if [[ ! -f "${root}/${rel}" ]]; then
+      case "${rel}" in
+        *bash*) printf '%s' "${PREREQ_BRIDGE_BASH}" ;;
+        *) printf '%s' "${PREREQ_BRIDGE_PWSH}" ;;
+      esac
+      return 0
+    fi
+  done
+  # The Bash entry point must additionally be executable, or this port cannot be
+  # invoked by path at all — the exact shape of the reported defect.
+  if [[ ! -x "${root}/scripts/bash/spec-kit-jira.sh" ]]; then
+    printf '%s' "${PREREQ_BRIDGE_BASH}"
+    return 0
+  fi
+  return 0
+}
+
 # _prereq_has <command> — true when the command is available.
 # Honours _PREREQ_FORCE_MISSING (space-separated) so tests can simulate absence.
 _prereq_has() {
@@ -47,6 +90,18 @@ prereq_check() {
   if ((${#missing[@]} > 0)); then
     printf 'spec-kit-jira: missing required command(s): %s. Install them and re-run.\n' \
       "${missing[*]}" >&2
+    return "${EXIT_PREREQ}"
+  fi
+
+  # The bridge's own entry points, reported as their OWN cause and never folded
+  # into the generic "missing required command(s)" line above (003 FR-017, T090):
+  # a lost file or a lost executable bit is an install problem with an install
+  # remedy, not a missing tool the operator should go and install.
+  local bridge
+  bridge="$(prereq_bridge_missing)"
+  if [[ -n "${bridge}" ]]; then
+    printf 'spec-kit-jira: the bridge entry point %s was not found or is not executable — the extension install is incomplete. Restore it with: %s\n' \
+      "${bridge}" 'specify extension add --dev <path-to-spec-kit-jira> --force' >&2
     return "${EXIT_PREREQ}"
   fi
 

@@ -48,12 +48,13 @@
     },
     "effects": {
       "type": "object",
-      "description": "The three effects of a /speckit.jira.config run, reported SEPARATELY (FR-054).",
+      "description": "The effects of a /speckit.jira.config run, reported SEPARATELY (FR-054).",
       "additionalProperties": false,
       "properties": {
         "discovery": { "$ref": "#/$defs/effect" },
         "hooks": { "$ref": "#/$defs/effect" },
-        "readme": { "$ref": "#/$defs/effect" }
+        "readme": { "$ref": "#/$defs/effect" },
+        "gitignore": { "$ref": "#/$defs/effect" }
       }
     },
     "drift": {
@@ -91,14 +92,28 @@
     },
     "hook_health": {
       "type": "object",
-      "description": "Hook health checked and reported on every run (FR-047).",
+      "description": "Hook health checked and reported on every run (FR-047). A pure READ of the consuming repository's hook registry: computing it writes nothing, and the registry itself is never written by this extension in any state (003 FR-022).",
       "additionalProperties": false,
       "required": ["present", "missing", "disabled"],
       "properties": {
         "present": { "type": "array", "items": { "type": "string" } },
         "missing": { "type": "array", "items": { "type": "string" } },
         "disabled": { "type": "array", "items": { "type": "string" } },
-        "repair_hint": { "type": "string", "description": "One-command repair instruction when any hook is missing (FR-047)." }
+        "held_disabled": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Events the operator disabled, recorded in the gitignored local binding and honoured at dispatch whatever the registry currently says (003 FR-007, FR-029). A cross-cutting annotation, not a further partition: an event here may also be `present` when the last install re-enabled it."
+        },
+        "duplicated": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Events carrying a leftover pre-manifest entry of this extension — our command with no owning `extension` field. The official install cannot purge it (its predicate matches on that field), so it is duplicated rather than replaced and the operator must remove it by hand (003 FR-028)."
+        },
+        "unreadable": {
+          "type": "boolean",
+          "description": "The registry could not be read at all. When true the three partition lists are EMPTY: the extension has no evidence either way and MUST NOT report the events as missing (003 FR-024)."
+        },
+        "repair_hint": { "type": "string", "description": "The remedy for whatever is not `present`, named literally: the official install command for `missing`, the release flag for `held_disabled`, the manual edit for `duplicated`. Present only when something is not `present` (FR-047, 003 FR-021)." }
       }
     },
     "mutations": {
@@ -126,8 +141,35 @@
       "additionalProperties": false,
       "required": ["status"],
       "properties": {
-        "status": { "enum": ["written", "unchanged", "created", "repaired", "refused", "skipped"] },
-        "detail": { "type": "string" }
+        "status": {
+          "description": "The first six are WRITE outcomes, for effects that write a file this extension owns. The last five are the READ-ONLY verification vocabulary of the hooks effect (003 contracts/hook-registry-entry.md): that effect classifies and reports the consuming repository's hook registry and never writes it, so no write outcome could honestly describe it.",
+          "enum": [
+            "written",
+            "unchanged",
+            "created",
+            "repaired",
+            "refused",
+            "skipped",
+            "healthy",
+            "incomplete",
+            "held_disabled",
+            "duplicated",
+            "unreadable"
+          ]
+        },
+        "detail": { "type": "string" },
+        "projects": {
+          "type": "object",
+          "description": "The per-project style audit of the discovery effect (002 FR-003): style plus its provenance, per bound project key.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "style": { "enum": ["company_managed", "team_managed"] },
+              "style_source": { "enum": ["api", "operator"] }
+            }
+          }
+        }
       }
     }
   }

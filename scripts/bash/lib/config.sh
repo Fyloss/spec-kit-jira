@@ -173,6 +173,13 @@ _cfg_scalar_json() {
     true) printf 'true' ;;
     false) printf 'false' ;;
     null | '~' | '') printf 'null' ;;
+    # The two EMPTY flow forms, and only those. They are in the subset because
+    # config_to_yaml emits exactly them for an empty collection, and the writer
+    # is documented above as a fixed point of this reader — without these, a
+    # file this module wrote reads back with the strings "[]" and "{}" where it
+    # wrote collections. Non-empty flow collections stay out of scope.
+    '[]') printf '[]' ;;
+    '{}') printf '{}' ;;
     *) jq -Rn --arg v "${s}" '$v' ;;
   esac
 }
@@ -210,6 +217,22 @@ _cfg_parse_mapping() {
       val="$(_cfg_scalar_json "${rest}")"
     elif ((_cfg_i < _cfg_n)) && ((_cfg_indents[_cfg_i] > ind)); then
       _cfg_parse_value; val="${_CFG_RET}"
+    elif ((_cfg_i < _cfg_n)) && ((_cfg_indents[_cfg_i] == ind)) \
+      && { [[ "${_cfg_lines[_cfg_i]}" == "-" ]] || [[ "${_cfg_lines[_cfg_i]}" == "- "* ]]; }; then
+      # A block sequence may sit at its PARENT KEY's indentation rather than
+      # under it. Both forms are valid YAML and this one is PyYAML's default —
+      # which matters because PyYAML is what `specify extension add` serialises
+      # the hook registry with:
+      #
+      #     hooks:
+      #       before_specify:
+      #       - extension: jira        <- same indent as the key
+      #
+      # Requiring a greater indent made this reader stop at the key and return
+      # null for its value, so the registry of every real installation parsed as
+      # `{"installed":null}` and hook health called a healthy repository
+      # unreadable (003 T010).
+      _cfg_parse_sequence "${ind}"; val="${_CFG_RET}"
     else
       val="null"
     fi
@@ -433,8 +456,16 @@ def branchpattern:
 # kcov-excl-start — jq literal (string lines are not statements)
 _CFG_LOCAL_ERRORS_JQ='
 [
-  (keys_unsorted[] | select(IN("site_alias","resolved_ids","overrides")|not)
+  (keys_unsorted[] | select(IN("site_alias","resolved_ids","overrides","hooks")|not)
    | "unknown config.local key: \(.)"),
+  (if has("hooks") then
+     ( .hooks
+       | ( (if (type) != "object" then "hooks must be a mapping" else empty end),
+           (select(type == "object")
+            | (keys_unsorted[] | select(. != "disabled") | "unknown hooks key: \(.)"),
+              (if has("disabled") and ((.disabled|type) != "array")
+               then "hooks.disabled must be a list of lifecycle event names" else empty end)) ) )
+   else empty end),
   ((.resolved_ids // {}) | to_entries[] | .key as $k | .value as $v
    | ( (if (($v|type) == "object") and ($v | has("style"))
           and ($v.style | IN("company_managed","team_managed") | not)
@@ -448,6 +479,133 @@ _CFG_LOCAL_ERRORS_JQ='
 # _cfg_schema_errors <jq-program> — read JSON on stdin, print each error line.
 _cfg_schema_errors() {
   jq -r "${1} | .[]" 2> /dev/null
+}
+
+# =============================================================================
+# The operator disable record (003 T012, FR-007/FR-029)
+# =============================================================================
+#
+# `specify extension add` writes `enabled: true` unconditionally for every entry
+# it re-adds, with no read of the existing value (003 research R5). So the hook
+# registry CANNOT remember that the operator disabled an event: the next install
+# or upgrade silently re-enables it. Constitution X forbids that outcome, and
+# FR-022 forbids the obvious fix of writing the value back.
+#
+# The decision is therefore recorded here instead, in the gitignored local
+# binding, which lives outside `.specify/extensions/` and survives a reinstall by
+# Principle V — and it is honoured at DISPATCH, so it holds even in the window
+# between an install that re-enabled the entry and the next ceremony.
+
+# The closed set of seven lifecycle events — the `hooks.disabled` enum of
+# contracts/config.local.schema.json. It is declared here because this module
+# encodes that schema; hooks/register_hooks.sh consumes it rather than
+# redeclaring it, so the set has exactly one source (data-model § Lifecycle event).
+JIRA_HOOK_EVENT_NAMES=(before_specify after_specify after_clarify after_plan after_tasks after_implement after_analyze)
+
+# _cfg_hook_events_json — the closed set as a JSON array.
+_cfg_hook_events_json() {
+  printf '%s\n' "${JIRA_HOOK_EVENT_NAMES[@]}" | jq -cR . | jq -cs .
+}
+
+# _cfg_local_path <config_dir> — the local binding's path.
+_cfg_local_path() {
+  printf '%s/config.local.yml' "${1:-${JIRA_CONFIG_DIR}}"
+}
+
+# _cfg_local_json <config_dir> — the local binding as JSON, or `{}` when absent
+# or unreadable. Never fails: a broken local binding must not break mirroring.
+_cfg_local_json() {
+  local f
+  f="$(_cfg_local_path "$1")"
+  [[ -f "${f}" ]] || { printf '{}'; return 0; }
+  config_yaml_to_json "${f}" 2> /dev/null || printf '{}'
+}
+
+# config_hooks_disabled_read [config_dir] — the recorded set as a canonical JSON
+# array of event names, sorted and deduplicated. An absent record is the empty
+# set. A name outside the closed set is REPORTED on stderr and ignored rather
+# than failing the run: this file is human-editable, and a typo must not stop
+# the mirror (data-model § Operator disable record, Validation).
+config_hooks_disabled_read() {
+  local dir="${1:-${JIRA_CONFIG_DIR}}" json events unknown
+  json="$(_cfg_local_json "${dir}")"
+  events="$(_cfg_hook_events_json)"
+
+  unknown="$(jq -r --argjson e "${events}" \
+    '((.hooks.disabled // []) | if type == "array" then . else [] end)
+     | map(select(. as $x | $e | index($x) == null)) | unique | .[]' <<< "${json}" 2> /dev/null)"
+  if [[ -n "${unknown}" ]]; then
+    local name
+    while IFS= read -r name; do
+      [[ -z "${name}" ]] && continue
+      printf 'config: %s: unknown lifecycle event in hooks.disabled: %s — ignored\n' \
+        "$(_cfg_local_path "${dir}")" "${name}" >&2
+    done <<< "${unknown}"
+  fi
+
+  jq -c --argjson e "${events}" \
+    '((.hooks.disabled // []) | if type == "array" then . else [] end)
+     | map(select(. as $x | $e | index($x) != null)) | unique' <<< "${json}" 2> /dev/null \
+    || printf '[]'
+}
+
+# _cfg_hooks_disabled_set <config_dir> <dry_run> <new-set-json> — persist the
+# record, preserving every other key the operator owns (site_alias, overrides)
+# and every machine-owned key (resolved_ids). Writes through the canonical
+# serialiser, so a re-run producing the same set writes byte-identical bytes.
+_cfg_hooks_disabled_set() {
+  local dir="$1" dry="$2" newset="$3" f json merged yaml
+  f="$(_cfg_local_path "${dir}")"
+  json="$(_cfg_local_json "${dir}")"
+  merged="$(jq -cS --argjson d "${newset}" '
+    . as $root
+    | .hooks = (($root.hooks // {}) + {disabled: $d})
+    | if (.hooks.disabled | length) == 0 then (.hooks |= del(.disabled)) else . end
+    | if (.hooks | length) == 0 then del(.hooks) else . end' <<< "${json}")"
+  [[ "${dry}" == "true" ]] && return 0
+  yaml="$(printf '%s' "${merged}" | config_to_yaml)"
+  mkdir -p "${dir}"
+  printf '%s\n' "${yaml}" > "${f}"
+}
+
+# config_hooks_disabled_add <event> [config_dir] [dry_run] — record the operator's
+# decision to disable one event. Prints `recorded`, `unchanged`, or `ignored`
+# (an unknown name). Under dry-run the status is computed and nothing is written
+# (Constitution XI). Never fails the run.
+config_hooks_disabled_add() {
+  local event="$1" dir="${2:-${JIRA_CONFIG_DIR}}" dry="${3:-false}"
+  if ! jq -e --arg x "${event}" --argjson e "$(_cfg_hook_events_json)" \
+    '$e | index($x) != null' <<< '{}' > /dev/null 2>&1; then
+    printf 'config: not a lifecycle event: %s — nothing recorded\n' "${event}" >&2
+    printf 'ignored'
+    return 0
+  fi
+  local current
+  current="$(config_hooks_disabled_read "${dir}" 2> /dev/null)"
+  if jq -e --arg x "${event}" 'index($x) != null' <<< "${current}" > /dev/null 2>&1; then
+    printf 'unchanged'
+    return 0
+  fi
+  _cfg_hooks_disabled_set "${dir}" "${dry}" \
+    "$(jq -c --arg x "${event}" '. + [$x] | unique' <<< "${current}")"
+  printf 'recorded'
+}
+
+# config_hooks_disabled_remove <event> [config_dir] [dry_run] — the operator's
+# explicit release (FR-029: removable only by an explicit operator action).
+# Prints `released` or `unrecorded`. Under dry-run the status is computed and
+# nothing is written (Constitution XI).
+config_hooks_disabled_remove() {
+  local event="$1" dir="${2:-${JIRA_CONFIG_DIR}}" dry="${3:-false}"
+  local current
+  current="$(config_hooks_disabled_read "${dir}" 2> /dev/null)"
+  if ! jq -e --arg x "${event}" 'index($x) != null' <<< "${current}" > /dev/null 2>&1; then
+    printf 'unrecorded'
+    return 0
+  fi
+  _cfg_hooks_disabled_set "${dir}" "${dry}" \
+    "$(jq -c --arg x "${event}" 'map(select(. != $x))' <<< "${current}")"
+  printf 'released'
 }
 
 # =============================================================================

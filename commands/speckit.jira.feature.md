@@ -8,14 +8,47 @@ argument-hint: "Optional: a mentioned ticket key, then the feature description, 
 
 Run the deterministic ticket-first naming step before a feature is created. It
 is registered as the `before_specify` → `speckit.jira.feature` hook
-(`enabled: true`, `optional: true`): non-blocking by construction — it may
-improve the feature name, it must never prevent feature creation.
+(`enabled: true`, `optional: false`): you **perform** it as part of the host
+command rather than offering it. Non-optional is a **dispatch** property, not a
+blocking one — this step may improve the feature name, and it must never prevent
+feature creation.
 
-The heavy lifting is performed by the deterministic entry point
-`spec-kit-jira feature`; this file is the exact, ordered ceremony the agent
-follows to drive it. **Never invent a ticket key, a team id, or a naming
-convention** — each comes from the committed `teams:` catalogue, the
-developer's personal selection, or a closed question below.
+The heavy lifting is performed by the deterministic entry point; this file is
+the exact, ordered ceremony the agent follows to drive it. **Never invent a
+ticket key, a team id, or a naming convention** — each comes from the committed
+`teams:` catalogue, the developer's personal selection, or a closed question
+below.
+
+## Invoking the bridge — normative
+
+The install places **nothing** on `PATH`: `specify extension add` copies the
+extension into the consuming repository's `.specify/extensions/jira/` and
+installs no machine-wide executable. Invoke the entry point by its
+**repository-relative path**, selecting the port from the host:
+
+| Host | Entry point |
+| --- | --- |
+| macOS, Linux | `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` |
+| Windows | `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1` |
+
+You MUST NOT invoke a bare `spec-kit-jira` command name. No such command exists
+in a consuming repository, and assuming it does is what produced the reported
+"spec-kit-jira CLI not installed" message.
+
+### When the entry point is missing — emit exactly as written
+
+When the entry point is not found or is not executable, emit the following text
+**exactly as written**. Do not paraphrase it, do not summarise it, and do not
+compose your own explanation of the situation:
+
+```text
+Jira bridge not available: the entry point
+.specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
+.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found or
+is not executable. This spec-kit command completed normally and nothing was
+mirrored to Jira. To restore the bridge, reinstall the extension with
+`specify extension add --dev <path-to-spec-kit-jira> --force`.
+```
 
 ## Inputs (all deterministic)
 
@@ -28,10 +61,16 @@ developer's personal selection, or a closed question below.
 
 ## Ordered ceremony
 
-1. **Run the deterministic command**:
+1. **Run the deterministic command** by its repository-relative path:
 
    ```text
-   spec-kit-jira feature [TICKET-KEY] [--use-team <id>] [--json] [--dry-run] <description>
+   .specify/extensions/jira/scripts/bash/spec-kit-jira.sh feature [TICKET-KEY] [--use-team <id>] [--json] [--dry-run] <description>
+   ```
+
+   On Windows:
+
+   ```text
+   .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 feature [TICKET-KEY] [--use-team <id>] [--json] [--dry-run] <description>
    ```
 
 2. **`{"active": false}`** ⇒ proceed **exactly as today**: drive the host

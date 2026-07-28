@@ -4,9 +4,18 @@
 This repository mirrors its Spec Kit artifacts into Jira Cloud via the
 [spec-kit-jira](https://github.com/Fyloss/spec-kit-jira) extension (v{{VERSION}}).
 
-- **Configure**: run `/speckit.jira.config` and answer the enumerated questions.
-- **Mirror**: `spec.md` / `plan.md` / `tasks.md` reconcile into Jira automatically
-  after each Spec Kit lifecycle step; run a manual reconcile any time.
+- **Install**: `specify extension add --dev <path-to-spec-kit-jira> --force`
+  registers the seven lifecycle hooks and activates them. No further step is
+  needed to wire them up.
+- **Configure**: run `/speckit.jira.config` to bind this repository to a Jira
+  project. It also verifies the hook registration — it never modifies
+  `.specify/extensions.yml`, which the official install alone writes.
+- **Mirror**: `spec.md` / `plan.md` / `tasks.md` reconcile into Jira as part of
+  each Spec Kit lifecycle step. A mirroring failure never fails the spec-kit
+  command that triggered it.
+- **Disable one event**: set `enabled: false` on its entry in
+  `.specify/extensions.yml` and run `/speckit.jira.config` once; release it later
+  with `/speckit.jira.config --enable-hook <event>`.
 - **Prerequisites**: Bash ≥ 4 (macOS ships 3.2 — install a newer Bash), or
   PowerShell 7+ on Windows, plus `curl`, `jq`, and `git`.
 

@@ -40,6 +40,18 @@ jobs:
         # /opt/homebrew/bin, ahead of /bin in the image PATH.
         run: brew install bats-core jq shellcheck bash
 
+      # T003 — the install harness (tests/conformance/install-harness.sh and its
+      # PowerShell twin) drives the REAL `specify extension add`. Without the CLI
+      # on PATH every US1/US4 conformance case skips, and the one claim this
+      # feature makes — that the official install alone registers the seven
+      # events — would go unverified on every push. Installed on all three hosts
+      # so both ports' harnesses run.
+      - name: Install the Spec Kit CLI (install-harness dependency)
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install specify-cli
+        run: uv tool install specify-cli --from git+https://github.com/github/spec-kit.git
+
       - name: Run bats (Bash port — POSIX hosts only)
         if: runner.os != 'Windows'
         run: bats -r tests/bash
@@ -52,6 +64,40 @@ jobs:
               Install-Module Pester -MinimumVersion 5.0.0 -Force -SkipPublisherCheck -Scope CurrentUser
           }
           $r = Invoke-Pester -Path tests/powershell -PassThru -Output Detailed
+          if ($r.FailedCount -gt 0) { exit 1 }
+
+  static-checks:
+    # T003 — the three static guarantees of feature 003, named as their own job
+    # so a regression reports which guarantee broke rather than "a bats test
+    # failed somewhere". They are cheap, they need no scratch install, and each
+    # one is the mechanical enforcement of a requirement no runtime test can
+    # reach:
+    #   * manifest ↔ registry — the seven events are declared at the manifest
+    #     root, non-optional, condition-free (FR-001..FR-004), and every
+    #     hooks[].command resolves to a declared command (FR-009, SC-002);
+    #   * message ↔ command — every command literal in every emitted message is
+    #     runnable as spelled (FR-018, FR-030, SC-009);
+    #   * no registry write — no code path in either port can open the consuming
+    #     repository's hook registry for writing (FR-022, SC-011).
+    name: Static checks (manifest, messages, registry writes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y bats jq
+
+      - name: Bash port
+        run: bats -r tests/bash/ci
+
+      - name: PowerShell port
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+          if (-not (Get-Module -ListAvailable Pester | Where-Object Version -ge '5.0.0')) {
+              Install-Module Pester -MinimumVersion 5.0.0 -Force -SkipPublisherCheck -Scope CurrentUser
+          }
+          $r = Invoke-Pester -Path tests/powershell/ci -PassThru -Output Detailed
           if ($r.FailedCount -gt 0) { exit 1 }
 
   conformance:
