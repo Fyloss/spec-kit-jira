@@ -28,8 +28,43 @@ env:
   PWSH_SCRIPTS: scripts/powershell
 
 jobs:
+  changes:
+    # Cheap gate in front of the expensive one: kcov+xtrace costs 20-35 minutes
+    # per run (see bash-coverage.sh), so PRs that never touch Bash-covered paths
+    # skip it entirely. Push to main always runs the real job regardless of this
+    # output — Constitution XIII's "measured on every CI run" holds unconditionally
+    # there; this filter only saves iteration time on PRs whose diff cannot move
+    # the number either way.
+    name: Detect Bash-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      bash: ${{ steps.filter.outputs.bash }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check whether the diff touches Bash-covered paths
+        id: filter
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")"
+          else
+            changed=""
+          fi
+          # Fail open: an empty/undetermined diff runs the real gate rather than
+          # skipping it, so a detection glitch can never hide a coverage drop.
+          if [ -z "${changed}" ] || printf '%s\n' "${changed}" \
+            | grep -qE '^(scripts/bash/|tests/bash/|tests/coverage/|tests/conformance/|\.github/workflows/gates\.yml)'; then
+            echo "bash=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "bash=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   coverage-bash:
     name: Bash coverage >= 80% (kcov primary, traceability fallback)
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.bash == 'true' }}
     # Pinned to 22.04: kcov (the PRIMARY coverage gate per Constitution XIII) was
     # dropped from the Ubuntu 24.04 (noble) archive, so `apt-get install kcov`
     # fails on ubuntu-latest. 22.04 (jammy) still ships kcov in universe.
