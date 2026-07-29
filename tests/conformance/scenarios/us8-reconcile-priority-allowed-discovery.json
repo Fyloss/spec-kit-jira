@@ -1,0 +1,15 @@
+{
+  "name": "us8-reconcile-priority-allowed-discovery",
+  "description": "004 T061, research R4 branch 2 — exercises the mock's createmetaFields route selection end to end: COMP's create metadata declares a priority field WITH allowedValues (createmeta-fields-company-allowed.json), so config persists only the two allowed priorities (Critical, Medium), resolved against the site-wide catalogue — never the full catalogue. Both ports must produce a byte-identical binding and Jira API call sequence (NFR-1).",
+  "mock": {
+    "projects": { "COMP": "company" },
+    "createmetaFields": { "COMP": "company-allowed" }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-config",
+  "argv": ["config", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1"
+  }
+}

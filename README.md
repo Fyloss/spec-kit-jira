@@ -27,7 +27,11 @@ Then run the one-command install ceremony in the consuming repository:
 
 See [INSTALL.md](INSTALL.md) for prerequisites (Bash ≥ 4 or PowerShell 7+,
 `curl`, `jq`, `git`) and credential setup — the API token never enters the
-tree, argv, logs, or traces.
+tree, argv, logs, or traces. A bound repository needs **no environment
+variables** to mirror specs: the target project, issue type, and priority are
+all resolved from `.specify/jira/config.yml` and the discovered binding — see
+[INSTALL.md's mirroring step](INSTALL.md#install--configure) for the override
+variables that remain supported.
 
 ## Repository layout
 

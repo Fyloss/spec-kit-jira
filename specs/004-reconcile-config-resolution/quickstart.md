@@ -139,15 +139,45 @@ Coverage must stay at or above 80% statement coverage, with the fail-closed and 
 
 The feature is done when all of these hold:
 
-- [ ] `fields.project.key` present in 100% of planned creations (SC-009)
-- [ ] `fields.issuetype.id` present in 100% of planned creations (SC-003)
-- [ ] `PROJ` appears in zero payloads (SC-002)
-- [ ] Zero writes on every unresolved run (SC-005)
-- [ ] Prediction and real runs byte-identical (SC-006)
-- [ ] Both ports byte-identical (SC-007)
-- [ ] No lifecycle command fails due to a resolution failure (SC-008)
-- [ ] Both creation paths share the same base attribute set (SC-010)
-- [ ] Both project styles produce a valid creation (SC-011)
-- [ ] Zero payloads declare an attribute the project does not accept (SC-012)
-- [ ] Zero cross-project identifiers (SC-013)
-- [ ] The R8 verification item closed against vendor documentation
+- [X] `fields.project.key` present in 100% of planned creations (SC-009) —
+      `tests/bash/sink/test_plan_apply_project.bats` (T010) asserts every
+      `POST …/issue` body carries a non-empty `fields.project.key`; confirmed
+      live in `us8-reconcile-real` (`fields.project.key == "COMP"`).
+- [X] `fields.issuetype.id` present in 100% of planned creations (SC-003) —
+      same suite and scenario; the assembly guard in `plan_writes` (T017)
+      returns non-zero before emitting a creation missing either field.
+- [X] `PROJ` appears in zero payloads (SC-002) — the placeholder fallback is
+      removed (T013) and an override equal to it is refused
+      (`test_reconcile.bats`, "an override equal to the shipped placeholder
+      is refused, zero writes").
+- [X] Zero writes on every unresolved run (SC-005) —
+      `tests/bash/commands/test_reconcile_diagnostics.bats` (T031) asserts an
+      empty `mock_calls` log for every one of the five diagnostic causes.
+- [X] Prediction and real runs byte-identical (SC-006) —
+      `tests/bash/conformance/test_us8_reconcile_real.bats` (T058) diffs the
+      `us8-reconcile-company-managed` dry-run report against the
+      `us8-reconcile-real` scenario's `calls.log`, on both ports.
+- [X] Both ports byte-identical (SC-007) — `us8-reconcile-company-managed`
+      and `us8-reconcile-team-managed` golden scenarios (T020, T046); the
+      full bats (597) and Pester (505) suites are green.
+- [X] No lifecycle command fails due to a resolution failure (SC-008) — every
+      new fault routes through `_reconcile_fault`, downgraded to exit 0 under
+      `SPEC_KIT_JIRA_HOOK_CONTEXT` (`test_reconcile_diagnostics.bats`).
+- [X] Both creation paths share the same base attribute set (SC-010) — the
+      shared `jira_create_fields_base` builder (T004–T008) both
+      `_ticket_create_body` and `plan_writes` wrap.
+- [X] Both project styles produce a valid creation (SC-011) —
+      `us8-reconcile-team-managed` scenario and
+      `tests/bash/commands/test_reconcile_styles.bats` (T041).
+- [X] Zero payloads declare an attribute the project does not accept
+      (SC-012) — the team-managed payload declares no `priority`
+      (`test_reconcile_styles.bats`, T041); the mock's `createmetaFields`
+      route selection is exercised end to end by
+      `tests/bash/conformance/test_us8_priority_allowed.bats` (T061).
+- [X] Zero cross-project identifiers (SC-013) — the dual-style fixture
+      `repo-with-two-styles` (T045) gives each project its own `resolved_ids`
+      entry; `test_reconcile_styles.bats` asserts no payload carries the
+      other project's issue type.
+- [X] The R8 verification item closed against vendor documentation —
+      `research.md` R8, closed at T001 against Atlassian's Cloud REST API
+      reference (no live Jira access in this session).

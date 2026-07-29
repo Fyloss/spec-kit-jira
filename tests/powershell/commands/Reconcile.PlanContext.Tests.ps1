@@ -69,4 +69,39 @@ Describe 'Creation context resolution (US2)' {
         $r.ExitCode | Should -Be 2
         $r.Json | Should -BeNullOrEmpty
     }
+
+    It 'Invoke-JiraReconcile reads config.yml for priority_map even when only project key and epic strategy are overridden (T057, FR-008 partial)' {
+        $legacy = Join-Path $Root 'tests/conformance/fixtures/repo-with-reconcile-legacy/.specify/jira'
+        $spec = Join-Path $TestDrive 'priority.md'
+        @(
+            '# Feature Specification: Priority Wiring', '',
+            '### User Story 1 - The core story (Priority: P1)', '',
+            '- **Given** a signed-in user', '- **When** they open the board', '- **Then** the widgets load'
+        ) -join "`n" | Set-Content -LiteralPath $spec -NoNewline
+
+        $env:SPEC_KIT_JIRA_BASE_URL = 'https://mock'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-feature'
+        $env:SPEC_KIT_JIRA_REPO = 'acme/app'
+        $env:SPEC_KIT_JIRA_PROJECT_KEY = 'TEST'
+        $env:SPEC_KIT_JIRA_EPIC_STRATEGY = 'per_repo'
+        $env:JIRA_CONFIG_DIR = $legacy
+        $env:SPEC_KIT_JIRA_PLAN_CONTEXT = $null
+        try {
+            $sw = [System.IO.StringWriter]::new()
+            $orig = [Console]::Out
+            [Console]::SetOut($sw)
+            try { [void](Invoke-JiraReconcile -Arguments @('reconcile', '--dry-run', '--json', $spec)) }
+            finally { [Console]::SetOut($orig) }
+            $out = $sw.ToString() | ConvertFrom-Json
+            # The legacy fixture's config.yml maps P1 -> Highest, and its
+            # config.local.yml resolves Highest -> "1" — resolvable only if
+            # config.yml is actually read when SPEC_KIT_JIRA_PLAN_CONTEXT is
+            # not overridden, even though the project key and epic strategy
+            # are.
+            $out.actions[0].body.fields.priority.id | Should -Be '1'
+        }
+        finally {
+            $env:JIRA_CONFIG_DIR = $null
+        }
+    }
 }

@@ -70,3 +70,30 @@ setup() {
   [ "$status" -eq 2 ]
   [ -z "$output" ]
 }
+
+@test "cmd_reconcile reads config.yml for priority_map even when only project key and epic strategy are overridden (T057, FR-008 partial)" {
+  local legacy spec
+  legacy="${ROOT}/tests/conformance/fixtures/repo-with-reconcile-legacy/.specify/jira"
+  spec="${BATS_TEST_TMPDIR}/priority.md"
+  printf '%s\n' \
+    '# Feature Specification: Priority Wiring' '' \
+    '### User Story 1 - The core story (Priority: P1)' '' \
+    '- **Given** a signed-in user' '- **When** they open the board' '- **Then** the widgets load' \
+    > "${spec}"
+
+  export SPEC_KIT_JIRA_BASE_URL="https://mock"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-feature"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  export SPEC_KIT_JIRA_PROJECT_KEY="TEST"
+  export SPEC_KIT_JIRA_EPIC_STRATEGY="per_repo"
+  export JIRA_CONFIG_DIR="${legacy}"
+  unset SPEC_KIT_JIRA_PLAN_CONTEXT
+
+  run cmd_reconcile reconcile --dry-run --json "${spec}"
+  [ "$status" -eq 0 ]
+  # The legacy fixture's config.yml maps P1 -> Highest, and its
+  # config.local.yml resolves Highest -> "1" — resolvable only if config.yml
+  # is actually read when SPEC_KIT_JIRA_PLAN_CONTEXT is not overridden, even
+  # though the project key and epic strategy are.
+  [ "$(jq -r '.actions[0].body.fields.priority.id' <<< "$output")" = "1" ]
+}

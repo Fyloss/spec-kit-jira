@@ -247,11 +247,13 @@ cmd_reconcile() {
   # environment. Routing + creation-context resolution (US1/US2, FR-001–FR-013):
   # per value, an explicit override wins; otherwise the value is derived from
   # the repository's own config, read exactly once and only when something
-  # needs it — a run whose project key and epic strategy are BOTH overridden
-  # never reads config.yml at all (contract "Precedence"). config.yml's
-  # absence maps to the same not-configured notice as a missing base URL; a
-  # present-but-invalid config.yml surfaces through config_load's own
-  # EXIT_CONFIG path.
+  # needs it — a run whose project key, epic strategy AND plan context are ALL
+  # overridden never reads config.yml at all (contract "Precedence"). A run
+  # overriding only the project key and epic strategy still needs config.yml
+  # for priority_map, since the plan context (unless itself overridden) is
+  # built from it (T057, FR-008). config.yml's absence maps to the same
+  # not-configured notice as a missing base URL; a present-but-invalid
+  # config.yml surfaces through config_load's own EXIT_CONFIG path.
   local folder slug repo
   folder="$(cd "$(dirname "${spec_file}")" && pwd)"
   slug="${SPEC_KIT_JIRA_SPEC_SLUG:-$(basename "${folder}")}"
@@ -259,7 +261,7 @@ cmd_reconcile() {
 
   local override_project="${SPEC_KIT_JIRA_PROJECT_KEY:-}" override_epic="${SPEC_KIT_JIRA_EPIC_STRATEGY:-}"
   local cfg_dir="${JIRA_CONFIG_DIR:-.specify/jira}" cfg="{}"
-  if [[ -z "${override_project}" || -z "${override_epic}" ]]; then
+  if [[ -z "${override_project}" || -z "${override_epic}" || -z "${SPEC_KIT_JIRA_PLAN_CONTEXT:-}" ]]; then
     if [[ ! -f "${cfg_dir}/config.yml" ]]; then
       _reconcile_notice \
         'Jira mirror skipped: this repository is not bound to a Jira project yet.' \
