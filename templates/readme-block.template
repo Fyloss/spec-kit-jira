@@ -19,6 +19,134 @@ This repository mirrors its Spec Kit artifacts into Jira Cloud via the
 - **Prerequisites**: Bash ≥ 4 (macOS ships 3.2 — install a newer Bash), or
   PowerShell 7+ on Windows, plus `curl`, `jq`, and `git`.
 
+### First-time setup
+
+The bridge reads three connection settings on every platform.
+`SPEC_KIT_JIRA_BASE_URL` and `JIRA_EMAIL` are not secret and belong in your
+environment; the API token is resolved from the environment, then the OS secret
+manager, then the gitignored `.specify/jira/.env`. That middle rung exists on
+macOS (Keychain) and Linux (libsecret) only — on Windows it is a no-op.
+
+First, on any platform, create a Jira API token at
+<https://id.atlassian.com/manage-profile/security/api-tokens>. Jira shows the
+value once — copy it before closing the dialog. Then follow your platform below.
+
+#### macOS
+
+1. **Prerequisites.** macOS ships Bash 3.2, which does not qualify — the check
+   exits with code `5` and names it. `curl` and `git` already ship with macOS
+   (`git` via the Xcode Command Line Tools).
+
+   ```sh
+   brew install bash jq
+   ```
+
+2. **Store the token in the Keychain** under the service name the resolver looks
+   up. `-w` with no value prompts twice with masked input, so the token never
+   enters your shell history. The first read from a script raises a macOS access
+   prompt — choose **Always Allow** to answer it once.
+
+   ```sh
+   security add-generic-password -U -s spec-kit-jira -a "$USER" -w
+   security find-generic-password -s spec-kit-jira -w   # confirm
+   ```
+
+3. **Export the two non-secret settings** in `~/.zshrc`, then `source ~/.zshrc`.
+   No trailing slash on the URL: the sink appends `/rest/api/3/…` directly.
+
+   ```sh
+   export SPEC_KIT_JIRA_BASE_URL="https://your-site.atlassian.net"
+   export JIRA_EMAIL="you@example.com"
+   ```
+
+4. **Install and bind.** Run the *Install* command above, check the bridge
+   answers with
+   `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help`, then run
+   `/speckit.jira.config`.
+
+#### Linux
+
+1. **Prerequisites** — Bash ≥ 4 (every current distribution ships 5.x), plus
+   `secret-tool` for the keyring step:
+
+   ```sh
+   sudo apt install curl jq git libsecret-tools     # Debian / Ubuntu
+   sudo dnf install curl jq git libsecret           # Fedora / RHEL
+   sudo pacman -S curl jq git libsecret             # Arch
+   ```
+
+2. **Store the token in the keyring.** The attribute name is what the resolver
+   queries, so use it verbatim; the value is read from the terminal.
+
+   ```sh
+   secret-tool store --label="spec-kit-jira" service spec-kit-jira
+   secret-tool lookup service spec-kit-jira   # confirm
+   ```
+
+   Headless machines and containers have no keyring daemon — skip this and use
+   the third rung instead: put `JIRA_API_TOKEN="…"` in `.specify/jira/.env`
+   (`chmod 600`). That file's parser reads **only** `JIRA_API_TOKEN`.
+
+3. **Export the two non-secret settings** in `~/.bashrc` or `~/.zshrc`, exactly
+   as in the macOS step above, and reload the profile.
+
+4. **Install and bind**, exactly as in the macOS step above.
+
+#### Windows (PowerShell 7+)
+
+The PowerShell port uses `Invoke-RestMethod` and native JSON, so neither `curl`
+nor `jq` is needed. **There is no OS secret-manager rung here**: the token must
+come from the environment or `.specify/jira/.env`. Putting it in the Windows
+Credential Manager will not work — nothing reads from there.
+
+1. **Prerequisites.** Run everything from `pwsh`, not Windows PowerShell 5.1 —
+   the check exits with code `5` on 5.1 and names the version.
+
+   ```powershell
+   winget install --id Microsoft.PowerShell
+   winget install --id Git.Git
+   ```
+
+2. **Store the token.** Read it in masked, then persist it for your user:
+
+   ```powershell
+   $token = Read-Host 'Jira API token' -AsSecureString
+   [Environment]::SetEnvironmentVariable(
+       'JIRA_API_TOKEN', (ConvertFrom-SecureString $token -AsPlainText), 'User')
+   ```
+
+   A user environment variable is stored in the registry in clear text; if that
+   is unacceptable, put `JIRA_API_TOKEN="…"` in `.specify/jira/.env` instead.
+
+3. **Set the two non-secret settings**, then **open a new terminal** — a `User`
+   variable does not reach sessions that were already running.
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable('SPEC_KIT_JIRA_BASE_URL', 'https://your-site.atlassian.net', 'User')
+   [Environment]::SetEnvironmentVariable('JIRA_EMAIL', 'you@example.com', 'User')
+   ```
+
+4. **Install and bind.** Run the *Install* command above, check the bridge
+   answers with
+   `.specify\extensions\jira\scripts\powershell\spec-kit-jira.ps1 --help`, then
+   run `/speckit.jira.config`.
+
+If `/speckit.jira.config` reports a degraded run, it names the connection
+setting that is missing — return to the step that supplies it.
+
+If the lifecycle hooks do not see your variables, the agent's shell did not load
+your profile. Declare the two non-secret settings per project in
+`.claude/settings.json`, leaving the token where you put it:
+
+```json
+{
+  "env": {
+    "SPEC_KIT_JIRA_BASE_URL": "https://your-site.atlassian.net",
+    "JIRA_EMAIL": "you@example.com"
+  }
+}
+```
+
 This block is managed by spec-kit-jira. Edits between the markers are regenerated
 on the next run; edit outside the markers freely.
 <!-- spec-kit-jira:end v{{VERSION}} -->
