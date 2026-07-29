@@ -29,10 +29,16 @@
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
   MANIFEST="${ROOT}/extension.yml"
-  # Files in scope: every Bash port script, and every command document.
+  # Files in scope: every Bash port script, every command document, and the
+  # documentation the install SHIPS — the managed README block template lands in
+  # every consuming repository, and README.md / INSTALL.md are where an operator
+  # copies a command from before any of our code has run. A wrong literal there
+  # fails in front of exactly the user who has no way to know better.
   mapfile -t SCOPE < <(
     find "${ROOT}/scripts/bash" -name '*.sh' -type f
     find "${ROOT}/commands" -name '*.md' -type f
+    find "${ROOT}/templates" -name '*.template' -type f
+    printf '%s\n' "${ROOT}/README.md" "${ROOT}/INSTALL.md"
   )
 }
 
@@ -123,11 +129,15 @@ declared_commands() {
 @test "every 'specify extension add' instruction is spelled as the operator runs it (FR-018 class c)" {
   # An INSTRUCTION carries arguments; a bare `specify extension add` inside prose
   # that explains what the host does is a reference, not something to copy and
-  # run, so only the argument-carrying occurrences are checked. The one runnable
-  # form this repository uses, everywhere, is the dev install with --force.
+  # run, so only the argument-carrying occurrences are checked. Two runnable
+  # forms exist and both are accepted: the archive install an operator of a
+  # consuming repository runs, and the dev install with --force, which is what
+  # someone working on the extension itself runs. Anything else is a third
+  # spelling nobody can execute.
   local bad
   bad="$(grep -nE 'specify extension add[[:space:]]+[^`]' "${SCOPE[@]}" \
-    | grep -vE 'specify extension add --dev <path-to-spec-kit-jira> --force' || true)"
+    | grep -vE 'specify extension add --dev <path-to-spec-kit-jira> --force' \
+    | grep -vE 'specify extension add jira --from https://github\.com/Fyloss/spec-kit-jira/archive/refs/heads/main\.zip' || true)"
   if [[ -n "${bad}" ]]; then
     printf 'host install command not in its runnable form:\n%s\n' "${bad}" >&2
     return 1

@@ -18,10 +18,17 @@ BeforeAll {
     $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:ManifestLines = (Get-Content -Raw -LiteralPath (Join-Path $script:Root 'extension.yml')) -split "`r?`n"
 
-    # Files in scope: every PowerShell port module, and every command document.
+    # Files in scope: every PowerShell port module, every command document, and
+    # the documentation the install SHIPS — the managed README block template
+    # lands in every consuming repository, and README.md / INSTALL.md are where an
+    # operator copies a command from before any of our code has run. A wrong
+    # literal there fails in front of exactly the user who has no way to know
+    # better.
     $script:Scope = @()
     $script:Scope += Get-ChildItem -LiteralPath (Join-Path $script:Root 'scripts/powershell') -Recurse -Include '*.psm1', '*.ps1' -File
     $script:Scope += Get-ChildItem -LiteralPath (Join-Path $script:Root 'commands') -Filter '*.md' -File
+    $script:Scope += Get-ChildItem -LiteralPath (Join-Path $script:Root 'templates') -Filter '*.template' -File
+    $script:Scope += Get-Item -LiteralPath (Join-Path $script:Root 'README.md'), (Join-Path $script:Root 'INSTALL.md')
 
     function Get-DeclaredCommands {
         $out = [System.Collections.Generic.List[string]]::new()
@@ -105,10 +112,22 @@ Describe '(c) Host commands' {
     It "spells every 'specify extension add' instruction as the operator runs it" {
         # An INSTRUCTION carries arguments; a bare mention inside prose that
         # explains what the host does is a reference, not something to copy and
-        # run, so only the argument-carrying occurrences are checked.
+        # run, so only the argument-carrying occurrences are checked. Two runnable
+        # forms exist and both are accepted: the archive install an operator of a
+        # consuming repository runs, and the dev install with --force, which is
+        # what someone working on the extension itself runs. Anything else is a
+        # third spelling nobody can execute.
+        $runnable = @(
+            'specify extension add --dev <path-to-spec-kit-jira> --force'
+            'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/archive/refs/heads/main.zip'
+        )
         foreach ($row in (Select-ScopeLine)) {
             if ($row.Text -match 'specify extension add\s+[^`]') {
-                $row.Text | Should -Match ([regex]::Escape('specify extension add --dev <path-to-spec-kit-jira> --force'))
+                $ok = $false
+                foreach ($form in $runnable) { if ($row.Text.Contains($form)) { $ok = $true; break } }
+                if (-not $ok) {
+                    throw "host install command not in a runnable form at $($row.File):$($row.Line): $($row.Text.Trim())"
+                }
             }
         }
     }
