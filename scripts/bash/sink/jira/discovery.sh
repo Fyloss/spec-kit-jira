@@ -123,6 +123,32 @@ discovery_list_projects() {
   printf '%s' "${list}" | json_canonical
 }
 
+# discovery_priorities_for_project <project-fields-json> <catalogue-json> —
+# derive the priorities a resolved project actually accepts, from its OWN
+# create metadata against the site-wide identifier catalogue (research R4,
+# 004 US4, FR-030/FR-031). Three branches, never a rule keyed on project style
+# (FR-028):
+#   1. no `priority` field at all             -> []  (the project has no priority)
+#   2. `priority` field WITH allowedValues    -> only those, resolved by id
+#      against the catalogue
+#   3. `priority` field WITHOUT allowedValues -> the whole catalogue (today's
+#      behaviour, preserved for a site that does not populate allowedValues)
+# Prints the canonical [{logical_name,id}, ...] array.
+discovery_priorities_for_project() {
+  local fields="${1:-[]}" catalogue="${2:-[]}"
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -cn --argjson fields "${fields}" --argjson cat "${catalogue}" '
+    (first($fields[] | select(.fieldId == "priority")) // null) as $pf
+    | if $pf == null then []
+      elif ($pf.allowedValues // null) != null then
+        [ $pf.allowedValues[] | .id as $id | ($cat[] | select(.id == $id) | {logical_name: .name, id: .id}) ]
+      else
+        [ $cat[] | {logical_name: .name, id: .id} ]
+      end
+  ' | json_canonical
+  # kcov-excl-stop
+}
+
 # discover_binding <project_key> — see the file header.
 discover_binding() {
   local key="$1"
@@ -165,6 +191,11 @@ discover_binding() {
   local flagged
   flagged="$(discovery_flagged_field "$(jq -c '.fields // []' <<< "${meta}")")"
 
+  # The project's own accepted priorities, derived from its create metadata
+  # against the site-wide catalogue fetched above (research R4, 004 US4).
+  local proj_priorities
+  proj_priorities="$(discovery_priorities_for_project "$(jq -c '.fields // []' <<< "${meta}")" "${priorities}")"
+
   # Assemble the neutral binding. Arrays keep discovered order; json_canonical
   # sorts object keys so both ports converge to identical bytes (research §11).
   # kcov-excl-start — jq literal (string lines are not statements)
@@ -173,7 +204,7 @@ discover_binding() {
     --argjson itypes "${itypes}" \
     --argjson meta "${meta}" \
     --argjson statuses "${statuses}" \
-    --argjson priorities "${priorities}" \
+    --argjson priorities "${proj_priorities}" \
     --argjson fields "${fields}" \
     --argjson flagged "${flagged}" '
     {
@@ -183,7 +214,7 @@ discover_binding() {
       statuses: ( reduce ($statuses[] | .statuses[]) as $s ([];
         if any(.[]; .id == $s.id) then .
         else . + [ {name: $s.name, id: $s.id, status_category: $s.statusCategory.key} ] end) ),
-      priorities: [ $priorities[] | {logical_name: .name, id: .id} ],
+      priorities: $priorities,
       fields: [ $fields[] | {logical_name: .name, id: .id, schema_type: (.schema.type // null), custom: .custom} ],
       estimation_candidates: ( [ $meta.fields[]
         | select(.schema.type == "number")

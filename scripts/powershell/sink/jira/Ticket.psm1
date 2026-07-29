@@ -53,12 +53,31 @@ function Confirm-JiraTicket {
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue $doc) }
 }
 
+function Get-JiraCreateFieldsBase {
+    <#
+    .SYNOPSIS
+      The mandatory base every creation path must produce: {project, issuetype,
+      summary} (research R3, FR-025). Mirror of jira_create_fields_base. Both
+      Get-JiraTicketCreateBody and Get-JiraPlanWriteSet build on this single
+      builder so the two creation paths cannot drift apart again. The issue
+      type is carried by ID only (never a literal name — Constitution VII).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ProjectKey,
+        [Parameter(Mandatory)] [string] $Summary,
+        [Parameter(Mandatory)] [string] $IssueTypeId
+    )
+    return '{"project":{"key":' + (ConvertTo-JiraJsonString $ProjectKey) +
+        '},"issuetype":{"id":' + (ConvertTo-JiraJsonString $IssueTypeId) +
+        '},"summary":' + (ConvertTo-JiraJsonString $Summary) + '}'
+}
+
 function Get-JiraTicketCreateBody {
     <#
     .SYNOPSIS
-      The canonical create payload. Mirror of _ticket_create_body: the issue
-      type is carried by ID only (never a literal name), and the field order
-      matches the Bash twin's jq construction byte-for-byte.
+      The canonical create payload. Mirror of _ticket_create_body: wraps
+      Get-JiraCreateFieldsBase unchanged, matching the Bash twin byte-for-byte.
     #>
     [CmdletBinding()]
     param(
@@ -66,9 +85,8 @@ function Get-JiraTicketCreateBody {
         [Parameter(Mandatory)] [string] $Summary,
         [Parameter(Mandatory)] [string] $StoryTypeId
     )
-    return '{"fields":{"project":{"key":' + (ConvertTo-JiraJsonString $ProjectKey) +
-        '},"issuetype":{"id":' + (ConvertTo-JiraJsonString $StoryTypeId) +
-        '},"summary":' + (ConvertTo-JiraJsonString $Summary) + '}}'
+    $base = Get-JiraCreateFieldsBase -ProjectKey $ProjectKey -Summary $Summary -IssueTypeId $StoryTypeId
+    return '{"fields":' + $base + '}'
 }
 
 function New-JiraTicket {
@@ -112,4 +130,4 @@ function New-JiraTicket {
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue ([ordered]@{ key = $key })) }
 }
 
-Export-ModuleMember -Function Confirm-JiraTicket, Get-JiraTicketCreateBody, New-JiraTicket
+Export-ModuleMember -Function Confirm-JiraTicket, Get-JiraCreateFieldsBase, Get-JiraTicketCreateBody, New-JiraTicket

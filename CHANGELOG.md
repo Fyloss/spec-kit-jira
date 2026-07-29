@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Reconcile resolves its own routing and plan context from config (004).
+
+`reconcile` never read the repository's own configuration. It took the project
+key from an environment variable nothing set, fell back to the placeholder
+`PROJ`, built an empty creation context, and then assembled a creation payload
+that declared no project at all — the destination service's "the project field
+is required" rejection. Four defects sat on one failure path; the last of them
+produced the reported symptom.
+
+This release wires the mirror to the config it already reads for every other
+purpose:
+
+- **Routing** now resolves from the team config's routing rules and
+  `routing_default` — no environment variable required for a bound repository.
+  A resolved key that is absent, syntactically invalid, or equal to the shipped
+  placeholder is refused before any write; the removed built-in `PROJ` fallback
+  is the only behaviour change for callers who override the project key.
+- **The creation context** (issue type, priority, estimation field) now builds
+  itself from the persisted binding for the resolved project, with the
+  machine-owned layer winning over the committed one.
+- **Every planned creation now declares its project and issue type in the
+  payload itself**, guarded before dispatch — the mirror path and the feature
+  ceremony's single-item creation path now agree on what a valid creation
+  contains.
+- **Team-managed projects mirror exactly as correctly as company-managed
+  ones**: payload contents follow what the resolved project's own create
+  metadata reports it accepts, never a rule keyed on project style. Priorities,
+  previously discovered site-wide and stored per project, are now derived per
+  project from its own create metadata.
+- **Four new diagnostic causes** — unresolvable routing, a placeholder
+  binding, a routing rule naming an undeclared project, and a project with no
+  persisted binding — each name their own remedy, make zero Jira requests, fail
+  closed on direct invocation, and downgrade to a single warning under a
+  lifecycle hook.
+
+Both ports carry identical changes; the conformance suite proves it with two
+new golden scenarios (company-managed and team-managed routing).
+
 ## [0.3.0] - 2026-07-28
 
 Hooks active from installation (003).

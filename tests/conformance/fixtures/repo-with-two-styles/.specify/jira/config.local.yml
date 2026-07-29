@@ -1,0 +1,16 @@
+# Machine-owned resolved identifiers for both bound projects — each project's
+# ids scoped under its own key so neither is ever mirrored with the other's
+# identifiers (004 FR-027, FR-031, SC-013).
+resolved_ids:
+  COMP:
+    style: company_managed
+    issue_types:
+      Story: "10004"
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+  TEAM:
+    style: team_managed
+    issue_types:
+      Story: "20002"

@@ -1,0 +1,24 @@
+# Team config binding two projects of different styles on one repository
+# (004 US4). Business-language keys; see the extension README for the full
+# reference.
+projects:
+  - key: COMP
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+  - key: TEAM
+    style: team_managed
+    epic_strategy: per_feature
+    task_strategy: subtask
+routing:
+  - match:
+      folder_prefix: "billing-"
+    project: COMP
+  - match:
+      folder_prefix: "infra-"
+    project: TEAM
+routing_default: COMP

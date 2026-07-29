@@ -54,6 +54,11 @@ $SearchPageSize = if ($cfg.ContainsKey('pageSize')) { [int]$cfg.pageSize } else 
 # Optional issue key returned by POST /rest/api/3/issue (feature-creation tests
 # derive the branch <ID> from the created key's number).
 $CreatedKey = if ($cfg.ContainsKey('createdKey')) { [string]$cfg.createdKey } else { '' }
+# Optional per-project createmeta-fields fixture override (US4 research R4
+# branch 2): lets a scenario exercise a company-managed project whose create
+# metadata declares `allowedValues` on its priority field, without touching
+# Get-Style/Get-MetaStyle or either of the two existing style-keyed fixtures.
+$CreateMetaFields = if ($cfg.ContainsKey('createmetaFields')) { $cfg.createmetaFields } else { @{} }
 
 # --- Helpers ----------------------------------------------------------------
 
@@ -72,6 +77,17 @@ function Get-MetaStyle {
     param([string]$Style)
     if ($Style -in @('company', 'team')) { return $Style }
     return 'company'
+}
+
+function Get-CreateMetaFieldsName {
+    # The fixture basename for the createmeta/{key}/issuetypes/{typeId} route:
+    # a configured per-project override wins, else the existing style-keyed
+    # default (createmeta-fields-company / createmeta-fields-team).
+    param([string]$Path, [string]$MetaStyle)
+    foreach ($key in $CreateMetaFields.Keys) {
+        if ($Path -match "/$([regex]::Escape($key))(/|$)") { return "createmeta-fields-$($CreateMetaFields[$key])" }
+    }
+    return "createmeta-fields-$MetaStyle"
 }
 
 function Get-ProjectSearchPage {
@@ -156,7 +172,7 @@ function Resolve-Route {
         '^/rest/api/3/project/search$'                                { if ($Method -eq 'GET') { return (Get-ProjectSearchPage -Query $Query) } }
         '^/rest/api/3/project/[^/]+/statuses$'                        { return (Read-FixtureBody "statuses-$metaStyle") }
         '^/rest/api/3/project/[^/]+$'                                 { return (Read-FixtureBody "project-$style") }
-        '^/rest/api/3/issue/createmeta/[^/]+/issuetypes/[^/]+$'       { return (Read-FixtureBody "createmeta-fields-$metaStyle") }
+        '^/rest/api/3/issue/createmeta/[^/]+/issuetypes/[^/]+$'       { return (Read-FixtureBody (Get-CreateMetaFieldsName -Path $Path -MetaStyle $metaStyle)) }
         '^/rest/api/3/issue/createmeta/[^/]+/issuetypes$'            { return (Read-FixtureBody "createmeta-issuetypes-$metaStyle") }
         '^/rest/api/3/priority$'                                      { return (Read-FixtureBody 'priority') }
         '^/rest/api/3/field$'                                         { return (Read-FixtureBody 'field') }

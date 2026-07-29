@@ -8,7 +8,14 @@ BeforeAll {
     $env:SPEC_KIT_JIRA_BASE_URL = 'https://mock'
     $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-feature'
     $env:SPEC_KIT_JIRA_REPO = 'acme/app'
-    $env:SPEC_KIT_JIRA_PROJECT_KEY = 'PROJ'
+    # 004 T014b: migrated off the placeholder key, which config resolution
+    # (FR-005) now refuses outright. Both the project key and epic strategy
+    # are overridden here, so config.yml is never read (contract
+    # "Precedence"); the fixture's config.local.yml supplies the persisted
+    # binding this suite's creation-context assertions now resolve through.
+    $env:SPEC_KIT_JIRA_PROJECT_KEY = 'TEST'
+    $env:SPEC_KIT_JIRA_EPIC_STRATEGY = 'per_repo'
+    $env:JIRA_CONFIG_DIR = Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-reconcile-legacy/.specify/jira'
     $env:SPEC_KIT_JIRA_PLAN_CONTEXT = $null
 
     $script:SpecWith = Join-Path $TestDrive 'with.md'
@@ -74,6 +81,15 @@ Describe 'Invoke-JiraReconcile (dry-run)' {
         finally { Pop-Location }
     }
 
+    It 'an override equal to the shipped placeholder is refused, zero writes (004 FR-005)' {
+        $env:SPEC_KIT_JIRA_PROJECT_KEY = 'PROJ'
+        try {
+            $null = Invoke-Captured @('reconcile', '--dry-run', '--json', $script:SpecWith) 2>$null
+            $script:code | Should -Not -Be 0
+        }
+        finally { $env:SPEC_KIT_JIRA_PROJECT_KEY = 'TEST' }
+    }
+
     It 'maps an invalid SPEC_KIT_JIRA_LIFECYCLE to exit 4 with an actionable error (FR-032)' {
         $env:SPEC_KIT_JIRA_LIFECYCLE = '{not json'
         try {
@@ -124,6 +140,7 @@ Describe 'Message discipline (T049 / T088, 003 US5)' {
         Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
         Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue
         Remove-Item Env:\SPEC_KIT_JIRA_EXTENSION_ROOT -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_PLAN_CONTEXT -ErrorAction SilentlyContinue
         Remove-Item -Recurse -Force $script:MdWork -ErrorAction SilentlyContinue
     }
 
@@ -185,6 +202,11 @@ Describe 'Message discipline (T049 / T088, 003 US5)' {
         # this case is about the mirror failing, not about it being unconfigured.
         $env:JIRA_EMAIL = 'user@example.com'
         $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+        # This test is about hook-context WARNING behaviour on a network
+        # failure, not the config-resolved binding ($script:MdWork has none) —
+        # bypass it with a minimal override supplying the issue type the
+        # assembly guard needs.
+        $env:SPEC_KIT_JIRA_PLAN_CONTEXT = '{"story_type_id":"10004"}'
         $r = Invoke-Degraded @('reconcile', '--json', $script:SpecWith)
         $r.ExitCode | Should -Be 0
         @([regex]::Matches($r.Err, 'WARNING:')).Count | Should -Be 1

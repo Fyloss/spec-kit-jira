@@ -1,0 +1,14 @@
+{
+  "name": "us8-reconcile-team-managed",
+  "description": "004 US1/US2/US4 — reconcile resolves its own routing and creation context for a team-managed project, exactly as it does for a company-managed one: the folder-prefix rule routes the spec to TEAM, the payload declares that project and its own issue type, and declares no priority (this project's persisted binding has none). Both ports must produce a byte-identical action set, exit code, and Jira API call sequence (NFR-1). No network call is made — resolution and payload assembly complete entirely from the two config layers.",
+  "mock": {
+    "projects": { "TEAM": "team" }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-two-styles",
+  "argv": ["reconcile", "--dry-run", "--json", "specs/infra-001-pipeline/spec.md"],
+  "env": {
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-infra-pipeline",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

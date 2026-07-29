@@ -125,10 +125,12 @@ Four creations planned, each declaring only `description` and `summary`. This is
 
 ## R8 — Open verification item
 
-**Decision**: Proceed on the basis that `fields.project` is mandatory for item creation in both company-managed and team-managed projects, and confirm against current vendor documentation during implementation.
+**Decision**: Proceed on the basis that `fields.project` is mandatory for item creation in both company-managed and team-managed projects.
 
-**Status**: **Unverified in the authoring session** — no network access was available to check the vendor's current API reference. This is recorded here rather than left implicit.
+**Status**: **Closed during implementation (T001)**. Direct network access to a real Jira site was still unavailable in the implementation session (no credentials, no live instance), so the closure is evidenced instead by Atlassian's own developer documentation and community guidance, consulted via web search on 2026-07-28:
 
-**Why it does not block**: the design is robust either way. FR-028 makes payload contents follow what the project's create metadata reports it accepts, so a project that somehow did not require `project` would still receive a valid payload. Every mock fixture and every real-world report is consistent with the field being required, and the reported symptom is itself evidence of it.
+- Atlassian's Cloud platform REST API reference for issue creation (`developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/`) and the "Discovering meta data for creating issues" guide both describe `fields.project` (an object carrying the project `key` or `id`) as part of the mandatory triple — alongside `issuetype` and `summary` — needed to identify which project an issue is created in. Nothing in either style's documented request shape makes `project` optional: the field is how the API knows which project's create screen and workflow to apply, a concept that exists identically for company-managed (classic) and team-managed (next-gen) projects.
+- Atlassian Community guidance on `createmeta` for team-managed projects confirms the same discovery flow (`GET /issue/createmeta/{key}/issuetypes/{typeId}`) is used for both project styles to determine the fields — including whether they are required — that a given project/issue-type combination accepts; no style-specific exemption for `project` is documented anywhere in these sources.
+- This is consistent with every mock fixture in this repository (`createmeta-fields-company.json`, `createmeta-fields-team.json`) and with the reported symptom itself: Jira rejected the mirror's creation precisely because no project was declared, which would be impossible if `project` were optional.
 
-**How to close it**: one call against a team-managed project on a real site — `GET /rest/api/3/issue/createmeta/{key}/issuetypes/{typeId}` and check the `project` entry's `required` flag — or the vendor's create-issue reference. This is a first task in `tasks.md`, not a release gate.
+**Why this evidence is sufficient without a live call**: FR-028 makes payload contents follow what each project's own create metadata reports it accepts, so even in the hypothetical case of a site where `project` were not required, the design would still emit a correct payload — this verification closes a documentation gap, not a design risk.

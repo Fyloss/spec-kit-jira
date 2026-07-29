@@ -48,12 +48,23 @@ ticket_validate() {
     '{key: $k, project: ($r.fields.project.key // null)}' | json_canonical
 }
 
-# _ticket_create_body <project> <summary> <story-type-id> — the canonical create
-# payload. The issue type is carried by ID only (never a literal name).
-_ticket_create_body() {
+# jira_create_fields_base <project> <summary> <issue-type-id> — the mandatory
+# base every creation path must produce: {project, issuetype, summary} (research
+# R3, FR-025). Both `_ticket_create_body` and `plan_writes` build on this single
+# builder so the two creation paths cannot drift apart again. The issue type is
+# carried by ID only (never a literal name — Constitution VII).
+jira_create_fields_base() {
   local project="$1" summary="$2" typeid="$3"
   jq -cn --arg p "${project}" --arg s "${summary}" --arg t "${typeid}" \
-    '{fields: {project: {key: $p}, issuetype: {id: $t}, summary: $s}}'
+    '{project: {key: $p}, issuetype: {id: $t}, summary: $s}'
+}
+
+# _ticket_create_body <project> <summary> <story-type-id> — the canonical create
+# payload: wraps jira_create_fields_base unchanged.
+_ticket_create_body() {
+  local project="$1" summary="$2" typeid="$3"
+  jq -cn --argjson base "$(jira_create_fields_base "${project}" "${summary}" "${typeid}")" \
+    '{fields: $base}'
 }
 
 # ticket_create <project> <summary> <story-type-id> [labels-json] [components-json] [spec-ref-json]

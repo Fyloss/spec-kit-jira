@@ -50,6 +50,23 @@ boot() {
   [ -z "$output" ]
 }
 
+@test "jira_create_fields_base returns exactly {project,issuetype,summary} (FR-025)" {
+  run jira_create_fields_base "IJT" "invoice export" "10201"
+  [ "$status" -eq 0 ]
+  [ "$(jq -cS 'keys' <<< "$output")" = '["issuetype","project","summary"]' ]
+  [ "$(jq -r '.project.key' <<< "$output")" = "IJT" ]
+  [ "$(jq -r '.issuetype.id' <<< "$output")" = "10201" ]
+  [ "$(jq -r '.summary' <<< "$output")" = "invoice export" ]
+}
+
+@test "_ticket_create_body is built from jira_create_fields_base, unchanged (FR-025)" {
+  local base
+  base="$(jira_create_fields_base "IJT" "invoice export" "10201")"
+  run _ticket_create_body "IJT" "invoice export" "10201"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.fields' <<< "$output")" = "$(jq -c . <<< "${base}")" ]
+}
+
 @test "the create body carries the team project and the resolved story-type id" {
   run _ticket_create_body "IJT" "invoice export" "10201"
   [ "$status" -eq 0 ]

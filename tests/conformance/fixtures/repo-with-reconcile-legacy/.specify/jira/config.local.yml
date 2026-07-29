@@ -1,0 +1,16 @@
+# Minimal machine-owned binding for the pre-existing reconcile test suite
+# (T059, 002/003 features), migrated off the placeholder project key by T014b.
+# Both SPEC_KIT_JIRA_PROJECT_KEY and SPEC_KIT_JIRA_EPIC_STRATEGY are overridden
+# by that suite, so config.yml is never read; this file exists only so the
+# creation-context resolution this feature adds (US2) finds a persisted
+# binding for the overridden project key, exactly as it would for any bound
+# repository.
+resolved_ids:
+  TEST:
+    style: company_managed
+    issue_types:
+      Story: "10004"
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"

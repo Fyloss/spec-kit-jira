@@ -38,6 +38,21 @@ Describe 'Ticket sink' {
         $r.Json | Should -Be ''
     }
 
+    It 'New-JiraCreateFieldsBase returns exactly {project,issuetype,summary} (FR-025)' {
+        $base = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'invoice export' -IssueTypeId '10201'
+        $obj = $base | ConvertFrom-Json
+        @($obj.PSObject.Properties.Name | Sort-Object) | Should -Be @('issuetype', 'project', 'summary')
+        $obj.project.key | Should -Be 'IJT'
+        $obj.issuetype.id | Should -Be '10201'
+        $obj.summary | Should -Be 'invoice export'
+    }
+
+    It 'Get-JiraTicketCreateBody is built from Get-JiraCreateFieldsBase, unchanged (FR-025)' {
+        $base = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'invoice export' -IssueTypeId '10201'
+        $body = Get-JiraTicketCreateBody -ProjectKey 'IJT' -Summary 'invoice export' -StoryTypeId '10201'
+        (($body | ConvertFrom-Json).fields | ConvertTo-Json -Compress -Depth 10) | Should -Be ($base | ConvertFrom-Json | ConvertTo-Json -Compress -Depth 10)
+    }
+
     It 'builds the create body with the team project and the resolved story-type id' {
         $body = Get-JiraTicketCreateBody -ProjectKey 'IJT' -Summary 'invoice export' -StoryTypeId '10201'
         $obj = $body | ConvertFrom-Json

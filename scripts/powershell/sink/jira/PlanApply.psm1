@@ -21,6 +21,7 @@ Import-Module (Join-Path $PSScriptRoot '../../engine/Idempotency.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../../engine/ManagedSection.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PrivacyGuard.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Client.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Ticket.psm1') -Force # Get-JiraCreateFieldsBase — the shared creation-fields builder (research R3)
 
 function Get-JiraPlanProp {
     # Safe property read: an EMPTY PSCustomObject's `.PSObject.Properties.Name`
@@ -50,6 +51,10 @@ function Get-JiraPlanWriteSet {
     $estId = [string](Get-JiraPlanProp $ctx 'estimation_field_id')
     $tickets = Get-JiraPlanProp $ctx 'tickets'
     $priorityIds = Get-JiraPlanProp $ctx 'priority_ids'
+    # The payload's project comes from the neutral document's validated
+    # routing.project_key — never from the plan context — so it cannot
+    # disagree with the run summary's resolved project (research R2, FR-023).
+    $project = [string](Get-JiraPlanProp (Get-JiraPlanProp $doc 'routing') 'project_key')
 
     $stories = @()
     $storyProp = Get-JiraPlanProp $doc 'stories'
@@ -68,18 +73,31 @@ function Get-JiraPlanWriteSet {
         $storyJson = ConvertTo-JiraJsonValue $story
         $adf = ConvertTo-JiraAdfDocument -ContentJson $storyJson | ConvertFrom-Json -Depth 100
 
-        $fields = [ordered]@{ summary = $title; description = $adf }
         if ($ticket -eq '') {
-            # CREATE: a bridge-created ticket owns its whole description (FR-040).
-            if ($storyType -ne '') { $fields['issuetype'] = [ordered]@{ id = $storyType } }
+            # FR-024 assembly guard: refuse an incomplete creation BEFORE it is
+            # ever emitted, rather than sending it for the destination service
+            # to reject.
+            if ($project -eq '' -or $storyType -eq '') {
+                throw "plan_writes: refusing to assemble a creation for `"$sid`" with no project or issue type (zero writes)"
+            }
+            # CREATE: the shared mandatory base (research R3, FR-025) + the
+            # optional attributes. A bridge-created ticket owns its whole
+            # description (no delimiter, FR-040).
+            $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $title -IssueTypeId $storyType | ConvertFrom-Json
+            $fields = [ordered]@{}
+            foreach ($p in $baseFields.PSObject.Properties) { $fields[$p.Name] = $p.Value }
+            $fields['description'] = $adf
             if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
             $estValue = Get-JiraPlanProp $story 'estimation'
             if ($estId -ne '' -and $null -ne $estValue) { $fields[$estId] = $estValue }
             $actions.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue"; body = [ordered]@{ fields = $fields } })
         }
         else {
-            # UPDATE: on a human-origin ticket the description is spliced into the
-            # managed panel so the human prose above survives (FR-038).
+            # UPDATE: content + priority; no project or issuetype is required
+            # (an update targets an existing item by key). On a human-origin
+            # ticket the description is spliced into the managed panel so the
+            # human prose above survives (FR-038).
+            $fields = [ordered]@{ summary = $title; description = $adf }
             $origins = Get-JiraPlanProp $ctx 'ticket_origins'
             $origin = [string](Get-JiraPlanProp $origins $sid)
             if ($origin -ne '' -and $origin -ne 'bridge-created') {
