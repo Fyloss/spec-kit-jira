@@ -1,0 +1,4 @@
+{
+  "projects": { "COMP": "company" },
+  "createmetaFields": { "COMP": "company-allowed" }
+}

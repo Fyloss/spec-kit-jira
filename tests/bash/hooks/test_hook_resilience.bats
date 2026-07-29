@@ -31,13 +31,20 @@ setup() {
   # An unreachable base makes every write fail-closed instantly (connection refused).
   export SPEC_KIT_JIRA_BASE_URL="http://127.0.0.1:1"
   export SPEC_KIT_JIRA_SPEC_SLUG="001-feature"
-  export SPEC_KIT_JIRA_PROJECT_KEY="PROJ"
+  # 004 FR-005: the shipped placeholder is now refused outright, so this suite
+  # (about hook resilience, not config resolution) is migrated to a real key
+  # with a matching epic-strategy override — both bypass config.yml, which
+  # this isolated work dir never has.
+  export SPEC_KIT_JIRA_PROJECT_KEY="TEST"
+  export SPEC_KIT_JIRA_EPIC_STRATEGY="per_repo"
   export SPEC_KIT_JIRA_EXTENSIONS_YML="${WORK}/.specify/extensions.yml"
   export JIRA_NO_SLEEP=1
   export JIRA_MAX_ATTEMPTS=1
   export JIRA_EMAIL="user@example.com"
   export JIRA_API_TOKEN="RAWSECRETXYZ"
-  unset SPEC_KIT_JIRA_PLAN_CONTEXT
+  # A minimal override supplying the issue type the assembly guard requires —
+  # this suite has no persisted binding to resolve one from.
+  export SPEC_KIT_JIRA_PLAN_CONTEXT='{"story_type_id":"10004"}'
   unset SPEC_KIT_JIRA_HOOK_CONTEXT
 
   SPEC="${WORK}/spec.md"
@@ -146,7 +153,9 @@ teardown() {
   local PS_CMD="${ROOT}/scripts/powershell/commands"
   local status_ps
   status_ps="$(SPEC_KIT_JIRA_BASE_URL="http://127.0.0.1:1" SPEC_KIT_JIRA_SPEC_SLUG="001-feature" \
-    SPEC_KIT_JIRA_PROJECT_KEY="PROJ" SPEC_KIT_JIRA_EXTENSIONS_YML="${SPEC_KIT_JIRA_EXTENSIONS_YML}" \
+    SPEC_KIT_JIRA_PROJECT_KEY="TEST" SPEC_KIT_JIRA_EPIC_STRATEGY="per_repo" \
+    SPEC_KIT_JIRA_PLAN_CONTEXT='{"story_type_id":"10004"}' \
+    SPEC_KIT_JIRA_EXTENSIONS_YML="${SPEC_KIT_JIRA_EXTENSIONS_YML}" \
     SPEC_KIT_JIRA_HOOK_CONTEXT=1 JIRA_NO_SLEEP=1 JIRA_MAX_ATTEMPTS=1 \
     JIRA_EMAIL="user@example.com" JIRA_API_TOKEN="RAWSECRETXYZ" \
     pwsh -NoProfile -Command "

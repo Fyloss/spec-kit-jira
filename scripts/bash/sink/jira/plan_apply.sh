@@ -30,6 +30,8 @@ source "${_plan_apply_dir}/privacy_guard.sh"
 source "${_plan_apply_dir}/client.sh"
 # shellcheck source=/dev/null
 source "${_plan_apply_dir}/adf.sh"
+# shellcheck source=/dev/null
+source "${_plan_apply_dir}/ticket.sh" # jira_create_fields_base — the shared creation-fields builder (research R3)
 # The sink may consume the neutral engine (the boundary only forbids engine->sink).
 # shellcheck source=/dev/null
 source "${_plan_apply_dir}/../../engine/drift.sh"
@@ -54,15 +56,19 @@ source "${_plan_apply_dir}/../../engine/idempotency.sh"
 # whole description is bridge-owned (the US3 behaviour, byte-for-byte unchanged).
 plan_writes() {
   local doc="$1" ctx="$2"
-  local base story_type estid
+  local base story_type estid project
   base="$(jq -r '.base_url // ""' <<< "${ctx}")"
   story_type="$(jq -r '.story_type_id // ""' <<< "${ctx}")"
   estid="$(jq -r '.estimation_field_id // ""' <<< "${ctx}")"
+  # The payload's project comes from the neutral document's validated
+  # routing.project_key — never from the plan context — so it cannot disagree
+  # with the run summary's resolved project (research R2, FR-023).
+  project="$(jq -r '.routing.project_key // ""' <<< "${doc}")"
 
   local actions="[]" n i
   n="$(jq '.stories | length' <<< "${doc}")"
   for ((i = 0; i < n; i++)); do
-    local story sid title prio est ticket priority_id adf fields action
+    local story sid title prio est ticket priority_id adf fields action base_fields
     story="$(jq -c ".stories[${i}]" <<< "${doc}")"
     sid="$(jq -r '.local_id' <<< "${story}")"
     title="$(jq -r '.title' <<< "${story}")"
@@ -73,10 +79,17 @@ plan_writes() {
     adf="$(adf_render_description "${story}")"
 
     if [[ -z "${ticket}" ]]; then
-      # CREATE: full content + issuetype + priority + estimation (create-only). A
-      # bridge-created ticket owns its whole description (no delimiter, FR-040).
-      fields="$(jq -cn --arg t "${title}" --argjson d "${adf}" --arg it "${story_type}" \
-        '{summary:$t, description:$d} + (if $it == "" then {} else {issuetype:{id:$it}} end)')"
+      # FR-024 assembly guard: refuse an incomplete creation BEFORE it is ever
+      # emitted, rather than sending it for the destination service to reject.
+      if [[ -z "${project}" || -z "${story_type}" ]]; then
+        printf 'plan_writes: refusing to assemble a creation for "%s" with no project or issue type (zero writes)\n' "${sid}" >&2
+        return 1
+      fi
+      # CREATE: the shared mandatory base (research R3, FR-025) + description +
+      # priority + estimation (create-only). A bridge-created ticket owns its
+      # whole description (no delimiter, FR-040).
+      base_fields="$(jira_create_fields_base "${project}" "${title}" "${story_type}")"
+      fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${adf}" '$base + {description:$d}')"
       [[ -n "${priority_id}" ]] && fields="$(jq -c --arg pid "${priority_id}" '. + {priority:{id:$pid}}' <<< "${fields}")"
       if [[ -n "${estid}" && "${est}" != "null" ]]; then
         fields="$(jq -c --arg fid "${estid}" --argjson v "${est}" '. + {($fid): $v}' <<< "${fields}")"

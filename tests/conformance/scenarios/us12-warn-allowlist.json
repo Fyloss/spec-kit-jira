@@ -2,18 +2,25 @@
   "name": "us12-warn-allowlist",
   "description": "US12 allowlist without false positives (FR-053). The spec's content references an allowlisted Confluence host on *.atlassian.net — a coordinate the BLOCK tier (US11) would otherwise refuse with exit 9. With that host declared in the allowlist (SPEC_KIT_JIRA_ALLOWLIST), the pre-write guard neutralises it, so the create proceeds and reconcile exits 0. Both ports MUST emit a byte-identical run summary, an identical Jira API call sequence (the create POST is performed), and an identical post-run tree (NFR-1) — proving the allowlist suppresses the BLOCK false positive identically on both ports.",
   "mock": {
-    "projects": { "PROJ": "company" }
+    "projects": {
+      "PROJ": "company"
+    }
   },
   "fixture": "tests/conformance/fixtures/repo-with-allowlisted-spec",
-  "argv": ["reconcile", "--json", "specs/001-feature/spec.md"],
+  "argv": [
+    "reconcile",
+    "--json",
+    "specs/001-feature/spec.md"
+  ],
   "env": {
     "JIRA_EMAIL": "user@example.com",
     "JIRA_API_TOKEN": "RAWSECRETXYZ",
     "JIRA_NO_SLEEP": "1",
     "SPEC_KIT_JIRA_SPEC_SLUG": "001-feature",
     "SPEC_KIT_JIRA_REPO": "acme/app",
-    "SPEC_KIT_JIRA_PROJECT_KEY": "PROJ",
+    "SPEC_KIT_JIRA_PROJECT_KEY": "TEST",
     "SPEC_KIT_JIRA_PLAN_CONTEXT": "{\"story_type_id\":\"10002\",\"priority_ids\":{\"P1\":\"1\",\"P2\":\"2\",\"P3\":\"3\"},\"estimation_field_id\":\"customfield_30044\"}",
-    "SPEC_KIT_JIRA_ALLOWLIST": "[\"ourco.atlassian.net\"]"
+    "SPEC_KIT_JIRA_ALLOWLIST": "[\"ourco.atlassian.net\"]",
+    "SPEC_KIT_JIRA_EPIC_STRATEGY": "per_repo"
   }
 }

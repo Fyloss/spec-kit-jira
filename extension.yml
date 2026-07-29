@@ -14,7 +14,7 @@ schema_version: "1.0"
 extension:
   id: jira
   name: Jira Reconcile Engine
-  version: 0.3.0
+  version: 0.4.0
   description: >-
     Mirrors a repository's Spec Kit artifacts (spec.md, plan.md, tasks.md) into
     Jira Cloud as a self-healing, idempotent, fail-closed bridge. Twin native

@@ -14,6 +14,7 @@ setup() {
 }
 
 DOC='{
+  "routing": {"project_key":"COMP"},
   "stories": [
     {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},
      "acceptance_criteria":[{"given":["g"],"when":["w"],"then":["t"]}],

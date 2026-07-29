@@ -1,0 +1,16 @@
+{
+  "name": "us8-reconcile-real",
+  "description": "004 T058, SC-006 — the same config-resolution run as us8-reconcile-company-managed, without --dry-run. The real run's Jira API call sequence must match the dry-run report's predicted actions exactly (method + path), proving prediction equals reality end to end through the config-resolution path, not merely for the pre-existing plan-context seam.",
+  "mock": {
+    "projects": { "COMP": "company" }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-reconcile-binding",
+  "argv": ["reconcile", "--json", "specs/billing-001-invoices/spec.md"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-billing-invoices",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

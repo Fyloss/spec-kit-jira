@@ -991,4 +991,5 @@ Export-ModuleMember -Function Get-JiraExtensionVersion, Assert-JiraSingleVersion
     Import-JiraPersonalConfig, `
     Get-JiraStatusClassification, Get-JiraPhaseStatusTargetSet, `
     Test-JiraPlaceholderKey, Get-JiraPlaceholderKey, `
-    Get-JiraHookEventNameList, Get-JiraHooksDisabled, Add-JiraHooksDisabled, Remove-JiraHooksDisabled
+    Get-JiraHookEventNameList, Get-JiraHooksDisabled, Add-JiraHooksDisabled, Remove-JiraHooksDisabled, `
+    Get-CfgLocalPath, Get-CfgLocalObject

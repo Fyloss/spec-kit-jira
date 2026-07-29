@@ -65,16 +65,25 @@ Describe 'Hook health reporting' {
         ) -join "`n" | Set-Content -LiteralPath $Spec -NoNewline
         $env:SPEC_KIT_JIRA_BASE_URL = 'http://127.0.0.1:1'
         $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-feature'
-        $env:SPEC_KIT_JIRA_PROJECT_KEY = 'PROJ'
+        # 004 FR-005: the shipped placeholder is now refused outright, so this
+        # suite (about hook health, not config resolution) is migrated to a
+        # real key with a matching epic-strategy override — both bypass
+        # config.yml, which this isolated work dir never has.
+        $env:SPEC_KIT_JIRA_PROJECT_KEY = 'TEST'
+        $env:SPEC_KIT_JIRA_EPIC_STRATEGY = 'per_repo'
         $env:SPEC_KIT_JIRA_EXTENSIONS_YML = Join-Path $Work '.specify/extensions.yml'
         $env:JIRA_NO_SLEEP = '1'
         $env:JIRA_MAX_ATTEMPTS = '1'
         $env:JIRA_EMAIL = 'user@example.com'
         $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
-        Remove-Item Env:\SPEC_KIT_JIRA_PLAN_CONTEXT -ErrorAction SilentlyContinue
+        # A minimal override supplying the issue type the assembly guard
+        # requires — this suite has no persisted binding to resolve one from.
+        $env:SPEC_KIT_JIRA_PLAN_CONTEXT = '{"story_type_id":"10004"}'
         Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue
     }
     AfterEach {
+        Remove-Item Env:\SPEC_KIT_JIRA_PLAN_CONTEXT -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_EPIC_STRATEGY -ErrorAction SilentlyContinue
         Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
     }
 

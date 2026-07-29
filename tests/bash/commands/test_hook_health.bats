@@ -25,13 +25,20 @@ setup() {
   # cases never touch it. --repair-hooks is independent of the mirror's result.
   export SPEC_KIT_JIRA_BASE_URL="http://127.0.0.1:1"
   export SPEC_KIT_JIRA_SPEC_SLUG="001-feature"
-  export SPEC_KIT_JIRA_PROJECT_KEY="PROJ"
+  # 004 FR-005: the shipped placeholder is now refused outright, so this suite
+  # (about hook health, not config resolution) is migrated to a real key with
+  # a matching epic-strategy override — both bypass config.yml, which this
+  # isolated work dir never has.
+  export SPEC_KIT_JIRA_PROJECT_KEY="TEST"
+  export SPEC_KIT_JIRA_EPIC_STRATEGY="per_repo"
   export SPEC_KIT_JIRA_EXTENSIONS_YML="${WORK}/.specify/extensions.yml"
   export JIRA_NO_SLEEP=1
   export JIRA_MAX_ATTEMPTS=1
   export JIRA_EMAIL="user@example.com"
   export JIRA_API_TOKEN="RAWSECRETXYZ"
-  unset SPEC_KIT_JIRA_PLAN_CONTEXT
+  # A minimal override supplying the issue type the assembly guard requires —
+  # this suite has no persisted binding to resolve one from.
+  export SPEC_KIT_JIRA_PLAN_CONTEXT='{"story_type_id":"10004"}'
   unset SPEC_KIT_JIRA_HOOK_CONTEXT
 
   SPEC="${WORK}/spec.md"
@@ -163,7 +170,7 @@ canonical_registry() {
   local b p
   b="$(cmd_reconcile reconcile --dry-run --json "${SPEC}")"
   p="$(SPEC_KIT_JIRA_BASE_URL='https://mock' SPEC_KIT_JIRA_SPEC_SLUG='001-feature' \
-       SPEC_KIT_JIRA_PROJECT_KEY='PROJ' SPEC_KIT_JIRA_EXTENSIONS_YML="${SPEC_KIT_JIRA_EXTENSIONS_YML}" \
+       SPEC_KIT_JIRA_PROJECT_KEY='TEST' SPEC_KIT_JIRA_EXTENSIONS_YML="${SPEC_KIT_JIRA_EXTENSIONS_YML}" \
        pwsh -NoProfile -Command "
         Import-Module '${PS_CMD}/Reconcile.psm1' -Force
         \$null = Invoke-JiraReconcile -Arguments @('reconcile','--dry-run','--json','${SPEC}')")"

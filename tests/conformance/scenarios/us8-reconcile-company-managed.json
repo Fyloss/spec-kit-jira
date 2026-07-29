@@ -1,0 +1,14 @@
+{
+  "name": "us8-reconcile-company-managed",
+  "description": "004 US1/US2 — reconcile resolves its own routing and creation context from a bound repository's own config, with no mirror environment variables set beyond the base URL. The folder-prefix rule routes the spec to COMP; the payload declares that project (never PROJ), the issue type and priority the persisted binding already discovered, and the estimation on create. Both ports must produce a byte-identical action set, exit code, and Jira API call sequence (NFR-1). No network call is made — resolution and payload assembly complete entirely from the two config layers.",
+  "mock": {
+    "projects": { "COMP": "company" }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-reconcile-binding",
+  "argv": ["reconcile", "--dry-run", "--json", "specs/billing-001-invoices/spec.md"],
+  "env": {
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-billing-invoices",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

@@ -15,7 +15,14 @@ setup() {
   export SPEC_KIT_JIRA_BASE_URL="https://mock"
   export SPEC_KIT_JIRA_SPEC_SLUG="001-feature"
   export SPEC_KIT_JIRA_REPO="acme/app"
-  export SPEC_KIT_JIRA_PROJECT_KEY="PROJ"
+  # 004 T014b: migrated off the placeholder key, which config resolution
+  # (FR-005) now refuses outright. Both the project key and epic strategy are
+  # overridden here, so config.yml is never read (contract "Precedence"); the
+  # fixture's config.local.yml supplies the persisted binding this suite's
+  # creation-context assertions (issue type, estimation) now resolve through.
+  export SPEC_KIT_JIRA_PROJECT_KEY="TEST"
+  export SPEC_KIT_JIRA_EPIC_STRATEGY="per_repo"
+  export JIRA_CONFIG_DIR="${ROOT}/tests/conformance/fixtures/repo-with-reconcile-legacy/.specify/jira"
   unset SPEC_KIT_JIRA_PLAN_CONTEXT
 
   SPEC_WITH="${BATS_TEST_TMPDIR}/with.md"
@@ -55,9 +62,16 @@ setup() {
 }
 
 @test "a create writes the estimation to the discovered field (FR-018)" {
-  export SPEC_KIT_JIRA_PLAN_CONTEXT='{"estimation_field_id":"customfield_30044"}'
+  export SPEC_KIT_JIRA_PLAN_CONTEXT='{"estimation_field_id":"customfield_30044","story_type_id":"10004"}'
   run cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}"
   [ "$(jq -r '.actions[0].body.fields.customfield_30044' <<< "$output")" = "5" ]
+}
+
+@test "an override equal to the shipped placeholder is refused, zero writes (004 FR-005)" {
+  export SPEC_KIT_JIRA_PROJECT_KEY="PROJ"
+  run cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"placeholder"* ]]
 }
 
 @test "an invalid SPEC_KIT_JIRA_LIFECYCLE maps to the config exit code with an actionable error (FR-032)" {
@@ -74,7 +88,7 @@ setup() {
   local b p
   b="$(cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}")"
   p="$(SPEC_KIT_JIRA_BASE_URL='https://mock' SPEC_KIT_JIRA_SPEC_SLUG='001-feature' \
-       SPEC_KIT_JIRA_REPO='acme/app' SPEC_KIT_JIRA_PROJECT_KEY='PROJ' \
+       SPEC_KIT_JIRA_REPO='acme/app' SPEC_KIT_JIRA_PROJECT_KEY='TEST' \
        pwsh -NoProfile -Command "
         Import-Module '${PS_CMD}/Reconcile.psm1' -Force
         \$null = Invoke-JiraReconcile -Arguments @('reconcile','--dry-run','--json','${SPEC_WITH}')")"
@@ -90,7 +104,7 @@ setup() {
   b="$(cd "${BATS_TEST_TMPDIR}" && cmd_reconcile reconcile --dry-run --json with.md)"
   p="$(cd "${BATS_TEST_TMPDIR}" && \
        SPEC_KIT_JIRA_BASE_URL='https://mock' SPEC_KIT_JIRA_SPEC_SLUG='001-feature' \
-       SPEC_KIT_JIRA_REPO='acme/app' SPEC_KIT_JIRA_PROJECT_KEY='PROJ' \
+       SPEC_KIT_JIRA_REPO='acme/app' SPEC_KIT_JIRA_PROJECT_KEY='TEST' \
        pwsh -NoProfile -Command "
         Import-Module '${PS_CMD}/Reconcile.psm1' -Force
         \$null = Invoke-JiraReconcile -Arguments @('reconcile','--dry-run','--json','with.md')")"
@@ -198,6 +212,10 @@ _md_work() {
   _md_work
   export SPEC_KIT_JIRA_BASE_URL="http://127.0.0.1:1"
   export SPEC_KIT_JIRA_HOOK_CONTEXT=1
+  # This test is about hook-context WARNING behaviour on a network failure, not
+  # about the config-resolved binding (_md_work's dir has none) — bypass it
+  # with a minimal override supplying the issue type the assembly guard needs.
+  export SPEC_KIT_JIRA_PLAN_CONTEXT='{"story_type_id":"10004"}'
   run cmd_reconcile reconcile --json "${SPEC_WITH}"
   [ "$status" -eq 0 ]
   [ "$(grep -c 'WARNING:' <<< "$output")" -eq 1 ]

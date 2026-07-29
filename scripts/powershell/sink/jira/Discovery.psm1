@@ -111,6 +111,43 @@ function Get-JiraDiscoveryProjectList {
     return [pscustomobject]@{ ExitCode = 0; List = (ConvertTo-JiraJsonValue $list) }
 }
 
+function Get-JiraDiscoveryPrioritiesForProject {
+    <#
+    .SYNOPSIS
+      Derive the priorities a resolved project actually accepts, from its OWN
+      create metadata against the site-wide identifier catalogue (research R4,
+      004 US4, FR-030/FR-031). Mirror of discovery_priorities_for_project.
+      Three branches, never a rule keyed on project style (FR-028):
+        1. no `priority` field at all             -> []
+        2. `priority` field WITH allowedValues    -> only those, resolved by
+           id against the catalogue
+        3. `priority` field WITHOUT allowedValues -> the whole catalogue
+           (today's behaviour, preserved for a site that omits allowedValues)
+    #>
+    [CmdletBinding()]
+    param([object[]] $Fields, [object[]] $Catalogue)
+    $result = [System.Collections.Generic.List[object]]::new()
+    $priorityField = $null
+    foreach ($f in $Fields) {
+        if ([string](Get-DiscProp $f 'fieldId') -eq 'priority') { $priorityField = $f; break }
+    }
+    if ($null -eq $priorityField) { return $result }
+
+    $allowed = Get-DiscProp $priorityField 'allowedValues'
+    if ($null -ne $allowed) {
+        foreach ($av in @($allowed)) {
+            $id = [string](Get-DiscProp $av 'id')
+            foreach ($p in $Catalogue) {
+                if ([string]$p.id -eq $id) { $result.Add([ordered]@{ logical_name = $p.name; id = $p.id }); break }
+            }
+        }
+        return $result
+    }
+
+    foreach ($p in $Catalogue) { $result.Add([ordered]@{ logical_name = $p.name; id = $p.id }) }
+    return $result
+}
+
 function Get-JiraDiscoveryBindingResult {
     <#
     .SYNOPSIS
@@ -191,10 +228,10 @@ function Get-JiraDiscoveryBindingResult {
         }
     }
 
-    $prio = [System.Collections.Generic.List[object]]::new()
-    foreach ($p in $priorities) {
-        $prio.Add([ordered]@{ logical_name = $p.name; id = $p.id })
-    }
+    # @() guards against PowerShell unwrapping an EMPTY List returned across a
+    # function boundary into $null (a team-managed project with no priority
+    # field must still serialise as [], not null).
+    $prio = @(Get-JiraDiscoveryPrioritiesForProject -Fields $meta.fields -Catalogue $priorities)
 
     $fieldList = [System.Collections.Generic.List[object]]::new()
     foreach ($f in $fields) {
@@ -469,4 +506,5 @@ function Get-JiraMentionedFetch {
 
 Export-ModuleMember -Function Get-JiraDiscoveryBinding, Get-JiraDiscoveryBindingResult, `
     Get-JiraDiscoveryStyle, Get-JiraDiscoveryFlaggedField, Get-JiraDiscoveryProjectList, `
+    Get-JiraDiscoveryPrioritiesForProject, `
     Get-JiraMentionedFetch, Get-JiraMentionedFetchResult

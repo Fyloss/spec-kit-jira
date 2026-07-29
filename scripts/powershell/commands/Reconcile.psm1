@@ -85,6 +85,137 @@ function Get-JiraReconcilePlanContext {
     return (ConvertTo-JiraJsonValue $map)
 }
 
+function Resolve-JiraReconcileRouting {
+    <#
+    .SYNOPSIS
+      Resolve this run's project key from the merged team config (US1,
+      FR-001–FR-004). Mirror of _reconcile_resolve_routing. Labels are not yet
+      extracted by the parser (Assumptions: "extending what the parser
+      extracts is out of scope"), so folder-prefix rules and routing_default
+      are what this resolves in practice. Returns { ExitCode; ProjectKey }.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $Folder, [Parameter(Mandatory)] [string] $ConfigJson)
+    return (Resolve-JiraRouting -FolderName (Split-Path -Leaf $Folder) -LabelsJson '[]' -RoutingConfigJson $ConfigJson)
+}
+
+function Get-JiraReconcileEpicStrategy {
+    <#
+    .SYNOPSIS
+      This run's epic strategy (FR-006): the resolved project's own
+      declaration in the team config. Mirror of _reconcile_epic_strategy.
+      Falls back to the legacy per_repo default only when that project
+      carries no declaration at all.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $ProjectKey, [Parameter(Mandatory)] [string] $ConfigJson)
+    $cfg = $ConfigJson | ConvertFrom-Json -Depth 100
+    $projectsVal = Get-JiraPlanPropSafe $cfg 'projects'
+    $projects = if ($null -ne $projectsVal) { @($projectsVal) } else { @() }
+    foreach ($p in $projects) {
+        if ([string](Get-JiraPlanPropSafe $p 'key') -eq $ProjectKey) {
+            $v = [string](Get-JiraPlanPropSafe $p 'epic_strategy')
+            if (-not [string]::IsNullOrEmpty($v)) { return $v }
+        }
+    }
+    return 'per_repo'
+}
+
+function Get-JiraPlanPropSafe {
+    # Safe property read (an empty PSCustomObject throws under StrictMode when
+    # indexing a member that does not exist).
+    param($Object, [string] $Name)
+    if ($null -eq $Object) { return $null }
+    $member = $Object.PSObject.Properties[$Name]
+    if ($null -eq $member) { return $null }
+    return $member.Value
+}
+
+function Get-JiraReconcileLocalBindingFor {
+    <#
+    .SYNOPSIS
+      The persisted binding's resolved_ids entry for one project, read
+      directly from the machine-owned local layer (independent of config.yml).
+      Mirror of _reconcile_local_binding_for. Returns { ExitCode; Json }:
+      ExitCode 0 on success; 2 when the local layer is missing ENTIRELY (never
+      bound at all); 3 when the file exists but holds no entry for this
+      project (FR-010, project-not-bound).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $ProjectKey, [Parameter(Mandatory)] [string] $ConfigDir)
+    $path = Get-CfgLocalPath -ConfigDir $ConfigDir
+    if (-not (Test-Path -LiteralPath $path)) { return [pscustomobject]@{ ExitCode = 2; Json = '' } }
+    # Get-CfgLocalObject returns nested IDictionary (OrderedDictionary) nodes,
+    # not PSCustomObjects — indexed by key, not by .PSObject.Properties.
+    $obj = Get-CfgLocalObject -ConfigDir $ConfigDir
+    $entry = $null
+    if ($obj -is [System.Collections.IDictionary] -and $obj.Contains('resolved_ids')) {
+        $resolvedIds = $obj['resolved_ids']
+        if ($resolvedIds -is [System.Collections.IDictionary] -and $resolvedIds.Contains($ProjectKey)) {
+            $entry = $resolvedIds[$ProjectKey]
+        }
+    }
+    if ($null -eq $entry) { return [pscustomobject]@{ ExitCode = 3; Json = '' } }
+    return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-Json -InputObject $entry -Compress -Depth 20) }
+}
+
+function Get-JiraReconcilePlanContextFromBinding {
+    <#
+    .SYNOPSIS
+      The plan context (US2, FR-007–FR-011, FR-013): base_url plus either the
+      caller's SPEC_KIT_JIRA_PLAN_CONTEXT override (wholesale) or the creation
+      context built from the resolved project's persisted binding —
+      story_type_id, the two-step-resolved priority_ids, and
+      estimation_field_id. Mirror of _reconcile_plan_context. Returns
+      { ExitCode; Json }; ExitCode is 2/3 exactly as
+      Get-JiraReconcileLocalBindingFor when no override is set and the
+      binding cannot be read.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $BaseUrl,
+        [Parameter(Mandatory)] [string] $ProjectKey,
+        [Parameter(Mandatory)] [string] $ConfigDir,
+        [Parameter(Mandatory)] [string] $ConfigJson
+    )
+    if ($env:SPEC_KIT_JIRA_PLAN_CONTEXT) {
+        return [pscustomobject]@{ ExitCode = 0; Json = (Get-JiraReconcilePlanContext -BaseUrl $BaseUrl) }
+    }
+
+    $bindingResult = Get-JiraReconcileLocalBindingFor -ProjectKey $ProjectKey -ConfigDir $ConfigDir
+    if ($bindingResult.ExitCode -ne 0) { return [pscustomobject]@{ ExitCode = $bindingResult.ExitCode; Json = '' } }
+    $binding = $bindingResult.Json | ConvertFrom-Json -Depth 100
+
+    $storyType = [string](Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $binding 'issue_types') 'Story')
+    $cfg = $ConfigJson | ConvertFrom-Json -Depth 100
+    $priorityMap = $null
+    $projectsVal = Get-JiraPlanPropSafe $cfg 'projects'
+    $projects = if ($null -ne $projectsVal) { @($projectsVal) } else { @() }
+    foreach ($p in $projects) {
+        if ([string](Get-JiraPlanPropSafe $p 'key') -eq $ProjectKey) { $priorityMap = Get-JiraPlanPropSafe $p 'priority_map'; break }
+    }
+    $priorities = Get-JiraPlanPropSafe $binding 'priorities'
+    $estField = [string](Get-JiraPlanPropSafe $binding 'estimation_field_id')
+
+    # Two-step priority resolution (FR-008): level -> logical name (team
+    # config) -> identifier (persisted binding). Either step yielding nothing
+    # omits the level rather than blocking the run (FR-011).
+    $priorityIds = [ordered]@{}
+    foreach ($lvl in @('P1', 'P2', 'P3')) {
+        $logical = [string](Get-JiraPlanPropSafe $priorityMap $lvl)
+        if ([string]::IsNullOrEmpty($logical)) { continue }
+        $id = [string](Get-JiraPlanPropSafe $priorities $logical)
+        if ([string]::IsNullOrEmpty($id)) { continue }
+        $priorityIds[$lvl] = $id
+    }
+
+    $result = [ordered]@{ base_url = $BaseUrl }
+    if (-not [string]::IsNullOrEmpty($storyType)) { $result['story_type_id'] = $storyType }
+    if ($priorityIds.Count -gt 0) { $result['priority_ids'] = $priorityIds }
+    if (-not [string]::IsNullOrEmpty($estField)) { $result['estimation_field_id'] = $estField }
+    return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-Json -InputObject $result -Compress -Depth 20) }
+}
+
 function Invoke-JiraReconcile {
     <#
     .SYNOPSIS
@@ -162,8 +293,76 @@ function Invoke-JiraReconcile {
     $folder = (Resolve-Path -LiteralPath $specParent).Path
     $slug = if ($env:SPEC_KIT_JIRA_SPEC_SLUG) { $env:SPEC_KIT_JIRA_SPEC_SLUG } else { Split-Path -Leaf $folder }
     $repo = if ($env:SPEC_KIT_JIRA_REPO) { $env:SPEC_KIT_JIRA_REPO } else { 'local/repo' }
-    $projectKey = if ($env:SPEC_KIT_JIRA_PROJECT_KEY) { $env:SPEC_KIT_JIRA_PROJECT_KEY } else { 'PROJ' }
-    $epicStrategy = if ($env:SPEC_KIT_JIRA_EPIC_STRATEGY) { $env:SPEC_KIT_JIRA_EPIC_STRATEGY } else { 'per_repo' }
+
+    # Routing + creation-context resolution (US1/US2, FR-001–FR-013): per
+    # value, an explicit override wins; otherwise the value is derived from
+    # the repository's own config, read exactly once and only when something
+    # needs it — a run whose project key, epic strategy AND plan context are
+    # ALL overridden never reads config.yml at all (contract "Precedence"). A
+    # run overriding only the project key and epic strategy still needs
+    # config.yml for priority_map, since the plan context (unless itself
+    # overridden) is built from it (T057, FR-008). config.yml's absence maps
+    # to the same not-configured notice as a missing base URL; a
+    # present-but-invalid config.yml surfaces through Import-JiraConfig's own
+    # EXIT_CONFIG path.
+    $overrideProject = $env:SPEC_KIT_JIRA_PROJECT_KEY
+    $overrideEpic = $env:SPEC_KIT_JIRA_EPIC_STRATEGY
+    $cfgDir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
+    $cfg = '{}'
+    if ([string]::IsNullOrEmpty($overrideProject) -or [string]::IsNullOrEmpty($overrideEpic) -or [string]::IsNullOrEmpty($env:SPEC_KIT_JIRA_PLAN_CONTEXT)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $cfgDir 'config.yml'))) {
+            Write-JiraReconcileNotice -Lines @(
+                'Jira mirror skipped: this repository is not bound to a Jira project yet.',
+                'Nothing was mirrored, and this spec-kit command completed normally.',
+                'To bind it, run /speckit.jira.config.')
+            return 0
+        }
+        $loaded = Import-JiraConfig -ConfigDir $cfgDir
+        if ($loaded.ExitCode -ne 0) {
+            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the team configuration could not be loaded (zero writes)')
+        }
+        $cfg = $loaded.Json
+    }
+
+    $projectFromConfig = $false
+    if (-not [string]::IsNullOrEmpty($overrideProject)) {
+        $projectKey = $overrideProject
+    }
+    else {
+        $routed = Resolve-JiraReconcileRouting -Folder $folder -ConfigJson $cfg
+        if ($routed.ExitCode -ne 0) {
+            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: routing could not be resolved — no rule in $cfgDir/config.yml matched `"$(Split-Path -Leaf $folder)`" and no routing_default is configured; add routing_default to config.yml")
+        }
+        $projectKey = $routed.ProjectKey
+        $projectFromConfig = $true
+    }
+
+    # FR-005: refuse an absent, syntactically invalid, or placeholder key —
+    # before any network call, so zero writes ever occur for it.
+    if ([string]::IsNullOrEmpty($projectKey) -or $projectKey -cnotmatch '^[A-Z][A-Z0-9_]+$') {
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the resolved project key is missing or syntactically invalid (zero writes)')
+    }
+    if (Test-JiraPlaceholderKey -Key $projectKey) {
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: the project is still set to the shipped placeholder `"$projectKey`" — run /speckit.jira.config to bind a real project (zero writes)")
+    }
+
+    # US3 unknown-project: a routing rule (or routing_default/team route) named
+    # a project the team config never declares in projects[] — distinct from
+    # an override, which may legitimately name a project outside config.yml.
+    if ($projectFromConfig) {
+        $cfgObj = $cfg | ConvertFrom-Json -Depth 100
+        $projectsVal = Get-JiraPlanPropSafe $cfgObj 'projects'
+        $declaredProjects = if ($null -ne $projectsVal) { @($projectsVal) } else { @() }
+        $declared = $false
+        foreach ($p in $declaredProjects) {
+            if ([string](Get-JiraPlanPropSafe $p 'key') -eq $projectKey) { $declared = $true; break }
+        }
+        if (-not $declared) {
+            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: a routing rule names project `"$projectKey`", which is not declared in $cfgDir/config.yml's projects[] — correct the rule in config.yml (zero writes)")
+        }
+    }
+
+    $epicStrategy = if (-not [string]::IsNullOrEmpty($overrideEpic)) { $overrideEpic } else { Get-JiraReconcileEpicStrategy -ProjectKey $projectKey -ConfigJson $cfg }
 
     $specText = Get-Content -Raw -LiteralPath $specFile
     if ($null -eq $specText) { $specText = '' }
@@ -183,8 +382,21 @@ function Invoke-JiraReconcile {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the specification could not be assembled into a valid neutral document (zero writes)')
     }
 
-    # SINK: plan the ordered action set (the --dry-run report is exactly this set).
-    $planCtx = Get-JiraReconcilePlanContext -BaseUrl $base
+    # SINK: the plan context (US2, FR-007–FR-011). An explicit
+    # SPEC_KIT_JIRA_PLAN_CONTEXT overrides the derived object wholesale;
+    # otherwise it is built from the resolved project's persisted binding.
+    $planCtxResult = Get-JiraReconcilePlanContextFromBinding -BaseUrl $base -ProjectKey $projectKey -ConfigDir $cfgDir -ConfigJson $cfg
+    if ($planCtxResult.ExitCode -eq 2) {
+        Write-JiraReconcileNotice -Lines @(
+            'Jira mirror skipped: this repository is not bound to a Jira project yet.',
+            'Nothing was mirrored, and this spec-kit command completed normally.',
+            'To bind it, run /speckit.jira.config.')
+        return 0
+    }
+    elseif ($planCtxResult.ExitCode -eq 3) {
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: the project `"$projectKey`" has not been bound yet — run /speckit.jira.config to discover its issue types and priorities (zero writes)")
+    }
+    $planCtx = $planCtxResult.Json
     try { $actionsJson = Get-JiraPlanWriteSet -NeutralDocJson $built.Document -PlanContextJson $planCtx }
     catch {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the write plan could not be assembled (zero writes)')
@@ -299,4 +511,5 @@ function Invoke-JiraReconcile {
     return $rc
 }
 
-Export-ModuleMember -Function Invoke-JiraReconcile
+Export-ModuleMember -Function Invoke-JiraReconcile, Resolve-JiraReconcileRouting, Get-JiraReconcileEpicStrategy, `
+    Get-JiraReconcileLocalBindingFor, Get-JiraReconcilePlanContextFromBinding
