@@ -15,8 +15,8 @@ which creates `.specify/extensions/jira/` there automatically:
 
 ```sh
 specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/archive/refs/heads/main.zip
-# or, while developing:
-specify extension add --dev /path/to/spec-kit-jira
+# or, while developing the extension itself:
+specify extension add --dev <path-to-spec-kit-jira> --force
 ```
 
 Then run the one-command install ceremony in the consuming repository:
@@ -78,7 +78,7 @@ security add-generic-password -U -s spec-kit-jira -a "$USER" -w
 out of your shell history. Confirm it landed:
 
 ```sh
-security find-generic-password -s spec-kit-jira -w
+security find-generic-password -s spec-kit-jira -w > /dev/null && echo "token present"
 ```
 
 The first read from a script raises a macOS access prompt — choose **Always
@@ -157,7 +157,7 @@ The command reads the token from the terminal, so it never enters your shell
 history. Confirm it:
 
 ```sh
-secret-tool lookup service spec-kit-jira
+secret-tool lookup service spec-kit-jira > /dev/null && echo "token present"
 ```
 
 On a headless machine or a container there is no keyring daemon and this step

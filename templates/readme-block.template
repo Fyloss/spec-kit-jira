@@ -4,7 +4,7 @@
 This repository mirrors its Spec Kit artifacts into Jira Cloud via the
 [spec-kit-jira](https://github.com/Fyloss/spec-kit-jira) extension (v{{VERSION}}).
 
-- **Install**: `specify extension add --dev <path-to-spec-kit-jira> --force`
+- **Install**: `specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/archive/refs/heads/main.zip`
   registers the seven lifecycle hooks and activates them. No further step is
   needed to wire them up.
 - **Configure**: run `/speckit.jira.config` to bind this repository to a Jira
@@ -48,7 +48,7 @@ value once — copy it before closing the dialog. Then follow your platform belo
 
    ```sh
    security add-generic-password -U -s spec-kit-jira -a "$USER" -w
-   security find-generic-password -s spec-kit-jira -w   # confirm
+   security find-generic-password -s spec-kit-jira -w > /dev/null && echo present
    ```
 
 3. **Export the two non-secret settings** in `~/.zshrc`, then `source ~/.zshrc`.
@@ -80,7 +80,7 @@ value once — copy it before closing the dialog. Then follow your platform belo
 
    ```sh
    secret-tool store --label="spec-kit-jira" service spec-kit-jira
-   secret-tool lookup service spec-kit-jira   # confirm
+   secret-tool lookup service spec-kit-jira > /dev/null && echo present
    ```
 
    Headless machines and containers have no keyring daemon — skip this and use

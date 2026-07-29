@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-29
+
+Documented first-time setup, per platform.
+
+The install ceremony was documented; the environment it needs was not. A new
+user reached `/speckit.jira.config` with no token stored anywhere and no site
+URL exported, and the degraded run was the first thing that told them so.
+
+- **The README carries a per-platform walkthrough** — macOS, Linux, and Windows
+  each get the ordered steps from prerequisites to the first mirrored spec,
+  naming the three connection settings and where each one is resolved from.
+- **The managed README block carries the same walkthrough in condensed form**,
+  so a consuming repository documents its own setup without linking out.
+- **The hook-environment caveat is stated**: the agent's shell does not always
+  load a profile, so the two non-secret settings can be declared per project in
+  `.claude/settings.json`.
+- **The command-literal gate now covers the shipped documentation** —
+  `README.md`, `INSTALL.md`, and `templates/*.template` join the scripts and
+  command documents already checked, and it accepts both runnable forms of the
+  install: the archive install an operator runs and the dev install with
+  `--force`.
+
 ## [0.4.0] - 2026-07-29
 
 Reconcile resolves its own routing and plan context from config (004).
@@ -302,7 +324,8 @@ First public release.
   repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.1.0...v0.2.0
