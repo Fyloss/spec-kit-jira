@@ -75,7 +75,6 @@ teardown() {
   # tracer's own pipe — the coverage run then never sees EOF and burns the CI
   # step's whole budget. An invalid branch name aborts the harness after
   # mock_start, which is where the leak used to happen.
-  before="$(pgrep -f 'mock-server.ps1' 2> /dev/null | sort || true)"
   cat > "${TMP}/abort.json" << 'EOF'
 {
   "name": "abort-after-mock",
@@ -94,16 +93,19 @@ EOF
   [ "${status}" -ne 0 ]
   grep -q 'not a valid branch name' "${TMP}/abort.out"
 
+  # Identified by the exact PID the harness recorded — a name-pattern scan
+  # (pgrep -f mock-server.ps1) would also catch every OTHER scenario's mock
+  # running concurrently under a parallel test suite (--jobs).
+  mock_pid="$(cat "${OUT}/mock.pid")"
+  [ -n "${mock_pid}" ]
+
   # Termination is asynchronous; poll rather than assume the kill has landed.
-  leaked="?"
   for _ in 1 2 3 4 5 6 7 8 9 10; do
-    after="$(pgrep -f 'mock-server.ps1' 2> /dev/null | sort || true)"
-    leaked="$(comm -13 <(printf '%s\n' "${before}") <(printf '%s\n' "${after}"))"
-    [ -n "${leaked}" ] || break
+    kill -0 "${mock_pid}" 2> /dev/null || break
     sleep 0.3
   done
-  [ -z "${leaked}" ] || {
-    printf 'the aborted run left mock pid(s) behind: %s\n' "${leaked}"
+  ! kill -0 "${mock_pid}" 2> /dev/null || {
+    printf 'the aborted run left mock pid %s behind\n' "${mock_pid}"
     false
   }
 }

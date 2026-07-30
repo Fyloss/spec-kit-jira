@@ -322,6 +322,17 @@ equivalent by a language-agnostic conformance corpus (`tests/conformance/`);
 `PSScriptAnalyzer`) and CI gates (engine/sink boundary, module parity,
 coverage, single-sourced version) blocking on the three-OS matrix.
 
+Run the suites locally with:
+
+```bash
+bats -r tests/bash --jobs "$(getconf _NPROCESSORS_ONLN)"   # requires: brew/apt install parallel
+pwsh -NoProfile -Command "Invoke-Pester -Path tests/powershell -PassThru"
+```
+
+`--jobs` runs independent `@test` cases across cores via GNU parallel; each
+test isolates its own tmpdir and the mock Jira server binds an OS-assigned
+ephemeral port, so concurrent runs cannot collide.
+
 ## License
 
 [MIT](LICENSE)
