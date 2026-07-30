@@ -94,33 +94,51 @@ while IFS=$'\t' read -r key value; do
   [ -n "${key}" ] && export "${key}=${value}"
 done < <(jq -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv' "${SCENARIO}")
 
-# --- Argv --------------------------------------------------------------------
-ARGV=()
-while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq -r '.argv[]? // empty' "${SCENARIO}")
+# --- Runs ----------------------------------------------------------------
+# A scenario is either a single implicit run (top-level `argv`, unchanged
+# behaviour) or an explicit `runs` array — each entry its own `argv` — for
+# proving a SECOND invocation's behaviour against state the FIRST left
+# behind (US1 idempotency, US2 zero churn): both runs share one workdir and
+# one mock process. Captured as stdout.N / stderr.N / exit.N, N = 1-based;
+# stdout/stderr/exit (unsuffixed) always mirror the LAST run, so a
+# single-run scenario's existing consumers see no difference.
+RUN_COUNT="$(jq '(.runs // []) | length' "${SCENARIO}")"
+if [ "${RUN_COUNT}" -eq 0 ]; then RUN_COUNT=1; fi
 
-# --- Run and capture ---------------------------------------------------------
 set +e
-if [ "${PORT}" = "bash" ]; then
-  if [ -n "${SPEC_KIT_JIRA_COVERAGE_INPROCESS:-}" ]; then
-    # Coverage mode only (T097): kcov's bash tracing follows forked subshells but
-    # NOT execve'd children, so `bash "${ENTRY}"` measures nothing. Sourcing the
-    # entry point in a subshell keeps every observable identical — own cwd, own
-    # argv, own redirections, own exit status, and `set -euo pipefail` scoped to
-    # the subshell — while making scripts/bash/** visible to the tracer.
-    # stderr is deliberately NOT captured in this mode: the tracer streams its
-    # PS4 trace on fd 2, so redirecting fd 2 to a file would hide every executed
-    # line from it. Coverage mode asserts nothing about stderr.
-    # shellcheck source=/dev/null
-    ( cd "${WORKDIR}" && source "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout"
-    : > "${OUTDIR}/stderr"
+for ((i = 1; i <= RUN_COUNT; i++)); do
+  ARGV=()
+  if [ "${RUN_COUNT}" -gt 1 ] || [ "$(jq '(.runs // []) | length' "${SCENARIO}")" -gt 0 ]; then
+    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq -r --argjson i "$((i - 1))" '.runs[$i].argv[]? // empty' "${SCENARIO}")
   else
-    ( cd "${WORKDIR}" && bash "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout" 2> "${OUTDIR}/stderr"
+    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq -r '.argv[]? // empty' "${SCENARIO}")
   fi
-else
-  ( cd "${WORKDIR}" && pwsh -NoProfile -File "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout" 2> "${OUTDIR}/stderr"
-fi
-echo "$?" > "${OUTDIR}/exit"
+
+  if [ "${PORT}" = "bash" ]; then
+    if [ -n "${SPEC_KIT_JIRA_COVERAGE_INPROCESS:-}" ]; then
+      # Coverage mode only (T097): kcov's bash tracing follows forked subshells but
+      # NOT execve'd children, so `bash "${ENTRY}"` measures nothing. Sourcing the
+      # entry point in a subshell keeps every observable identical — own cwd, own
+      # argv, own redirections, own exit status, and `set -euo pipefail` scoped to
+      # the subshell — while making scripts/bash/** visible to the tracer.
+      # stderr is deliberately NOT captured in this mode: the tracer streams its
+      # PS4 trace on fd 2, so redirecting fd 2 to a file would hide every executed
+      # line from it. Coverage mode asserts nothing about stderr.
+      # shellcheck source=/dev/null
+      ( cd "${WORKDIR}" && source "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout.${i}"
+      : > "${OUTDIR}/stderr.${i}"
+    else
+      ( cd "${WORKDIR}" && bash "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout.${i}" 2> "${OUTDIR}/stderr.${i}"
+    fi
+  else
+    ( cd "${WORKDIR}" && pwsh -NoProfile -File "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout.${i}" 2> "${OUTDIR}/stderr.${i}"
+  fi
+  echo "$?" > "${OUTDIR}/exit.${i}"
+done
 set -e
+cp "${OUTDIR}/stdout.${RUN_COUNT}" "${OUTDIR}/stdout"
+cp "${OUTDIR}/stderr.${RUN_COUNT}" "${OUTDIR}/stderr"
+cp "${OUTDIR}/exit.${RUN_COUNT}" "${OUTDIR}/exit"
 
 mock_stop
 cp "${MOCK_CALLLOG}" "${OUTDIR}/calls.log" 2> /dev/null || : > "${OUTDIR}/calls.log"

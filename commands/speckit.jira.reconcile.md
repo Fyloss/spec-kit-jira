@@ -53,8 +53,12 @@ in a consuming repository, and assuming it does is what produced the reported
 
 3. **Interpret the outcome and report exactly one line** — never more than one
    message per host command run, whatever the outcome:
-   - **success** — the `counts.created` / `counts.updated` figures from the run
-     summary;
+   - **success** — the `counts.created` / `counts.updated` / `counts.
+     recognised` / `counts.skipped` figures from the run summary. On a
+     second run over an unchanged specification, `created` and `updated`
+     are both `0`; `recognised` equals the story count and `skipped` does
+     too — this is the correct signature of an idempotent re-run, not a
+     failure to mirror anything;
    - **degraded** — one warning naming the true cause, from the table below;
    - **disabled** — for an event the operator disabled, the bridge exits `0`
      silently. Report **nothing at all**; do not announce that it was skipped.
@@ -106,6 +110,74 @@ Every command name you put in a message must be runnable exactly as spelled:
 - an invocation of the bridge is always one of the two repository-relative paths
   in the table above;
 - a host command is given in the form the operator actually runs.
+
+## The story marker line
+
+Immediately after each `### User Story` heading (or after the document's `#`
+title, for a specification with no such headings), reconcile writes one HTML
+comment line:
+
+```markdown
+<!-- speckit-jira story=7f3a9c1e40b2d85a ticket=PROJ-142 -->
+```
+
+This is how a **second** run recognises the ticket it already created instead of
+mirroring the story again — the identifier is assigned once, persists across a
+retitle, reorder, or a specification-folder rename, and is never recomputed. It
+is spec-kit-jira's own bookkeeping; leave it exactly where it is. Deleting it (or
+regenerating `spec.md` from the template) makes the next run treat that story as
+new, mirroring it again — the ticket it used to point at is left untouched.
+
+## Recognition and the run summary
+
+Before planning any write, reconcile reads back every ticket a story's marker
+already names and verifies its identity marker. A recognised ticket is updated
+(or skipped, if nothing changed) instead of duplicated. The run summary's
+`counts` reflect this:
+
+- `recognised` — stories bound to an existing ticket by this run.
+- `assigned` — durable identifiers newly written into `spec.md` by this run.
+- `skipped` — recognised tickets whose write was dropped because nothing
+  changed (this is what makes a second, unchanged run a true no-op).
+
+A story whose recorded ticket cannot be verified (a mismatched or missing
+identity marker, a duplicate identifier, or a ticket claimed by another
+specification) is reported in `warnings` and left untouched; it never blocks
+its siblings.
+
+## Configuring lifecycle safety: `phase_status_map` and `halted_statuses`
+
+Two optional, hand-edited keys under a project entry in `config.yml` let
+reconcile evaluate drift and operator-halted states against a ticket's real,
+recognised status. Neither has a default table — an operator's configured
+workflow is authoritative, and omitting both keeps this machinery inert
+exactly as it was before recognition existed:
+
+```yaml
+projects:
+  - key: COMP
+    # ...
+    phase_status_map:
+      after_specify: "To Do"
+      after_plan: "In Progress"
+    halted_statuses:
+      - "Blocked"
+```
+
+- `phase_status_map` maps a lifecycle event name (`after_specify`,
+  `after_clarify`, `after_plan`, `after_tasks`, `after_implement`,
+  `after_analyze`) to the Jira status that event implies. When the run was
+  dispatched for one of these events, a recognised ticket already sitting
+  **ahead** of that status raises a named drift warning; its content still
+  reconciles, but reconcile never issues a status transition itself.
+- `halted_statuses` names statuses the operator uses to pause a ticket by
+  hand. A recognised ticket sitting in one of these statuses has its content
+  write suppressed (not just its transition), with a named warning — an
+  operator's manual hold is never silently overwritten.
+
+A ticket carrying the Jira **Flagged** field is treated the same way as a
+halted ticket: surfaced, its write withheld, and the flag itself is never
+touched.
 
 ## Flags
 

@@ -1,0 +1,16 @@
+{
+  "name": "us1-recognition-second-run",
+  "description": "Reconcile a three-story specification twice against the mocked Jira double: the first run creates three tickets and stamps three markers; the second run recognises all three by their recorded key and creates nothing (the reported defect, now fixed). SPEC_KIT_JIRA_ID_SOURCE pins the three identifiers so the resulting spec.md is byte-identical across ports (research R4).",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec",
+  "runs": [
+    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] },
+    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222 3333333333333333"
+  }
+}

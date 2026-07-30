@@ -139,6 +139,16 @@ entry is the canonical one the install wrote.
   `config.local.yml` is **byte-identical** (determinism, SC-004), and
   `.specify/extensions.yml` is byte-identical too — comments included.
 - Re-run a reconcile on an unchanged corpus: **zero writes** of every kind
-  (zero-churn idempotency, SC-001).
+  (zero-churn idempotency, SC-001). This is possible because the first run
+  writes one HTML comment line after each user story's heading —
+  `<!-- speckit-jira story=<id> ticket=<KEY> -->` — that lets the next run
+  recognise the ticket it already created instead of mirroring the story
+  again. Leave this line where the bridge puts it; it is invisible in a
+  rendered specification and carries no Jira coordinate, only a random
+  identifier and the issue key.
+- Confirm recognition worked by reading the `--json` run summary's `counts`:
+  a second, unchanged run reports `created: 0`, `updated: 0`, `recognised`
+  equal to the story count, and `skipped` equal to it too — not just an
+  absence of errors.
 - A forced reinstall preserves the team config and re-registers the seven events
   without duplicating them.

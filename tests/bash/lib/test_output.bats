@@ -106,3 +106,38 @@ line_of() {
   ps_out="$(pwsh -NoProfile -Command "Import-Module '${PS_LIB}/Output.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraSummaryProse '$json'))")"
   [ "$bash_out" = "$ps_out" ]
 }
+
+# =============================================================================
+# T054/T055 [Phase 7] — the run summary reports recognised/assigned/skipped
+# (Phase 3/4/6), in both JSON and prose form.
+# =============================================================================
+
+_output_wrapper() {
+  printf '%s' "$1" | summary_render_prose
+}
+
+@test "prose renders Recognised/Assigned when the summary carries them (reconcile)" {
+  local json='{"schema_version":"1.0","command":"reconcile","dry_run":false,"counts":{"created":0,"updated":0,"skipped":3,"warnings":0,"errors":0,"recognised":3,"assigned":0},"actions":[],"hook_health":{},"exit_code":0}'
+  run _output_wrapper "${json}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Recognised: 3, Assigned: 0"* ]]
+  [[ "$output" == *"Skipped: 3"* ]]
+}
+
+@test "prose omits Recognised/Assigned for a command that never reports them (config)" {
+  local json='{"schema_version":"1.0","command":"config","dry_run":false,"counts":{"created":0,"updated":0,"skipped":0,"warnings":0,"errors":0},"exit_code":0}'
+  run _output_wrapper "${json}"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Recognised"* ]]
+}
+
+@test "the PowerShell port renders Recognised/Assigned identically (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local json='{"schema_version":"1.0","command":"reconcile","dry_run":false,"counts":{"created":0,"updated":0,"skipped":3,"warnings":0,"errors":0,"recognised":3,"assigned":0},"actions":[],"hook_health":{},"exit_code":0}'
+  local b p
+  b="$(printf '%s' "${json}" | summary_render_prose)"
+  p="$(pwsh -NoProfile -Command "
+    Import-Module '${PS_LIB}/Output.psm1' -Force
+    [Console]::Out.Write((ConvertTo-JiraSummaryProse -Json '${json}'))")"
+  [ "${b}" = "${p}" ]
+}

@@ -232,6 +232,55 @@ YAML
   [[ "$output" == *"link_type"* ]]
 }
 
+@test "config_load rejects a phase_status_map that is not a mapping to status names (exit 4, T074)" {
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+    phase_status_map: "not-a-mapping"
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"phase_status_map"* ]]
+}
+
+@test "config_load accepts a valid phase_status_map and halted_statuses (T074)" {
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+    phase_status_map:
+      after_specify: "To Do"
+      after_plan: "In Progress"
+    halted_statuses:
+      - "Blocked"
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+}
+
+@test "config_load rejects a halted_statuses that is neither a list nor a string (exit 4, T074)" {
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+    halted_statuses:
+      count: 3
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"halted_statuses"* ]]
+}
+
 @test "config_load rejects an unknown top-level key (exit 4)" {
   write_valid_team
   cat >> "${DIR}/config.yml" <<'YAML'

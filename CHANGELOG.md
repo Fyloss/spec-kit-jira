@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-30
+
+Reconcile recognises the tickets it already created (005).
+
+`plan_writes` decided create-versus-update from a `tickets` map that only an
+explicit test override ever filled, so on a normal run the map was always
+empty and every user story was planned as a creation — running any lifecycle
+command twice mirrored every story again, duplicating every ticket it had
+already created seconds earlier.
+
+- **Each user story now carries a durable identifier**, recorded in one HTML
+  comment line immediately after its heading in `spec.md` and stamped on the
+  ticket's own identity property. The identifier is assigned once, survives a
+  retitle, a reorder, and a specification-folder rename, and is never
+  recomputed.
+- **A recognition step now runs before every write**: one direct read per
+  recorded ticket (never a search — Jira's search index is eventually
+  consistent, and the reported defect happened between two lifecycle
+  commands seconds apart) verifies the ticket's identity marker and decides
+  create-versus-update accordingly. A second run over an unchanged
+  specification now writes **nothing** to Jira at all.
+- **The run summary gains `recognised`, `assigned`, and a populated
+  `skipped`** (previously hard-coded to `0`), in both `--json` and the default
+  prose, so a reader can confirm an unchanged re-run did nothing rather than
+  mirrored nothing.
+- **The drift, Flagged, and blocker safety rules now engage** against real
+  recognised ticket state — a ticket advanced beyond its expected phase is
+  named in a warning and never silently overwritten, and a Flagged ticket's
+  transition is withheld — while this release still never moves a ticket's
+  status: no transition request is ever issued.
+- **A marker naming a ticket outside the routed project is mirrored into the
+  routed project** rather than blocked; the former ticket is left untouched.
+- **Existing tickets are not migrated.** A ticket created before this release
+  carries no marker and cannot be recognised: the first reconcile after
+  upgrading will mirror its specification afresh, producing one duplicate
+  generation. This is the one user-visible cost of the fix — after that first
+  run, every subsequent run is idempotent as described above.
+
 ## [0.5.0] - 2026-07-29
 
 Documented first-time setup, per platform.

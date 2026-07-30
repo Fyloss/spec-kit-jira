@@ -20,14 +20,18 @@ function Get-JiraIdentityKey {
 function Get-JiraIdentityMarker {
     <#
     .SYNOPSIS
-      Build the canonical marker value. Mirror of identity_marker.
+      Build the canonical marker value. Mirror of identity_marker. `Story`
+      (Phase 2, contracts/story-marker.md) is the durable story identifier;
+      omitted when absent.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] [string] $SpecRefJson, [Parameter(Mandatory)] [string] $Origin)
+    param([Parameter(Mandatory)] [string] $SpecRefJson, [Parameter(Mandatory)] [string] $Origin, [string] $Story = '')
     $s = $SpecRefJson | ConvertFrom-Json -Depth 100
     $repo = if ($s.PSObject.Properties.Name -contains 'repo' -and $null -ne $s.repo) { [string]$s.repo } else { '' }
     $slug = if ($s.PSObject.Properties.Name -contains 'spec_slug' -and $null -ne $s.spec_slug) { [string]$s.spec_slug } else { '' }
-    return (ConvertTo-JiraJsonValue ([ordered]@{ origin = $Origin; repo = $repo; spec_slug = $slug }))
+    $marker = [ordered]@{ origin = $Origin; repo = $repo; spec_slug = $slug }
+    if (-not [string]::IsNullOrEmpty($Story)) { $marker['story'] = $Story }
+    return (ConvertTo-JiraJsonValue $marker)
 }
 
 function Test-JiraIdentityClaimedByOther {
@@ -86,13 +90,13 @@ function Set-JiraIdentity {
       identity_write. Returns the transport exit code.
     #>
     [CmdletBinding(SupportsShouldProcess)]
-    param([Parameter(Mandatory)] [string] $IssueKey, [Parameter(Mandatory)] [string] $SpecRefJson, [Parameter(Mandatory)] [string] $Origin)
+    param([Parameter(Mandatory)] [string] $IssueKey, [Parameter(Mandatory)] [string] $SpecRefJson, [Parameter(Mandatory)] [string] $Origin, [string] $Story = '')
     if ([string]::IsNullOrEmpty($env:SPEC_KIT_JIRA_BASE_URL)) {
         [Console]::Error.WriteLine('identity: SPEC_KIT_JIRA_BASE_URL is not set')
         return [int](Get-JiraExitCode 'fail_closed')
     }
     if (-not $PSCmdlet.ShouldProcess($IssueKey, 'write identity property')) { return 0 }
-    $marker = Get-JiraIdentityMarker -SpecRefJson $SpecRefJson -Origin $Origin
+    $marker = Get-JiraIdentityMarker -SpecRefJson $SpecRefJson -Origin $Origin -Story $Story
     $r = Invoke-JiraRequest -Method PUT -Url (Get-JiraIdentityUrl $IssueKey) -Body $marker
     return [int]$r.ExitCode
 }

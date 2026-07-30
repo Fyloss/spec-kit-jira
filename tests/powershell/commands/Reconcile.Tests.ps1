@@ -54,13 +54,17 @@ Describe 'Invoke-JiraReconcile (dry-run)' {
     }
 
     It 'never re-sends the estimation on update (FR-018)' {
-        $env:SPEC_KIT_JIRA_PLAN_CONTEXT = '{"estimation_field_id":"customfield_30044","tickets":{"s1":"ABC-1"}}'
+        # T018: the durable identifier is pinned via SPEC_KIT_JIRA_ID_SOURCE
+        # (research R4) rather than the retired positional "s1", since a
+        # marker-less story is now assigned a fresh identifier before parsing.
+        $env:SPEC_KIT_JIRA_ID_SOURCE = '1111111111111111'
+        $env:SPEC_KIT_JIRA_PLAN_CONTEXT = '{"estimation_field_id":"customfield_30044","tickets":{"1111111111111111":"ABC-1"}}'
         try {
             $out = Invoke-Captured @('reconcile', '--dry-run', '--json', $script:SpecWith) | ConvertFrom-Json
             $out.actions[0].method | Should -Be 'PUT'
             $out.actions[0].body.fields.PSObject.Properties.Name | Should -Not -Contain 'customfield_30044'
         }
-        finally { $env:SPEC_KIT_JIRA_PLAN_CONTEXT = $null }
+        finally { $env:SPEC_KIT_JIRA_PLAN_CONTEXT = $null; $env:SPEC_KIT_JIRA_ID_SOURCE = $null }
     }
 
     It 'reports host-relative action urls (no coordinate leaks)' {

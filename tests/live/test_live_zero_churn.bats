@@ -44,12 +44,39 @@ teardown() {
   require_live
   # shellcheck source=/dev/null
   source "${CMD_DIR}/reconcile.sh"
-  # First run establishes the tickets; the second must be a pure zero-churn re-run.
-  cmd_reconcile reconcile --json "${SPEC}" > /dev/null
+
+  # Phase 3-4, US1/US2: the reported defect happened between two lifecycle
+  # commands seconds apart, so it is the FIRST-to-SECOND transition that
+  # must be proven live — a mocked Jira's search index has no lag to hide
+  # (Constitution II, research R2). The first run creates one ticket and
+  # stamps its marker into spec.md.
+  local first
+  first="$(cmd_reconcile reconcile --json "${SPEC}")"
+  [ "$(jq -r '.counts.created' <<< "${first}")" -eq 1 ]
+  local marker_line; marker_line="$(grep -o 'speckit-jira story=[0-9a-f]\{16\} ticket=[A-Z][A-Z0-9_]*-[1-9][0-9]*' "${SPEC}")"
+  [ -n "${marker_line}" ]
+  local ticket_key; ticket_key="$(printf '%s' "${marker_line}" | grep -o '[A-Z][A-Z0-9_]*-[1-9][0-9]*')"
+
+  # The second run must recognise that SAME ticket by its recorded key —
+  # never search — and issue zero writes of any kind.
   run cmd_reconcile reconcile --json "${SPEC}"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.counts.created' <<< "$output")" -eq 0 ]
   [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.counts.recognised' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.counts.skipped' <<< "$output")" -eq 1 ]
+  # spec.md still names the SAME ticket — the identifier was never reassigned.
+  grep -qF "${ticket_key}" "${SPEC}"
+
+  # A THIRD run, ten times over (SC-002), never drifts from that signature —
+  # an unchanged corpus stays a permanent no-op, not a one-time recognition.
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    run cmd_reconcile reconcile --json "${SPEC}"
+    [ "$status" -eq 0 ]
+    [ "$(jq -r '.counts.created' <<< "$output")" -eq 0 ]
+    [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
+  done
 }
 
 @test "SC-008: a forced reinstall preserves the team config and the registered hooks" {

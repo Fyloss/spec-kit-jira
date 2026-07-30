@@ -54,6 +54,57 @@ $SearchPageSize = if ($cfg.ContainsKey('pageSize')) { [int]$cfg.pageSize } else 
 # Optional issue key returned by POST /rest/api/3/issue (feature-creation tests
 # derive the branch <ID> from the created key's number).
 $CreatedKey = if ($cfg.ContainsKey('createdKey')) { [string]$cfg.createdKey } else { '' }
+
+# --- Stateful issue store (Phase 1, T001-T004) -------------------------------
+#
+# The double was write-only and stateless, so it could not express "the ticket
+# exists now" — the reason duplicate creation was invisible to the test suite.
+# Every created issue's fields and entity properties now live here for the
+# lifetime of this ONE mock process, so a scenario's two runs share the same
+# ticket and a fresh scenario starts clean. Keyed by issue key.
+$script:Issues = [System.Collections.Generic.Dictionary[string, object]]::new()
+$script:IssueCounters = @{}
+
+# Optional pre-seeded issues (a scenario's fixture: a ticket that already
+# exists before its first reconcile call, e.g. repo-with-mirrored-spec).
+if ($cfg.ContainsKey('issues')) {
+    foreach ($k in $cfg.issues.Keys) {
+        $seed = $cfg.issues[$k]
+        $fields = @{
+            summary     = if ($seed.ContainsKey('summary')) { $seed.summary } else { '' }
+            description = if ($seed.ContainsKey('description')) { $seed.description } else { $null }
+            priority    = if ($seed.ContainsKey('priority')) { $seed.priority } else { $null }
+            status      = if ($seed.ContainsKey('status')) { $seed.status } else { @{ name = 'To Do'; statusCategory = @{ key = 'new' } } }
+            issuelinks  = if ($seed.ContainsKey('issuelinks')) { $seed.issuelinks } else { @() }
+        }
+        if ($seed.ContainsKey('flagged') -and $seed.flagged) {
+            $fields['Flagged'] = @(@{ value = 'Impediment' })
+        }
+        $props = @{}
+        if ($seed.ContainsKey('properties')) { $props = $seed.properties }
+        $script:Issues[$k] = @{ fields = $fields; properties = $props }
+    }
+}
+
+function Get-MockRequestProjectKey {
+    # The project key a POST /rest/api/3/issue body creates in, or 'COMP' when
+    # the body carries none (keeps the transport smoke test's single-call
+    # expectation — tests/bash/sink/test_client.bats — while still being
+    # genuinely sequential across multiple calls in one mock session).
+    param([string]$Body)
+    if ($Body -match '"project"\s*:\s*\{\s*"key"\s*:\s*"([^"]+)"') { return $Matches[1] }
+    return 'COMP'
+}
+
+function New-MockIssueKey {
+    # A distinct, sequential key per project (T001): the defect this feature
+    # fixes was invisible precisely because every creation returned the SAME
+    # fixed key, so a second creation could not be told apart from the first.
+    param([string]$ProjectKey)
+    if (-not $script:IssueCounters.ContainsKey($ProjectKey)) { $script:IssueCounters[$ProjectKey] = 0 }
+    $script:IssueCounters[$ProjectKey]++
+    return "$ProjectKey-$($script:IssueCounters[$ProjectKey])"
+}
 # Optional per-project createmeta-fields fixture override (US4 research R4
 # branch 2): lets a scenario exercise a company-managed project whose create
 # metadata declares `allowedValues` on its priority field, without touching
@@ -164,7 +215,7 @@ function Read-FixtureBody {
 }
 
 function Resolve-Route {
-    param([string]$Method, [string]$Path, [string]$Query = '')
+    param([string]$Method, [string]$Path, [string]$Query = '', [string]$Body = '')
     $style = Get-Style -Path $Path
     $metaStyle = Get-MetaStyle -Style $style
     switch -regex ($Path) {
@@ -179,17 +230,48 @@ function Resolve-Route {
         '^/rest/api/3/issue$'                                         {
             if ($Method -eq 'POST') {
                 if ($CreatedKey) {
-                    return @{ status = 201; body = "{`"id`":`"99001`",`"key`":`"$CreatedKey`",`"self`":`"/rest/api/3/issue/99001`"}" }
+                    $key = $CreatedKey
                 }
-                $b = Read-FixtureBody 'issue-created'; $b.status = 201; return $b
+                else {
+                    $projKey = Get-MockRequestProjectKey -Body $Body
+                    $key = New-MockIssueKey -ProjectKey $projKey
+                }
+                $suppliedFields = @{}
+                try {
+                    $bodyObj = $Body | ConvertFrom-Json -AsHashtable
+                    if ($bodyObj -and $bodyObj.ContainsKey('fields')) { $suppliedFields = $bodyObj.fields }
+                }
+                catch { }
+                $fields = @{
+                    summary     = if ($suppliedFields.ContainsKey('summary')) { $suppliedFields.summary } else { '' }
+                    description = if ($suppliedFields.ContainsKey('description')) { $suppliedFields.description } else { $null }
+                    priority    = if ($suppliedFields.ContainsKey('priority')) { $suppliedFields.priority } else { $null }
+                    status      = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }
+                    issuelinks  = @()
+                }
+                $script:Issues[$key] = @{ fields = $fields; properties = @{} }
+                return @{ status = 201; body = "{`"id`":`"99001`",`"key`":`"$key`",`"self`":`"/rest/api/3/issue/99001`"}" }
             }
         }
         '^/rest/api/3/issue/[^/]+/transitions$'                       { if ($Method -eq 'POST') { return @{ status = 204; body = '' } } }
         '^/rest/api/3/issue/[^/]+/remotelink$'                        { if ($Method -eq 'GET') { return (Read-FixtureBody 'remotelinks') } }
         '^/rest/api/3/(search|search/jql)$'                           { if ($Method -eq 'GET') { return (Read-FixtureBody 'search-siblings') } }
         '^/rest/api/3/issue/[^/]+/properties/[^/]+$' {
-            if ($Method -eq 'PUT') { return @{ status = 204; body = '' } }
+            $ikey = ($Path -split '/')[-3]
+            $propKey = ($Path -split '/')[-1]
+            if ($Method -eq 'PUT') {
+                if ($script:Issues.ContainsKey($ikey)) {
+                    $val = $null
+                    try { $val = $Body | ConvertFrom-Json -AsHashtable } catch { $val = $Body }
+                    $script:Issues[$ikey].properties[$propKey] = $val
+                }
+                return @{ status = 204; body = '' }
+            }
             if ($Method -eq 'GET') {
+                if ($script:Issues.ContainsKey($ikey) -and $script:Issues[$ikey].properties.ContainsKey($propKey)) {
+                    $wrapped = @{ key = $propKey; value = $script:Issues[$ikey].properties[$propKey] }
+                    return @{ status = 200; body = ($wrapped | ConvertTo-Json -Depth 20 -Compress) }
+                }
                 $marker = Get-IdentityMarker -Path $Path
                 if ($marker) { return @{ status = 200; body = $marker } }
                 $b = Read-FixtureBody 'issue-property'
@@ -198,18 +280,46 @@ function Resolve-Route {
             }
         }
         '^/rest/api/3/issue/[^/]+$' {
+            $ikey = ($Path -split '/')[-1]
             if ($Method -eq 'GET') {
                 # Mentioned-ticket validation (fields=project): the issue's project
                 # is its key prefix; an unconfigured project is a 404 (fail-closed).
                 if ($Query -match '(^|&)fields=project(&|$)') {
-                    $ikey = ($Path -split '/')[-1]
                     $pkey = ($ikey -split '-')[0]
                     if ($Projects.ContainsKey($pkey)) {
                         return @{ status = 200; body = "{`"key`":`"$ikey`",`"fields`":{`"project`":{`"key`":`"$pkey`"}}}" }
                     }
                     return @{ status = 404; body = '{"errorMessages":["not found"],"errors":{}}' }
                 }
+                if ($script:Issues.ContainsKey($ikey)) {
+                    $issue = $script:Issues[$ikey]
+                    $resp = @{ key = $ikey; fields = $issue.fields }
+                    if ($Query -match '(^|&)properties=([^&]+)') {
+                        $propNames = $Matches[2] -split ','
+                        $propsOut = @{}
+                        foreach ($pn in $propNames) {
+                            if ($issue.properties.ContainsKey($pn)) { $propsOut[$pn] = $issue.properties[$pn] }
+                        }
+                        $resp['properties'] = $propsOut
+                    }
+                    return @{ status = 200; body = ($resp | ConvertTo-Json -Depth 20 -Compress) }
+                }
+                # Unseeded / unknown key: the legacy default fixture, for
+                # existing mention/discovery tests that never created a
+                # stateful issue.
                 return (Read-FixtureBody 'issue-mentioned')
+            }
+            if ($Method -eq 'PUT') {
+                if ($script:Issues.ContainsKey($ikey)) {
+                    $suppliedFields = @{}
+                    try {
+                        $bodyObj = $Body | ConvertFrom-Json -AsHashtable
+                        if ($bodyObj -and $bodyObj.ContainsKey('fields')) { $suppliedFields = $bodyObj.fields }
+                    }
+                    catch { }
+                    foreach ($k in $suppliedFields.Keys) { $script:Issues[$ikey].fields[$k] = $suppliedFields[$k] }
+                }
+                return @{ status = 204; body = '' }
             }
         }
         default { }
@@ -311,7 +421,7 @@ try {
             }
 
             $query = if (($target -split '\?').Count -ge 2) { ($target -split '\?')[1] } else { '' }
-            $route = Resolve-Route -Method $method -Path $path -Query $query
+            $route = Resolve-Route -Method $method -Path $path -Query $query -Body $body
             Write-Response -Stream $stream -Status ([int]$route.status) -Body ([string]$route.body)
         }
         finally {

@@ -24,11 +24,16 @@ source "${_identity_dir}/client.sh"
 
 : "${SPEC_KIT_JIRA_IDENTITY_KEY:=spec-kit-jira}"
 
-# identity_marker <spec-ref-json> <origin> — build the canonical marker value.
+# identity_marker <spec-ref-json> <origin> [story-id] — build the canonical
+# marker value. `story` (Phase 2, contracts/story-marker.md) is the durable
+# story identifier; it is omitted when absent — the feature-naming ceremony
+# and the mentioned-ticket flow mirror a whole feature rather than one story,
+# and those tickets are not story tickets (data-model.md "Identity marker").
 identity_marker() {
-  local spec_ref="$1" origin="$2"
-  jq -cn --argjson s "${spec_ref}" --arg o "${origin}" \
-    '{origin:$o, repo:($s.repo // ""), spec_slug:($s.spec_slug // "")}' | json_canonical
+  local spec_ref="$1" origin="$2" story="${3:-}"
+  jq -cn --argjson s "${spec_ref}" --arg o "${origin}" --arg story "${story}" \
+    '{origin:$o, repo:($s.repo // ""), spec_slug:($s.spec_slug // "")}
+     + (if $story == "" then {} else {story:$story} end)' | json_canonical
 }
 
 # identity_claimed_by_other <marker-json> <spec-ref-json> — return 0 when the
@@ -77,16 +82,17 @@ identity_read() {
   return "${rc}"
 }
 
-# identity_write <issue-key> <spec-ref-json> <origin> — stamp the identity marker
-# on the ticket via the entity property. Returns the transport exit code.
+# identity_write <issue-key> <spec-ref-json> <origin> [story-id] — stamp the
+# identity marker on the ticket via the entity property. Returns the
+# transport exit code.
 identity_write() {
-  local key="$1" spec_ref="$2" origin="$3"
+  local key="$1" spec_ref="$2" origin="$3" story="${4:-}"
   if [[ -z "${SPEC_KIT_JIRA_BASE_URL:-}" ]]; then
     printf 'identity: SPEC_KIT_JIRA_BASE_URL is not set\n' >&2
     return "$(cli_exit_code fail_closed)"
   fi
   local url marker
   url="$(_identity_url "${key}")"
-  marker="$(identity_marker "${spec_ref}" "${origin}")"
+  marker="$(identity_marker "${spec_ref}" "${origin}" "${story}")"
   jira_request PUT "${url}" "${marker}" > /dev/null
 }
