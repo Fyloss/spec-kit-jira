@@ -67,6 +67,10 @@ fi
 MOCK_CFG="$(mktemp)"
 jq '.mock // {}' "${SCENARIO}" > "${MOCK_CFG}"
 mock_start "${MOCK_CFG}"
+# Recorded so a caller can identify THIS run's mock precisely — a name-pattern
+# scan (pgrep -f mock-server.ps1) also matches every other scenario's mock
+# running concurrently under a parallel test suite.
+echo "${MOCK_PID}" > "${OUTDIR}/mock.pid"
 # From here on every exit path reaps the mock, including the ones `set -e` takes
 # on our behalf. An orphan holds each descriptor it inherited, and whoever reads
 # the other end then blocks forever rather than failing.

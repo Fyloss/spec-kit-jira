@@ -31,14 +31,16 @@ jobs:
 
       - name: Install Bash toolchain (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y bats jq shellcheck curl
+        # GNU parallel drives bats' --jobs flag below, splitting the suite
+        # across cores instead of running every @test on a single one.
+        run: sudo apt-get update && sudo apt-get install -y bats jq shellcheck curl parallel
 
       - name: Install Bash toolchain (macOS)
         if: runner.os == 'macOS'
         # The runner image only ships Apple's Bash 3.2, which the port refuses
         # by design (prereq_check requires Bash >= 4); brew's bash lands in
         # /opt/homebrew/bin, ahead of /bin in the image PATH.
-        run: brew install bats-core jq shellcheck bash
+        run: brew install bats-core jq shellcheck bash parallel
 
       # T003 — the install harness (tests/conformance/install-harness.sh and its
       # PowerShell twin) drives the REAL `specify extension add`. Without the CLI
@@ -54,7 +56,11 @@ jobs:
 
       - name: Run bats (Bash port — POSIX hosts only)
         if: runner.os != 'Windows'
-        run: bats -r tests/bash
+        # --jobs runs @test cases (and, within a file, its own tests) across
+        # cores via GNU parallel. Each test already isolates its own tmpdir
+        # and the mock Jira server binds an OS-assigned ephemeral port, so
+        # concurrent runs cannot collide on shared state.
+        run: bats -r tests/bash --jobs "$(getconf _NPROCESSORS_ONLN)"
 
       - name: Run Pester (PowerShell port — all hosts)
         shell: pwsh
@@ -114,13 +120,20 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           harness="tests/conformance/run-scenario.sh"
-          failed=0
           scenarios=(tests/conformance/scenarios/*.json)
           if [ ${#scenarios[@]} -eq 0 ]; then
             echo "conformance corpus is empty — nothing to compare (scenarios land per user story)"
             exit 0
           fi
-          for scenario in "${scenarios[@]}"; do
+
+          # Scenarios are independent (each gets its own mktemp workdir and an
+          # OS-assigned ephemeral mock port, per run-scenario.sh), so they run
+          # concurrently across cores instead of one after another. xargs -P
+          # exits 123 if any invocation of run_scenario fails, which `set -e`
+          # below turns into this step's failure — no manual result-collection
+          # needed.
+          run_scenario() {
+            local scenario="$1" name out_bash out_ps failed=0
             name="$(basename "${scenario}" .json)"
             out_bash="$(mktemp -d)"
             out_ps="$(mktemp -d)"
@@ -138,5 +151,10 @@ jobs:
               echo "::error::conformance divergence in ${name} (written files)"
               failed=1
             fi
-          done
-          exit "${failed}"
+            return "${failed}"
+          }
+          export -f run_scenario
+          export harness
+
+          printf '%s\n' "${scenarios[@]}" \
+            | xargs -P "$(nproc)" -I{} bash -c 'run_scenario "$@"' _ {}

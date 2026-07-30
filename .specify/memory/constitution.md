@@ -1,6 +1,42 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 1.0.1 → 1.1.0 (MINOR — materially expanded guidance: one new rule added
+to an existing principle. No principle added, removed, renumbered, or redefined; nothing
+existing weakened or restated.)
+Modified principles:
+  XIII. TDD With a Minimum 80% Coverage — added a test-isolation rule: tests MUST identify
+      the state they observe, assert on, or clean up (processes, files, directories, ports)
+      by an identifier the test itself recorded from what it spawned or created, never by a
+      name pattern or any other global/process-wide/machine-wide scan; where a harness owns
+      the spawn, it MUST publish that identifier into run-scoped output. The enforcement
+      test gains two clauses: every suite stays green under parallel execution, and any test
+      locating a process, file, or port by name pattern is a review rejection. The rest of
+      Principle XIII (Red-Green-Refactor, the 80% statement-coverage gate and its
+      per-implementation tooling, critical-path targets, regression tests) is unchanged.
+Rationale: surfaced by a real defect. The conformance harness test "harness stops the mock
+when the run aborts after the mock started" (tests/bash/conformance/test_run_scenario.bats)
+detected leaked mock processes with `pgrep -f mock-server.ps1` — a name-pattern scan across
+the whole machine. Under `bats --jobs` it matched OTHER scenarios' mock servers running
+concurrently and failed a passing test with no real leak. Fixed by having the harness
+(tests/conformance/run-scenario.sh) record its own mock's PID to a run-scoped file and
+having the test assert on that PID specifically. The rule generalizes the fix: a test that
+assumes exclusive access to machine-wide state is correct only by the accident of running
+alone, and breaks the moment the suite is parallelized.
+Added sections: none
+Removed sections: none
+Templates: re-verified — no template changes required
+  - ✅ .specify/templates/plan-template.md — no testing-discipline or coverage wording
+    affected by this amendment
+  - ✅ .specify/templates/spec-template.md — Constitution Check rows reference principle
+    titles only; Principle XIII's title is unchanged
+  - ✅ .specify/templates/tasks-template.md — no reference to test-isolation or coverage
+    wording
+  - ✅ .specify/templates/checklist-template.md — no changes required
+Follow-up TODOs: none
+
+Prior report (1.0.1)
+--------------------
 Version change: 1.0.0 → 1.0.1 (PATCH — clarifications making existing enforcement
 mechanically verifiable in the ratified script-native design; no principle added,
 removed, renumbered, or materially expanded.)
@@ -373,13 +409,26 @@ Development is test-driven, strictly Red-Green-Refactor:
   exercised.
 - Critical paths — drift decision, idempotency, fail-closed, privacy guard, credential
   resolution — target coverage close to 100%.
+- **Test isolation — identify state by recorded identity, never by pattern**: a test MUST
+  identify every piece of state it observes, asserts on, or cleans up — processes, files,
+  directories, ports — by an identifier the test itself recorded from what it spawned or
+  created (a PID captured at launch, a path it generated, a port it bound), and MUST NEVER
+  identify it by a name pattern or any other global, process-wide, or machine-wide scan
+  (`pgrep -f`, a fixed well-known port, a shared temporary path). A test that scans
+  machine-wide state assumes exclusive access to the machine: it is correct only by the
+  accident of running alone, and it breaks the moment the suite is parallelized or another
+  test happens to run concurrently. Where a harness owns the spawn, the harness MUST
+  publish the identifier into run-scoped output (e.g. write the PID it started to a file
+  under the run's output directory) so the test can assert against that identifier alone.
 - Every fixed bug MUST ship with a regression test written before the fix.
 
 **Enforcement test**: CI publishes statement coverage for both implementations
 (Pester CodeCoverage for PowerShell; kcov for Bash, or the requirement→scenario
 traceability check while the documented fallback is active) computed on the mocked
 unit suites, and fails below 80%; `tasks.md` review rejects any implementation task
-not preceded by its test task.
+not preceded by its test task; every suite MUST stay green under parallel execution
+(e.g. `bats --jobs`), and any test that locates a process, file, or port by name pattern
+or machine-wide scan rather than by a recorded identifier is a review rejection.
 
 ### XIV. KISS — The Simplest Solution That Satisfies the Spec
 
@@ -457,4 +506,4 @@ whose review requires verbal explanations to be understood fails this principle.
 - Every PR review verifies compliance with all sixteen principles; any deviation MUST
   be justified in the plan's "Complexity Tracking" section or the PR is rejected.
 
-**Version**: 1.0.1 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-07-23
+**Version**: 1.1.0 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-07-30
