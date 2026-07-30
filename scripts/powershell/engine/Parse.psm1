@@ -12,6 +12,44 @@
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force # canonical serialiser only — lib/, never sink/
+Import-Module (Join-Path $PSScriptRoot 'StoryMarker.psm1') -Force # the durable identifier's grammar (Phase 2)
+
+function Remove-JiraParseMarkerLines {
+    <#
+    .SYNOPSIS
+      Remove every speckit-jira marker attempt line (valid or malformed —
+      contract "Reading rules" #2) from $Text, so it never lands in a title,
+      description, acceptance criterion, or design item.
+    #>
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
+    $lines = Split-JiraParseLine $Text
+    $out = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in $lines) {
+        $info = ConvertTo-JiraStoryMarkerInfo -Line $line | ConvertFrom-Json -Depth 20
+        if ($info.kind -ne 'none') { continue }
+        $out.Add($line)
+    }
+    return ($out -join "`n")
+}
+
+function Get-JiraParseLocalIdForMarker {
+    <#
+    .SYNOPSIS
+      The story's local_id derived from its marker (research R7): the
+      marker's own identifier when one resolves it; empty for a truly
+      unassigned section; a freshly generated identifier for a "duplicate"
+      section, so the story still has a legitimate, unique local_id and is
+      excluded from the write plan by itself rather than failing the whole
+      document's schema validation.
+    #>
+    param([Parameter(Mandatory)] [string] $InfoJson)
+    $info = $InfoJson | ConvertFrom-Json -Depth 20
+    switch ([string]$info.state) {
+        'absent' { return '' }
+        'duplicate' { return (New-JiraStoryMarkerId) }
+        default { return [string]$info.id }
+    }
+}
 
 function Split-JiraParseLine {
     param([string] $Text)
@@ -281,8 +319,9 @@ function Get-JiraParsedStory {
       Assemble one neutral story from a section of the spec. Mirror of parse_story.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text, [Parameter(Mandatory)] [string] $FolderSlug, [Parameter(Mandatory)] [string] $LocalId)
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text, [Parameter(Mandatory)] [string] $FolderSlug, [Parameter(Mandatory)] [AllowEmptyString()] [string] $LocalId)
 
+    $Text = Remove-JiraParseMarkerLines -Text $Text
     $title = Get-JiraParsedTitle -Text $Text -FolderSlug $FolderSlug
     $desc = Get-JiraParsedDescription -Text $Text | ConvertFrom-Json -Depth 100
     $ac = @(Get-JiraParsedAcceptance -Text $Text | ConvertFrom-Json -Depth 100)
@@ -314,16 +353,25 @@ function Get-JiraParsedSpec {
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text, [Parameter(Mandatory)] [string] $FolderSlug)
     $lines = Split-JiraParseLine $Text
 
-    $etitle = Get-JiraParsedTitle -Text $Text -FolderSlug $FolderSlug
-    $edesc = Get-JiraParsedDescription -Text $Text | ConvertFrom-Json -Depth 100
+    $cleanText = Remove-JiraParseMarkerLines -Text $Text
+    $etitle = Get-JiraParsedTitle -Text $cleanText -FolderSlug $FolderSlug
+    $edesc = Get-JiraParsedDescription -Text $cleanText | ConvertFrom-Json -Depth 100
 
+    # Split into user-story sections, tracking each heading's ABSOLUTE
+    # 1-based line number (the "anchor", exactly as StoryMarker.psm1's
+    # assignment scan defines it) so the marker section-info lookup below
+    # reports line numbers a human can find in the real file.
     $sections = [System.Collections.Generic.List[string]]::new()
+    $anchors = [System.Collections.Generic.List[int]]::new()
     $cur = ''
     $inStory = $false
+    $lineno = 0
     foreach ($line in $lines) {
+        $lineno++
         if ($line -match '^#{2,4}\s+User Story') {
             if ($inStory) { $sections.Add($cur) }
             $cur = "$line`n"; $inStory = $true
+            $anchors.Add($lineno)
         }
         elseif ($inStory) {
             $cur += "$line`n"
@@ -331,15 +379,32 @@ function Get-JiraParsedSpec {
     }
     if ($inStory) { $sections.Add($cur) }
 
+    $totalLines = Get-JiraStoryMarkerLineCount -Content $Text
     $stories = [System.Collections.Generic.List[object]]::new()
+
     if ($sections.Count -eq 0) {
-        $stories.Add((Get-JiraParsedStory -Text $Text -FolderSlug $FolderSlug -LocalId 's1' | ConvertFrom-Json -Depth 100))
+        # The implicit single story: the marker sits after the document's
+        # H1, or the file's first line when there is no H1 either — anchor 0
+        # means "before line 1", matching StoryMarker.psm1's own convention.
+        $docAnchors = @(Get-JiraStoryMarkerAnchors -Content $Text)
+        $anchor = $docAnchors[0]
+        $spanStart = if ($anchor -eq 0) { 1 } else { $anchor + 1 }
+        $minfo = Get-JiraStoryMarkerSectionInfo -Content $Text -Start $spanStart -End $totalLines
+        $localId = Get-JiraParseLocalIdForMarker -InfoJson $minfo
+        $story = Get-JiraParsedStory -Text $Text -FolderSlug $FolderSlug -LocalId $localId | ConvertFrom-Json -Depth 100
+        $story | Add-Member -MemberType NoteProperty -Name 'marker' -Value ($minfo | ConvertFrom-Json -Depth 20)
+        $stories.Add($story)
     }
     else {
-        $i = 0
-        foreach ($s in $sections) {
-            $i++
-            $stories.Add((Get-JiraParsedStory -Text $s -FolderSlug $FolderSlug -LocalId "s$i" | ConvertFrom-Json -Depth 100))
+        $n = $sections.Count
+        for ($i = 0; $i -lt $n; $i++) {
+            $spanStart = $anchors[$i] + 1
+            $spanEnd = if ($i + 1 -lt $n) { $anchors[$i + 1] - 1 } else { $totalLines }
+            $minfo = Get-JiraStoryMarkerSectionInfo -Content $Text -Start $spanStart -End $spanEnd
+            $localId = Get-JiraParseLocalIdForMarker -InfoJson $minfo
+            $story = Get-JiraParsedStory -Text $sections[$i] -FolderSlug $FolderSlug -LocalId $localId | ConvertFrom-Json -Depth 100
+            $story | Add-Member -MemberType NoteProperty -Name 'marker' -Value ($minfo | ConvertFrom-Json -Depth 20)
+            $stories.Add($story)
         }
     }
 

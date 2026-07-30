@@ -1,0 +1,16 @@
+# Machine-owned resolved identifiers, discovered by the config command
+# (gitignored in a real repository; committed here only as a fixture for
+# reproducible conformance testing).
+resolved_ids:
+  COMP:
+    style: company_managed
+    issue_types:
+      Epic: "10001"
+      Story: "10004"
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"
+    estimation_field_id: "customfield_20011"

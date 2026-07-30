@@ -53,8 +53,12 @@ in a consuming repository, and assuming it does is what produced the reported
 
 3. **Interpret the outcome and report exactly one line** — never more than one
    message per host command run, whatever the outcome:
-   - **success** — the `counts.created` / `counts.updated` figures from the run
-     summary;
+   - **success** — the `counts.created` / `counts.updated` / `counts.
+     recognised` / `counts.skipped` figures from the run summary. On a
+     second run over an unchanged specification, `created` and `updated`
+     are both `0`; `recognised` equals the story count and `skipped` does
+     too — this is the correct signature of an idempotent re-run, not a
+     failure to mirror anything;
    - **degraded** — one warning naming the true cause, from the table below;
    - **disabled** — for an event the operator disabled, the bridge exits `0`
      silently. Report **nothing at all**; do not announce that it was skipped.
@@ -106,6 +110,23 @@ Every command name you put in a message must be runnable exactly as spelled:
 - an invocation of the bridge is always one of the two repository-relative paths
   in the table above;
 - a host command is given in the form the operator actually runs.
+
+## The story marker line
+
+Immediately after each `### User Story` heading (or after the document's `#`
+title, for a specification with no such headings), reconcile writes one HTML
+comment line:
+
+```markdown
+<!-- speckit-jira story=7f3a9c1e40b2d85a ticket=PROJ-142 -->
+```
+
+This is how a **second** run recognises the ticket it already created instead of
+mirroring the story again — the identifier is assigned once, persists across a
+retitle, reorder, or a specification-folder rename, and is never recomputed. It
+is spec-kit-jira's own bookkeeping; leave it exactly where it is. Deleting it (or
+regenerating `spec.md` from the template) makes the next run treat that story as
+new, mirroring it again — the ticket it used to point at is left untouched.
 
 ## Flags
 

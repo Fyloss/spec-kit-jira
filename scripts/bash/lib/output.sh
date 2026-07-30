@@ -90,6 +90,15 @@ summary_render_prose() {
   [[ "${dry}" == "true" ]] && suffix=" (dry-run)"
   printf 'Command: %s%s\n' "${command}" "${suffix}"
   printf 'Created: %s, Updated: %s, Skipped: %s\n' "${created}" "${updated}" "${skipped}"
+  # recognised/assigned (Phase 7, US1/US2) exist only on reconcile's summary
+  # — a reader confirms an unchanged re-run recognised every story and
+  # created nothing, without needing --json.
+  if [[ "$(jq -r '.counts | has("recognised")' <<< "${json}")" == "true" ]]; then
+    local recognised assigned
+    recognised="$(jq -r '.counts.recognised' <<< "${json}")"
+    assigned="$(jq -r '.counts.assigned' <<< "${json}")"
+    printf 'Recognised: %s, Assigned: %s\n' "${recognised}" "${assigned}"
+  fi
   printf 'Warnings: %s, Errors: %s\n' "${warnings}" "${errors}"
   # The config ceremony's effects, reported separately (FR-054). Rendered in a
   # fixed order (discovery, hooks, readme, gitignore) so both ports match

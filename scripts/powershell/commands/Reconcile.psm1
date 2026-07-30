@@ -14,6 +14,8 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../engine/Parse.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../engine/Interchange.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../engine/StoryMarker.psm1') -Force # R5 step 1 — assign identifiers
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/Recognition.psm1') -Force # R5 step 2 — recognise recorded tickets
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/PlanApply.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force # hook health — READ ONLY (003 FR-022)
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force          # the operator disable record
@@ -65,8 +67,15 @@ function Get-JiraReconcileFaultCode {
       closed (Constitution III).
     #>
     param([int] $Code, [string] $Message)
+    # Phase 6, US4 (T053 audit): in hook context every early-return fault
+    # gets the SAME standardised WARNING wording the late apply-failure path
+    # uses — the caller's specific message is kept, just wrapped, so every
+    # degraded path reads identically under a hook (FR-016).
+    if ($env:SPEC_KIT_JIRA_HOOK_CONTEXT) {
+        [Console]::Error.WriteLine("WARNING: $Message (exit $Code). This spec-kit command completed normally.")
+        return 0
+    }
     [Console]::Error.WriteLine($Message)
-    if ($env:SPEC_KIT_JIRA_HOOK_CONTEXT) { return 0 }
     return $Code
 }
 
@@ -119,6 +128,77 @@ function Get-JiraReconcileEpicStrategy {
         }
     }
     return 'per_repo'
+}
+
+function Get-JiraReconcilePhaseStatusMap {
+    <#
+    .SYNOPSIS
+      The resolved project's declared phase->status map (Phase 6, US4,
+      research R9), or {} when the project declares none. Mirror of
+      _reconcile_phase_status_map.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $ProjectKey, [Parameter(Mandatory)] [string] $ConfigJson)
+    $cfg = $ConfigJson | ConvertFrom-Json -Depth 100
+    $projectsVal = Get-JiraPlanPropSafe $cfg 'projects'
+    $projects = if ($null -ne $projectsVal) { @($projectsVal) } else { @() }
+    foreach ($p in $projects) {
+        if ([string](Get-JiraPlanPropSafe $p 'key') -eq $ProjectKey) {
+            $v = Get-JiraPlanPropSafe $p 'phase_status_map'
+            if ($null -ne $v) { return (ConvertTo-JiraJsonValue $v) }
+        }
+    }
+    return '{}'
+}
+
+function Get-JiraReconcileHaltedStatuses {
+    <#
+    .SYNOPSIS
+      The resolved project's declared operator stop-states (Phase 6, US4),
+      or [] when none. Mirror of _reconcile_halted_statuses.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $ProjectKey, [Parameter(Mandatory)] [string] $ConfigJson)
+    $cfg = $ConfigJson | ConvertFrom-Json -Depth 100
+    $projectsVal = Get-JiraPlanPropSafe $cfg 'projects'
+    $projects = if ($null -ne $projectsVal) { @($projectsVal) } else { @() }
+    foreach ($p in $projects) {
+        if ([string](Get-JiraPlanPropSafe $p 'key') -eq $ProjectKey) {
+            $v = Get-JiraPlanPropSafe $p 'halted_statuses'
+            if ($null -ne $v) { return (ConvertTo-JiraJsonValue @($v)) }
+        }
+    }
+    return '[]'
+}
+
+function Get-JiraReconcilePhaseOrder {
+    <#
+    .SYNOPSIS
+      The DISTINCT statuses a phase->status map resolves to, IN THE FIXED
+      CANONICAL LIFECYCLE-EVENT ORDER (extension.yml's own hook list) —
+      deliberately NOT Get-JiraPhaseStatusTargetSet, whose own tested
+      contract accepts arbitrary phase names and therefore returns them
+      SORTED, not chronologically (Import-JiraConfig's merge also sorts the
+      map's own keys, so declaration order can never be recovered from the
+      map alone). Reconcile's phase names ARE the fixed lifecycle events, so
+      this local helper can use that closed vocabulary to restore the true
+      chronological order drift's ahead/behind comparison depends on
+      (Phase 6, US4, research R9). Mirror of _reconcile_phase_order.
+    #>
+    [CmdletBinding()]
+    param([string] $PhaseStatusMapJson = '{}')
+    $pm = $PhaseStatusMapJson | ConvertFrom-Json -Depth 100
+    $canonicalOrder = @('before_specify', 'after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')
+    $distinct = [System.Collections.Generic.List[string]]::new()
+    foreach ($event in $canonicalOrder) {
+        if ($pm -isnot [System.Management.Automation.PSCustomObject]) { continue }
+        $member = $pm.PSObject.Properties[$event]
+        if ($null -eq $member) { continue }
+        $v = [string]$member.Value
+        if ([string]::IsNullOrEmpty($v)) { continue }
+        if (-not $distinct.Contains($v)) { $distinct.Add($v) }
+    }
+    return (ConvertTo-JiraJsonValue $distinct)
 }
 
 function Get-JiraPlanPropSafe {
@@ -176,7 +256,8 @@ function Get-JiraReconcilePlanContextFromBinding {
         [Parameter(Mandatory)] [string] $BaseUrl,
         [Parameter(Mandatory)] [string] $ProjectKey,
         [Parameter(Mandatory)] [string] $ConfigDir,
-        [Parameter(Mandatory)] [string] $ConfigJson
+        [Parameter(Mandatory)] [string] $ConfigJson,
+        [string] $RecognitionJson = '{}'
     )
     if ($env:SPEC_KIT_JIRA_PLAN_CONTEXT) {
         return [pscustomobject]@{ ExitCode = 0; Json = (Get-JiraReconcilePlanContext -BaseUrl $BaseUrl) }
@@ -209,10 +290,35 @@ function Get-JiraReconcilePlanContextFromBinding {
         $priorityIds[$lvl] = $id
     }
 
+    # Phase 3, US1: tickets/ticket_origins/ticket_descriptions come from
+    # recognition's `bound` map instead of only from the override
+    # (data-model.md "Plan context").
+    $recog = $RecognitionJson | ConvertFrom-Json -Depth 100
+    $boundVal = Get-JiraPlanPropSafe $recog 'bound'
+    $tickets = [ordered]@{}
+    $ticketOrigins = [ordered]@{}
+    $ticketDescriptions = [ordered]@{}
+    if ($boundVal) {
+        foreach ($p in $boundVal.PSObject.Properties) {
+            $tickets[$p.Name] = [string](Get-JiraPlanPropSafe $p.Value 'key')
+            # Populated ONLY for a non-bridge origin (FR-038): a "bridge"
+            # origin means plan_writes owns the whole description (the US3
+            # behaviour, unchanged) — the same meaning an absent map entry
+            # has always had.
+            $originVal = [string](Get-JiraPlanPropSafe $p.Value 'origin')
+            if ($originVal -ne 'bridge') { $ticketOrigins[$p.Name] = $originVal }
+            $current = Get-JiraPlanPropSafe $p.Value 'current'
+            $ticketDescriptions[$p.Name] = Get-JiraPlanPropSafe $current 'description'
+        }
+    }
+
     $result = [ordered]@{ base_url = $BaseUrl }
     if (-not [string]::IsNullOrEmpty($storyType)) { $result['story_type_id'] = $storyType }
     if ($priorityIds.Count -gt 0) { $result['priority_ids'] = $priorityIds }
     if (-not [string]::IsNullOrEmpty($estField)) { $result['estimation_field_id'] = $estField }
+    if ($tickets.Count -gt 0) { $result['tickets'] = $tickets }
+    if ($ticketOrigins.Count -gt 0) { $result['ticket_origins'] = $ticketOrigins }
+    if ($ticketDescriptions.Count -gt 0) { $result['ticket_descriptions'] = $ticketDescriptions }
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-Json -InputObject $result -Compress -Depth 20) }
 }
 
@@ -364,28 +470,90 @@ function Invoke-JiraReconcile {
 
     $epicStrategy = if (-not [string]::IsNullOrEmpty($overrideEpic)) { $overrideEpic } else { Get-JiraReconcileEpicStrategy -ProjectKey $projectKey -ConfigJson $cfg }
 
-    $specText = Get-Content -Raw -LiteralPath $specFile
-    if ($null -eq $specText) { $specText = '' }
+    $specRef = [ordered]@{ repo = $repo; spec_slug = $slug; folder = $folder }
+    $specRefJson = ConvertTo-JiraJsonValue $specRef
+
+    # Phase 6, US4: the phase->status map and halted-status list this run's
+    # lifecycle-safety rules resolve against — declared per project, exactly
+    # like priority_map (FR-006). Absent a declaration both default to empty.
+    $phaseStatusMap = Get-JiraReconcilePhaseStatusMap -ProjectKey $projectKey -ConfigJson $cfg
+    $haltedStatuses = Get-JiraReconcileHaltedStatuses -ProjectKey $projectKey -ConfigJson $cfg
+
+    # R5 step 1 — ASSIGN (Phase 2/3, contracts/story-marker.md, research R5):
+    # every story section with no marker at all gets a durable identifier,
+    # spliced into spec.md. A dry run computes the SAME assignment but never
+    # writes it (FR-016) — the in-memory assigned text is what the rest of
+    # THIS run parses, so a dry run predicts the exact identifiers a
+    # following real run would use. An unwritable spec.md fails closed
+    # BEFORE any Jira write (FR-012).
+    $rawSpec = Get-Content -Raw -LiteralPath $specFile
+    if ($null -eq $rawSpec) { $rawSpec = '' }
+    try { $preParse = Get-JiraParsedSpec -Text $rawSpec -FolderSlug $slug }
+    catch {
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the specification could not be parsed (zero writes)')
+    }
+    $preParseObj = $preParse | ConvertFrom-Json -Depth 100
+    $assignedCount = @($preParseObj.stories | Where-Object {
+            $m = Get-JiraPlanPropSafe $_ 'marker'
+            $st = if ($m) { [string](Get-JiraPlanPropSafe $m 'state') } else { 'absent' }
+            $st -eq 'absent'
+        }).Count
+
+    $assignedSpec = $rawSpec
+    if ($assignedCount -gt 0) {
+        $assignedSpec = Set-JiraStoryMarkerAssign -Text $rawSpec
+        if (-not $dryRun) {
+            try { Write-JiraStoryMarkerFile -Path $specFile -NewContent $assignedSpec | Out-Null }
+            catch {
+                return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: $specFile could not be written — no ticket may be created before its identifier is recorded (zero writes)")
+            }
+        }
+    }
 
     # ENGINE: parse the spec into neutral content, then assemble + validate. Every
     # step is GUARDED so a failure surfaces the mapped error path — never a raw
     # unhandled exception (FR-032: mapped exits, zero writes; mirrors the Bash
     # port's guarded substitutions).
-    try { $parse = Get-JiraParsedSpec -Text $specText -FolderSlug $slug }
+    try { $parse = Get-JiraParsedSpec -Text $assignedSpec -FolderSlug $slug }
     catch {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the specification could not be parsed (zero writes)')
     }
-    $specRef = [ordered]@{ repo = $repo; spec_slug = $slug; folder = $folder }
     $ctx = ConvertTo-JiraJsonValue ([ordered]@{ spec_ref = $specRef; project_key = $projectKey; epic_strategy = $epicStrategy })
     $built = Build-JiraNeutralDocument -ParseJson $parse -ContextJson $ctx
     if (-not $built.Valid) {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the specification could not be assembled into a valid neutral document (zero writes)')
     }
 
-    # SINK: the plan context (US2, FR-007–FR-011). An explicit
-    # SPEC_KIT_JIRA_PLAN_CONTEXT overrides the derived object wholesale;
-    # otherwise it is built from the resolved project's persisted binding.
-    $planCtxResult = Get-JiraReconcilePlanContextFromBinding -BaseUrl $base -ProjectKey $projectKey -ConfigDir $cfgDir -ConfigJson $cfg
+    # R5 step 2 — RECOGNISE (Phase 3, US1; contracts/recognition-contract.md):
+    # one read per recorded ticket, verified against the SAME identity
+    # marker the read returns. A read failure is NEVER downgraded to "no
+    # ticket exists" (FR-004) — it fails the WHOLE specification closed here.
+    $docObj = $built.Document | ConvertFrom-Json -Depth 100
+    $storiesSlim = [System.Collections.Generic.List[object]]::new()
+    foreach ($s in @($docObj.stories)) { $storiesSlim.Add([ordered]@{ local_id = $s.local_id; marker = (Get-JiraPlanPropSafe $s 'marker') }) }
+    $storiesSlimJson = ConvertTo-JiraJsonValue $storiesSlim
+    $recogResult = Invoke-JiraRecognitionRun -StoriesJson $storiesSlimJson -SpecRefJson $specRefJson -ProjectKey $projectKey -SpecPath $specFile
+    if ($recogResult.ExitCode -ne 0) {
+        return (Get-JiraReconcileFaultCode -Code $recogResult.ExitCode -Message 'reconcile: a ticket could not be recognised (zero writes)')
+    }
+    $recogJson = $recogResult.Json
+    $recog = $recogJson | ConvertFrom-Json -Depth 100
+
+    # FR-011/FR-016/FR-021: a blocked story is excluded from the document
+    # handed to Get-JiraPlanWriteSet — a blocked story never blocks its siblings.
+    $blockedIds = @(($recog.blocked) | ForEach-Object { [string]$_.story })
+    $docForWriteObj = $docObj.PSObject.Copy()
+    $filteredStories = [System.Collections.Generic.List[object]]::new()
+    foreach ($s in @($docObj.stories)) { if ($blockedIds -notcontains [string]$s.local_id) { $filteredStories.Add($s) } }
+    $docForWriteObj.stories = $filteredStories
+    $docForWriteJson = ConvertTo-JiraJsonValue $docForWriteObj
+
+    # SINK: the plan context (US2, FR-007–FR-011; Phase 3, US1: tickets/
+    # ticket_origins/ticket_descriptions now come from recognition's `bound`
+    # map). An explicit SPEC_KIT_JIRA_PLAN_CONTEXT overrides the derived
+    # object wholesale; otherwise it is built from the resolved project's
+    # persisted binding.
+    $planCtxResult = Get-JiraReconcilePlanContextFromBinding -BaseUrl $base -ProjectKey $projectKey -ConfigDir $cfgDir -ConfigJson $cfg -RecognitionJson $recogJson
     if ($planCtxResult.ExitCode -eq 2) {
         Write-JiraReconcileNotice -Lines @(
             'Jira mirror skipped: this repository is not bound to a Jira project yet.',
@@ -397,7 +565,7 @@ function Invoke-JiraReconcile {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: the project `"$projectKey`" has not been bound yet — run /speckit.jira.config to discover its issue types and priorities (zero writes)")
     }
     $planCtx = $planCtxResult.Json
-    try { $actionsJson = Get-JiraPlanWriteSet -NeutralDocJson $built.Document -PlanContextJson $planCtx }
+    try { $actionsJson = Get-JiraPlanWriteSet -NeutralDocJson $docForWriteJson -PlanContextJson $planCtx }
     catch {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the write plan could not be assembled (zero writes)')
     }
@@ -407,11 +575,17 @@ function Invoke-JiraReconcile {
     # zero-churn idempotency, status-category drift, Flagged withholding, and the
     # blocker note. Runs in BOTH dry-run and real mode so the --dry-run report
     # equals the real run's action set exactly (FR-033). Mirror of reconcile.sh.
+    # US6 lifecycle safety (Phase 4, US2): the lifecycle context is now built
+    # from recognition's `bound` map on EVERY run — not only under the
+    # SPEC_KIT_JIRA_LIFECYCLE test override, which continues to win wholesale
+    # (unchanged seam). Zero-churn dropping (FR-030) fires whenever a ticket
+    # was recognised; the drift/Flagged/blocker rules stay inert until
+    # Phase 6 supplies a `target`.
     $warnsJson = '[]'
     $notesJson = '[]'
-    $hasLifecycle = $false
+    $hasOverrideLifecycle = $false
     if ($env:SPEC_KIT_JIRA_LIFECYCLE) {
-        $hasLifecycle = $true
+        $hasOverrideLifecycle = $true
         try { $lcObj = $env:SPEC_KIT_JIRA_LIFECYCLE | ConvertFrom-Json -Depth 100 }
         catch {
             return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: SPEC_KIT_JIRA_LIFECYCLE is not valid JSON (zero writes)')
@@ -423,29 +597,101 @@ function Invoke-JiraReconcile {
         $lcMap['base_url'] = $base
         $lcMap['on_drift'] = $onDrift
         $lcJson = ConvertTo-JiraJsonValue $lcMap
-        try { $lresult = Get-JiraLifecyclePlan -ContentActionsJson $actionsJson -NeutralDocJson $built.Document -LifecycleContextJson $lcJson | ConvertFrom-Json -Depth 100 }
-        catch {
-            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the lifecycle plan could not be assembled (zero writes)')
-        }
-        $actionsJson = ConvertTo-JiraJsonValue $lresult.actions
-        $warnsJson = ConvertTo-JiraJsonValue $lresult.warnings
-        $notesJson = ConvertTo-JiraJsonValue $lresult.notes
     }
+    else {
+        # origin is omitted when "bridge": Get-JiraLifecyclePlan's own churn
+        # check branches on origin exactly as Get-JiraPlanWriteSet does, and
+        # a "bridge" value would wrongly route a bridge-created ticket
+        # through the human-origin managed-panel comparison, which always
+        # reads "unchanged" for a description that never carried the panel
+        # marker in the first place.
+        # target/category (Phase 6, US4, research R9): target is the status
+        # the CURRENT lifecycle event maps to, via the routed project's
+        # phase_status_map — empty when this run has no hook event or the
+        # event has no declared mapping (R9's inert fallback). category
+        # classifies each recognised ticket's OWN status the same way
+        # config_classify_statuses seeds it: mapped (a declared phase
+        # target) overrides an operator-designated halted state, which
+        # overrides Jira's own "done" statusCategory (post-scope), else
+        # unknown.
+        $phaseMapObj = $phaseStatusMap | ConvertFrom-Json -Depth 100
+        $mappedTargets = @()
+        if ($phaseMapObj -is [System.Management.Automation.PSCustomObject]) {
+            $mappedTargets = @($phaseMapObj.PSObject.Properties | ForEach-Object { [string]$_.Value })
+        }
+        $order = @(Get-JiraReconcilePhaseOrder -PhaseStatusMapJson $phaseStatusMap | ConvertFrom-Json -Depth 100)
+        $target = ''
+        if ($phaseMapObj -is [System.Management.Automation.PSCustomObject] -and -not [string]::IsNullOrEmpty($hookEvent)) {
+            $target = [string](Get-JiraPlanPropSafe $phaseMapObj $hookEvent)
+        }
+        $haltedList = @($haltedStatuses | ConvertFrom-Json -Depth 100 | ForEach-Object { [string]$_ })
+
+        $lcTickets = [ordered]@{}
+        $boundVal2 = Get-JiraPlanPropSafe $recog 'bound'
+        if ($boundVal2) {
+            foreach ($p in $boundVal2.PSObject.Properties) {
+                $statusVal = [string](Get-JiraPlanPropSafe $p.Value 'status')
+                $statusCategoryVal = [string](Get-JiraPlanPropSafe $p.Value 'status_category')
+                $category = 'unknown'
+                if ($mappedTargets -contains $statusVal) { $category = 'mapped' }
+                elseif ($haltedList -contains $statusVal) { $category = 'halted' }
+                elseif ($statusCategoryVal -eq 'done') { $category = 'post-scope' }
+                $entry = [ordered]@{
+                    key      = Get-JiraPlanPropSafe $p.Value 'key'
+                    current  = Get-JiraPlanPropSafe $p.Value 'current'
+                    status   = $statusVal
+                    category = $category
+                    target   = $target
+                    flagged  = Get-JiraPlanPropSafe $p.Value 'flagged'
+                    blockers = Get-JiraPlanPropSafe $p.Value 'blockers'
+                }
+                $originVal2 = [string](Get-JiraPlanPropSafe $p.Value 'origin')
+                if ($originVal2 -ne 'bridge') { $entry['origin'] = $originVal2 }
+                $lcTickets[$p.Name] = $entry
+            }
+        }
+        $lcJson = ConvertTo-JiraJsonValue ([ordered]@{ base_url = $base; on_drift = $onDrift; order = $order; tickets = $lcTickets })
+    }
+    try { $lresult = Get-JiraLifecyclePlan -ContentActionsJson $actionsJson -NeutralDocJson $docForWriteJson -LifecycleContextJson $lcJson | ConvertFrom-Json -Depth 100 }
+    catch {
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the lifecycle plan could not be assembled (zero writes)')
+    }
+    $actionsJson = ConvertTo-JiraJsonValue $lresult.actions
+    $warnsJson = ConvertTo-JiraJsonValue $lresult.warnings
+    $notesJson = ConvertTo-JiraJsonValue $lresult.notes
+
+    # Every blocked story produces exactly one warning from the diagnostics
+    # catalogue (FR-011, FR-016, FR-021) — folded into the same channel the
+    # lifecycle rules use.
+    $warnsList = [System.Collections.Generic.List[string]]::new()
+    foreach ($w in @($warnsJson | ConvertFrom-Json -Depth 100)) { $warnsList.Add([string]$w) }
+    foreach ($b in @($recog.blocked)) { $warnsList.Add([string]$b.detail) }
+    $warnsJson = ConvertTo-JiraJsonValue $warnsList
 
     # A List keeps a single-element action set an ARRAY (a bare @() unwraps to an
     # object under ConvertTo-JiraJsonValue, diverging from the Bash port).
     $actions = [System.Collections.Generic.List[object]]::new()
     foreach ($x in @($actionsJson | ConvertFrom-Json -Depth 100)) { $actions.Add($x) }
 
-    # created counts only create-endpoint POSTs; a transition is also a POST but is
-    # not a ticket creation, so it is excluded from the created tally.
+    # created/updated count only their own endpoints; a transition is also a
+    # POST but is not a ticket creation, so it is excluded from the created
+    # tally. skipped (FR-023) is what Get-JiraLifecyclePlan silently dropped
+    # as no-op: every recognised ticket whose write would have been a no-op.
     $created = @($actions | Where-Object { $_.method -eq 'POST' -and ([string]$_.url).EndsWith('/issue') }).Count
     $updated = @($actions | Where-Object { $_.method -eq 'PUT' }).Count
     $warnCount = @($warnsJson | ConvertFrom-Json -Depth 100).Count
+    $recognisedCount = @($recog.bound.PSObject.Properties).Count
+    $skippedCount = $recognisedCount - $updated
+    if ($skippedCount -lt 0) { $skippedCount = 0 }
+    $hasLifecycle = $hasOverrideLifecycle
+    if ($warnCount -gt 0) { $hasLifecycle = $true }
 
     $rc = 0
     if (-not $dryRun) {
-        $rc = Invoke-JiraApplyWriteSet -ActionsJson $actionsJson
+        # R5 steps 4/6: Invoke-JiraApplyWriteSetWithRecognition marks every
+        # planned creation `creating` before the first create, and stamps +
+        # records each created ticket's key IMMEDIATELY, per ticket.
+        $rc = Invoke-JiraApplyWriteSetWithRecognition -ActionsJson $actionsJson -SpecRefJson $specRefJson -SpecFile $specFile
     }
 
     # Hook health is READ and reported on every run (FR-047). Nothing here writes
@@ -478,20 +724,25 @@ function Invoke-JiraReconcile {
     # Report the action set with the base URL stripped to a host-relative path:
     # the site host is a coordinate that must never appear in output
     # (Constitution IV), and it keeps the summary stable across the mock port.
+    # `local_id` is internal bookkeeping (which story a creation stamps) and
+    # is never part of the published action shape.
     $disp = [System.Collections.Generic.List[object]]::new()
     foreach ($x in $actions) {
         $u = [string]$x.url
         if ($u.StartsWith($base)) { $x.url = $u.Substring($base.Length) }
-        $disp.Add($x)
+        $copy = [ordered]@{}
+        foreach ($p in $x.PSObject.Properties) { if ($p.Name -ne 'local_id') { $copy[$p.Name] = $p.Value } }
+        $disp.Add($copy)
     }
 
-    # The warnings/notes keys appear only when the lifecycle facts were supplied,
-    # so the content-only reconcile (US3) summary is byte-for-byte unchanged.
+    # The warnings/notes keys appear when the lifecycle facts were supplied OR
+    # a story was blocked, so the content-only reconcile (US3) summary with
+    # neither is byte-for-byte unchanged.
     $summaryObj = [ordered]@{
         schema_version = '1.0'
         command        = 'reconcile'
         dry_run        = [bool]$dryRun
-        counts         = [ordered]@{ created = $created; updated = $updated; skipped = 0; warnings = $warnCount; errors = 0 }
+        counts         = [ordered]@{ created = $created; updated = $updated; skipped = $skippedCount; warnings = $warnCount; errors = 0; recognised = $recognisedCount; assigned = $assignedCount }
         actions        = $disp
     }
     if ($hasLifecycle) {

@@ -19,6 +19,23 @@ _JIRA_ENGINE_PARSE=1
 _parse_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${_parse_dir}/../lib/output.sh" # json_canonical only — lib/, never sink/
+# shellcheck source=/dev/null
+source "${_parse_dir}/story_marker.sh" # the durable identifier's grammar (Phase 2, contracts/story-marker.md)
+
+# _parse_strip_marker_lines — remove every speckit-jira marker attempt line
+# (valid or malformed — contract "Reading rules" #2) from the document on
+# stdin, so it never lands in a title, description, acceptance criterion, or
+# design item. Preserves every other line, including blank ones.
+_parse_strip_marker_lines() {
+  local doc line kind first=1 out=""
+  doc="$(cat)"
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    kind="$(story_marker_parse_line "${line}" | jq -r '.kind')"
+    [[ "${kind}" != "none" ]] && continue
+    if ((first)); then out="${line}"; first=0; else out="${out}"$'\n'"${line}"; fi
+  done <<< "${doc}"
+  printf '%s' "${out}"
+}
 
 # _parse_trim <string> — strip leading and trailing whitespace.
 _parse_trim() {
@@ -300,10 +317,12 @@ parse_estimation() {
 
 # parse_story <folder-slug> <local-id> — assemble one neutral story from a
 # section of the spec (stdin). Optional keys are omitted when empty so the
-# neutral document stays minimal.
+# neutral document stays minimal. The story marker line (contract "Reading
+# rules" #2) is excluded from every extraction below.
 parse_story() {
   local slug="$1" local_id="$2" doc
   doc="$(cat)"
+  doc="$(_parse_strip_marker_lines <<< "${doc}")"
 
   local title desc ac design priority estimation
   title="$(printf '%s' "${doc}" | parse_title "${slug}")"
@@ -324,39 +343,87 @@ parse_story() {
   ' | json_canonical
 }
 
+# _parse_local_id_for_marker <marker-info-json> — the story's local_id
+# derived from its marker (research R7): the marker's own identifier when one
+# resolves it; empty for a truly unassigned section (assignment fills this
+# before a real run ever reaches here — research R5 step 1); a freshly
+# generated identifier for a "duplicate" section, since no single recorded
+# value can be trusted, but the story still needs a legitimate, unique
+# local_id to be excluded from the write plan BY ITSELF rather than failing
+# the whole document's schema validation (contract: "a blocked story never
+# blocks its siblings").
+_parse_local_id_for_marker() {
+  local info="$1" state
+  state="$(jq -r '.state' <<< "${info}")"
+  case "${state}" in
+    absent) printf '' ;;
+    duplicate) story_marker_generate_id ;;
+    *) jq -r '.id' <<< "${info}" ;;
+  esac
+}
+
 # parse_spec <folder-slug> — parse a whole specification (stdin) into neutral
 # content: one epic (title + description) plus one story per `User Story`
-# section (or a single story when the spec has none).
+# section (or a single story when the spec has none). Every story's
+# `local_id` and `marker` come from its story-marker line (contracts/
+# story-marker.md); the marker line itself never reaches title, description,
+# acceptance-criteria, design, priority, or estimation extraction.
 parse_spec() {
   local slug="$1" doc line
   doc="$(cat)"
 
+  local clean_doc; clean_doc="$(_parse_strip_marker_lines <<< "${doc}")"
   local etitle edesc
-  etitle="$(printf '%s' "${doc}" | parse_title "${slug}")"
-  edesc="$(printf '%s' "${doc}" | parse_description_blocks)"
+  etitle="$(printf '%s' "${clean_doc}" | parse_title "${slug}")"
+  edesc="$(printf '%s' "${clean_doc}" | parse_description_blocks)"
 
-  # Split into user-story sections.
-  local -a sections=()
-  local cur="" in_story=0
+  # Split into user-story sections, tracking each heading's ABSOLUTE 1-based
+  # line number (the "anchor", exactly as story_marker.sh's assignment scan
+  # defines it) so the marker section-info lookup below reports line numbers
+  # a human can find in the real file.
+  local -a sections=() anchors=()
+  local cur="" in_story=0 lineno=0
   while IFS= read -r line || [[ -n "${line}" ]]; do
+    lineno=$((lineno + 1))
     local lc="${line%$'\r'}"
     if [[ "${lc}" =~ ^#{2,4}[[:space:]]+User\ Story ]]; then
       ((in_story)) && sections+=("${cur}")
       cur="${lc}"$'\n'; in_story=1
+      anchors+=("${lineno}")
     elif ((in_story)); then
       cur+="${lc}"$'\n'
     fi
   done <<< "${doc}"
   ((in_story)) && sections+=("${cur}")
 
-  local stories="[]" i=0 s story
+  local total_lines; total_lines="$(_smk_line_count "${doc}")"
+  local stories="[]" i n s story minfo local_id marker_json
+
   if ((${#sections[@]} == 0)); then
-    story="$(printf '%s' "${doc}" | parse_story "${slug}" "s1")"
+    # The implicit single story (contracts/story-marker.md "Placement"): the
+    # marker sits after the document's H1, or the file's first line when
+    # there is no H1 either — anchor 0 means "before line 1", matching
+    # story_marker.sh's own convention exactly.
+    local -a doc_anchor; while IFS= read -r a; do doc_anchor+=("${a}"); done < <(_smk_scan_anchors "${doc}")
+    local anchor="${doc_anchor[0]}" span_start
+    if ((anchor == 0)); then span_start=1; else span_start=$((anchor + 1)); fi
+    minfo="$(story_marker_section_info "${doc}" "${span_start}" "${total_lines}")"
+    local_id="$(_parse_local_id_for_marker "${minfo}")"
+    marker_json="$(json_canonical <<< "${minfo}")"
+    story="$(printf '%s' "${doc}" | parse_story "${slug}" "${local_id}")"
+    story="$(jq -c --argjson m "${marker_json}" '. + {marker:$m}' <<< "${story}")"
     stories="$(jq -c --argjson s "${story}" '. + [$s]' <<< "${stories}")"
   else
-    for s in "${sections[@]}"; do
-      i=$((i + 1))
-      story="$(printf '%s' "${s}" | parse_story "${slug}" "s${i}")"
+    n=${#sections[@]}
+    for ((i = 0; i < n; i++)); do
+      s="${sections[i]}"
+      local span_start=$((anchors[i] + 1)) span_end
+      if ((i + 1 < n)); then span_end=$((anchors[i + 1] - 1)); else span_end="${total_lines}"; fi
+      minfo="$(story_marker_section_info "${doc}" "${span_start}" "${span_end}")"
+      local_id="$(_parse_local_id_for_marker "${minfo}")"
+      marker_json="$(json_canonical <<< "${minfo}")"
+      story="$(printf '%s' "${s}" | parse_story "${slug}" "${local_id}")"
+      story="$(jq -c --argjson m "${marker_json}" '. + {marker:$m}' <<< "${story}")"
       stories="$(jq -c --argjson s "${story}" '. + [$s]' <<< "${stories}")"
     done
   fi

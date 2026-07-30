@@ -22,6 +22,8 @@ Import-Module (Join-Path $PSScriptRoot '../../engine/ManagedSection.psm1') -Forc
 Import-Module (Join-Path $PSScriptRoot 'PrivacyGuard.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Client.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Ticket.psm1') -Force # Get-JiraCreateFieldsBase — the shared creation-fields builder (research R3)
+Import-Module (Join-Path $PSScriptRoot '../../engine/StoryMarker.psm1') -Force # R5 steps 4/6 — mark `creating`, stamp + record per ticket
+Import-Module (Join-Path $PSScriptRoot 'Identity.psm1') -Force # stamp the identity marker on each created ticket (R5 step 6)
 
 function Get-JiraPlanProp {
     # Safe property read: an EMPTY PSCustomObject's `.PSObject.Properties.Name`
@@ -90,7 +92,7 @@ function Get-JiraPlanWriteSet {
             if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
             $estValue = Get-JiraPlanProp $story 'estimation'
             if ($estId -ne '' -and $null -ne $estValue) { $fields[$estId] = $estValue }
-            $actions.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue"; body = [ordered]@{ fields = $fields } })
+            $actions.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue"; body = [ordered]@{ fields = $fields }; local_id = $sid })
         }
         else {
             # UPDATE: content + priority; no project or issuetype is required
@@ -314,4 +316,80 @@ function Invoke-JiraApplyWriteSet {
     return $worst
 }
 
-Export-ModuleMember -Function Get-JiraApplyKnownCoordinate, Invoke-JiraApplyWriteSet, Get-JiraPlanWriteSet, Get-JiraLifecyclePlan, Get-JiraManagedDescriptionStatus
+function Invoke-JiraApplyWriteSetWithRecognition {
+    <#
+    .SYNOPSIS
+      Mirror of apply_writes_with_recognition. Guards every payload (US11,
+      unchanged), then adds R5 steps 4 and 6: every story whose action is a
+      creation (`local_id` present on a `POST .../issue` action —
+      Get-JiraPlanWriteSet stamps this) is marked `creating` in $SpecFile in
+      ONE splice, immediately after the guard and before the first create
+      (step 4); then, for each ticket actually created, its identity marker
+      is stamped and its `creating` mark is replaced with the recorded key
+      IN $SpecFile — per ticket, IMMEDIATELY, never batched (step 6).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ActionsJson,
+        [Parameter(Mandatory)] [string] $SpecRefJson,
+        [Parameter(Mandatory)] [string] $SpecFile,
+        [string] $ExtraKnownCoordinatesJson = '[]'
+    )
+    $coords = Get-JiraApplyKnownCoordinate -ExtraJson $ExtraKnownCoordinatesJson
+    $allow = if ($env:SPEC_KIT_JIRA_ALLOWLIST) { $env:SPEC_KIT_JIRA_ALLOWLIST } else { '[]' }
+    $actions = @($ActionsJson | ConvertFrom-Json -Depth 100)
+
+    # (1) Pre-write gate — unchanged: scan every payload before writing anything.
+    foreach ($a in $actions) {
+        $bodyObj = if ($a.PSObject.Properties.Name -contains 'body') { $a.body } else { $null }
+        $bodyText = if ($null -eq $bodyObj) { '{}' } else { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 }
+        $code = Test-JiraPrivacyBlock -Payload $bodyText -KnownCoordinatesJson $coords -AllowlistJson $allow
+        if ($code -ne 0) { return [int]$code }
+    }
+
+    # (2) R5 step 4 — mark every planned creation `creating`, one splice.
+    $creatingIds = [System.Collections.Generic.List[string]]::new()
+    foreach ($a in $actions) {
+        $lid = [string](Get-JiraPlanProp $a 'local_id')
+        if ($a.method -eq 'POST' -and ([string]$a.url).EndsWith('/issue') -and $lid -ne '') { $creatingIds.Add($lid) }
+    }
+    if ($creatingIds.Count -gt 0) {
+        $current = if (Test-Path -LiteralPath $SpecFile) { Get-Content -Raw -LiteralPath $SpecFile } else { '' }
+        if ($null -eq $current) { $current = '' }
+        $newContent = Set-JiraStoryMarkerMarkCreating -Text $current -IdsJson (ConvertTo-JiraJsonValue $creatingIds)
+        Write-JiraStoryMarkerFile -Path $SpecFile -NewContent $newContent | Out-Null
+    }
+
+    # (3) Write pass, in order; a CREATE stamps + records IMMEDIATELY (step 6).
+    $worst = 0
+    foreach ($a in $actions) {
+        $bodyObj = if ($a.PSObject.Properties.Name -contains 'body') { $a.body } else { $null }
+        if ($null -ne $bodyObj) {
+            $bodyText = ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100
+            $r = Invoke-JiraRequest -Method $a.method -Url $a.url -Body $bodyText
+        }
+        else {
+            $r = Invoke-JiraRequest -Method $a.method -Url $a.url
+        }
+        if ([int]$r.ExitCode -gt $worst) { $worst = [int]$r.ExitCode }
+        if ([int]$r.ExitCode -ge 2) { return $worst }
+
+        if ($a.method -eq 'POST' -and ([string]$a.url).EndsWith('/issue')) {
+            $respObj = $null
+            try { $respObj = $r.Body | ConvertFrom-Json -Depth 100 } catch { }
+            $key = if ($respObj) { [string](Get-JiraPlanProp $respObj 'key') } else { '' }
+            $localId = [string](Get-JiraPlanProp $a 'local_id')
+            if ($key -ne '' -and $localId -ne '') {
+                Set-JiraIdentity -IssueKey $key -SpecRefJson $SpecRefJson -Origin 'bridge' -Story $localId | Out-Null
+                $cur = if (Test-Path -LiteralPath $SpecFile) { Get-Content -Raw -LiteralPath $SpecFile } else { '' }
+                if ($null -eq $cur) { $cur = '' }
+                $new = Set-JiraStoryMarkerRecordTicket -Text $cur -Id $localId -Key $key
+                Write-JiraStoryMarkerFile -Path $SpecFile -NewContent $new | Out-Null
+            }
+        }
+    }
+    return $worst
+}
+
+Export-ModuleMember -Function Get-JiraApplyKnownCoordinate, Invoke-JiraApplyWriteSet, Get-JiraPlanWriteSet, Get-JiraLifecyclePlan, `
+    Get-JiraManagedDescriptionStatus, Invoke-JiraApplyWriteSetWithRecognition

@@ -206,6 +206,12 @@ function ConvertTo-JiraSummaryProse {
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("Command: $($s.command)$suffix")
     $lines.Add("Created: $($s.counts.created), Updated: $($s.counts.updated), Skipped: $($s.counts.skipped)")
+    # recognised/assigned (Phase 7, US1/US2) exist only on reconcile's
+    # summary — a reader confirms an unchanged re-run recognised every
+    # story and created nothing, without needing --json.
+    if ($s.counts.PSObject.Properties.Name -contains 'recognised') {
+        $lines.Add("Recognised: $($s.counts.recognised), Assigned: $($s.counts.assigned)")
+    }
     $lines.Add("Warnings: $($s.counts.warnings), Errors: $($s.counts.errors)")
     # The config ceremony's effects, reported separately (FR-054), in a fixed
     # order (discovery, hooks, readme, gitignore) so both ports match

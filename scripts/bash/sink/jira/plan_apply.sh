@@ -37,6 +37,10 @@ source "${_plan_apply_dir}/ticket.sh" # jira_create_fields_base — the shared c
 source "${_plan_apply_dir}/../../engine/drift.sh"
 # shellcheck source=/dev/null
 source "${_plan_apply_dir}/../../engine/idempotency.sh"
+# shellcheck source=/dev/null
+source "${_plan_apply_dir}/../../engine/story_marker.sh" # R5 steps 4/6 — mark `creating`, stamp + record per ticket
+# shellcheck source=/dev/null
+source "${_plan_apply_dir}/identity.sh" # stamp the identity marker on each created ticket (R5 step 6)
 
 # plan_writes <neutral-doc-json> <plan-context-json> — resolve the validated
 # neutral document into an ordered action set (US3, T058). Each story becomes a
@@ -94,8 +98,8 @@ plan_writes() {
       if [[ -n "${estid}" && "${est}" != "null" ]]; then
         fields="$(jq -c --arg fid "${estid}" --argjson v "${est}" '. + {($fid): $v}' <<< "${fields}")"
       fi
-      action="$(jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" \
-        '{method:"POST", url:$u, body:{fields:$f}}')"
+      action="$(jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" --arg sid "${sid}" \
+        '{method:"POST", url:$u, body:{fields:$f}, local_id:$sid}')"
     else
       # UPDATE: content + priority; the estimation is NEVER re-sent (FR-018). On a
       # human-origin ticket the description is spliced into the managed panel so the
@@ -299,6 +303,80 @@ apply_writes() {
     rc=$?
     ((rc > worst)) && worst=${rc}
     ((rc >= 2)) && return "${worst}"
+  done
+  return "${worst}"
+}
+
+# apply_writes_with_recognition <actions-json> <spec-ref-json> <spec-file>
+#   [extra-known-coords-json]
+#   Mirror of apply_writes's guard-then-write discipline (US11), extended
+#   with R5 steps 4 and 6: every story whose action is a creation
+#   (`local_id` present on a `POST .../issue` action — plan_writes stamps
+#   this) is marked `creating` in spec-file in ONE splice, immediately after
+#   the guard and before the first create (step 4, research R5); then, for
+#   each ticket actually created, its identity marker is stamped and its
+#   `creating` mark is replaced with the recorded key IN spec-file — per
+#   ticket, IMMEDIATELY, never batched (step 6): a run interrupted between
+#   one create's response and its record leaves every OTHER story's
+#   identifier untouched and creatable by the next run.
+apply_writes_with_recognition() {
+  local actions="$1" spec_ref="$2" spec_file="$3" extra="${4:-[]}"
+  local coords allow
+  coords="$(_apply_known_coords "${extra}")"
+  allow="${SPEC_KIT_JIRA_ALLOWLIST:-[]}"
+
+  local n
+  n="$(jq 'length' <<< "${actions}")"
+
+  # (1) Pre-write gate — unchanged: scan every payload before writing anything.
+  local i body
+  for ((i = 0; i < n; i++)); do
+    body="$(jq -c ".[${i}].body // {}" <<< "${actions}")"
+    privacy_guard_scan "${body}" "${coords}" "${allow}" || return $?
+  done
+
+  # (2) R5 step 4 — mark every planned creation `creating`, one splice.
+  local creating_ids
+  creating_ids="$(jq -c '[.[] | select(.method=="POST" and (.url|endswith("/issue")) and (.local_id // "") != "") | .local_id]' <<< "${actions}")"
+  if [[ "$(jq 'length' <<< "${creating_ids}")" -gt 0 ]]; then
+    local current new_content
+    current="$(cat "${spec_file}" 2> /dev/null; printf x)"; current="${current%x}"
+    new_content="$(printf '%s' "${current}" | story_marker_mark_creating "${creating_ids}"; printf x)"; new_content="${new_content%x}"
+    story_marker_write_file "${spec_file}" "${new_content}" > /dev/null
+  fi
+
+  # (3) Write pass, in order; a CREATE stamps + records IMMEDIATELY (step 6).
+  local worst=0 method url rc resp
+  for ((i = 0; i < n; i++)); do
+    method="$(jq -r ".[${i}].method" <<< "${actions}")"
+    url="$(jq -r ".[${i}].url" <<< "${actions}")"
+    body="$(jq -c ".[${i}].body // empty" <<< "${actions}")"
+    resp="$(mktemp)"
+    if [[ -n "${body}" ]]; then
+      jira_request "${method}" "${url}" "${body}" > "${resp}"
+    else
+      jira_request "${method}" "${url}" > "${resp}"
+    fi
+    rc=$?
+    ((rc > worst)) && worst=${rc}
+    if ((rc >= 2)); then
+      rm -f "${resp}"
+      return "${worst}"
+    fi
+
+    if [[ "${method}" == "POST" && "${url}" == */issue ]]; then
+      local key local_id
+      key="$(jq -r '.key // empty' < "${resp}")"
+      local_id="$(jq -r ".[${i}].local_id // empty" <<< "${actions}")"
+      if [[ -n "${key}" && -n "${local_id}" ]]; then
+        identity_write "${key}" "${spec_ref}" "bridge" "${local_id}" || true
+        local cur new
+        cur="$(cat "${spec_file}" 2> /dev/null; printf x)"; cur="${cur%x}"
+        new="$(printf '%s' "${cur}" | story_marker_record_ticket "${local_id}" "${key}"; printf x)"; new="${new%x}"
+        story_marker_write_file "${spec_file}" "${new}" > /dev/null
+      fi
+    fi
+    rm -f "${resp}"
   done
   return "${worst}"
 }

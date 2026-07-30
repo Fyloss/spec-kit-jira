@@ -54,7 +54,11 @@ setup() {
 }
 
 @test "an update never re-sends the estimation (FR-018)" {
-  export SPEC_KIT_JIRA_PLAN_CONTEXT='{"estimation_field_id":"customfield_30044","tickets":{"s1":"ABC-1"}}'
+  # T018: the durable identifier is pinned via SPEC_KIT_JIRA_ID_SOURCE
+  # (research R4) rather than the retired positional "s1", since a
+  # marker-less story is now assigned a fresh identifier before parsing.
+  export SPEC_KIT_JIRA_ID_SOURCE="1111111111111111"
+  export SPEC_KIT_JIRA_PLAN_CONTEXT='{"estimation_field_id":"customfield_30044","tickets":{"1111111111111111":"ABC-1"}}'
   run cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.actions[0].method' <<< "$output")" = "PUT" ]

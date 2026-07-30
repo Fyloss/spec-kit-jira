@@ -29,7 +29,10 @@ _report_lines() {
 
   bash "${HARNESS}" "${REAL_SCENARIO}" bash "${TMP}/real" > /dev/null
   [ "$(cat "${TMP}/real/exit")" = "0" ]
-  local performed; performed="$(cat "${TMP}/real/calls.log")"
+  # Phase 3, US1: a real creation now stamps the identity marker immediately
+  # afterward (research R5 step 6) — a write a dry run correctly never
+  # predicts, since it never creates the ticket the stamp would apply to.
+  local performed; performed="$(grep -v '/properties/' "${TMP}/real/calls.log")"
 
   [ "${reported}" = "${performed}" ]
 }

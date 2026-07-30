@@ -29,6 +29,10 @@ source "${_cmd_reconcile_dir}/../engine/parse.sh"
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../engine/interchange.sh"
 # shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../engine/story_marker.sh" # R5 step 1 — assign identifiers
+# shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../sink/jira/recognition.sh" # R5 step 2 — recognise recorded tickets
+# shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/plan_apply.sh"
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../hooks/register_hooks.sh" # hook health — READ ONLY (003 FR-022)
@@ -80,8 +84,16 @@ _reconcile_notice() {
 # returned unchanged, so a direct invocation still fails closed (Constitution III).
 _reconcile_fault() {
   local code="$1" message="$2"
+  # Phase 6, US4 (T053 audit): in hook context every early-return fault gets
+  # the SAME standardised WARNING wording the late apply-failure path uses
+  # below — the caller's specific, actionable message is kept (it names the
+  # true cause better than a generic per-code label would), just wrapped so
+  # every degraded path reads identically under a hook (FR-016).
+  if [[ -n "${SPEC_KIT_JIRA_HOOK_CONTEXT:-}" ]]; then
+    printf 'WARNING: %s (exit %s). This spec-kit command completed normally.\n' "${message}" "${code}" >&2
+    return 0
+  fi
   _reconcile_notice "${message}"
-  [[ -n "${SPEC_KIT_JIRA_HOOK_CONTEXT:-}" ]] && return 0
   return "${code}"
 }
 
@@ -110,6 +122,60 @@ _reconcile_epic_strategy() {
   printf '%s' "${v}"
 }
 
+# _reconcile_phase_status_map <project-key> <cfg-json> — the resolved
+# project's declared phase->status map (Phase 6, US4, research R9), or {}
+# when the project declares none — the same inert default the phase-status
+# machinery has always had (config_classify_statuses/config_phase_status_
+# targets already default gracefully to an empty map).
+_reconcile_phase_status_map() {
+  local key="$1" cfg="$2" v
+  v="$(jq -c --arg k "${key}" '(.projects // [])[] | select(.key==$k) | .phase_status_map // {}' <<< "${cfg}")"
+  [[ -z "${v}" ]] && v='{}'
+  printf '%s' "${v}"
+}
+
+# _reconcile_halted_statuses <project-key> <cfg-json> — the resolved
+# project's declared operator stop-states (Phase 6, US4), or [] when none.
+_reconcile_halted_statuses() {
+  local key="$1" cfg="$2" v
+  v="$(jq -c --arg k "${key}" '(.projects // [])[] | select(.key==$k) | .halted_statuses // []' <<< "${cfg}")"
+  [[ -z "${v}" ]] && v='[]'
+  # The team-config YAML reader does not parse an inline flow-style array
+  # (`halted_statuses: ["Blocked"]`) — only a block-style list — so a
+  # declaration written that way arrives here as a plain JSON STRING
+  # holding the literal array text. Recover it rather than silently
+  # treating the whole declaration as empty.
+  if [[ "$(jq -r 'type' <<< "${v}" 2> /dev/null)" == "string" ]]; then
+    local inner; inner="$(jq -r '.' <<< "${v}")"
+    if jq -e 'type=="array"' <<< "${inner}" > /dev/null 2>&1; then
+      v="${inner}"
+    else
+      v='[]'
+    fi
+  fi
+  printf '%s' "${v}"
+}
+
+# _reconcile_phase_order <phase-status-map-json> — the DISTINCT statuses a
+# phase->status map resolves to, IN THE FIXED CANONICAL LIFECYCLE-EVENT ORDER
+# (extension.yml's own hook list) — deliberately NOT config_phase_status_
+# targets, whose own tested contract accepts arbitrary phase names and
+# therefore returns them SORTED, not chronologically (config_load's merge
+# also sorts the map's own keys, so declaration order can never be recovered
+# from the map alone). Reconcile's phase names ARE the fixed lifecycle
+# events, so this local helper can use that closed vocabulary to restore the
+# true chronological order drift's ahead/behind comparison depends on
+# (Phase 6, US4, research R9).
+_reconcile_phase_order() {
+  local psmap="${1:-}"
+  [[ -z "${psmap}" ]] && psmap='{}'
+  jq -cn --argjson pm "${psmap}" '
+    ["before_specify","after_specify","after_clarify","after_plan","after_tasks","after_implement","after_analyze"]
+    | map($pm[.] // empty)
+    | reduce .[] as $s ([]; if (index($s) != null) then . else . + [$s] end)
+  ' | json_canonical
+}
+
 # _reconcile_local_binding_for <project-key> <config-dir> — the persisted
 # binding's resolved_ids entry for one project, read directly from the
 # machine-owned local layer (independent of config.yml — a project key may be
@@ -128,14 +194,24 @@ _reconcile_local_binding_for() {
 }
 
 # _reconcile_plan_context <base-url> <project-key> <config-dir> <merged-cfg-json>
+#   [recognition-result-json]
 #   The plan context (US2, FR-007–FR-011, FR-013): base_url plus either the
 #   caller's SPEC_KIT_JIRA_PLAN_CONTEXT override (wholesale) or the creation
 #   context built from the resolved project's persisted binding — story_type_id,
-#   the two-step-resolved priority_ids, and estimation_field_id. base_url
-#   always wins. Returns 2 / 3 exactly as _reconcile_local_binding_for when no
-#   override is set and the binding cannot be read.
+#   the two-step-resolved priority_ids, estimation_field_id, and (Phase 3, US1)
+#   the recognised tickets/origins/descriptions maps, filled from the
+#   recognition result's `bound` map rather than only from the override
+#   (data-model.md "Plan context — tickets, ticket_origins, ticket_descriptions").
+#   base_url always wins. Returns 2 / 3 exactly as _reconcile_local_binding_for
+#   when no override is set and the binding cannot be read.
 _reconcile_plan_context() {
-  local base="$1" key="$2" dir="$3" cfg="$4"
+  local base="$1" key="$2" dir="$3" cfg="$4" recog="${5:-}"
+  # NOT "${5:-{}}" as the default inline: bash's brace-matching for a
+  # `${...}` parameter expansion misparses a `{}`-shaped default value,
+  # corrupting how the REST OF THE FUNCTION is parsed (a real, reproduced
+  # failure — jq calls dozens of lines later raised a phantom "Unmatched
+  # '}'"). Default it in a separate, brace-free statement instead.
+  [[ -z "${recog}" ]] && recog='{}'
   local extra="${SPEC_KIT_JIRA_PLAN_CONTEXT:-}"
   if [[ -n "${extra}" ]]; then
     jq -cn --arg b "${base}" --argjson e "${extra}" '$e + {base_url:$b}'
@@ -164,11 +240,25 @@ _reconcile_plan_context() {
         end
     ))')"
 
-  jq -cn --arg b "${base}" --arg st "${story_type}" --argjson pids "${priority_ids}" --arg ef "${est_field}" '
+  # ticket_origins (FR-038) is populated ONLY for a non-bridge origin: a
+  # "bridge" origin means plan_writes owns the whole description (the US3
+  # behaviour, unchanged) — the same meaning an absent map entry has always
+  # had. Including "bridge" here would wrongly route a bridge-created
+  # ticket through the human-origin managed-panel splice.
+  local tickets ticket_origins ticket_descriptions
+  tickets="$(jq -c '(.bound // {}) | with_entries(.value |= .key)' <<< "${recog}")"
+  ticket_origins="$(jq -c '(.bound // {}) | with_entries(select(.value.origin != "bridge")) | with_entries(.value |= .origin)' <<< "${recog}")"
+  ticket_descriptions="$(jq -c '(.bound // {}) | with_entries(.value |= .current.description)' <<< "${recog}")"
+
+  jq -cn --arg b "${base}" --arg st "${story_type}" --argjson pids "${priority_ids}" --arg ef "${est_field}" \
+    --argjson tk "${tickets}" --argjson to "${ticket_origins}" --argjson td "${ticket_descriptions}" '
     {base_url:$b}
     + (if $st == "" then {} else {story_type_id:$st} end)
     + (if ($pids|length) == 0 then {} else {priority_ids:$pids} end)
-    + (if $ef == "" then {} else {estimation_field_id:$ef} end)'
+    + (if $ef == "" then {} else {estimation_field_id:$ef} end)
+    + (if ($tk|length) == 0 then {} else {tickets:$tk} end)
+    + (if ($to|length) == 0 then {} else {ticket_origins:$to} end)
+    + (if ($td|length) == 0 then {} else {ticket_descriptions:$td} end)'
 }
 
 # cmd_reconcile <argv...> — reconcile one specification into its Jira project.
@@ -314,15 +404,47 @@ cmd_reconcile() {
     epic_strategy="$(_reconcile_epic_strategy "${project_key}" "${cfg}")"
   fi
 
-  local spec_ref parse ctx doc
+  local spec_ref
   spec_ref="$(jq -cn --arg r "${repo}" --arg s "${slug}" --arg f "${folder}" \
     '{repo:$r, spec_slug:$s, folder:$f}')"
 
-  # ENGINE: parse the spec into neutral content, then assemble + validate. Every
-  # substitution is GUARDED: under the dispatcher's live `set -euo pipefail` an
-  # unguarded failure would kill the process with a raw exit code, skipping the
-  # mapped error path (FR-032: mapped exits, zero writes).
-  if ! parse="$(parse_spec "${slug}" < "${spec_file}")"; then
+  # Phase 6, US4: the phase->status map and halted-status list this run's
+  # lifecycle-safety rules resolve against — declared per project, exactly
+  # like priority_map (FR-006). Absent a declaration both default to empty,
+  # the same inert behaviour every existing repository already has.
+  local phase_status_map halted_statuses
+  phase_status_map="$(_reconcile_phase_status_map "${project_key}" "${cfg}")"
+  halted_statuses="$(_reconcile_halted_statuses "${project_key}" "${cfg}")"
+
+  # R5 step 1 — ASSIGN (Phase 2/3, contracts/story-marker.md, research R5):
+  # every story section with no marker at all gets a durable identifier,
+  # spliced into spec.md. A dry run computes the SAME assignment but never
+  # writes it (FR-016) — the in-memory assigned text is what the rest of
+  # THIS run parses, so a dry run predicts the exact identifiers a following
+  # real run would use. An unwritable spec.md fails closed BEFORE any Jira
+  # write (FR-012): no ticket may ever exist for a story whose identifier was
+  # never recorded.
+  local raw_spec pre_parse assigned_count=0
+  raw_spec="$(cat "${spec_file}" 2> /dev/null; printf x)"; raw_spec="${raw_spec%x}"
+  if ! pre_parse="$(printf '%s' "${raw_spec}" | parse_spec "${slug}")"; then
+    _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the specification could not be parsed (zero writes)'
+    return $?
+  fi
+  assigned_count="$(jq '[.stories[] | select((.marker.state // "absent")=="absent")] | length' <<< "${pre_parse}")"
+
+  local assigned_spec="${raw_spec}"
+  if ((assigned_count > 0)); then
+    assigned_spec="$(printf '%s' "${raw_spec}" | story_marker_assign; printf x)"; assigned_spec="${assigned_spec%x}"
+    if [[ "${dry_run}" != "true" ]]; then
+      if ! story_marker_write_file "${spec_file}" "${assigned_spec}" > /dev/null 2>&1; then
+        _reconcile_fault "${EXIT_CONFIG}" "reconcile: ${spec_file} could not be written — no ticket may be created before its identifier is recorded (zero writes)"
+        return $?
+      fi
+    fi
+  fi
+
+  local parse ctx doc
+  if ! parse="$(printf '%s' "${assigned_spec}" | parse_spec "${slug}")"; then
     _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the specification could not be parsed (zero writes)'
     return $?
   fi
@@ -333,11 +455,33 @@ cmd_reconcile() {
     return $?
   fi
 
-  # SINK: the plan context (US2, FR-007–FR-011). An explicit
+  # R5 step 2 — RECOGNISE (Phase 3, US1; contracts/recognition-contract.md):
+  # one read per recorded ticket, verified against the SAME identity marker
+  # the read returns. A read failure is NEVER downgraded to "no ticket
+  # exists" (FR-004) — it fails the WHOLE specification closed here.
+  local stories_slim recog rc_recog=0
+  stories_slim="$(jq -c '[.stories[] | {local_id, marker}]' <<< "${doc}")"
+  recog="$(recognition_run "${stories_slim}" "${spec_ref}" "${project_key}" "${spec_file}")" || rc_recog=$?
+  if ((rc_recog != 0)); then
+    _reconcile_fault "${rc_recog}" 'reconcile: a ticket could not be recognised (zero writes)'
+    return $?
+  fi
+
+  # FR-011/FR-016/FR-021: a blocked story is excluded from the document
+  # handed to plan_writes, and the rest of the specification reconciles
+  # normally — a blocked story never blocks its siblings.
+  local blocked_ids doc_for_write
+  blocked_ids="$(jq -c '[.blocked[].story]' <<< "${recog}")"
+  doc_for_write="$(jq -c --argjson bids "${blocked_ids}" \
+    '.stories |= [.[] | . as $s | select(($bids | index($s.local_id)) == null)]' <<< "${doc}")"
+
+  # SINK: the plan context (US2, FR-007–FR-011; Phase 3, US1: tickets/
+  # ticket_origins/ticket_descriptions now come from recognition's `bound`
+  # map instead of only from the override). An explicit
   # SPEC_KIT_JIRA_PLAN_CONTEXT overrides the derived object wholesale;
   # otherwise it is built from the resolved project's persisted binding.
   local plan_ctx actions rc_pc=0
-  plan_ctx="$(_reconcile_plan_context "${base}" "${project_key}" "${cfg_dir}" "${cfg}")" || rc_pc=$?
+  plan_ctx="$(_reconcile_plan_context "${base}" "${project_key}" "${cfg_dir}" "${cfg}" "${recog}")" || rc_pc=$?
   if [[ "${rc_pc}" -eq 2 ]]; then
     _reconcile_notice \
       'Jira mirror skipped: this repository is not bound to a Jira project yet.' \
@@ -348,45 +492,101 @@ cmd_reconcile() {
     _reconcile_fault "${EXIT_CONFIG}" "reconcile: the project \"${project_key}\" has not been bound yet — run /speckit.jira.config to discover its issue types and priorities (zero writes)"
     return $?
   fi
-  if ! actions="$(plan_writes "${doc}" "${plan_ctx}")"; then
+  if ! actions="$(plan_writes "${doc_for_write}" "${plan_ctx}")"; then
     _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the write plan could not be assembled (zero writes)'
     return $?
   fi
 
-  # US6 lifecycle safety: when the current-Jira facts are supplied (the seam the
-  # config/discovery integration fills from a fail-closed read), fold in zero-churn
-  # idempotency, status-category drift, Flagged withholding, and the blocker note.
-  # The filtering runs in BOTH dry-run and real mode so the --dry-run report equals
-  # the real run's action set exactly (FR-033).
-  local warns="[]" notes="[]" has_lifecycle="false"
+  # US6 lifecycle safety (Phase 4, US2): the lifecycle context is now built
+  # from recognition's `bound` map on EVERY run — not only under the
+  # SPEC_KIT_JIRA_LIFECYCLE test override, which continues to win wholesale
+  # (unchanged seam). Zero-churn dropping (FR-030) fires whenever a ticket
+  # was recognised, which is what makes an unchanged re-run write nothing at
+  # all; the drift/Flagged/blocker rules stay inert until Phase 6 supplies a
+  # `target` from a lifecycle event. The filtering runs in BOTH dry-run and
+  # real mode so the --dry-run report equals the real run's action set
+  # exactly (FR-033).
+  local warns="[]" notes="[]" has_override_lifecycle="false"
   local lifecycle="${SPEC_KIT_JIRA_LIFECYCLE:-}"
   if [[ -n "${lifecycle}" ]]; then
-    has_lifecycle="true"
+    has_override_lifecycle="true"
     if ! lifecycle="$(jq -c --arg b "${base}" --arg od "${on_drift}" '. + {base_url:$b, on_drift:$od}' <<< "${lifecycle}" 2> /dev/null)"; then
       _reconcile_fault "${EXIT_CONFIG}" 'reconcile: SPEC_KIT_JIRA_LIFECYCLE is not valid JSON (zero writes)'
       return $?
     fi
-    local lresult
-    if ! lresult="$(plan_lifecycle "${actions}" "${doc}" "${lifecycle}")"; then
-      _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the lifecycle plan could not be assembled (zero writes)'
-      return $?
-    fi
-    actions="$(jq -c '.actions' <<< "${lresult}")"
-    warns="$(jq -c '.warnings' <<< "${lresult}")"
-    notes="$(jq -c '.notes' <<< "${lresult}")"
+  else
+    # origin is omitted when "bridge" (mirrors the plan context's
+    # ticket_origins filter above): plan_lifecycle's own churn check
+    # branches on origin exactly as plan_writes does, and a "bridge" value
+    # would wrongly route a bridge-created ticket through the human-origin
+    # managed-panel comparison, which always reads "unchanged" for a
+    # description that never carried the panel marker in the first place.
+    # target (Phase 6, US4, research R9): the status the CURRENT lifecycle
+    # event maps to, via the routed project's phase_status_map — empty when
+    # this run has no hook event (a direct invocation) or the event has no
+    # declared mapping, which leaves drift evaluation inert exactly as it is
+    # today (R9's stated fallback). category classifies each recognised
+    # ticket's OWN status the same way config_classify_statuses seeds it:
+    # mapped (a declared phase target) overrides an operator-designated
+    # halted state, which overrides Jira's own "done" statusCategory
+    # (post-scope), else unknown.
+    local order target
+    order="$(_reconcile_phase_order "${phase_status_map}")"
+    target="$(jq -r --arg e "${hook_event}" '.[$e] // ""' <<< "${phase_status_map}")"
+    lifecycle="$(jq -c --arg b "${base}" --arg od "${on_drift}" --argjson ord "${order}" \
+      --argjson pm "${phase_status_map}" --argjson hd "${halted_statuses}" --arg tgt "${target}" \
+      '($pm | [.[]]) as $mapped_targets
+       | {base_url:$b, on_drift:$od, order:$ord,
+          tickets: ((.bound // {}) | with_entries(.value |= (
+            { key: .key, current: .current, blockers: .blockers,
+              status: .status,
+              category: (
+                if (.status | IN($mapped_targets[])) then "mapped"
+                elif (.status | IN($hd[])) then "halted"
+                elif .status_category == "done" then "post-scope"
+                else "unknown" end),
+              target: $tgt,
+              flagged: .flagged }
+            + (if .origin == "bridge" then {} else {origin: .origin} end)
+          )))}' \
+      <<< "${recog}")"
   fi
+  local lresult
+  if ! lresult="$(plan_lifecycle "${actions}" "${doc_for_write}" "${lifecycle}")"; then
+    _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the lifecycle plan could not be assembled (zero writes)'
+    return $?
+  fi
+  actions="$(jq -c '.actions' <<< "${lresult}")"
+  warns="$(jq -c '.warnings' <<< "${lresult}")"
+  notes="$(jq -c '.notes' <<< "${lresult}")"
 
-  # created counts only create-endpoint POSTs; a transition is also a POST but is
-  # not a ticket creation, so it is excluded from the created tally.
+  # Every blocked story produces exactly one warning from the diagnostics
+  # catalogue (FR-011, FR-016, FR-021) — folded into the same channel the
+  # lifecycle rules use, so a reader sees every reason a story's Jira write
+  # did not happen in one place.
+  warns="$(jq -c --argjson bw "$(jq -c '[.blocked[].detail]' <<< "${recog}")" '. + $bw' <<< "${warns}")"
+
+  # created/updated count only their own endpoints; a transition is also a
+  # POST but is not a ticket creation, so it is excluded from the created
+  # tally. skipped (FR-023) is what plan_lifecycle silently dropped as
+  # no-op: every recognised ticket whose write would have been a no-op.
   local created updated warn_count rc=0
   created="$(jq '[.[] | select(.method=="POST" and (.url|endswith("/issue")))] | length' <<< "${actions}")"
   updated="$(jq '[.[] | select(.method=="PUT")] | length' <<< "${actions}")"
   warn_count="$(jq 'length' <<< "${warns}")"
+  local recognised_count; recognised_count="$(jq '.bound | length' <<< "${recog}")"
+  local skipped_count; skipped_count="$(jq --argjson u "${updated}" '(.bound | length) - $u' <<< "${recog}")"
+  ((skipped_count < 0)) && skipped_count=0
+  local has_lifecycle="${has_override_lifecycle}"
+  [[ "${warn_count}" -gt 0 ]] && has_lifecycle="true"
 
   if [[ "${dry_run}" != "true" ]]; then
     # `|| rc=$?` keeps a fail-closed apply (exit >= 2) from aborting the command
     # under the dispatcher's `set -e`, so the run summary always prints (FR-032).
-    apply_writes "${actions}" || rc=$?
+    # R5 steps 4/6: apply_writes_with_recognition marks every planned creation
+    # `creating` before the first create, and stamps + records each created
+    # ticket's key IMMEDIATELY, per ticket — never batched.
+    apply_writes_with_recognition "${actions}" "${spec_ref}" "${spec_file}" || rc=$?
   fi
 
   # Hook health is READ and reported on every run (FR-047). Nothing here writes
@@ -423,19 +623,24 @@ cmd_reconcile() {
   # Report the action set with the base URL stripped to a host-relative path: the
   # site host is a coordinate that must never appear in output (Constitution IV),
   # and it also keeps the summary stable across the mock's per-run ephemeral port.
+  # `local_id` is internal bookkeeping (which story a creation stamps) and is
+  # never part of the published action shape.
   local disp_actions
-  disp_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b)]' <<< "${actions}")"
+  disp_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b) | del(.local_id)]' <<< "${actions}")"
 
-  # The warnings/notes keys appear only when the lifecycle facts were supplied, so
-  # the content-only reconcile (US3) summary is byte-for-byte unchanged.
+  # The warnings/notes keys appear when the lifecycle facts were supplied OR
+  # a story was blocked, so the content-only reconcile (US3) summary with
+  # neither is byte-for-byte unchanged.
   local summary
   summary="$(jq -cn \
     --argjson dry "${dry_run}" --argjson c "${created}" --argjson u "${updated}" \
     --argjson x "${rc}" --argjson actions "${disp_actions}" \
     --argjson wc "${warn_count}" --argjson w "${warns}" --argjson no "${notes}" \
-    --argjson hl "${has_lifecycle}" --argjson hooks "${hooks_health}" '
+    --argjson hl "${has_lifecycle}" --argjson hooks "${hooks_health}" \
+    --argjson rec "${recognised_count}" --argjson asg "${assigned_count}" --argjson sk "${skipped_count}" '
     {schema_version:"1.0", command:"reconcile", dry_run:$dry,
-     counts:{created:$c, updated:$u, skipped:0, warnings:$wc, errors:0},
+     counts:{created:$c, updated:$u, skipped:$sk, warnings:$wc, errors:0,
+             recognised:$rec, assigned:$asg},
      actions:$actions}
     + (if $hl then {warnings:$w, notes:$no} else {} end)
     + {hook_health:$hooks, exit_code:$x}' | json_canonical)"

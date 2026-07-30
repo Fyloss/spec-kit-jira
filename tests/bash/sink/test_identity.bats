@@ -73,3 +73,36 @@ SPEC_B='{"repo":"acme/app","spec_slug":"002-feature-b","folder":"specs/002-featu
   p="$(pwsh -NoProfile -Command "Import-Module '${PS_SINK}/Identity.psm1' -Force; [Console]::Out.Write((Get-JiraIdentityMarker -SpecRefJson '${SPEC_A}' -Origin 'human'))")"
   [ "${b}" = "${p}" ]
 }
+
+# =============================================================================
+# Phase 2 [T016/T017] — the identity marker gains `story`, byte-identical
+# across ports.
+# =============================================================================
+
+@test "identity_marker omits story when absent (feature-ceremony / mentioned-ticket tickets)" {
+  run identity_marker "${SPEC_A}" bridge-created
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("story")' <<< "$output")" = "false" ]
+}
+
+@test "identity_marker records the durable story identifier when supplied" {
+  run identity_marker "${SPEC_A}" bridge-created "7f3a9c1e40b2d85a"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.story' <<< "$output")" = "7f3a9c1e40b2d85a" ]
+  [ "$(jq -r '.origin' <<< "$output")" = "bridge-created" ]
+}
+
+@test "identity_write stamps a marker carrying story when given one" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  run identity_write ABC-1 "${SPEC_A}" bridge-created "7f3a9c1e40b2d85a"
+  [ "$status" -eq 0 ]
+}
+
+@test "the PowerShell port builds an identical marker with story (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local b p
+  b="$(identity_marker "${SPEC_A}" human "7f3a9c1e40b2d85a")"
+  p="$(pwsh -NoProfile -Command "Import-Module '${PS_SINK}/Identity.psm1' -Force; [Console]::Out.Write((Get-JiraIdentityMarker -SpecRefJson '${SPEC_A}' -Origin 'human' -Story '7f3a9c1e40b2d85a'))")"
+  [ "${b}" = "${p}" ]
+}
