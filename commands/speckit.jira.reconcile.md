@@ -128,6 +128,57 @@ is spec-kit-jira's own bookkeeping; leave it exactly where it is. Deleting it (o
 regenerating `spec.md` from the template) makes the next run treat that story as
 new, mirroring it again — the ticket it used to point at is left untouched.
 
+## Recognition and the run summary
+
+Before planning any write, reconcile reads back every ticket a story's marker
+already names and verifies its identity marker. A recognised ticket is updated
+(or skipped, if nothing changed) instead of duplicated. The run summary's
+`counts` reflect this:
+
+- `recognised` — stories bound to an existing ticket by this run.
+- `assigned` — durable identifiers newly written into `spec.md` by this run.
+- `skipped` — recognised tickets whose write was dropped because nothing
+  changed (this is what makes a second, unchanged run a true no-op).
+
+A story whose recorded ticket cannot be verified (a mismatched or missing
+identity marker, a duplicate identifier, or a ticket claimed by another
+specification) is reported in `warnings` and left untouched; it never blocks
+its siblings.
+
+## Configuring lifecycle safety: `phase_status_map` and `halted_statuses`
+
+Two optional, hand-edited keys under a project entry in `config.yml` let
+reconcile evaluate drift and operator-halted states against a ticket's real,
+recognised status. Neither has a default table — an operator's configured
+workflow is authoritative, and omitting both keeps this machinery inert
+exactly as it was before recognition existed:
+
+```yaml
+projects:
+  - key: COMP
+    # ...
+    phase_status_map:
+      after_specify: "To Do"
+      after_plan: "In Progress"
+    halted_statuses:
+      - "Blocked"
+```
+
+- `phase_status_map` maps a lifecycle event name (`after_specify`,
+  `after_clarify`, `after_plan`, `after_tasks`, `after_implement`,
+  `after_analyze`) to the Jira status that event implies. When the run was
+  dispatched for one of these events, a recognised ticket already sitting
+  **ahead** of that status raises a named drift warning; its content still
+  reconciles, but reconcile never issues a status transition itself.
+- `halted_statuses` names statuses the operator uses to pause a ticket by
+  hand. A recognised ticket sitting in one of these statuses has its content
+  write suppressed (not just its transition), with a named warning — an
+  operator's manual hold is never silently overwritten.
+
+A ticket carrying the Jira **Flagged** field is treated the same way as a
+halted ticket: surfaced, its write withheld, and the flag itself is never
+touched.
+
 ## Flags
 
 - `<SPEC-FILE>` — optional positional: the specification to mirror; defaults to

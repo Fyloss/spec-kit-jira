@@ -93,6 +93,7 @@ function Invoke-JiraRecognitionRun {
     $bound = [ordered]@{}
     $new = [System.Collections.Generic.List[string]]::new()
     $blocked = [System.Collections.Generic.List[object]]::new()
+    $rerouted = [ordered]@{}
     $allIds = @($stories | ForEach-Object { [string]$_.local_id })
 
     foreach ($st in $stories) {
@@ -142,6 +143,7 @@ function Invoke-JiraRecognitionRun {
 
         if (-not [string]::IsNullOrEmpty($ProjectKey) -and (Get-JiraRecognitionProjectOf -IssueKey $key) -ne $ProjectKey) {
             $new.Add($id)
+            $rerouted[$id] = [ordered]@{ former_key = $key; former_project = (Get-JiraRecognitionProjectOf -IssueKey $key) }
             continue
         }
 
@@ -235,7 +237,7 @@ function Invoke-JiraRecognitionRun {
         }
     }
 
-    $json = ConvertTo-JiraJsonValue ([ordered]@{ bound = $bound; new = $new; blocked = $blocked })
+    $json = ConvertTo-JiraJsonValue ([ordered]@{ bound = $bound; new = $new; blocked = $blocked; rerouted = $rerouted })
     return [pscustomobject]@{ ExitCode = 0; Json = $json }
 }
 

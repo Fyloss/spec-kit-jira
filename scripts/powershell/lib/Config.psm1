@@ -504,6 +504,23 @@ function Test-JiraTeamConfig {
             if (@('subtask', 'linked_story') -cnotcontains $ts) { $errs.Add("projects[$i].task_strategy is invalid") }
             $lt = Get-CfgProp $p 'link_type'
             if ($ts -eq 'linked_story' -and [string]::IsNullOrEmpty([string]$lt)) { $errs.Add("projects[$i].link_type is required when task_strategy=linked_story") }
+            if (($p -is [System.Collections.IDictionary]) -and $p.Contains('phase_status_map')) {
+                $psm = Get-CfgProp $p 'phase_status_map'
+                $psmValid = $psm -is [System.Collections.IDictionary]
+                if ($psmValid) { foreach ($v in $psm.Values) { if ($v -isnot [string]) { $psmValid = $false } } }
+                if (-not $psmValid) { $errs.Add("projects[$i].phase_status_map must be a mapping of lifecycle-event name to status name") }
+            }
+            # halted_statuses is normally an array, but the team-config YAML
+            # reader does not parse an inline flow-style list ("[Blocked]") —
+            # only a block-style one — so a declaration written that way
+            # arrives here as a plain string; _reconcile_halted_statuses (the
+            # Bash mirror: Get-JiraReconcileHaltedStatuses) already recovers
+            # it. A string is therefore accepted here too, not just an array.
+            if (($p -is [System.Collections.IDictionary]) -and $p.Contains('halted_statuses')) {
+                $hs = Get-CfgProp $p 'halted_statuses'
+                $hsValid = ($hs -is [string]) -or (($hs -is [System.Collections.IEnumerable]) -and ($hs -isnot [System.Collections.IDictionary]))
+                if (-not $hsValid) { $errs.Add("projects[$i].halted_statuses must be a list of status names") }
+            }
             $i++
         }
     }

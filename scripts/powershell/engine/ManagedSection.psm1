@@ -125,9 +125,14 @@ function Get-JiraNodeStringValue {
         foreach ($item in $Node) { foreach ($s in (Get-JiraNodeStringValue $item)) { $out.Add($s) } }
         return $out
     }
-    if ($Node -is [psobject] -or $Node.PSObject.Properties.Count -gt 0) {
-        foreach ($p in $Node.PSObject.Properties) { foreach ($s in (Get-JiraNodeStringValue $p.Value)) { $out.Add($s) } }
-    }
+    # Anything left (an object, or a boxed scalar such as an ADF `attrs.level`)
+    # falls through to property enumeration. Guarding this with `-is
+    # [psobject] -or ...` looks redundant but is NOT equivalent to omitting
+    # it: under Set-StrictMode, some property-bearing values throw on
+    # `.PSObject.Properties.Count` even though `-is [psobject]` is true for
+    # them, defeating the intended short-circuit. `foreach` over Properties
+    # is always safe — zero properties just means zero iterations.
+    foreach ($p in $Node.PSObject.Properties) { foreach ($s in (Get-JiraNodeStringValue $p.Value)) { $out.Add($s) } }
     return $out
 }
 

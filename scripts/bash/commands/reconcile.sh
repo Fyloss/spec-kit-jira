@@ -589,6 +589,36 @@ cmd_reconcile() {
     apply_writes_with_recognition "${actions}" "${spec_ref}" "${spec_file}" || rc=$?
   fi
 
+  # T071: the catalogued `re-routed` notice, once the new key is recorded.
+  # Recognition tags a re-routed story with its former key and project
+  # (recog.rerouted); the new key is only known after the create response,
+  # so the command layer re-reads the just-written spec_file for it. Skipped
+  # under --dry-run (no key is ever recorded there) and skipped for a story
+  # whose creation did not complete this run — a future run reports it then.
+  local rerouted; rerouted="$(jq -c '.rerouted // {}' <<< "${recog}")"
+  if [[ "${dry_run}" != "true" ]] && [[ "$(jq 'length' <<< "${rerouted}")" -gt 0 ]]; then
+    local post_content post_parse
+    post_content="$(cat "${spec_file}" 2> /dev/null; printf x)"; post_content="${post_content%x}"
+    if post_parse="$(printf '%s' "${post_content}" | parse_spec "${slug}" 2> /dev/null)"; then
+      local rid
+      for rid in $(jq -r 'keys[]' <<< "${rerouted}"); do
+        local new_key
+        new_key="$(jq -r --arg id "${rid}" \
+          '.stories[] | select(.local_id == $id and .marker.state == "bound") | .marker.ticket // empty' \
+          <<< "${post_parse}")"
+        if [[ -n "${new_key}" ]]; then
+          local former_key former_project
+          former_key="$(jq -r --arg id "${rid}" '.[$id].former_key' <<< "${rerouted}")"
+          former_project="$(jq -r --arg id "${rid}" '.[$id].former_project' <<< "${rerouted}")"
+          notes="$(jq -c --arg d \
+            "Story ${rid} in ${spec_file} was previously mirrored as ${former_key} in project ${former_project}, which is no longer the project this specification routes to; ${former_key} was left untouched and the story was mirrored into ${project_key} as ${new_key}. Nothing was moved or deleted." \
+            '. + [$d]' <<< "${notes}")"
+          has_lifecycle="true"
+        fi
+      done
+    fi
+  fi
+
   # Hook health is READ and reported on every run (FR-047). Nothing here writes
   # the registry, in any state — reading it is the extension's whole
   # relationship with that file (003 FR-022). The path is relative to the

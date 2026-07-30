@@ -201,6 +201,32 @@ Describe 'Import-JiraConfig' {
         ($r.Errors -join "`n") | Should -Match 'unknown'
         Remove-Item -Recurse -Force $d
     }
+
+    It 'rejects a phase_status_map that is not a mapping to status names (exit 4, T074)' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: company_managed`n    epic_strategy: per_repo`n    task_strategy: subtask`n    phase_status_map: `"not-a-mapping`"`nrouting_default: PROJ`n" -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'phase_status_map'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'accepts a valid phase_status_map and halted_statuses (T074)' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: company_managed`n    epic_strategy: per_repo`n    task_strategy: subtask`n    phase_status_map:`n      after_specify: `"To Do`"`n      after_plan: `"In Progress`"`n    halted_statuses:`n      - `"Blocked`"`nrouting_default: PROJ`n" -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 0
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'rejects a halted_statuses that is neither a list nor a string (exit 4, T074)' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: company_managed`n    epic_strategy: per_repo`n    task_strategy: subtask`n    halted_statuses:`n      count: 3`nrouting_default: PROJ`n" -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'halted_statuses'
+        Remove-Item -Recurse -Force $d
+    }
 }
 
 Describe 'The operator disable record (T009, FR-007, FR-029)' {

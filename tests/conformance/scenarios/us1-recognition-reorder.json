@@ -1,0 +1,16 @@
+{
+  "name": "us1-recognition-reorder",
+  "description": "Reconcile a three-story specification, then a SECOND run reads a reordered and retitled copy of it: story 3 moved above story 1, story 2 retitled. Recognition keys on the durable identifier, not position or title, so no ticket is re-created and each ticket still holds the content of the story whose marker names it (FR-006, SC-005).",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec",
+  "runs": [
+    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] },
+    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec-reordered.md"] }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222 3333333333333333"
+  }
+}

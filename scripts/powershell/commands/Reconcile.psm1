@@ -694,6 +694,41 @@ function Invoke-JiraReconcile {
         $rc = Invoke-JiraApplyWriteSetWithRecognition -ActionsJson $actionsJson -SpecRefJson $specRefJson -SpecFile $specFile
     }
 
+    # T071: the catalogued `re-routed` notice, once the new key is recorded.
+    # Recognition tags a re-routed story with its former key and project
+    # ($recog.rerouted); the new key is only known after the create response,
+    # so the command layer re-reads the just-written spec file for it.
+    # Skipped under --dry-run (no key is ever recorded there) and skipped for
+    # a story whose creation did not complete this run — a future run
+    # reports it then.
+    $reroutedProp = Get-JiraPlanPropSafe $recog 'rerouted'
+    if (-not $dryRun -and $reroutedProp -and @($reroutedProp.PSObject.Properties).Count -gt 0) {
+        $postRaw = Get-Content -Raw -LiteralPath $specFile
+        if ($null -eq $postRaw) { $postRaw = '' }
+        try {
+            $postParseObj = (Get-JiraParsedSpec -Text $postRaw -FolderSlug $slug) | ConvertFrom-Json -Depth 100
+            $notesList = [System.Collections.Generic.List[string]]::new()
+            foreach ($n in @($notesJson | ConvertFrom-Json -Depth 100)) { $notesList.Add([string]$n) }
+            foreach ($rp in $reroutedProp.PSObject.Properties) {
+                $rid = $rp.Name
+                $story = $postParseObj.stories | Where-Object { [string]$_.local_id -eq $rid } | Select-Object -First 1
+                $marker = if ($story) { Get-JiraPlanPropSafe $story 'marker' } else { $null }
+                $state = if ($marker) { [string](Get-JiraPlanPropSafe $marker 'state') } else { '' }
+                if ($state -eq 'bound') {
+                    $newKey = [string](Get-JiraPlanPropSafe $marker 'ticket')
+                    if (-not [string]::IsNullOrEmpty($newKey)) {
+                        $formerKey = [string]$rp.Value.former_key
+                        $formerProject = [string]$rp.Value.former_project
+                        $notesList.Add("Story $rid in $specFile was previously mirrored as $formerKey in project $formerProject, which is no longer the project this specification routes to; $formerKey was left untouched and the story was mirrored into $projectKey as $newKey. Nothing was moved or deleted.")
+                        $hasLifecycle = $true
+                    }
+                }
+            }
+            $notesJson = ConvertTo-JiraJsonValue $notesList
+        }
+        catch {}
+    }
+
     # Hook health is READ and reported on every run (FR-047). Nothing here writes
     # the registry, in any state — reading it is the extension's whole
     # relationship with that file (003 FR-022). The path is relative to the

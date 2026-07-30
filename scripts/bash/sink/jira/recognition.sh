@@ -67,7 +67,11 @@ _recognition_project_of() {
 #
 # Prints the recognition result on success:
 #   {"bound":{<id>:{key,origin,current,status,flagged,blockers}}, "new":[ids],
-#    "blocked":[{story,reason,detail}]}
+#    "blocked":[{story,reason,detail}],
+#    "rerouted":{<id>:{former_key,former_project}}}
+#   rerouted entries are also present in `new` (the story IS mirrored, into the
+#   routed project); the command layer uses the extra detail to emit the
+#   catalogued `re-routed` notice once the new key is recorded (T071).
 # Returns a transport exit code (>=2) with ZERO stdout when any read is
 # inconclusive — the whole specification fails closed (research R2/R3,
 # contract "The read").
@@ -76,7 +80,7 @@ recognition_run() {
   local repo
   repo="$(jq -r '.repo // ""' <<< "${spec_ref}")"
 
-  local bound="{}" new="[]" blocked="[]"
+  local bound="{}" new="[]" blocked="[]" rerouted="{}"
   local all_ids; all_ids="$(jq -c '[.[].local_id]' <<< "${stories}")"
 
   # --- Parse-level marker problems: malformed / duplicate-in-section -------
@@ -147,9 +151,12 @@ recognition_run() {
 
     # A recorded key whose project differs from the routed one: mirror into
     # the routed project instead (US3, Phase 5) — treated as NEW, former
-    # ticket left untouched.
+    # ticket left untouched. Recorded here so the command layer can emit the
+    # catalogued `re-routed` notice once the new key is known (T071).
     if [[ -n "${project}" ]] && [[ "$(_recognition_project_of "${key}")" != "${project}" ]]; then
       new="$(jq -c --arg s "${id}" '. + [$s]' <<< "${new}")"
+      rerouted="$(jq -c --arg s "${id}" --arg fk "${key}" --arg fp "$(_recognition_project_of "${key}")" \
+        '. + {($s): {former_key:$fk, former_project:$fp}}' <<< "${rerouted}")"
       continue
     fi
 
@@ -235,6 +242,6 @@ recognition_run() {
     bound="$(jq -c --arg id "${id}" --argjson e "${entry}" '. + {($id): $e}' <<< "${bound}")"
   done
 
-  jq -cn --argjson b "${bound}" --argjson nw "${new}" --argjson bl "${blocked}" \
-    '{bound:$b, new:$nw, blocked:$bl}' | json_canonical
+  jq -cn --argjson b "${bound}" --argjson nw "${new}" --argjson bl "${blocked}" --argjson rr "${rerouted}" \
+    '{bound:$b, new:$nw, blocked:$bl, rerouted:$rr}' | json_canonical
 }

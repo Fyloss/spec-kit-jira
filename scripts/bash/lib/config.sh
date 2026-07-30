@@ -447,7 +447,12 @@ def branchpattern:
         (if ($p.epic_strategy|IN("per_repo","per_feature")|not) then "projects[\($i)].epic_strategy is invalid" else empty end),
         (if ($p.task_strategy|IN("subtask","linked_story")|not) then "projects[\($i)].task_strategy is invalid" else empty end),
         (if ($p.task_strategy == "linked_story" and (($p.link_type // "")|length) < 1)
-         then "projects[\($i)].link_type is required when task_strategy=linked_story" else empty end)
+         then "projects[\($i)].link_type is required when task_strategy=linked_story" else empty end),
+        (if ($p | has("phase_status_map")) and
+            (($p.phase_status_map|type) != "object" or ([$p.phase_status_map[]|type] | any(. != "string")))
+         then "projects[\($i)].phase_status_map must be a mapping of lifecycle-event name to status name" else empty end),
+        (if ($p | has("halted_statuses")) and (($p.halted_statuses|type) as $t | $t != "array" and $t != "string")
+         then "projects[\($i)].halted_statuses must be a list of status names" else empty end)
       ][] ) )
 ] | flatten'
 # kcov-excl-stop

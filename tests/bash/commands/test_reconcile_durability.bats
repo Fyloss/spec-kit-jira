@@ -89,6 +89,41 @@ teardown() {
   [ "$(jq -r '.new[0]' <<< "$output")" = "1111111111111111" ]
 }
 
+@test "re-routed: the catalogued notice names the story, the former key and project, and the new key (T071)" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  local work="${BATS_TEST_TMPDIR}/repo"
+  cp -R "${FIXTURE}" "${work}"
+  local spec="${work}/specs/001-billing-invoices/spec.md"
+  export JIRA_CONFIG_DIR="${work}/.specify/jira"
+
+  printf '%s\n' \
+    '# Feature Specification: Billing Invoices' '' \
+    '### User Story 1 - Export a single invoice (Priority: P1)' \
+    '<!-- speckit-jira story=1111111111111111 ticket=LEGACY-42 -->' '' \
+    'As a customer, I want to export one invoice as a PDF.' '' \
+    '- **Given** a signed-in customer viewing an invoice' \
+    '- **When** they choose Export' \
+    '- **Then** a PDF download starts' > "${spec}"
+
+  run cmd_reconcile reconcile "${spec}" --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.counts.created' <<< "$output")" -eq 1 ]
+
+  local note; note="$(jq -r '.notes[0] // ""' <<< "$output")"
+  [[ "${note}" == *"1111111111111111"* ]]
+  [[ "${note}" == *"LEGACY-42"* ]]
+  [[ "${note}" == *"in project LEGACY"* ]]
+  [[ "${note}" == *"mirrored into COMP as COMP-1"* ]]
+
+  # the recorded marker now names the new ticket; the former one is left
+  # untouched — no write was ever issued to it.
+  grep -q 'ticket=COMP-1' "${spec}"
+  ! grep -q 'ticket=LEGACY-42' "${spec}"
+  [ "$(grep -c 'LEGACY-42' "${MOCK_CALLLOG}")" -eq 0 ]
+}
+
 @test "a story whose recorded ticket lives outside the routed project is mirrored into the routed project, not blocked" {
   mock_start "${ROOT}/tests/conformance/mock-jira/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"

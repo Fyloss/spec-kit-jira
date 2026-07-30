@@ -88,6 +88,38 @@ teardown() {
   [ -z "$output" ]
 }
 
+@test "a human-origin ticket's churn is computed on the managed section alone: its prose above the panel is never rewritten (T072)" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${SPEC}" --json > /dev/null
+
+  local story_id
+  story_id="$(grep -oE 'story=[0-9a-f]{16} ticket=COMP-2' "${SPEC}" | grep -oE '^story=[0-9a-f]{16}' | cut -d= -f2)"
+  local spec_ref='{"repo":"local/repo","spec_slug":"001-billing-invoices","folder":"x"}'
+
+  # Declare COMP-2 human-origin (as a colleague's own ticket would carry it),
+  # with no prose yet: this run wraps it in the managed panel for the first
+  # time — a one-time, legitimate churn, not the behaviour under test.
+  identity_write "COMP-2" "${spec_ref}" human "${story_id}" > /dev/null
+  cmd_reconcile reconcile "${SPEC}" --json > /dev/null
+
+  # Now a human adds a note above the panel, exactly as a PO would in Jira.
+  local current_desc human_desc
+  current_desc="$(jira_request GET "${MOCK_BASE_URL}/rest/api/3/issue/COMP-2?fields=description")"
+  human_desc="$(jq -cn --argjson d "$(jq -c '.fields.description' <<< "${current_desc}")" \
+    '{type:"doc", version:1, content:([{type:"paragraph", content:[{type:"text", text:"Human note above the panel."}]}] + $d.content)}')"
+  jira_request PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-2" \
+    "$(jq -cn --argjson d "${human_desc}" '{fields:{description:$d}}')" > /dev/null
+
+  : > "${MOCK_CALLLOG}"
+  run cmd_reconcile reconcile "${SPEC}" --json
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^PUT /rest/api/3/issue/COMP-2$' "${MOCK_CALLLOG}")" -eq 0 ]
+
+  run curl -s "${MOCK_BASE_URL}/rest/api/3/issue/COMP-2"
+  [ "$(jq -r '.fields.description.content[0].content[0].text' <<< "$output")" = "Human note above the panel." ]
+}
+
 @test "the PowerShell port shows the identical zero-churn signature (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   mock_start "${MOCK}/configs/default.json"
