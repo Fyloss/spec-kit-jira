@@ -65,7 +65,7 @@ function ConvertTo-JiraStoryMarkerInfo {
         {"kind":"none"}
         {"kind":"valid","id":"..","state":"assigned"}
         {"kind":"valid","id":"..","state":"creating"}
-        {"kind":"valid","id":"..","state":"bound","ticket":"KEY-1"}
+        {"kind":"valid","id":"..","state":"bound","ticket":".."}
         {"kind":"malformed","id":".."}
     #>
     [CmdletBinding()]

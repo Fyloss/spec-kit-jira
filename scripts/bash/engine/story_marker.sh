@@ -67,7 +67,7 @@ story_marker_format() {
 #   {"kind":"none"}                                             — not a marker at all
 #   {"kind":"valid","id":"..","state":"assigned"}                — story=<id>
 #   {"kind":"valid","id":"..","state":"creating"}                 — story=<id> creating
-#   {"kind":"valid","id":"..","state":"bound","ticket":"KEY-1"}   — story=<id> ticket=KEY-1
+#   {"kind":"valid","id":"..","state":"bound","ticket":".."}      — story=<id> ticket=<ticket>
 #   {"kind":"malformed","id":".."}                                — a valid identifier with an unrecognisable tail
 story_marker_parse_line() {
   local raw="$1" line t
