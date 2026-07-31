@@ -25,7 +25,18 @@ Describe 'The unicode binding survives an unrelated config run (conformance)' {
     It 'the unicode binding''s every key with every expected id survives (powershell)' {
         $outDir = Join-Path $script:Tmp 'out-ps'
         & bash $script:Harness $script:Scenario 'powershell' $outDir | Out-Null
-        (Get-Content -LiteralPath (Join-Path $outDir 'exit') -Raw).Trim() | Should -Be '0'
+        # A bare exit-code mismatch here is unactionable on its own, and an empty
+        # stderr says only that the run failed WITHOUT complaining — which is its
+        # own distinct cause. Report every artefact the harness captured, each
+        # labelled, so a CI failure names what actually happened.
+        $diag = (@('stderr', 'stdout', 'argv.1', 'entry.1') | ForEach-Object {
+            $p = Join-Path $outDir $_
+            $body = if (Test-Path -LiteralPath $p) {
+                Get-Content -LiteralPath $p -Raw -ErrorAction SilentlyContinue
+            } else { '<file absent>' }
+            "--- ${_} ---`n$body"
+        }) -join "`n"
+        (Get-Content -LiteralPath (Join-Path $outDir 'exit') -Raw).Trim() | Should -Be '0' -Because "harness artefacts:`n$diag"
 
         $localf = Join-Path $outDir 'workdir/.specify/jira/config.local.yml'
         $localj = ConvertFrom-JiraConfigYaml -Path $localf | ConvertFrom-Json -Depth 100
@@ -51,7 +62,9 @@ Describe 'The unicode binding survives an unrelated config run (conformance)' {
         & bash $script:Harness $script:Scenario 'bash' $outBash | Out-Null
         & bash $script:Harness $script:Scenario 'powershell' $outPs | Out-Null
 
-        (Get-Content -LiteralPath (Join-Path $outBash 'exit') -Raw) | Should -Be (Get-Content -LiteralPath (Join-Path $outPs 'exit') -Raw)
+        $bashErr = Get-Content -LiteralPath (Join-Path $outBash 'stderr') -Raw -ErrorAction SilentlyContinue
+        $psErr = Get-Content -LiteralPath (Join-Path $outPs 'stderr') -Raw -ErrorAction SilentlyContinue
+        (Get-Content -LiteralPath (Join-Path $outBash 'exit') -Raw) | Should -Be (Get-Content -LiteralPath (Join-Path $outPs 'exit') -Raw) -Because "bash stderr:`n$bashErr`npowershell stderr:`n$psErr"
 
         $bashLocal = Get-Content -LiteralPath (Join-Path $outBash 'workdir/.specify/jira/config.local.yml') -Raw
         $psLocal = Get-Content -LiteralPath (Join-Path $outPs 'workdir/.specify/jira/config.local.yml') -Raw
