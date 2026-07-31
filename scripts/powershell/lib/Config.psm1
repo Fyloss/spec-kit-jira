@@ -118,8 +118,18 @@ function Assert-JiraSingleVersionSource {
 # concerns as in the Bash port).
 $script:CfgLines = @()
 $script:CfgIndents = @()
+$script:CfgLineNos = @()
 $script:CfgN = 0
 $script:CfgI = 0
+$script:CfgFile = $null
+
+# $script:CfgErr — the formatted parse-failure message (contracts/
+# parse-failure.md §2), or $null when clear. Set by New-CfgParseFailure /
+# New-CfgDuplicateKeyFailure; every parser loop below returns immediately once
+# it is set — a flag, not a `throw` per frame, so control flow is identical to
+# the Bash port's mirrored flag (Constitution VI: a throw on one side and a
+# global on the other would unwind differently and reorder stderr).
+$script:CfgErr = $null
 
 function Remove-CfgInlineComment {
     param([string] $Line)
@@ -137,10 +147,15 @@ function Remove-CfgInlineComment {
 
 function Initialize-CfgBuffer {
     param([string] $Path)
+    $script:CfgFile = $Path
     $script:CfgLines = [System.Collections.Generic.List[string]]::new()
     $script:CfgIndents = [System.Collections.Generic.List[int]]::new()
+    $script:CfgLineNos = [System.Collections.Generic.List[int]]::new()
     $script:CfgI = 0
+    $script:CfgErr = $null
+    $lineno = 0
     foreach ($raw0 in [System.IO.File]::ReadAllLines($Path)) {
+        $lineno++
         $raw = $raw0.TrimEnd("`r")
         $body = $raw.TrimStart(' ')
         if ($body -eq '') { continue }
@@ -150,15 +165,129 @@ function Initialize-CfgBuffer {
         if ($body -eq '') { continue }
         $script:CfgIndents.Add($indent)
         $script:CfgLines.Add($body)
+        $script:CfgLineNos.Add($lineno)
     }
     $script:CfgN = $script:CfgLines.Count
 }
 
-function Test-CfgMapEntry {
-    # The apostrophe is included because discovered status names ("Won't Do")
-    # are legal map keys — mirror of _cfg_is_map_entry.
+function Protect-CfgLine {
+    <#
+    .SYNOPSIS
+      Replace every credential-shaped substring with [redacted] before a
+      parse-failure line is formatted (contracts/parse-failure.md §2.1): the
+      BLOCK-tier shapes the privacy guard recognises (an Atlassian API token
+      prefix, a real *.atlassian.net host) and the WARN-tier email shape
+      (Constitution IX). Applied to the WHOLE line, mirror of
+      _cfg_redact_line.
+    #>
+    param([string] $Line)
+    $Line = [regex]::Replace($Line, 'ATATT[A-Za-z0-9._=+/-]{2,}', '[redacted]')
+    $Line = [regex]::Replace($Line, '[a-z0-9][a-z0-9-]*\.atlassian\.net', '[redacted]', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    $Line = [regex]::Replace($Line, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[redacted]', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    return $Line
+}
+
+function New-CfgParseFailure {
+    <#
+    .SYNOPSIS
+      Set $script:CfgErr to the three-line message of
+      contracts/parse-failure.md §2 for the retained line at the given cursor
+      index. Mirror of _cfg_raise_parse_failure.
+    #>
+    param([int] $Index)
+    $line = $script:CfgLineNos[$Index]
+    $content = Protect-CfgLine $script:CfgLines[$Index]
+    $script:CfgErr = "config: ${script:CfgFile}:${line}: cannot parse this line as a mapping entry: $content`n" +
+    'config: a key must be followed by ": " — quote the key if it contains a colon, e.g. "Blocked: waiting": "10001"' + "`n" +
+    "config: re-run /speckit.jira.config to regenerate ${script:CfgFile} from the Jira instance."
+}
+
+function New-CfgDuplicateKeyFailure {
+    <#
+    .SYNOPSIS
+      Set $script:CfgErr to the duplicate-key message of
+      contracts/parse-failure.md §1 (FR-016). Mirror of
+      _cfg_raise_duplicate_key.
+    #>
+    param([int] $Index, [string] $Key, [int] $FirstLine)
+    $line = $script:CfgLineNos[$Index]
+    $redactedKey = Protect-CfgLine $Key
+    $script:CfgErr = "config: ${script:CfgFile}:${line}: duplicate key ${redactedKey} — already defined at line ${FirstLine}`n" +
+    'config: two entries cannot claim the same name; delete or rename one of them.' + "`n" +
+    "config: re-run /speckit.jira.config to regenerate ${script:CfgFile} from the Jira instance."
+}
+
+$script:CfgKey = $null
+$script:CfgRestText = $null
+
+function Get-CfgMapEntryKey {
+    <#
+    .SYNOPSIS
+      Locate a mapping entry's DELIMITER COLON by structure, not by an
+      enumerated key charset (contracts/yaml-key-grammar.md §1). Mirror of
+      _cfg_map_entry_key: sets $script:CfgKey / $script:CfgRestText and
+      returns $true on success; clears both and returns $false when the line
+      is not a mapping entry (no delimiter colon found, or the key is empty
+      after trimming).
+    #>
     param([string] $Content)
-    return ($Content -match "^[A-Za-z0-9_.' -]+:(\s.*)?$")
+    $script:CfgKey = $null
+    $script:CfgRestText = $null
+    $n = $Content.Length
+    if ($n -eq 0) { return $false }
+    $first = $Content[0]
+    if ($first -eq '"' -or $first -eq "'") {
+        # Quoted key (§1.1): bounded by the NEXT occurrence of the same quote
+        # character — no escape sequences are interpreted. The delimiter colon
+        # must immediately follow the closing quote, then whitespace or EOL.
+        $q = $first
+        $close = -1
+        for ($i = 1; $i -lt $n; $i++) {
+            if ($Content[$i] -eq $q) { $close = $i; break }
+        }
+        if ($close -lt 0) { return $false }
+        $colonIdx = $close + 1
+        if ($colonIdx -ge $n -or $Content[$colonIdx] -ne ':') { return $false }
+        $afterIdx = $colonIdx + 1
+        $nxt = if ($afterIdx -lt $n) { $Content[$afterIdx] } else { $null }
+        if ($null -ne $nxt -and $nxt -ne ' ' -and $nxt -ne "`t") { return $false }
+        $key = $Content.Substring(1, $close - 1)
+        if ($key -eq '') { return $false }
+        $script:CfgKey = $key
+        $tail = if ($afterIdx -lt $n) { $Content.Substring($afterIdx) } else { '' }
+        $script:CfgRestText = $tail.TrimStart()
+        return $true
+    }
+    # Bare key (§1.2): scan left to right for the first `:` followed by
+    # whitespace or end of line. Deliberately NOT quote-aware — `Won't Do: "1"`
+    # must parse, and a quote-aware scan would open a single-quote region at
+    # the apostrophe and never find the delimiter (research R1).
+    for ($i = 0; $i -lt $n; $i++) {
+        if ($Content[$i] -ne ':') { continue }
+        $afterIdx = $i + 1
+        $nxt = if ($afterIdx -lt $n) { $Content[$afterIdx] } else { $null }
+        if ($null -eq $nxt -or $nxt -eq ' ' -or $nxt -eq "`t") {
+            $key = $Content.Substring(0, $i).TrimEnd()
+            if ($key -eq '') { return $false }
+            $script:CfgKey = $key
+            $tail = if ($afterIdx -lt $n) { $Content.Substring($afterIdx) } else { '' }
+            $script:CfgRestText = $tail.TrimStart()
+            return $true
+        }
+    }
+    return $false
+}
+
+function Test-CfgMapEntry {
+    <#
+    .SYNOPSIS
+      True when the line opens a mapping entry (contracts/yaml-key-grammar.md
+      §1). Also used as a non-fatal DISPATCH by Read-CfgSequence to decide
+      whether `- x` opens a mapping or is a plain scalar item (§1.4) — a
+      $false here must never be treated as an error.
+    #>
+    param([string] $Content)
+    return (Get-CfgMapEntryKey $Content)
 }
 
 function Convert-CfgScalar {
@@ -198,20 +327,32 @@ function Read-CfgValue {
 function Read-CfgMapping {
     param([int] $Ind)
     $map = [ordered]@{}
+    # A key repeated at THIS mapping's own level is malformed (FR-016,
+    # yaml-key-grammar.md §1.5) — the same name at a DIFFERENT level is legal,
+    # so $seen is local to this call, freshly scoped by every recursive call.
+    $seen = [System.Collections.Generic.Dictionary[string, int]]::new()
     while ($script:CfgI -lt $script:CfgN) {
         if ($script:CfgIndents[$script:CfgI] -ne $Ind) { break }
         $content = $script:CfgLines[$script:CfgI]
         if ($content -eq '-' -or $content.StartsWith('- ')) { break }
-        if (-not (Test-CfgMapEntry $content)) { break }
-        $colon = $content.IndexOf(':')
-        $key = $content.Substring(0, $colon).Trim()
-        $rest = $content.Substring($colon + 1).TrimStart(' ')
+        if (-not (Get-CfgMapEntryKey $content)) {
+            New-CfgParseFailure -Index $script:CfgI
+            return
+        }
+        $key = $script:CfgKey
+        $rest = $script:CfgRestText
+        if ($seen.ContainsKey($key)) {
+            New-CfgDuplicateKeyFailure -Index $script:CfgI -Key $key -FirstLine $seen[$key]
+            return
+        }
+        $seen[$key] = $script:CfgLineNos[$script:CfgI]
         $script:CfgI++
         if ($rest -ne '') {
             $map[$key] = Convert-CfgScalar $rest
         }
         elseif ($script:CfgI -lt $script:CfgN -and $script:CfgIndents[$script:CfgI] -gt $Ind) {
             Read-CfgValue
+            if ($script:CfgErr) { return }
             $map[$key] = $script:CfgRet
         }
         elseif ($script:CfgI -lt $script:CfgN -and $script:CfgIndents[$script:CfgI] -eq $Ind -and
@@ -230,6 +371,7 @@ function Read-CfgMapping {
             # installation parsed as `{"installed":null}` and hook health called a
             # healthy repository unreadable (003 T011).
             Read-CfgSequence $Ind
+            if ($script:CfgErr) { return }
             $map[$key] = $script:CfgRet
         }
         else {
@@ -251,6 +393,7 @@ function Read-CfgSequence {
             $script:CfgI++
             if ($script:CfgI -lt $script:CfgN -and $script:CfgIndents[$script:CfgI] -gt $Ind) {
                 Read-CfgValue
+                if ($script:CfgErr) { return }
                 $items.Add($script:CfgRet)
             }
             else { $items.Add($null) }
@@ -260,6 +403,7 @@ function Read-CfgSequence {
             $script:CfgLines[$script:CfgI] = $rest
             $script:CfgIndents[$script:CfgI] = $Ind + 2
             Read-CfgMapping ($Ind + 2)
+            if ($script:CfgErr) { return }
             $items.Add($script:CfgRet)
         }
         else {
@@ -273,10 +417,20 @@ function Read-CfgSequence {
 }
 
 function Read-JiraConfigYamlObject {
+    <#
+    .SYNOPSIS
+      Parse the YAML subset into a structure. Throws the located
+      parse-failure message (contracts/parse-failure.md §2/§1) when a line
+      cannot be interpreted as a mapping entry, or a key repeats at its own
+      mapping level (FR-016) — the message text is byte-identical to the Bash
+      port's, minus the trailing exit code, which the Bash function returns
+      separately.
+    #>
     param([Parameter(Mandatory)] [string] $Path)
     if (-not (Test-Path -LiteralPath $Path)) { throw "config: file not found: $Path" }
     Initialize-CfgBuffer $Path
     Read-CfgValue
+    if ($script:CfgErr) { throw $script:CfgErr }
     return $script:CfgRet
 }
 
@@ -284,11 +438,20 @@ function ConvertFrom-JiraConfigYaml {
     <#
     .SYNOPSIS
       Parse the YAML subset and return canonical JSON, byte-identical to the Bash
-      port's config_yaml_to_json.
+      port's config_yaml_to_json. On a parse failure, prints the located message
+      to stderr (mirroring config_yaml_to_json's own print) and re-throws —
+      nothing is returned on stdout for a document this reader cannot interpret
+      in full (contracts/parse-failure.md §4).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Path)
-    $obj = Read-JiraConfigYamlObject -Path $Path
+    try {
+        $obj = Read-JiraConfigYamlObject -Path $Path
+    }
+    catch {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        throw
+    }
     return (ConvertTo-JiraJsonValue $obj)
 }
 
@@ -309,10 +472,57 @@ function Write-CfgYamlScalar {
     return '"' + [string]$Value + '"'
 }
 
+function Test-CfgUnrepresentable {
+    # True when a string contains `"` or `\`, which the reader cannot
+    # unescape — mirror of the Bash writer's badchars jq def (research R3).
+    param([string] $Value)
+    return ($Value.IndexOf('"') -ge 0 -or $Value.IndexOf('\') -ge 0)
+}
+
+function Get-CfgWriteRefusalError {
+    <#
+    .SYNOPSIS
+      Walk a parsed structure and return the first "<path>: <reason>" for a
+      key or string value the writer cannot represent (contract §2.3). The
+      value itself is never included — only the path at which it occurred.
+      Mirror of _cfg_write_refusal_errors.
+    #>
+    param($Node, [string] $Path)
+
+    if ($Node -is [System.Collections.IDictionary] -or $Node -is [System.Management.Automation.PSCustomObject]) {
+        $map = [ordered]@{}
+        if ($Node -is [System.Collections.IDictionary]) { foreach ($k in $Node.Keys) { $map[[string]$k] = $Node[$k] } }
+        else { foreach ($p in $Node.PSObject.Properties) { $map[[string]$p.Name] = $p.Value } }
+        foreach ($k in $map.Keys) {
+            if (Test-CfgUnrepresentable ([string]$k)) {
+                return "${Path}: a key here contains `" or \, which this writer cannot represent"
+            }
+            $childPath = if ($Path -eq '') { [string]$k } else { "$Path.$k" }
+            $err = Get-CfgWriteRefusalError $map[$k] $childPath
+            if ($err) { return $err }
+        }
+        return $null
+    }
+    if (($Node -is [System.Collections.IEnumerable]) -and ($Node -isnot [string])) {
+        $i = 0
+        foreach ($item in $Node) {
+            $err = Get-CfgWriteRefusalError $item "$Path[$i]"
+            if ($err) { return $err }
+            $i++
+        }
+        return $null
+    }
+    if ($Node -is [string] -and (Test-CfgUnrepresentable $Node)) {
+        return "${Path}: a string value here contains `" or \, which this writer cannot represent"
+    }
+    return $null
+}
+
 function Write-CfgYamlNode {
     # Recursively emit a parsed value as canonical YAML lines (2-space indent,
-    # sorted object keys ordinal, `- ` sequences). Returns the joined lines with
-    # no trailing newline — byte-identical to the Bash emitter's jq program.
+    # sorted object keys ordinal, `- ` sequences, every key double-quoted).
+    # Returns the joined lines with no trailing newline — byte-identical to the
+    # Bash emitter's jq program.
     param($Node, [string] $Ind)
 
     if ($Node -is [System.Collections.IDictionary] -or $Node -is [System.Management.Automation.PSCustomObject]) {
@@ -330,16 +540,17 @@ function Write-CfgYamlNode {
         $names.Sort([System.StringComparer]::Ordinal)
         $lines = foreach ($k in $names) {
             $v = $map[$k]
+            $qk = '"' + $k + '"'
             if ($v -is [System.Collections.IDictionary] -or $v -is [System.Management.Automation.PSCustomObject]) {
                 $childCount = @($(if ($v -is [System.Collections.IDictionary]) { $v.Keys } else { $v.PSObject.Properties })).Count
-                if ($childCount -eq 0) { "$Ind${k}: {}" }
-                else { "$Ind${k}:`n" + (Write-CfgYamlNode $v ($Ind + '  ')) }
+                if ($childCount -eq 0) { "$Ind${qk}: {}" }
+                else { "$Ind${qk}:`n" + (Write-CfgYamlNode $v ($Ind + '  ')) }
             }
             elseif (($v -is [System.Collections.IEnumerable]) -and ($v -isnot [string])) {
-                if (@($v).Count -eq 0) { "$Ind${k}: []" }
-                else { "$Ind${k}:`n" + (Write-CfgYamlNode $v ($Ind + '  ')) }
+                if (@($v).Count -eq 0) { "$Ind${qk}: []" }
+                else { "$Ind${qk}:`n" + (Write-CfgYamlNode $v ($Ind + '  ')) }
             }
-            else { "$Ind${k}: " + (Write-CfgYamlScalar $v) }
+            else { "$Ind${qk}: " + (Write-CfgYamlScalar $v) }
         }
         return ($lines -join "`n")
     }
@@ -362,10 +573,16 @@ function ConvertTo-JiraConfigYaml {
     .SYNOPSIS
       Emit a JSON value as canonical YAML (no trailing newline), byte-identical to
       the Bash port's config_to_yaml. The caller adds exactly one trailing newline.
+      Every key is quoted unconditionally (contract yaml-key-grammar.md §2.1).
+      Throws when a key or string value contains `"` or `\`, which this writer
+      cannot represent (research R3) — the value itself never appears in the
+      exception message (Constitution IV).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Json)
     $obj = $Json | ConvertFrom-Json -Depth 100
+    $refusal = Get-CfgWriteRefusalError $obj ''
+    if ($refusal) { throw "config: $refusal" }
     return (Write-CfgYamlNode $obj '')
 }
 
@@ -666,7 +883,7 @@ function Import-JiraConfig {
 
     try { $teamObj = Read-JiraConfigYamlObject -Path $team }
     catch {
-        $errors.Add("config: $team is not valid config YAML")
+        $errors.Add($_.Exception.Message)
         [Console]::Error.WriteLine($errors[-1])
         return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() }
     }
@@ -678,7 +895,7 @@ function Import-JiraConfig {
     if (Test-Path -LiteralPath $localF) {
         try { $localObj = Read-JiraConfigYamlObject -Path $localF }
         catch {
-            $errors.Add("config: $localF is not valid config YAML")
+            $errors.Add($_.Exception.Message)
             [Console]::Error.WriteLine($errors[-1])
             return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() }
         }
@@ -754,7 +971,7 @@ function Import-JiraPersonalConfig {
 
     try { $pObj = Read-JiraConfigYamlObject -Path $pf }
     catch {
-        return (& $fail "config: personal ($pf): not valid personal YAML")
+        return (& $fail $_.Exception.Message)
     }
 
     $emit = {
@@ -883,12 +1100,18 @@ function Get-CfgLocalPath {
 }
 
 function Get-CfgLocalObject {
-    # The local binding as a parsed object, or an empty map when absent or
-    # unreadable. Never throws: a broken local binding must not break mirroring.
+    <#
+    .SYNOPSIS
+      The local binding as a parsed object. An ABSENT file yields an empty
+      map (never bound). A PRESENT-but-unreadable file THROWS the located
+      parse-failure message: an unreadable binding is not evidence of an
+      empty one, and swallowing it here was the defect this feature closes
+      (research R5). Mirror of _cfg_local_json.
+    #>
     param([string] $ConfigDir = (Get-JiraConfigDirPath))
     $f = Get-CfgLocalPath -ConfigDir $ConfigDir
     if (-not (Test-Path -LiteralPath $f)) { return [ordered]@{} }
-    try { $o = Read-JiraConfigYamlObject -Path $f } catch { return [ordered]@{} }
+    $o = Read-JiraConfigYamlObject -Path $f
     if ($o -isnot [System.Collections.IDictionary]) { return [ordered]@{} }
     return $o
 }

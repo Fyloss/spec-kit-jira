@@ -132,6 +132,24 @@ EOF
   _assert_fault_properties "has not been bound yet"
 }
 
+@test "an unreadable local binding fails closed with zero writes, not reported as unbound (007 FR-010, R7 case 9)" {
+  cat > "${JIRA_CONFIG_DIR}/config.yml" <<'EOF'
+projects:
+  - key: COMP
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+routing_default: COMP
+EOF
+  printf 'resolved_ids:\n  COMP:\n    this line has no delimiter\n' > "${JIRA_CONFIG_DIR}/config.local.yml"
+  run cmd_reconcile reconcile --dry-run --json "${SPEC}"
+  [ "$status" -eq 4 ]
+  [ -z "$(mock_calls)" ]
+  [[ "$output" != *"has not been bound yet"* ]]
+  [[ "$output" != *"not bound to a Jira project yet"* ]]
+  [[ "$output" == *"cannot parse this line as a mapping entry"* ]]
+}
+
 @test "the four causes each produce a message distinguishable from the others" {
   cat > "${JIRA_CONFIG_DIR}/config.yml" <<'EOF'
 projects:

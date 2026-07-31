@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A local binding whose issue types, priorities, or statuses carried the
+  Jira instance's own language or ordinary punctuation (accented or
+  non-Latin names, parentheses, slashes) was silently truncated on read —
+  the configuration reader accepted a mapping key only from a short
+  enumerated character set, and stopped parsing at the first line outside
+  it. The reader now recognises a mapping entry by line structure instead,
+  and the writer quotes every key unconditionally so the round trip stays
+  closed.
+- A configuration line the reader could not interpret was discarded
+  silently, with exit 0 and a truncated document reaching every caller. The
+  parser now fails closed with a located, actionable message (file, line,
+  content, remediation) and `EXIT_CONFIG` (4); reconcile performs zero Jira
+  writes and a lifecycle hook downgrades to one `WARNING:` line rather than
+  failing the host command.
+
 ## [0.6.0] - 2026-07-30
 
 Reconcile recognises the tickets it already created (005).

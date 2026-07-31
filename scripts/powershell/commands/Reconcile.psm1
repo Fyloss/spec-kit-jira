@@ -219,7 +219,9 @@ function Get-JiraReconcileLocalBindingFor {
       Mirror of _reconcile_local_binding_for. Returns { ExitCode; Json }:
       ExitCode 0 on success; 2 when the local layer is missing ENTIRELY (never
       bound at all); 3 when the file exists but holds no entry for this
-      project (FR-010, project-not-bound).
+      project (FR-010, project-not-bound); 4 (EXIT_CONFIG) when the file
+      exists but cannot be read — distinct from both 2 and 3, propagated
+      rather than treated as "not bound" (Constitution III).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $ProjectKey, [Parameter(Mandatory)] [string] $ConfigDir)
@@ -227,7 +229,11 @@ function Get-JiraReconcileLocalBindingFor {
     if (-not (Test-Path -LiteralPath $path)) { return [pscustomobject]@{ ExitCode = 2; Json = '' } }
     # Get-CfgLocalObject returns nested IDictionary (OrderedDictionary) nodes,
     # not PSCustomObjects — indexed by key, not by .PSObject.Properties.
-    $obj = Get-CfgLocalObject -ConfigDir $ConfigDir
+    try { $obj = Get-CfgLocalObject -ConfigDir $ConfigDir }
+    catch {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        return [pscustomobject]@{ ExitCode = 4; Json = '' }
+    }
     $entry = $null
     if ($obj -is [System.Collections.IDictionary] -and $obj.Contains('resolved_ids')) {
         $resolvedIds = $obj['resolved_ids']
@@ -350,7 +356,16 @@ function Invoke-JiraReconcile {
     # on every single lifecycle command for an event the operator deliberately
     # turned off, which is precisely what FR-020 forbids.
     $hookEvent = if ($env:SPEC_KIT_JIRA_HOOK_EVENT) { $env:SPEC_KIT_JIRA_HOOK_EVENT } else { '' }
-    if (Test-JiraReconcileHeld -LifecycleEvent $hookEvent) { return 0 }
+    try {
+        if (Test-JiraReconcileHeld -LifecycleEvent $hookEvent) { return 0 }
+    }
+    catch {
+        # An unreadable disable record is not evidence that nothing is
+        # disabled (Constitution X) — propagate rather than silently
+        # proceeding as if the event were not held.
+        [Console]::Error.WriteLine($_.Exception.Message)
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the operator disable record could not be read (zero writes)')
+    }
 
     # The spec file is the first positional argument.
     $specFile = ''
@@ -563,6 +578,9 @@ function Invoke-JiraReconcile {
     }
     elseif ($planCtxResult.ExitCode -eq 3) {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: the project `"$projectKey`" has not been bound yet — run /speckit.jira.config to discover its issue types and priorities (zero writes)")
+    }
+    elseif ($planCtxResult.ExitCode -eq $script:ReconcileExitConfig) {
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the local Jira binding could not be read (zero writes)')
     }
     $planCtx = $planCtxResult.Json
     try { $actionsJson = Get-JiraPlanWriteSet -NeutralDocJson $docForWriteJson -PlanContextJson $planCtx }

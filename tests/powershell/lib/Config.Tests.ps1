@@ -13,6 +13,14 @@ BeforeAll {
         return $d
     }
 
+    function Get-CanonicalJson {
+        # Key-order-independent canonicalisation for equality checks — mirror
+        # of the bats tests' `jq -cS .`. ConvertTo-Json preserves the parsed
+        # property order, which the writer legitimately reorders (ordinal sort).
+        param([string] $Json)
+        return ($Json | & jq -cS .)
+    }
+
     $script:ValidTeam = @'
 # Team config (committable, credential-free).
 projects:
@@ -95,6 +103,155 @@ Describe 'ConvertFrom-JiraConfigYaml' {
         $obj.resolved_ids.TEAM.statuses."Won't Do" | Should -Be '14'
         $obj.resolved_ids.TEAM.style | Should -Be 'team_managed'
         $obj.resolved_ids.TEAM.style_source | Should -Be 'api'
+        Remove-Item -Recurse -Force $d
+    }
+
+    # --- Unicode and punctuated mapping keys (007, contracts/yaml-key-grammar.md) -
+
+    It "the bug report's own document round-trips whole (007 FR-002, FR-004)" {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'rt.yml'
+        $input = '{"resolved_ids":{"JET":{"issue_types":{"R' + [char]0xE9 + 'cit":"10004","Story":"10005"},"priorities":{"Faible":"4","' + [char]0xC9 + 'lev' + [char]0xE9 + 'e' + '":"1"},"statuses":{"Termin' + [char]0xE9 + '":"10002","Won''t Do":"10004","' + [char]0xC0 + ' faire":"10001","' + [char]0x5B8C + [char]0x4E86 + '":"10003"},"style":"company_managed"}}}'
+        $yaml = ConvertTo-JiraConfigYaml -Json $input
+        [System.IO.File]::WriteAllText($f, $yaml + "`n")
+        $back = ConvertFrom-JiraConfigYaml -Path $f
+        (Get-CanonicalJson $input) | Should -Be (Get-CanonicalJson $back)
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'keys in four different scripts read back bare (007 FR-002)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'scripts.yml'
+        $content = "Gr" + [char]0xF6 + "e: `"3`"`n" +
+        [char]0x41F + [char]0x440 + [char]0x438 + [char]0x43E + [char]0x440 + [char]0x438 + [char]0x442 + [char]0x435 + [char]0x442 + ': "2"' + "`n" +
+        [char]0x5B8C + [char]0x4E86 + ': "10003"' + "`n" +
+        'Done (QA): "10005"' + "`n" +
+        'high/low: "6"' + "`n"
+        [System.IO.File]::WriteAllText($f, $content, (New-Object System.Text.UTF8Encoding($false)))
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.('Gr' + [char]0xF6 + 'e') | Should -Be '3'
+        $obj.([char]0x41F + [char]0x440 + [char]0x438 + [char]0x43E + [char]0x440 + [char]0x438 + [char]0x442 + [char]0x435 + [char]0x442) | Should -Be '2'
+        $obj.([char]0x5B8C + [char]0x4E86) | Should -Be '10003'
+        $obj.'Done (QA)' | Should -Be '10005'
+        $obj.'high/low' | Should -Be '6'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'a bare apostrophe key still parses (guards the non-quote-aware bare scan, 007 R1)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'apos.yml'
+        Set-Content -Path $f -Value "Won't Do: `"7`"" -NoNewline
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.'Won''t Do' | Should -Be '7'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'a bare URL value is still a scalar, not a key (007 FR-003)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'url.yml'
+        Set-Content -Path $f -Value 'site: https://example.atlassian.net' -NoNewline
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.site | Should -Be 'https://example.atlassian.net'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'keys requiring writer quoting survive the write-read round trip (007 FR-004, FR-005)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'quoted.yml'
+        $input = '{"a":{"Blocked: waiting on QA":"5","Sprint # 2":"6","- pending":"7","  padded  ":"8"}}'
+        $yaml = ConvertTo-JiraConfigYaml -Json $input
+        [System.IO.File]::WriteAllText($f, $yaml + "`n")
+        $back = ConvertFrom-JiraConfigYaml -Path $f
+        (Get-CanonicalJson $input) | Should -Be (Get-CanonicalJson $back)
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'every emitted key is double-quoted (007 contract yaml-key-grammar.md section 2.1)' {
+        $yaml = ConvertTo-JiraConfigYaml -Json ('{"a":{"' + [char]0xC9 + 'lev' + [char]0xE9 + 'e":"1"}}')
+        $yaml | Should -Match ('"' + [char]0xC9 + 'lev' + [char]0xE9 + 'e": "1"')
+    }
+
+    It 'a key containing a double quote is refused on write, and the key text never appears (007 research R3)' {
+        { ConvertTo-JiraConfigYaml -Json '{"a":{"say \"hi\"":"1"}}' } | Should -Throw
+        try { ConvertTo-JiraConfigYaml -Json '{"a":{"say \"hi\"":"1"}}' } catch { $_.Exception.Message | Should -Not -Match 'say "hi"' }
+    }
+
+    It 'a string value containing a double quote is refused on write, value never printed (007 research R3)' {
+        { ConvertTo-JiraConfigYaml -Json '{"a":{"k":"say \"hi\""}}' } | Should -Throw
+        try { ConvertTo-JiraConfigYaml -Json '{"a":{"k":"say \"hi\""}}' } catch { $_.Exception.Message | Should -Not -Match 'say "hi"' }
+    }
+
+    # --- Fail-closed on a line that cannot be interpreted (007, contracts/parse-failure.md) -
+
+    It 'a malformed line fails closed with the exact three-line message (007 FR-007 to FR-009)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'bad.yml'
+        Set-Content -Path $f -Value "resolved_ids:`n  JET:`n    this line has no delimiter" -NoNewline
+        $errMsg = $null
+        try { ConvertFrom-JiraConfigYaml -Path $f | Out-Null; $threw = $false }
+        catch { $threw = $true; $errMsg = $_.Exception.Message }
+        $threw | Should -BeTrue
+        $lines = $errMsg -split "`n"
+        $lines[0] | Should -Be "config: ${f}:3: cannot parse this line as a mapping entry: this line has no delimiter"
+        $lines[1] | Should -Be 'config: a key must be followed by ": " — quote the key if it contains a colon, e.g. "Blocked: waiting": "10001"'
+        $lines[2] | Should -Be "config: re-run /speckit.jira.config to regenerate ${f} from the Jira instance."
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'the reported line number counts blank and comment lines (007 FR-009)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'bad2.yml'
+        Set-Content -Path $f -Value "# a comment`n`nresolved_ids:`n  JET:`n    broken" -NoNewline
+        $errMsg = $null
+        try { ConvertFrom-JiraConfigYaml -Path $f | Out-Null } catch { $errMsg = $_.Exception.Message }
+        $errMsg | Should -Match ':5:'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It "a '- jira' sequence item is not a parse failure (007 contract yaml-key-grammar.md section 1.4)" {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'seq.yml'
+        Set-Content -Path $f -Value "installed:`n- jira" -NoNewline
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.installed[0] | Should -Be 'jira'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'a malformed line carrying credential-shaped content is redacted (007 FR-009, Constitution IV)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'leak.yml'
+        Set-Content -Path $f -Value "resolved_ids:`n  JET:`n    ATATT3xFfGF0 someone@example.com https://acme.atlassian.net" -NoNewline
+        $errMsg = $null
+        try { ConvertFrom-JiraConfigYaml -Path $f | Out-Null } catch { $errMsg = $_.Exception.Message }
+        $firstLine = ($errMsg -split "`n")[0]
+        $firstLine | Should -Match ([regex]::Escape("${f}:3:"))
+        $firstLine | Should -Not -Match 'ATATT3xFfGF0'
+        $firstLine | Should -Not -Match 'someone@example.com'
+        $firstLine | Should -Not -Match 'acme.atlassian.net'
+        $firstLine | Should -Match ([regex]::Escape('[redacted]'))
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'a key repeated at the same mapping level fails, naming both lines (007 FR-016)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'dup.yml'
+        Set-Content -Path $f -Value "statuses:`n  `"Termin$([char]0xE9)`": `"1`"`n  `"Termin$([char]0xE9)`": `"2`"" -NoNewline
+        $errMsg = $null
+        try { ConvertFrom-JiraConfigYaml -Path $f | Out-Null } catch { $errMsg = $_.Exception.Message }
+        $firstLine = ($errMsg -split "`n")[0]
+        $firstLine | Should -Match ([regex]::Escape("${f}:3:"))
+        $firstLine | Should -Match 'duplicate key'
+        $firstLine | Should -Match 'line 2'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'the same key at two different mapping levels stays legal (007 yaml-key-grammar.md section 1.5)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'nodup.yml'
+        Set-Content -Path $f -Value "resolved_ids:`n  COMP:`n    statuses:`n      `"To Do`": `"1`"`n  TEAM:`n    statuses:`n      `"To Do`": `"2`"" -NoNewline
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.resolved_ids.COMP.statuses.'To Do' | Should -Be '1'
+        $obj.resolved_ids.TEAM.statuses.'To Do' | Should -Be '2'
         Remove-Item -Recurse -Force $d
     }
 }

@@ -296,6 +296,27 @@ profile. Declare the two non-secret settings per project in
 The token stays in the Keychain, the keyring, or the gitignored `.env` — never
 put it in that file.
 
+## If a configuration file cannot be read
+
+`.specify/jira/config.yml`, `config.local.yml`, `personal.yml`, and the host's
+`.specify/extensions.yml` are all read through the same restricted YAML
+parser. A line that cannot be interpreted as a mapping entry — or a key
+repeated at the same level — fails the read closed rather than silently
+dropping the rest of the file:
+
+```
+config: <file>:<line>: cannot parse this line as a mapping entry: <content>
+config: a key must be followed by ": " — quote the key if it contains a colon, e.g. "Blocked: waiting": "10001"
+config: re-run /speckit.jira.config to regenerate <file> from the Jira instance.
+```
+
+This exits `4` on a direct run. Inside a lifecycle hook, the same three lines
+are followed by one `WARNING:` and the host command still completes normally
+— nothing is mirrored until the file is fixed or regenerated. Re-running
+`/speckit.jira.config` rewrites `config.local.yml` from scratch, which
+resolves the great majority of cases; a hand-edited `config.yml` or
+`personal.yml` needs the named line corrected by hand.
+
 ## Repository layout
 
 This is the extension's SOURCE repository, following the official extension

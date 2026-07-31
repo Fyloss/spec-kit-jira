@@ -106,6 +106,28 @@ Describe 'Hook resilience' {
         }
     }
 
+    It 'an unreadable local binding inside a hook leaves the host exit 0 with the three lines plus one WARNING (007 FR-011)' {
+        $cfgDir = Join-Path $Work '.specify/jira'
+        New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $cfgDir 'config.local.yml') -Value "resolved_ids:`n  TEST:`n    this line has no delimiter" -NoNewline
+        $env:JIRA_CONFIG_DIR = $cfgDir
+        $env:SPEC_KIT_JIRA_HOOK_CONTEXT = '1'
+        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+        $sw = [System.IO.StringWriter]::new(); $se = [System.IO.StringWriter]::new()
+        $oo = [Console]::Out; $oe = [Console]::Error
+        [Console]::SetOut($sw); [Console]::SetError($se)
+        try { $code = Invoke-JiraReconcile -Arguments @('reconcile', '--json', $Spec) }
+        finally {
+            [Console]::SetOut($oo); [Console]::SetError($oe)
+            Remove-Item Env:JIRA_CONFIG_DIR -ErrorAction SilentlyContinue
+            Remove-Item Env:SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
+        }
+        $text = $sw.ToString() + $se.ToString()
+        [int]$code | Should -Be 0
+        @([regex]::Matches($text, 'WARNING:')).Count | Should -Be 1
+        $text | Should -Match 'cannot parse this line as a mapping entry'
+    }
+
     It 'never brings the hook registry into existence (FR-022, SC-011)' {
         $ext = $env:SPEC_KIT_JIRA_EXTENSIONS_YML
         Remove-Item -Force $ext -ErrorAction SilentlyContinue

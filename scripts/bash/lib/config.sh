@@ -97,13 +97,24 @@ config_assert_single_version_source() {
 # YAML subset -> JSON (T030)
 # =============================================================================
 
-# Parser state (globals, reset per parse). Two parallel arrays hold the retained
-# (non-blank, non-comment) lines' indentation and trimmed content; a cursor walks
-# them via mutually-recursive block parsers.
+# Parser state (globals, reset per parse). Parallel arrays hold the retained
+# (non-blank, non-comment) lines' indentation, trimmed content, and 1-based
+# SOURCE line number (blank/comment lines are dropped from the arrays but still
+# count, since a parse-failure message must name the line as the operator sees
+# it in the file); a cursor walks them via mutually-recursive block parsers.
 _cfg_indents=()
 _cfg_lines=()
+_cfg_linenos=()
 _cfg_n=0
 _cfg_i=0
+_cfg_file=""
+
+# _CFG_ERR — the formatted parse-failure message (contracts/parse-failure.md
+# §2), or empty when clear. Set by _cfg_raise_parse_failure /
+# _cfg_raise_duplicate_key; every parser loop below returns immediately once
+# it is set (a flag, not a `return`-code-per-frame throw, so the propagation
+# is identical to the PowerShell port's mirrored flag — Constitution VI).
+_CFG_ERR=""
 
 # _cfg_strip_inline_comment <line> — drop a ` #...` trailing comment that is not
 # inside quotes. Prints the cleaned line.
@@ -128,12 +139,16 @@ _cfg_strip_inline_comment() {
 
 # _cfg_prep <file> — populate the parser arrays from a YAML file.
 _cfg_prep() {
-  local file="$1" raw indent body
+  local file="$1" raw indent body lineno=0
+  _cfg_file="${file}"
   _cfg_indents=()
   _cfg_lines=()
+  _cfg_linenos=()
   _cfg_n=0
   _cfg_i=0
+  _CFG_ERR=""
   while IFS= read -r raw || [[ -n "${raw}" ]]; do
+    lineno=$((lineno + 1))
     raw="${raw%$'\r'}"                          # tolerate CRLF
     body="${raw#"${raw%%[![:space:]]*}"}"       # content without leading ws
     [[ -z "${body}" ]] && continue              # blank line
@@ -143,17 +158,132 @@ _cfg_prep() {
     [[ -z "${body}" ]] && continue
     _cfg_indents+=("${indent}")
     _cfg_lines+=("${body}")
+    _cfg_linenos+=("${lineno}")
     _cfg_n=$((_cfg_n + 1))
   done < "${file}"
 }
 
-# _cfg_is_map_entry <content> — true when the line opens a `key:` mapping entry
-# (as opposed to a bare scalar such as a URL). The key charset is intentionally
-# narrow; `key:` and `key: value` match, `https://x` does not. The apostrophe is
-# included because discovered status names ("Won't Do") are legal map keys.
+# _cfg_redact_shape <line> <ere-pattern> <case_insensitive:0|1> — replace every
+# match of pattern in line with [redacted]. Prints the result.
+_cfg_redact_shape() {
+  local line="$1" pattern="$2" ci="$3" hay match prefix start len
+  while :; do
+    if [[ "${ci}" == "1" ]]; then hay="${line,,}"; else hay="${line}"; fi
+    [[ "${hay}" =~ ${pattern} ]] || break
+    match="${BASH_REMATCH[0]}"
+    [[ -z "${match}" ]] && break
+    prefix="${hay%%"${match}"*}"
+    start=${#prefix}
+    len=${#match}
+    line="${line:0:start}[redacted]${line:start+len}"
+  done
+  printf '%s' "${line}"
+}
+
+# _cfg_redact_line <content> — replace every credential-shaped substring with
+# [redacted] before a parse-failure line is formatted (contracts/parse-failure.md
+# §2.1): the BLOCK-tier shapes the privacy guard recognises (an Atlassian API
+# token prefix, a real *.atlassian.net host) and the WARN-tier email shape
+# (Constitution IX). Applied to the WHOLE line — a line that failed the
+# mapping-entry test has no reliable delimiter, so there is no value half to
+# isolate.
+_cfg_redact_line() {
+  local line="$1"
+  line="$(_cfg_redact_shape "${line}" 'ATATT[A-Za-z0-9._=+/-]{2,}' 0)"
+  line="$(_cfg_redact_shape "${line}" '[a-z0-9][a-z0-9-]*\.atlassian\.net' 1)"
+  line="$(_cfg_redact_shape "${line}" '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' 1)"
+  printf '%s' "${line}"
+}
+
+# _cfg_raise_parse_failure <cursor-index> — set _CFG_ERR to the three-line
+# message of contracts/parse-failure.md §2 for the retained line at that
+# index. The line's content is redacted before it is formatted (§2.1).
+_cfg_raise_parse_failure() {
+  local idx="$1" line content
+  line="${_cfg_linenos[idx]}"
+  content="$(_cfg_redact_line "${_cfg_lines[idx]}")"
+  _CFG_ERR="$(printf 'config: %s:%s: cannot parse this line as a mapping entry: %s\nconfig: a key must be followed by ": " — quote the key if it contains a colon, e.g. "Blocked: waiting": "10001"\nconfig: re-run /speckit.jira.config to regenerate %s from the Jira instance.' \
+    "${_cfg_file}" "${line}" "${content}" "${_cfg_file}")"
+}
+
+# _cfg_raise_duplicate_key <cursor-index> <key> <first-lineno> — set _CFG_ERR
+# to the duplicate-key message of contracts/parse-failure.md §1 (FR-016). The
+# key is redacted like any other printed line content (§2.1).
+_cfg_raise_duplicate_key() {
+  local idx="$1" key="$2" first_line="$3" line redacted_key
+  line="${_cfg_linenos[idx]}"
+  redacted_key="$(_cfg_redact_line "${key}")"
+  _CFG_ERR="$(printf 'config: %s:%s: duplicate key %s — already defined at line %s\nconfig: two entries cannot claim the same name; delete or rename one of them.\nconfig: re-run /speckit.jira.config to regenerate %s from the Jira instance.' \
+    "${_cfg_file}" "${line}" "${redacted_key}" "${first_line}" "${_cfg_file}")"
+}
+
+# _cfg_map_entry_key <content> — locate a mapping entry's DELIMITER COLON by
+# structure, not by an enumerated key charset (contracts/yaml-key-grammar.md
+# §1): a key of any script and ordinary punctuation is recognised, while a bare
+# URL value (colon followed by a non-whitespace character) is not. On success,
+# sets _CFG_KEY (verbatim for a quoted key, right-trimmed for a bare one) and
+# _CFG_REST (the left-trimmed value text) and returns 0. On failure — no
+# delimiter colon found, or the key is empty after trimming (§1.2 step 4,
+# §1.1 by the same rule) — clears both and returns 1: "not a mapping entry",
+# not yet a verdict on whether that is fatal (§1.4 leaves that to the caller).
+_CFG_KEY=""
+_CFG_REST=""
+_cfg_map_entry_key() {
+  local content="$1" n=${#content}
+  _CFG_KEY=""
+  _CFG_REST=""
+  ((n == 0)) && return 1
+  local first="${content:0:1}"
+  if [[ "${first}" == '"' || "${first}" == "'" ]]; then
+    # Quoted key (§1.1): the key is bounded by the NEXT occurrence of the same
+    # quote character — no escape sequences are interpreted. The character
+    # immediately after the closing quote must be the delimiter colon, itself
+    # followed by whitespace or end of line.
+    local q="${first}" i close=-1
+    for ((i = 1; i < n; i++)); do
+      if [[ "${content:i:1}" == "${q}" ]]; then close=$i; break; fi
+    done
+    ((close < 0)) && return 1
+    local colon_idx=$((close + 1))
+    [[ "${content:colon_idx:1}" != ":" ]] && return 1
+    local after_idx=$((colon_idx + 1)) nxt
+    nxt="${content:after_idx:1}"
+    [[ -n "${nxt}" && "${nxt}" != " " && "${nxt}" != $'\t' ]] && return 1
+    local key="${content:1:close-1}"
+    [[ -z "${key}" ]] && return 1
+    _CFG_KEY="${key}"
+    local tail="${content:after_idx}"
+    _CFG_REST="${tail#"${tail%%[![:space:]]*}"}"
+    return 0
+  fi
+  # Bare key (§1.2): scan left to right for the first `:` followed by
+  # whitespace or end of line. Deliberately NOT quote-aware — `Won't Do: "1"`
+  # must parse, and a quote-aware scan would open a single-quote region at the
+  # apostrophe and never find the delimiter (research R1).
+  local i
+  for ((i = 0; i < n; i++)); do
+    [[ "${content:i:1}" == ":" ]] || continue
+    local after_idx=$((i + 1)) nxt
+    nxt="${content:after_idx:1}"
+    if [[ -z "${nxt}" || "${nxt}" == " " || "${nxt}" == $'\t' ]]; then
+      local key="${content:0:i}"
+      key="${key%"${key##*[![:space:]]}"}"
+      [[ -z "${key}" ]] && return 1
+      _CFG_KEY="${key}"
+      local tail="${content:after_idx}"
+      _CFG_REST="${tail#"${tail%%[![:space:]]*}"}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# _cfg_is_map_entry <content> — true when the line opens a mapping entry
+# (contracts/yaml-key-grammar.md §1). Also used as a non-fatal DISPATCH by
+# _cfg_parse_sequence to decide whether `- x` opens a mapping or is a plain
+# scalar item (§1.4) — a "no" here must never be treated as an error.
 _cfg_is_map_entry() {
-  local re="^[A-Za-z0-9_.' -]+:([[:space:]].*)?$"
-  [[ "$1" =~ ${re} ]]
+  _cfg_map_entry_key "$1"
 }
 
 # _cfg_scalar_json <raw> — encode a YAML scalar as a JSON value.
@@ -203,20 +333,31 @@ _cfg_parse_value() {
 # _cfg_parse_mapping <indent> — parse consecutive `key:`/`key: value` lines.
 _cfg_parse_mapping() {
   local ind="$1" parts=() key rest val
+  local -A seen=()
   while ((_cfg_i < _cfg_n)); do
     [[ "${_cfg_indents[_cfg_i]}" != "${ind}" ]] && break
     local content="${_cfg_lines[_cfg_i]}"
     [[ "${content}" == "-" || "${content}" == "- "* ]] && break
-    _cfg_is_map_entry "${content}" || break
-    key="${content%%:*}"
-    key="${key%"${key##*[![:space:]]}"}"        # rtrim key
-    rest="${content#*:}"
-    rest="${rest#"${rest%%[![:space:]]*}"}"      # ltrim value
+    if ! _cfg_map_entry_key "${content}"; then
+      _cfg_raise_parse_failure "${_cfg_i}"
+      return
+    fi
+    key="${_CFG_KEY}"
+    rest="${_CFG_REST}"
+    # A key repeated at this mapping's own level is malformed (FR-016,
+    # yaml-key-grammar.md §1.5) — the same name at a DIFFERENT level is legal,
+    # so `seen` is local to this frame, freshly scoped by every recursive call.
+    if [[ -n "${seen[${key}]+x}" ]]; then
+      _cfg_raise_duplicate_key "${_cfg_i}" "${key}" "${seen[${key}]}"
+      return
+    fi
+    seen["${key}"]="${_cfg_linenos[_cfg_i]}"
     ((_cfg_i++))
     if [[ -n "${rest}" ]]; then
       val="$(_cfg_scalar_json "${rest}")"
     elif ((_cfg_i < _cfg_n)) && ((_cfg_indents[_cfg_i] > ind)); then
       _cfg_parse_value; val="${_CFG_RET}"
+      [[ -n "${_CFG_ERR}" ]] && return
     elif ((_cfg_i < _cfg_n)) && ((_cfg_indents[_cfg_i] == ind)) \
       && { [[ "${_cfg_lines[_cfg_i]}" == "-" ]] || [[ "${_cfg_lines[_cfg_i]}" == "- "* ]]; }; then
       # A block sequence may sit at its PARENT KEY's indentation rather than
@@ -233,6 +374,7 @@ _cfg_parse_mapping() {
       # `{"installed":null}` and hook health called a healthy repository
       # unreadable (003 T010).
       _cfg_parse_sequence "${ind}"; val="${_CFG_RET}"
+      [[ -n "${_CFG_ERR}" ]] && return
     else
       val="null"
     fi
@@ -258,6 +400,7 @@ _cfg_parse_sequence() {
       ((_cfg_i++))
       if ((_cfg_i < _cfg_n)) && ((_cfg_indents[_cfg_i] > ind)); then
         _cfg_parse_value; item="${_CFG_RET}"
+        [[ -n "${_CFG_ERR}" ]] && return
       else
         item="null"
       fi
@@ -267,6 +410,7 @@ _cfg_parse_sequence() {
       _cfg_lines[_cfg_i]="${rest}"
       _cfg_indents[_cfg_i]=$((ind + 2))
       _cfg_parse_mapping $((ind + 2)); item="${_CFG_RET}"
+      [[ -n "${_CFG_ERR}" ]] && return
     else
       ((_cfg_i++))
       item="$(_cfg_scalar_json "${rest}")"
@@ -283,6 +427,10 @@ config_yaml_to_json() {
   [[ -f "${file}" ]] || { printf 'config: file not found: %s\n' "${file}" >&2; return 1; }
   _cfg_prep "${file}"
   _cfg_parse_value
+  if [[ -n "${_CFG_ERR}" ]]; then
+    printf '%s\n' "${_CFG_ERR}" >&2
+    return "${EXIT_CONFIG}"
+  fi
   json="${_CFG_RET}"
   # Canonicalise (and prove well-formed). A malformed subset surfaces here.
   printf '%s' "${json}" | jq -cS . 2> /dev/null || {
@@ -299,17 +447,47 @@ config_yaml_to_json() {
 # table filled by discovery). To make a re-run byte-identical (FR-003), the
 # writer is DETERMINISTIC and a FIXED POINT of the reader above: emitting a value
 # then re-parsing it yields the same value. Keys are sorted (ordinal, matching
-# json_canonical) and emitted plain (the reader does not accept quoted keys);
-# string values are double-quoted (the reader strips the quotes verbatim, so any
-# numeric-looking id round-trips as a string, exactly as the reader produces).
-# The PowerShell port (ConvertTo-JiraConfigYaml) emits byte-identical output.
+# json_canonical) and emitted DOUBLE-QUOTED, unconditionally (contract
+# yaml-key-grammar.md §2.1) — four key forms (an embedded `: `, a ` #`, a
+# leading `- `, and padding whitespace) cannot round-trip bare, and quoting
+# every key neutralises all four with one rule instead of a "does this key need
+# quoting?" predicate duplicated across ports (research R2). The reader keeps
+# accepting bare keys, because the committable config.yml and the host's
+# PyYAML-written extensions.yml use them. String values stay double-quoted (the
+# reader strips the quotes verbatim, so any numeric-looking id round-trips as a
+# string, exactly as the reader produces). The PowerShell port
+# (ConvertTo-JiraConfigYaml) emits byte-identical output.
 #
-# The restricted subset carries no `"`/`\` in keys or values (Jira logical names
-# and ids do not); the reader's naive quote handling makes those safe to omit.
+# A key or a string value containing `"` or `\` cannot be represented — the
+# reader performs no unescaping — so the writer REFUSES it (research R3):
+# EXIT_CONFIG, naming the path, never the value (Constitution IV).
+
+# _cfg_write_refusal_errors — read a JSON value on stdin; print one error line
+# per key or string value the writer cannot represent (contract §2.3). The
+# value itself is NEVER printed — only the path at which it occurred.
+# shellcheck disable=SC2016  # `\(...)` is jq string interpolation, not shell expansion
+# kcov-excl-start — jq literal (string lines are not statements)
+_CFG_WRITE_REFUSAL_JQ='
+def disppath:
+  reduce .[] as $p (""; . + (if ($p|type)=="number" then "[\($p)]"
+                             elif . == "" then $p else "." + $p end));
+def badchars: test("[\"\\\\]");
+( [ paths as $p
+    | ($p[-1]) as $last
+    | select(($last|type)=="string") | select($last|badchars)
+    | "\($p[:-1]|disppath): a key here contains \" or \\, which this writer cannot represent"
+  ]
+  + [ paths(scalars) as $p
+      | select(getpath($p)|type=="string") | select(getpath($p)|badchars)
+      | "\($p|disppath): a string value here contains \" or \\, which this writer cannot represent"
+    ]
+) | unique | .[]'
+# kcov-excl-stop
 
 # _cfg_yaml_emit_jq — the recursive jq emitter (2-space block indent, sorted
-# object keys, `- ` sequences). Kept as a single self-recursive function because
-# jq forbids mutual recursion between separate defs.
+# object keys, `- ` sequences, every key double-quoted). Kept as a single
+# self-recursive function because jq forbids mutual recursion between separate
+# defs.
 # shellcheck disable=SC2016  # `\(...)`-free; single-quoted jq program
 # kcov-excl-start — jq literal (string lines are not statements)
 _CFG_YAML_EMIT_JQ='
@@ -318,15 +496,16 @@ def yscalar:
   elif type=="boolean" then (if . then "true" else "false" end)
   elif type=="null" then "null"
   else tostring end;
+def qkey: "\"" + . + "\"";
 def yemit(ind):
   if type=="object" then
     (to_entries | sort_by(.key) | map(
       .key as $k | .value as $v |
       (if ($v|type)=="object" then
-         (if ($v|length)==0 then ind+$k+": {}" else ind+$k+":\n"+($v|yemit(ind+"  ")) end)
+         (if ($v|length)==0 then ind+($k|qkey)+": {}" else ind+($k|qkey)+":\n"+($v|yemit(ind+"  ")) end)
        elif ($v|type)=="array" then
-         (if ($v|length)==0 then ind+$k+": []" else ind+$k+":\n"+($v|yemit(ind+"  ")) end)
-       else ind+$k+": "+($v|yscalar) end)
+         (if ($v|length)==0 then ind+($k|qkey)+": []" else ind+($k|qkey)+":\n"+($v|yemit(ind+"  ")) end)
+       else ind+($k|qkey)+": "+($v|yscalar) end)
     ) | join("\n"))
   elif type=="array" then
     (map(
@@ -339,8 +518,22 @@ yemit("")'
 
 # config_to_yaml — read a JSON value on stdin, print its canonical YAML on stdout
 # (no trailing newline; the caller adds exactly one when writing the file).
+# Refuses (EXIT_CONFIG) a key or string value containing `"` or `\`, printing a
+# named error per offending path and nothing else — no partial YAML is ever
+# emitted for a document this writer cannot faithfully represent.
 config_to_yaml() {
-  jq -rS "${_CFG_YAML_EMIT_JQ}"
+  local input errs
+  input="$(cat)"
+  errs="$(printf '%s' "${input}" | jq -r "${_CFG_WRITE_REFUSAL_JQ}" 2> /dev/null)"
+  if [[ -n "${errs}" ]]; then
+    local line
+    while IFS= read -r line; do
+      [[ -z "${line}" ]] && continue
+      printf 'config: %s\n' "${line}" >&2
+    done <<< "${errs}"
+    return "${EXIT_CONFIG}"
+  fi
+  printf '%s' "${input}" | jq -rS "${_CFG_YAML_EMIT_JQ}"
 }
 
 # =============================================================================
@@ -517,13 +710,16 @@ _cfg_local_path() {
   printf '%s/config.local.yml' "${1:-${JIRA_CONFIG_DIR}}"
 }
 
-# _cfg_local_json <config_dir> — the local binding as JSON, or `{}` when absent
-# or unreadable. Never fails: a broken local binding must not break mirroring.
+# _cfg_local_json <config_dir> — the local binding as JSON. An ABSENT file
+# yields `{}` (never bound). A PRESENT-but-unreadable file PROPAGATES the
+# located parse failure and EXIT_CONFIG (contracts/parse-failure.md §4): an
+# unreadable binding is not evidence of an empty one, and swallowing it here
+# was the defect this feature closes (research R5).
 _cfg_local_json() {
   local f
   f="$(_cfg_local_path "$1")"
   [[ -f "${f}" ]] || { printf '{}'; return 0; }
-  config_yaml_to_json "${f}" 2> /dev/null || printf '{}'
+  config_yaml_to_json "${f}"
 }
 
 # config_hooks_disabled_read [config_dir] — the recorded set as a canonical JSON
@@ -532,8 +728,12 @@ _cfg_local_json() {
 # than failing the run: this file is human-editable, and a typo must not stop
 # the mirror (data-model § Operator disable record, Validation).
 config_hooks_disabled_read() {
-  local dir="${1:-${JIRA_CONFIG_DIR}}" json events unknown
-  json="$(_cfg_local_json "${dir}")"
+  local dir="${1:-${JIRA_CONFIG_DIR}}" json events unknown rc=0
+  # An unreadable binding is not evidence that no hook is disabled — an
+  # operator-disabled event must be honoured forever (Constitution X), so a
+  # read failure PROPAGATES rather than defaulting to the empty set.
+  json="$(_cfg_local_json "${dir}")" || rc=$?
+  ((rc != 0)) && return "${rc}"
   events="$(_cfg_hook_events_json)"
 
   unknown="$(jq -r --argjson e "${events}" \
@@ -559,9 +759,13 @@ config_hooks_disabled_read() {
 # and every machine-owned key (resolved_ids). Writes through the canonical
 # serialiser, so a re-run producing the same set writes byte-identical bytes.
 _cfg_hooks_disabled_set() {
-  local dir="$1" dry="$2" newset="$3" f json merged yaml
+  local dir="$1" dry="$2" newset="$3" f json merged yaml rc=0
   f="$(_cfg_local_path "${dir}")"
-  json="$(_cfg_local_json "${dir}")"
+  # An unreadable binding must never be silently REPLACED by a fresh one built
+  # from an empty seed — that would discard whatever the operator's file held
+  # that this reader could not parse (Constitution III: fail-closed on writes).
+  json="$(_cfg_local_json "${dir}")" || rc=$?
+  ((rc != 0)) && return "${rc}"
   merged="$(jq -cS --argjson d "${newset}" '
     . as $root
     | .hooks = (($root.hooks // {}) + {disabled: $d})
@@ -585,14 +789,15 @@ config_hooks_disabled_add() {
     printf 'ignored'
     return 0
   fi
-  local current
-  current="$(config_hooks_disabled_read "${dir}" 2> /dev/null)"
+  local current rc=0
+  current="$(config_hooks_disabled_read "${dir}")" || rc=$?
+  ((rc != 0)) && return "${rc}"
   if jq -e --arg x "${event}" 'index($x) != null' <<< "${current}" > /dev/null 2>&1; then
     printf 'unchanged'
     return 0
   fi
   _cfg_hooks_disabled_set "${dir}" "${dry}" \
-    "$(jq -c --arg x "${event}" '. + [$x] | unique' <<< "${current}")"
+    "$(jq -c --arg x "${event}" '. + [$x] | unique' <<< "${current}")" || return $?
   printf 'recorded'
 }
 
@@ -602,14 +807,15 @@ config_hooks_disabled_add() {
 # nothing is written (Constitution XI).
 config_hooks_disabled_remove() {
   local event="$1" dir="${2:-${JIRA_CONFIG_DIR}}" dry="${3:-false}"
-  local current
-  current="$(config_hooks_disabled_read "${dir}" 2> /dev/null)"
+  local current rc=0
+  current="$(config_hooks_disabled_read "${dir}")" || rc=$?
+  ((rc != 0)) && return "${rc}"
   if ! jq -e --arg x "${event}" 'index($x) != null' <<< "${current}" > /dev/null 2>&1; then
     printf 'unrecorded'
     return 0
   fi
   _cfg_hooks_disabled_set "${dir}" "${dry}" \
-    "$(jq -c --arg x "${event}" 'map(select(. != $x))' <<< "${current}")"
+    "$(jq -c --arg x "${event}" 'map(select(. != $x))' <<< "${current}")" || return $?
   printf 'released'
 }
 
@@ -661,8 +867,7 @@ config_personal_load() {
   fi
 
   local pjson
-  if ! pjson="$(config_yaml_to_json "${pf}" 2> /dev/null)"; then
-    printf 'config: personal (%s): not valid personal YAML\n' "${pf}" >&2
+  if ! pjson="$(config_yaml_to_json "${pf}")"; then
     return "${EXIT_CONFIG}"
   fi
   printf '%s' "${pjson}" | _cfg_credential_errors | _cfg_report_errors "credential" "${pf}" || return "${EXIT_CONFIG}"

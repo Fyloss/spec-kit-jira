@@ -93,6 +93,139 @@ YAML
   [ "$(printf '%s' "${json}" | jq -r '.generation.design_section | type')" = "boolean" ]
 }
 
+# --- Unicode and punctuated mapping keys (007, contracts/yaml-key-grammar.md) -
+
+@test "the bug report's own document round-trips whole (007 FR-002, FR-004)" {
+  local input='{"resolved_ids":{"JET":{
+    "issue_types":{"Récit":"10004","Story":"10005"},
+    "priorities":{"Faible":"4","Élevée":"1"},
+    "statuses":{"Terminé":"10002","Won'\''t Do":"10004","À faire":"10001","完了":"10003"},
+    "style":"company_managed"}}}'
+  printf '%s' "${input}" | config_to_yaml > "${DIR}/rt.yml"
+  local back
+  back="$(config_yaml_to_json "${DIR}/rt.yml")"
+  [ "$(jq -cS . <<< "${input}")" = "$(jq -cS . <<< "${back}")" ]
+}
+
+@test "keys in four different scripts read back bare (007 FR-002)" {
+  printf '%s\n' \
+    'Größe: "3"' \
+    'Приоритет: "2"' \
+    '完了: "10003"' \
+    'Done (QA): "10005"' \
+    'high/low: "6"' \
+    > "${DIR}/scripts.yml"
+  json="$(config_yaml_to_json "${DIR}/scripts.yml")"
+  [ "$(jq -r '.["Größe"]' <<< "${json}")" = "3" ]
+  [ "$(jq -r '.["Приоритет"]' <<< "${json}")" = "2" ]
+  [ "$(jq -r '.["完了"]' <<< "${json}")" = "10003" ]
+  [ "$(jq -r '.["Done (QA)"]' <<< "${json}")" = "10005" ]
+  [ "$(jq -r '.["high/low"]' <<< "${json}")" = "6" ]
+}
+
+@test "a bare apostrophe key still parses (guards the non-quote-aware bare scan, 007 R1)" {
+  printf '%s\n' "Won't Do: \"7\"" > "${DIR}/apos.yml"
+  json="$(config_yaml_to_json "${DIR}/apos.yml")"
+  [ "$(jq -r ".[\"Won't Do\"]" <<< "${json}")" = "7" ]
+}
+
+@test "a bare URL value is still a scalar, not a key (007 FR-003)" {
+  printf 'site: https://example.atlassian.net\n' > "${DIR}/url.yml"
+  json="$(config_yaml_to_json "${DIR}/url.yml")"
+  [ "$(jq -r '.site' <<< "${json}")" = "https://example.atlassian.net" ]
+}
+
+@test "keys requiring writer quoting survive the write-read round trip (007 FR-004, FR-005)" {
+  local input='{"a":{"Blocked: waiting on QA":"5","Sprint # 2":"6","- pending":"7","  padded  ":"8"}}'
+  printf '%s' "${input}" | config_to_yaml > "${DIR}/quoted.yml"
+  local back
+  back="$(config_yaml_to_json "${DIR}/quoted.yml")"
+  [ "$(jq -cS . <<< "${input}")" = "$(jq -cS . <<< "${back}")" ]
+}
+
+@test "every emitted key is double-quoted (007 contract yaml-key-grammar.md §2.1)" {
+  printf '%s' '{"a":{"Élevée":"1"}}' | config_to_yaml > "${DIR}/emitted.yml"
+  grep -q '"Élevée": "1"' "${DIR}/emitted.yml"
+}
+
+@test "a key containing a double quote is refused on write, and the key text never appears (007 research R3)" {
+  local out status=0
+  out="$(printf '%s' '{"a":{"say \"hi\"":"1"}}' | config_to_yaml 2>&1)" || status=$?
+  [ "$status" -eq 4 ]
+  [[ "$out" != *'say "hi"'* ]]
+}
+
+@test "a string value containing a double quote is refused on write, value never printed (007 research R3)" {
+  local out status=0
+  out="$(printf '%s' '{"a":{"k":"say \"hi\""}}' | config_to_yaml 2>&1)" || status=$?
+  [ "$status" -eq 4 ]
+  [[ "$out" != *'say "hi"'* ]]
+}
+
+# --- Fail-closed on a line that cannot be interpreted (007, contracts/parse-failure.md) -
+
+@test "a malformed line fails closed with the exact three-line message (007 FR-007 to FR-009)" {
+  printf 'resolved_ids:\n  JET:\n    this line has no delimiter\n' > "${DIR}/bad.yml"
+  local out status=0
+  out="$(config_yaml_to_json "${DIR}/bad.yml" 2>"${DIR}/err.txt")" || status=$?
+  [ "$status" -eq 4 ]
+  [ -z "$out" ]
+  [ "$(sed -n 1p "${DIR}/err.txt")" = "config: ${DIR}/bad.yml:3: cannot parse this line as a mapping entry: this line has no delimiter" ]
+  [ "$(sed -n 2p "${DIR}/err.txt")" = 'config: a key must be followed by ": " — quote the key if it contains a colon, e.g. "Blocked: waiting": "10001"' ]
+  [ "$(sed -n 3p "${DIR}/err.txt")" = "config: re-run /speckit.jira.config to regenerate ${DIR}/bad.yml from the Jira instance." ]
+  [ "$(wc -l < "${DIR}/err.txt" | tr -d ' ')" = "3" ]
+}
+
+@test "the reported line number counts blank and comment lines (007 FR-009)" {
+  printf '# a comment\n\nresolved_ids:\n  JET:\n    broken\n' > "${DIR}/bad2.yml"
+  local status=0
+  config_yaml_to_json "${DIR}/bad2.yml" 2> "${DIR}/err.txt" > /dev/null || status=$?
+  [ "$status" -eq 4 ]
+  [[ "$(sed -n 1p "${DIR}/err.txt")" == *":5:"* ]]
+}
+
+@test "a '- jira' sequence item is not a parse failure (007 contract yaml-key-grammar.md §1.4)" {
+  printf 'installed:\n- jira\n' > "${DIR}/seq.yml"
+  local status=0
+  json="$(config_yaml_to_json "${DIR}/seq.yml" 2>"${DIR}/err.txt")" || status=$?
+  [ "$status" -eq 0 ]
+  [ ! -s "${DIR}/err.txt" ]
+  [ "$(jq -r '.installed[0]' <<< "${json}")" = "jira" ]
+}
+
+@test "a malformed line carrying credential-shaped content is redacted (007 FR-009, Constitution IV)" {
+  printf 'resolved_ids:\n  JET:\n    ATATT3xFfGF0 someone@example.com https://acme.atlassian.net\n' > "${DIR}/leak.yml"
+  local status=0
+  config_yaml_to_json "${DIR}/leak.yml" 2> "${DIR}/err.txt" > /dev/null || status=$?
+  [ "$status" -eq 4 ]
+  local firstline
+  firstline="$(sed -n 1p "${DIR}/err.txt")"
+  [[ "${firstline}" == *"${DIR}/leak.yml:3:"* ]]
+  [[ "${firstline}" != *"ATATT3xFfGF0"* ]]
+  [[ "${firstline}" != *"someone@example.com"* ]]
+  [[ "${firstline}" != *"acme.atlassian.net"* ]]
+  [ "$(grep -c '\[redacted\]' <<< "${firstline}")" -ge 1 ]
+}
+
+@test "a key repeated at the same mapping level fails, naming both lines (007 FR-016)" {
+  printf 'statuses:\n  "Terminé": "1"\n  "Terminé": "2"\n' > "${DIR}/dup.yml"
+  local status=0
+  config_yaml_to_json "${DIR}/dup.yml" 2> "${DIR}/err.txt" > /dev/null || status=$?
+  [ "$status" -eq 4 ]
+  local firstline
+  firstline="$(sed -n 1p "${DIR}/err.txt")"
+  [[ "${firstline}" == *"${DIR}/dup.yml:3:"* ]]
+  [[ "${firstline}" == *"duplicate key"* ]]
+  [[ "${firstline}" == *"line 2"* ]]
+}
+
+@test "the same key at two different mapping levels stays legal (007 yaml-key-grammar.md §1.5)" {
+  printf 'resolved_ids:\n  COMP:\n    statuses:\n      "To Do": "1"\n  TEAM:\n    statuses:\n      "To Do": "2"\n' > "${DIR}/nodup.yml"
+  json="$(config_yaml_to_json "${DIR}/nodup.yml")"
+  [ "$(jq -r '.resolved_ids.COMP.statuses["To Do"]' <<< "${json}")" = "1" ]
+  [ "$(jq -r '.resolved_ids.TEAM.statuses["To Do"]' <<< "${json}")" = "2" ]
+}
+
 # --- Valid load --------------------------------------------------------------
 
 @test "config_load accepts a valid team config (exit 0) and emits merged JSON" {

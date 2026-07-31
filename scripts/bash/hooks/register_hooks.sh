@@ -269,7 +269,12 @@ register_hooks_health() {
       return "${EXIT_CONFIG}"
     fi
     if ! existing="$(config_yaml_to_json "${path}" 2> /dev/null)"; then
-      _register_hooks_unreadable "${path}" "not valid YAML in this reader's subset"
+      # Surface the located parse-failure message (file, line, content,
+      # remediation) rather than a generic label — the stderr from the same
+      # call, captured separately since the first call above discarded it.
+      local detail
+      detail="$(config_yaml_to_json "${path}" 2>&1 1> /dev/null)"
+      _register_hooks_unreadable "${path}" "${detail}"
       return "${EXIT_CONFIG}"
     fi
     # Parsing succeeding is not the same as the file being a registry. The

@@ -140,4 +140,26 @@ resolved_ids:
 '@ | Set-Content -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml') -NoNewline
         Assert-FaultProperties -Needle 'has not been bound yet'
     }
+
+    It 'an unreadable local binding fails closed with zero writes, not reported as unbound (007 FR-010, R7 case 9)' {
+        @'
+projects:
+  - key: COMP
+    style: company_managed
+    epic_strategy: per_repo
+    task_strategy: subtask
+routing_default: COMP
+'@ | Set-Content -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -NoNewline
+        @'
+resolved_ids:
+  COMP:
+    this line has no delimiter
+'@ | Set-Content -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml') -NoNewline
+        $r = Invoke-Captured @('reconcile', '--dry-run', '--json', $script:Spec)
+        $r.ExitCode | Should -Be 4
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ }).Count | Should -Be 0
+        ($r.Out + $r.Err) | Should -Not -Match 'has not been bound yet'
+        ($r.Out + $r.Err) | Should -Not -Match 'not bound to a Jira project yet'
+        ($r.Out + $r.Err) | Should -Match 'cannot parse this line as a mapping entry'
+    }
 }

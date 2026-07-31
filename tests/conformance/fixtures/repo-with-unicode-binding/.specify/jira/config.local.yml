@@ -1,0 +1,23 @@
+# Machine-owned local binding (gitignored in a real repository). This copy
+# reproduces the bug report's own binding for a Jira instance whose issue
+# types, priorities and statuses carry the instance's own language and
+# ordinary punctuation — written in the BARE key form the writer emitted
+# before 007, which is exactly what made it unreadable.
+resolved_ids:
+  JET:
+    issue_types:
+      Récit: "10004"
+      Story: "10005"
+    priorities:
+      Faible: "4"
+      Élevée: "1"
+      Приоритет: "2"
+      Größe: "3"
+    statuses:
+      Terminé: "10002"
+      Won't Do: "10004"
+      À faire: "10001"
+      完了: "10003"
+      Done (QA): "10005"
+      high/low: "6"
+    style: company_managed

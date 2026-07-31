@@ -299,7 +299,7 @@ function Get-JiraHookHealth {
         $construct = Get-CfgUnsupportedConstruct -Path $Path
         if ($construct) { return (New-JiraHookUnreadable -Path $Path -Detail $construct) }
         try { $root = ConvertFrom-JiraConfigYaml -Path $Path | ConvertFrom-Json -Depth 100 }
-        catch { return (New-JiraHookUnreadable -Path $Path -Detail "not valid YAML in this reader's subset") }
+        catch { return (New-JiraHookUnreadable -Path $Path -Detail $_.Exception.Message) }
 
         # Parsing succeeding is not the same as the file being a registry. The
         # reader is lenient by design, so a genuinely broken file can parse into a

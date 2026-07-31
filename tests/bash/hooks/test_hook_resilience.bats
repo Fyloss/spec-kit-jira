@@ -76,6 +76,18 @@ teardown() {
   [ "$(jq -r '.exit_code' <<< "$(grep '^{' <<< "$output")")" = "0" ]
 }
 
+@test "an unreadable local binding inside a hook leaves the host exit 0 with the three lines plus one WARNING (007 FR-011)" {
+  mkdir -p "${WORK}/.specify/jira"
+  printf 'resolved_ids:\n  TEST:\n    this line has no delimiter\n' > "${WORK}/.specify/jira/config.local.yml"
+  export JIRA_CONFIG_DIR="${WORK}/.specify/jira"
+  export SPEC_KIT_JIRA_HOOK_CONTEXT=1
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile --json "${SPEC}"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'WARNING:' <<< "$output")" -eq 1 ]
+  [[ "$output" == *"cannot parse this line as a mapping entry"* ]]
+}
+
 @test "every bridge fault leaves the host exit code untouched under optional:false (FR-015)" {
   # The faults reachable without a live Jira: an unreachable base (fail-closed
   # write), an unparseable spec, and a malformed lifecycle payload. Under

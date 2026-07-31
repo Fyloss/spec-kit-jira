@@ -55,6 +55,16 @@ case "${PORT}" in
 esac
 [ -f "${ENTRY}" ] || { echo "entry point not found: ${ENTRY}" >&2; exit 1; }
 
+# Are we git-bash (MSYS) on Windows, about to spawn a NATIVE pwsh.exe? That one
+# combination mistranslates a bash argv array into a Windows command line and
+# needs the wrapper below; every other host takes the plain invocation. Both
+# conditions are required — cygpath also exists under Cygwin, where `uname`
+# reports CYGWIN and this translation does not apply the same way.
+MSYS_PWSH=""
+case "$(uname -s 2> /dev/null || true)" in
+  MINGW* | MSYS*) command -v cygpath > /dev/null 2>&1 && MSYS_PWSH=1 ;;
+esac
+
 # --- Isolated workdir (the "repository" the port runs against) ---------------
 WORKDIR="$(mktemp -d)"
 FIXTURE="$(jq -r '.fixture // empty' "${SCENARIO}")"
@@ -134,8 +144,27 @@ for ((i = 1; i <= RUN_COUNT; i++)); do
     else
       ( cd "${WORKDIR}" && bash "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout.${i}" 2> "${OUTDIR}/stderr.${i}"
     fi
-  else
+  elif [ -z "${MSYS_PWSH:-}" ]; then
+    # The plain invocation, unchanged since T009 and green on Linux and macOS
+    # for this project's whole history. Everywhere except git-bash-on-Windows
+    # this is exactly right, so it stays the default: the workaround below can
+    # only ever regress the platform it was written for.
     ( cd "${WORKDIR}" && pwsh -NoProfile -File "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout.${i}" 2> "${OUTDIR}/stderr.${i}"
+  else
+    # git-bash (MSYS) on Windows ONLY. Spawning the NATIVE pwsh.exe with
+    # `-File <path> <args...>` loses or mangles trailing simple-word arguments
+    # in MSYS's argv-to-Windows-command-line translation, so the entry point
+    # and argv travel in FILES and pwsh's command line carries nothing but the
+    # wrapper's own path. cygpath spells those paths the way pwsh.exe reads
+    # them — bash here speaks POSIX ("/d/a/repo/..."), which it cannot resolve.
+    entry_native="$(cygpath -w "${ENTRY}")"
+    printf '%s' "${entry_native}" > "${OUTDIR}/entry.${i}"
+    printf '%s\n' ${ARGV[@]+"${ARGV[@]}"} > "${OUTDIR}/argv.${i}"
+    ( cd "${WORKDIR}" \
+      && SPEC_KIT_JIRA_HARNESS_ENTRYFILE="$(cygpath -w "${OUTDIR}/entry.${i}")" \
+         SPEC_KIT_JIRA_HARNESS_ARGVFILE="$(cygpath -w "${OUTDIR}/argv.${i}")" \
+         pwsh -NoProfile -File "$(cygpath -w "${CONF_DIR}/pwsh-invoke.ps1")" \
+    ) > "${OUTDIR}/stdout.${i}" 2> "${OUTDIR}/stderr.${i}"
   fi
   echo "$?" > "${OUTDIR}/exit.${i}"
 done
