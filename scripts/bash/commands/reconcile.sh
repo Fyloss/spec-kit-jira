@@ -50,7 +50,11 @@ _reconcile_hook_event() {
   printf '%s' "${SPEC_KIT_JIRA_HOOK_EVENT:-}"
 }
 
-# _reconcile_is_held <event> — 0 when the operator disabled this event.
+# _reconcile_is_held <event> — 0 when the operator disabled this event, 1 when
+# not, EXIT_CONFIG when the disable record cannot be read. A read failure must
+# never be silently treated as "not held" — an unreadable binding might be
+# hiding an operator's disable decision (Constitution X, contracts/
+# parse-failure.md §4: config_hooks_disabled_read propagates).
 #
 # Read at DISPATCH, before any prerequisite check and before any network work, so
 # the decision holds even in the window between an install that re-enabled the
@@ -58,10 +62,11 @@ _reconcile_hook_event() {
 # The registry's own `enabled` field is deliberately NOT consulted here: the
 # install rewrites it to `true` unconditionally, so it cannot carry the answer.
 _reconcile_is_held() {
-  local event="$1"
+  local event="$1" disabled rc=0
   [[ -z "${event}" ]] && return 1
-  jq -e --arg e "${event}" 'index($e) != null' \
-    <<< "$(config_hooks_disabled_read 2> /dev/null)" > /dev/null 2>&1
+  disabled="$(config_hooks_disabled_read)" || rc=$?
+  ((rc != 0)) && return "${rc}"
+  jq -e --arg e "${event}" 'index($e) != null' <<< "${disabled}" > /dev/null 2>&1
 }
 
 # _reconcile_notice <line...> — the SINGLE message a degraded run is allowed
@@ -184,10 +189,15 @@ _reconcile_phase_order() {
 # all — the existing not-configured notice, not a fault). Returns 3 when the
 # file exists but holds no entry for this project (FR-010, project-not-bound).
 _reconcile_local_binding_for() {
-  local key="$1" dir="$2" f entry
+  local key="$1" dir="$2" f json entry rc=0
   f="$(_cfg_local_path "${dir}")"
   [[ -f "${f}" ]] || return 2
-  entry="$(_cfg_local_json "${dir}" | jq -c --arg k "${key}" '.resolved_ids[$k] // empty' 2>/dev/null)"
+  # An unreadable binding is not "not bound" — it must fail closed with zero
+  # Jira writes (FR-010, Constitution III), distinct from 2 (never bound at
+  # all) and 3 (bound, no entry for this project).
+  json="$(_cfg_local_json "${dir}")" || rc=$?
+  ((rc != 0)) && return "${rc}"
+  entry="$(jq -c --arg k "${key}" '.resolved_ids[$k] // empty' <<< "${json}" 2>/dev/null)"
   [[ -z "${entry}" || "${entry}" == "null" ]] && return 3
   printf '%s' "${entry}"
   return 0
@@ -285,10 +295,14 @@ cmd_reconcile() {
   # is INERT: no Jira call, and no warning either. A warning here would be noise
   # on every single lifecycle command for an event the operator deliberately
   # turned off, which is precisely what FR-020 forbids.
-  local hook_event
+  local hook_event rc_held=0
   hook_event="$(_reconcile_hook_event)"
-  if _reconcile_is_held "${hook_event}"; then
+  _reconcile_is_held "${hook_event}" || rc_held=$?
+  if ((rc_held == 0)); then
     return 0
+  elif ((rc_held == EXIT_CONFIG)); then
+    _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the operator disable record could not be read (zero writes)'
+    return $?
   fi
 
   # The spec file is the first positional argument.
@@ -490,6 +504,9 @@ cmd_reconcile() {
     return 0
   elif [[ "${rc_pc}" -eq 3 ]]; then
     _reconcile_fault "${EXIT_CONFIG}" "reconcile: the project \"${project_key}\" has not been bound yet — run /speckit.jira.config to discover its issue types and priorities (zero writes)"
+    return $?
+  elif [[ "${rc_pc}" -eq "${EXIT_CONFIG}" ]]; then
+    _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the local Jira binding could not be read (zero writes)'
     return $?
   fi
   if ! actions="$(plan_writes "${doc_for_write}" "${plan_ctx}")"; then
