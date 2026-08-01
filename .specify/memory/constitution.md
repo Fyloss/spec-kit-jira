@@ -26,7 +26,8 @@ and three plausible Windows hypotheses (checkout line endings, cygpath -w spelli
 bash version) were each disproved by measurement on the runner. The root cause was
 measurable only there: the MSYS bash pattern matcher lets a CRLF inside a glob pattern
 match a bare LF, so the line-ending detector counted every LF as a CRLF and called
-every LF host CRLF (fixed in 2289340, proven by a green probe run; quirks catalog in
+every LF host CRLF (fixed by the CR-by-CR walk _ms_count_crlf in
+scripts/bash/engine/managed_section.sh, proven by a green probe run; quirks catalog in
 docs/10-windows-portability.md; probe loop in .github/workflows/windows-conformance.yml).
 The rule generalizes the method that worked: a model of Windows is not Windows, and a
 fix claimed without a run on the affected platform is a hypothesis, not a fix.

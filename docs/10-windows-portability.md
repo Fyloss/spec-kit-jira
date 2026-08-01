@@ -2,7 +2,8 @@
 
 Every rule in this document was **measured on a real `windows-latest` runner**,
 not reasoned about. That distinction is the whole lesson: during the CRLF saga
-(commits `6802a3f`..`2289340`) three plausible Windows hypotheses were disproved
+(the `fix:`/`ci:` commit run ending in `fix: count CRLF pairs with a CR-by-CR
+walk`) three plausible Windows hypotheses were disproved
 by measurement, and a faithful emulation — a stub `jq` on PATH that appends CR
 exactly the way `jq.exe`'s text-mode stdout does — passed the entire conformance
 corpus while the real runner failed fifteen scenarios. A model of Windows is not
@@ -21,7 +22,7 @@ substring count with a `$'\r\n'` needle therefore counts every LF, which made
 authored line with `\r\n` — one uniform +1 byte per authored line across
 fifteen scenarios.
 
-Measured (probe run on `a901562`, MSYS bash 5.3.15): `_ms_count "$c" $'\r\n'`
+Measured (shard-0 decomposition probe, MSYS bash 5.3.15): `_ms_count "$c" $'\r\n'`
 returned **12** on a 387-byte capture holding **zero** CR bytes, and **2** on
 the literal `a\nb\n`. The capture, the pipe, and `igncr` all measured clean.
 
