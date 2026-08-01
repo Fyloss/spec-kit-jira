@@ -35,6 +35,14 @@ on:
 permissions:
   contents: read
 
+# A probe is pushed repeatedly by design — that is the whole loop it exists to
+# shorten — and each push claims four Windows runners for ten minutes. Without
+# this, the superseded run keeps them while the one carrying the answer queues
+# behind it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   conformance:
     name: Conformance corpus ${{ matrix.shard }}/4 (windows-latest)
@@ -95,10 +103,15 @@ jobs:
             #   26 = could not read the local data file  -> spelling rejected
             #    7 = could not connect                   -> file was read fine
             probe=$(mktemp); printf '{}' > "${probe}"
+            # `|| rc=$?` is load-bearing: a GitHub `shell: bash` step runs under
+            # `-eo pipefail`, and BOTH outcomes this probe is looking for are
+            # non-zero curl exits — so an unguarded call kills the step before
+            # it can report the very code it was measuring.
             try() {
+              local rc=0
               printf 'url = "http://127.0.0.1:1/"\nrequest = "POST"\ndata = "@%s"\n' "$2" \
-                | curl --silent --config - --output "${probe}.out" > /dev/null 2>&1
-              printf '%s=%s ' "$1" "$?"
+                | curl --silent --config - --output "${probe}.out" > /dev/null 2>&1 || rc=$?
+              printf '%s=%s ' "$1" "${rc}"
             }
             printf 'curl data-path spelling (26=unreadable, 7=read ok): '
             try posix "${probe}"
