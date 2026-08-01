@@ -33,6 +33,24 @@ _ms_count() {
   printf '%s' "${n}"
 }
 
+# _ms_count_crlf <haystack> — echo the number of CRLF pairs in <haystack>.
+# Deliberately NOT _ms_count with a $'\r\n' needle: the MSYS bash pattern
+# matcher lets a CRLF inside a pattern match a bare LF, so on windows-latest
+# that count equals the LF total and every LF host detects as CRLF (measured:
+# 12 "CRLF" in a 387-byte fixture holding zero CR bytes). Single-character
+# patterns are unaffected there, so walk CR by CR and check the byte after.
+_ms_count_crlf() {
+  local rest="$1" n=0
+  while [[ "${rest}" == *$'\r'* ]]; do
+    rest="${rest#*$'\r'}"
+    if [[ "${rest}" == $'\n'* ]]; then
+      n=$((n + 1))
+      rest="${rest:1}"
+    fi
+  done
+  printf '%s' "${n}"
+}
+
 # _ms_line_numbers <content> <token> — echo the 1-based line numbers of every
 # occurrence of <token>, space-separated. Used only for located error messages.
 _ms_line_numbers() {
@@ -54,7 +72,7 @@ _ms_line_numbers() {
 managed_section_line_ending() {
   local content crlf lf_total lf_only
   content="$(cat; printf x)"; content="${content%x}"
-  crlf="$(_ms_count "${content}" $'\r\n')"
+  crlf="$(_ms_count_crlf "${content}")"
   lf_total="$(_ms_count "${content}" $'\n')"
   lf_only=$((lf_total - crlf))
   if [[ "${crlf}" -gt "${lf_only}" ]]; then
