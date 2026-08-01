@@ -132,9 +132,13 @@ Each carries a durable identifier, recorded in its own HTML comment line —
 one beside the document's title for the parent, one beside each story's
 heading — and stamped on the ticket itself. A second run reads those
 identifiers back, recognises the same tickets, and updates them instead of
-creating duplicates — an unchanged re-run writes nothing to Jira at all. Every
-identifier survives a retitle, a reorder, and a specification-folder rename;
-leave the comment lines where reconcile put them.
+creating duplicates — an unchanged re-run writes nothing to Jira at all. A
+story's identifier survives a retitle, a reorder, and a specification-folder
+rename. The parent's is tied to the repository and the specification slug: it
+survives a retitle and a reorder, and a folder rename so long as the slug
+stays the same. Change the slug and reconcile blocks the parent — naming the
+slug that already claims the ticket — rather than opening a second one. Leave
+the comment lines where reconcile put them.
 
 ## Step-by-step setup on Linux
 

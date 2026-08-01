@@ -44,10 +44,28 @@ Describe 'Retired configuration keys' {
         ($r.Errors -join "`n") | Should -Match 'link_type'
     }
 
-    It 'T032a — grep proves the three keys are gone from scripts, templates, commands and docs, outside the retirement rule' {
+    It 'T032a — the three keys are gone from scripts, templates, commands and docs, outside the retirement rule' {
+        # Searched with Select-String rather than by shelling out to grep: this
+        # suite runs on all three hosts, and `grep` is not on a GitHub-hosted
+        # Windows runner's PATH — where a missing command is a TERMINATING
+        # CommandNotFoundException, so the test would fail on the absence of
+        # grep rather than on the presence of a retired key. The bats mirror
+        # (tests/bash/lib/test_config_retired_keys.bats) keeps using grep: it
+        # only ever runs on a POSIX host.
         $root = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $hits = & grep -rn 'epic_strategy\|task_strategy\|link_type\|SPEC_KIT_JIRA_EPIC_STRATEGY' (Join-Path $root 'scripts') (Join-Path $root 'templates') (Join-Path $root 'commands') (Join-Path $root 'README.md') (Join-Path $root 'INSTALL.md') 2>$null |
-            Where-Object { $_ -notmatch 'retired|no longer uses' }
+        $searched = @(
+            @('scripts', 'templates', 'commands') |
+                ForEach-Object { Join-Path $root $_ } |
+                Where-Object { Test-Path -LiteralPath $_ } |
+                ForEach-Object { Get-ChildItem -LiteralPath $_ -Recurse -File }
+            @('README.md', 'INSTALL.md') |
+                ForEach-Object { Join-Path $root $_ } |
+                Where-Object { Test-Path -LiteralPath $_ } |
+                ForEach-Object { Get-Item -LiteralPath $_ }
+        )
+        $hits = $searched |
+            Select-String -Pattern 'epic_strategy|task_strategy|link_type|SPEC_KIT_JIRA_EPIC_STRATEGY' |
+            Where-Object { $_.Line -notmatch 'retired|no longer uses' }
         $hits | Should -BeNullOrEmpty
     }
 }
