@@ -1,0 +1,15 @@
+# Team config for the French-hierarchy conformance fixture (US1) — a Jira
+# whose issue-type names carry Latin diacritics rather than the Atlassian
+# defaults (committable, credential-free).
+projects:
+  - key: FR
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: FR
+routing_default: FR

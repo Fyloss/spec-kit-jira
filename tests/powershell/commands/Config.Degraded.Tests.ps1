@@ -27,7 +27,7 @@ Describe 'Config degraded mode' {
         $script:Work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
         New-Item -ItemType Directory -Path (Join-Path $Work '.specify/jira') -Force | Out-Null
         $env:JIRA_CONFIG_DIR = Join-Path $Work '.specify/jira'
-        $lines = @('projects:', '  - key: TEAM', '    epic_strategy: per_repo', '    task_strategy: subtask', 'routing_default: TEAM')
+        $lines = @('projects:', '  - key: TEAM', 'routing_default: TEAM')
         [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines -join "`n") + "`n"))
         Push-Location $Work
         git init -q -b main
@@ -125,7 +125,7 @@ Describe 'Degraded causes are told apart (T047, 003 US5)' {
         $script:Work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
         New-Item -ItemType Directory -Path (Join-Path $script:Work '.specify/jira') -Force | Out-Null
         $env:JIRA_CONFIG_DIR = Join-Path $script:Work '.specify/jira'
-        $lines = @('projects:', '  - key: TEAM', '    epic_strategy: per_repo', '    task_strategy: subtask', 'routing_default: TEAM')
+        $lines = @('projects:', '  - key: TEAM', 'routing_default: TEAM')
         [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines -join "`n") + "`n"))
         $env:SPEC_KIT_JIRA_EXTENSIONS_YML = Join-Path $script:Work '.specify/extensions.yml'
     }

@@ -1,0 +1,8 @@
+# Team config for the retired-key refusal conformance fixture (US4, T025).
+# Declares epic_strategy, a key this version of spec-kit-jira no longer uses
+# (spec FR-030/FR-031) — the run must refuse before any Jira call.
+projects:
+  - key: COMP
+    style: company_managed
+    epic_strategy: per_repo
+routing_default: COMP

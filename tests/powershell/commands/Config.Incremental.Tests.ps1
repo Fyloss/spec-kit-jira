@@ -18,14 +18,10 @@ BeforeAll {
     $script:CompProject = @'
   - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 '@ + "`n"
     $script:TeamProject = @'
   - key: TEAM
     style: team_managed
-    epic_strategy: per_feature
-    task_strategy: subtask
 '@ + "`n"
     function Write-TeamConfig([string] $Projects) {
         $body = "projects:`n" + $Projects + "routing_default: `"COMP`"`n"
@@ -35,7 +31,7 @@ BeforeAll {
         $sw = [System.IO.StringWriter]::new()
         $orig = [Console]::Out
         [Console]::SetOut($sw)
-        try { [void](Invoke-JiraConfig -Arguments @('config', '--json')) }
+        try { [void](Invoke-JiraConfig -Arguments @('config', '--child-type', 'COMP=Story', '--child-type', 'TEAM=Story', '--json')) }
         finally { [Console]::SetOut($orig) }
     }
     function Get-LocalObject {
@@ -60,7 +56,7 @@ Describe 'Config incremental re-bind' {
         Write-TeamConfig $CompProject
         Invoke-ConfigSilently
         $before = Get-LocalObject
-        $before.resolved_ids.COMP.issue_types.Story | Should -Be '10102'
+        ($before.resolved_ids.COMP.issue_types | Where-Object { $_.logical_name -eq "Story" }).id | Should -Be '10102'
         ($before.resolved_ids.PSObject.Properties.Name -contains 'TEAM') | Should -BeFalse
         $compBefore = $before.resolved_ids.COMP | ConvertTo-Json -Depth 20 -Compress
 
@@ -75,8 +71,8 @@ Describe 'Config incremental re-bind' {
         Write-TeamConfig ($CompProject + $TeamProject)
         Invoke-ConfigSilently
         $obj = Get-LocalObject
-        $obj.resolved_ids.COMP.issue_types.Story | Should -Be '10102'
-        $obj.resolved_ids.TEAM.issue_types.Story | Should -Not -BeNullOrEmpty
-        $obj.resolved_ids.COMP.issue_types.Story | Should -Not -Be $obj.resolved_ids.TEAM.issue_types.Story
+        ($obj.resolved_ids.COMP.issue_types | Where-Object { $_.logical_name -eq "Story" }).id | Should -Be '10102'
+        ($obj.resolved_ids.TEAM.issue_types | Where-Object { $_.logical_name -eq "Story" }).id | Should -Not -BeNullOrEmpty
+        ($obj.resolved_ids.COMP.issue_types | Where-Object { $_.logical_name -eq "Story" }).id | Should -Not -Be ($obj.resolved_ids.TEAM.issue_types | Where-Object { $_.logical_name -eq "Story" }).id
     }
 }

@@ -36,8 +36,6 @@ write_config() {
     printf 'projects:\n'
     printf '  - key: %s\n' "$1"
     [ -n "${2:-}" ] && printf '    style: %s\n' "$2"
-    printf '    epic_strategy: per_repo\n'
-    printf '    task_strategy: subtask\n'
     printf 'routing_default: %s\n' "$1"
   } > "${JIRA_CONFIG_DIR}/config.yml"
 }
@@ -113,7 +111,7 @@ boot() {
 @test "--style resolves the ambiguity with style_source operator (resolution rung 2)" {
   write_config AMBI
   boot '{"AMBI":"ambiguous"}'
-  run cmd_config config --style AMBI=team_managed --json
+  run cmd_config config --style AMBI=team_managed --child-type AMBI=Story --json
   [ "$status" -eq 0 ]
   local localj
   localj="$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")"
@@ -124,7 +122,7 @@ boot() {
 @test "a committed style declaration resolves an ambiguous payload as operator" {
   write_config AMBI team_managed
   boot '{"AMBI":"ambiguous"}'
-  run cmd_config config --json
+  run cmd_config config --child-type AMBI=Story --json
   [ "$status" -eq 0 ]
   local localj
   localj="$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")"
@@ -176,7 +174,7 @@ boot() {
 @test "the prose audit reports operator provenance too (FR-003, T098)" {
   write_config AMBI
   boot '{"AMBI":"ambiguous"}'
-  run cmd_config config --style AMBI=team_managed
+  run cmd_config config --style AMBI=team_managed --child-type AMBI=Story
   [ "$status" -eq 0 ]
   [[ "$output" == *"    AMBI: team_managed (operator)"* ]]
 }

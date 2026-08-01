@@ -98,6 +98,46 @@ _parse_wrapper() {
   [ "$(jq -r '.stories[1].title' <<< "$output")" = "First Renamed" ]
 }
 
+# --- T052 [Phase 5, US2]: a spec= (parent) marker line is excluded from ----
+# every extraction, exactly as a story= marker line already is.
+
+@test "T052: a spec= line right after the H1 never lands in the epic description" {
+  local doc
+  doc=$'# Feature Specification: X\n<!-- speckit-jira spec=3f2a91c04b7e6d18 ticket=COMP-412 -->\n\nOverview prose.\n'
+  run _parse_wrapper "${doc}"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"speckit-jira"* ]]
+  [ "$(jq -r '.epic.description.blocks[0].text' <<< "$output")" = "Overview prose." ]
+}
+
+@test "T052: a spec= line inside a story section never lands in that story's title, description or acceptance criteria" {
+  local doc
+  doc=$'### User Story 1 - First (Priority: P1)\n<!-- speckit-jira story=7f3a9c1e40b2d85a -->\n<!-- speckit-jira spec=3f2a91c04b7e6d18 -->\n\nAs a user I want X.\n\n- **Given** a thing\n- **When** it happens\n- **Then** it works\n'
+  run _parse_wrapper "${doc}"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"speckit-jira"* ]]
+  [ "$(jq -r '.stories[0].title' <<< "$output")" = "First" ]
+}
+
+@test "T052: a spec= line inside a story section never lands in the design section" {
+  local doc
+  doc=$'### User Story 1 - First (Priority: P1)\n<!-- speckit-jira story=7f3a9c1e40b2d85a -->\n<!-- speckit-jira spec=3f2a91c04b7e6d18 -->\n\nBody.\n\n#### Design\n\nSome guidance here.\n'
+  run _parse_wrapper "${doc}"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"speckit-jira"* ]]
+  [ "$(jq -c '.stories[0].design' <<< "$output")" = '[{"kind":"guidance","value":"Some guidance here."}]' ]
+}
+
+@test "T052: a spec= line inside a story section never lands in priority or estimation extraction" {
+  local doc
+  doc=$'### User Story 1 - First (Priority: P1)\n<!-- speckit-jira story=7f3a9c1e40b2d85a -->\n<!-- speckit-jira spec=3f2a91c04b7e6d18 -->\n\nEstimation: 5\n'
+  run _parse_wrapper "${doc}"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"speckit-jira"* ]]
+  [ "$(jq -r '.stories[0].priority_logical' <<< "$output")" = "P1" ]
+  [ "$(jq -r '.stories[0].estimation' <<< "$output")" = "5" ]
+}
+
 # --- Cross-port parity ------------------------------------------------------
 
 @test "the PowerShell port parses markers identically (NFR-1)" {

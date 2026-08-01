@@ -33,8 +33,6 @@ write_config() {
   {
     printf 'projects:\n'
     printf '  - key: %s\n' "$1"
-    printf '    epic_strategy: per_repo\n'
-    printf '    task_strategy: subtask\n'
     printf 'routing_default: %s\n' "$1"
   } > "${JIRA_CONFIG_DIR}/config.yml"
 }

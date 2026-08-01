@@ -58,4 +58,30 @@ function Get-JiraMockCallLog {
     if (Test-Path -LiteralPath $Mock.CallLog) { Get-Content -LiteralPath $Mock.CallLog } else { @() }
 }
 
-Export-ModuleMember -Function Start-JiraMock, Stop-JiraMock, Get-JiraMockCallLog
+function Write-JiraMockConfig {
+    # Writes an ad hoc mock config (e.g. per-issue-type createmeta overrides
+    # via "createmetaFields") to a temp file and returns its path (T003),
+    # mirroring lib.sh's mock_write_config.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Json)
+    $f = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
+    Set-Content -LiteralPath $f -Value $Json -NoNewline
+    return $f
+}
+
+function Get-JiraMockIssueField {
+    # Reads back a field of an issue the mock already holds, e.g.
+    # "fields.parent.key", for parent-link assertions (T002/T003).
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Mock, [Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][string]$Path)
+    $issue = Invoke-RestMethod -Uri "$($Mock.BaseUrl)/rest/api/3/issue/$Key"
+    $cursor = $issue
+    foreach ($segment in ($Path -split '\.')) {
+        if ($null -eq $cursor) { return $null }
+        if ($cursor -isnot [System.Collections.IDictionary] -and -not ($cursor.PSObject.Properties.Match($segment).Count)) { return $null }
+        $cursor = $cursor.$segment
+    }
+    return $cursor
+}
+
+Export-ModuleMember -Function Start-JiraMock, Stop-JiraMock, Get-JiraMockCallLog, Write-JiraMockConfig, Get-JiraMockIssueField

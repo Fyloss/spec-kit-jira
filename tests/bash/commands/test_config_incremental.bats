@@ -49,26 +49,20 @@ boot() {
   boot
   # First run: only COMP is configured.
   write_config '  - key: COMP
-    style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask'
-  run cmd_config config --json
+    style: company_managed'
+  run cmd_config config --child-type COMP=Story --child-type TEAM=Story --json
   [ "$status" -eq 0 ]
   local before after
   before="$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")"
-  [ "$(jq -r '.resolved_ids.COMP.issue_types.Story' <<< "$before")" = "10102" ]
+  [ "$(jq -r '(.resolved_ids.COMP.issue_types[] | select(.logical_name=="Story") | .id)' <<< "$before")" = "10102" ]
   [ "$(jq -r '.resolved_ids | has("TEAM")' <<< "$before")" = "false" ]
 
   # Second run: add TEAM alongside COMP.
   write_config '  - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
   - key: TEAM
-    style: team_managed
-    epic_strategy: per_feature
-    task_strategy: subtask'
-  run cmd_config config --json
+    style: team_managed'
+  run cmd_config config --child-type COMP=Story --child-type TEAM=Story --json
   [ "$status" -eq 0 ]
   after="$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")"
 
@@ -82,39 +76,33 @@ boot() {
   boot
   write_config '  - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
   - key: TEAM
-    style: team_managed
-    epic_strategy: per_feature
-    task_strategy: subtask'
-  run cmd_config config --json
+    style: team_managed'
+  run cmd_config config --child-type COMP=Story --child-type TEAM=Story --json
   [ "$status" -eq 0 ]
   local json
   json="$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")"
   # Company- and team-managed ids live under distinct keys — no shared namespace.
-  [ "$(jq -r '.resolved_ids.COMP.issue_types.Story' <<< "$json")" = "10102" ]
-  [ "$(jq -r '.resolved_ids.TEAM.issue_types.Story' <<< "$json")" != "null" ]
-  [ "$(jq -r '.resolved_ids.COMP.issue_types.Story != .resolved_ids.TEAM.issue_types.Story' <<< "$json")" = "true" ]
+  [ "$(jq -r '(.resolved_ids.COMP.issue_types[] | select(.logical_name=="Story") | .id)' <<< "$json")" = "10102" ]
+  [ "$(jq -r '(.resolved_ids.TEAM.issue_types[] | select(.logical_name=="Story") | .id)' <<< "$json")" != "null" ]
+  [ "$(jq -r '(.resolved_ids.COMP.issue_types[] | select(.logical_name=="Story") | .id) != (.resolved_ids.TEAM.issue_types[] | select(.logical_name=="Story") | .id)' <<< "$json")" = "true" ]
 }
 
 @test "a project removed from the local layer by hand is re-bound but others preserved" {
   boot
   write_config '  - key: COMP
-    style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask'
-  cmd_config config --json > /dev/null
+    style: company_managed'
+  cmd_config config --child-type COMP=Story --child-type TEAM=Story --json > /dev/null
   # Inject an operator-authored key into the local layer; it must survive the merge.
   local injected
   injected="$(jq -cS '. + {site_alias: "prod"}' <<< "$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")")"
   printf '%s' "$injected" | config_to_yaml > "${JIRA_CONFIG_DIR}/config.local.yml"
 
-  cmd_config config --json > /dev/null
+  cmd_config config --child-type COMP=Story --child-type TEAM=Story --json > /dev/null
   local json
   json="$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")"
   [ "$(jq -r '.site_alias' <<< "$json")" = "prod" ]
-  [ "$(jq -r '.resolved_ids.COMP.issue_types.Story' <<< "$json")" = "10102" ]
+  [ "$(jq -r '(.resolved_ids.COMP.issue_types[] | select(.logical_name=="Story") | .id)' <<< "$json")" = "10102" ]
 }
 
 @test "the PowerShell port binds incrementally byte-identically (NFR-1)" {
@@ -122,14 +110,10 @@ boot() {
   boot
   local cfg='  - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
   - key: TEAM
-    style: team_managed
-    epic_strategy: per_feature
-    task_strategy: subtask'
+    style: team_managed'
   write_config "${cfg}"
-  cmd_config config --json > /dev/null
+  cmd_config config --child-type COMP=Story --child-type TEAM=Story --json > /dev/null
   cp "${JIRA_CONFIG_DIR}/config.local.yml" "${WORK}/local-bash"
 
   local pswork
@@ -140,7 +124,7 @@ boot() {
     JIRA_EMAIL="${JIRA_EMAIL}" JIRA_API_TOKEN="${JIRA_API_TOKEN}" JIRA_NO_SLEEP=1 \
     pwsh -NoProfile -Command "
       Import-Module '${PS_CMD}/Config.psm1' -Force
-      [void](Invoke-JiraConfig -Arguments @('config','--json'))
+      [void](Invoke-JiraConfig -Arguments @('config','--child-type','COMP=Story','--child-type','TEAM=Story','--json'))
     " > /dev/null
   run diff "${WORK}/local-bash" "${pswork}/.specify/jira/config.local.yml"
   [ "$status" -eq 0 ]

@@ -1,0 +1,50 @@
+# Machine-owned resolved identifiers (gitignored in a real repository;
+# committed here only as a fixture). New list shape (data-model.md §3): level
+# 0 holds two candidates (Récit, Tâche), so child_type is an operator answer.
+# hierarchy_level is a quoted string, like every other identifier the binding
+# already persists — the writer's scalar round-trip has no number type.
+resolved_ids:
+  FR:
+    style: company_managed
+    style_source: api
+    issue_types:
+      - logical_name: "Épopée"
+        id: "10301"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Récit"
+        id: "10302"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "Tâche"
+        id: "10303"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "Sous-tâche"
+        id: "10304"
+        hierarchy_level: "-1"
+        subtask: true
+    child_type:
+      logical_name: "Récit"
+      id: "10302"
+      source: operator
+    parent_type:
+      logical_name: "Épopée"
+      id: "10301"
+      source: derived
+    required_fields:
+      "10301":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "10302":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "10302": true
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"
+    estimation_field_id: null

@@ -1,0 +1,13 @@
+{
+  "name": "us2-parent-first-run",
+  "description": "US2 (T061) — quickstart Step 7: the first run of a three-story specification against an empty project builds the whole hierarchy in one pass — the parent is created first, its key is stamped and recorded before any child, and every child creation carries fields.parent.key = the parent's key.",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec",
+  "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111 2222222222222222 3333333333333333"
+  }
+}

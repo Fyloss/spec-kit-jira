@@ -35,8 +35,9 @@ _INTERCHANGE_ERRORS_JQ='
   (if (.epic | type) != "object" then "epic is required"
    else
      (if ((.epic.title // "") | length) < 1 then "epic.title is required" else empty end),
-     (if (.epic.strategy | IN("per_repo","per_feature") | not) then "epic.strategy is invalid" else empty end),
-     (if ((.epic.description.blocks // []) | length) < 1 then "epic.description.blocks must be non-empty" else empty end)
+     (if ((.epic.description.blocks // []) | length) < 1 then "epic.description.blocks must be non-empty" else empty end),
+     (if ((.epic.marker.state // "absent") != "absent") and (((.epic.local_id // "") | test("^[0-9a-f]{16}$")) | not)
+      then "epic.local_id is required and must be 16 hex characters unless the marker state is absent" else empty end)
    end),
   (if (.stories | type) != "array" or (.stories | length) < 1 then "stories must be a non-empty array"
    else
@@ -67,14 +68,18 @@ interchange_validate() {
 }
 
 # interchange_build <parse-json> <context-json> — assemble the neutral document
-# from the engine's parse output plus the routing/strategy decisions the parser
-# does not own (US3, T055). The parser produces the CONTENT (epic title +
-# description, stories); the assembly injects `spec_ref`, `routing.project_key`,
-# and the `epic.strategy` from config. The result is VALIDATED against the schema
-# before it is returned: an invalid document surfaces an error and returns
-# non-zero — a validation failure blocks every downstream write (Constitution VIII).
+# from the engine's parse output plus the routing decisions the parser does
+# not own (US3, T055). The parser produces the CONTENT (epic title +
+# description, stories); the assembly injects `spec_ref` and
+# `routing.project_key`. The result is VALIDATED against the schema before it
+# is returned: an invalid document surfaces an error and returns non-zero — a
+# validation failure blocks every downstream write (Constitution VIII).
 #
-# context-json: { spec_ref:{repo,spec_slug,folder}, project_key, epic_strategy }
+# `epic.strategy` is gone (008 T026, FR-030): the field, its validation rule,
+# and the `epic_strategy` context key are retired together, not deleted one
+# at a time.
+#
+# context-json: { spec_ref:{repo,spec_slug,folder}, project_key }
 interchange_build() {
   local parse="$1" ctx="$2" doc
 
@@ -86,9 +91,10 @@ interchange_build() {
       spec_ref: $ctx.spec_ref,
       routing: { project_key: ($ctx.project_key // "") },
       epic: {
-        strategy: ($ctx.epic_strategy // ""),
         title: ($parse.epic.title // ""),
-        description: ($parse.epic.description // {blocks: []})
+        description: ($parse.epic.description // {blocks: []}),
+        local_id: ($parse.epic.local_id // ""),
+        marker: ($parse.epic.marker // {state:"absent", id:"", lines:[]})
       },
       stories: ($parse.stories // [])
     }' | json_canonical)"

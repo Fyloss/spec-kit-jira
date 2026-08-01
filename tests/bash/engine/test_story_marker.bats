@@ -8,6 +8,8 @@ setup() {
   PS_ENGINE="${ROOT}/scripts/powershell/engine"
   # shellcheck source=/dev/null
   source "${ENGINE_DIR}/story_marker.sh"
+  # shellcheck source=/dev/null
+  source "${ROOT}/tests/bash/helpers/mtime.bash"
 }
 
 # --- Identifier generation ---------------------------------------------------
@@ -162,22 +164,22 @@ setup() {
 
 # --- File write: idempotence + atomicity --------------------------------------
 
-@test "story_marker_write_file does not touch the file when content is unchanged" {
+@test "marker_splice_write_file does not touch the file when content is unchanged" {
   local f; f="${BATS_TEST_TMPDIR}/spec.md"
   printf 'unchanged content' > "${f}"
   local before after
-  before="$(stat -f %m "${f}" 2> /dev/null || stat -c %Y "${f}")"
+  before="$(helper_file_mtime "${f}")"
   sleep 1.1
-  run story_marker_write_file "${f}" "unchanged content"
+  run marker_splice_write_file "${f}" "unchanged content"
   [ "$output" = "unchanged" ]
-  after="$(stat -f %m "${f}" 2> /dev/null || stat -c %Y "${f}")"
+  after="$(helper_file_mtime "${f}")"
   [ "${before}" = "${after}" ]
 }
 
-@test "story_marker_write_file writes changed content" {
+@test "marker_splice_write_file writes changed content" {
   local f; f="${BATS_TEST_TMPDIR}/spec2.md"
   printf 'old' > "${f}"
-  run story_marker_write_file "${f}" "new"
+  run marker_splice_write_file "${f}" "new"
   [ "$output" = "written" ]
   [ "$(cat "${f}")" = "new" ]
 }

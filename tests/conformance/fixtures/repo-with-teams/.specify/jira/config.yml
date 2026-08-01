@@ -2,8 +2,6 @@
 # credential-free). Declares two teams sharing this clone-family: ijt and wex.
 projects:
   - key: IJT
-    epic_strategy: per_repo
-    task_strategy: subtask
     priority_map:
       P1: Highest
       P2: Medium

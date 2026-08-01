@@ -1,11 +1,7 @@
 .serena/
 
-# Go
-bin/
-dist/
-*.out
-*.test
-*.prof
+# Worktrees
+.claude/worktrees/
 
 # Test/coverage output (kcov, Pester) — anchored to the repo root so the
 # tests/coverage/ runner itself stays tracked

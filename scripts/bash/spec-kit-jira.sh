@@ -21,6 +21,13 @@ _ENTRY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_ENTRY_DIR}/lib/cli.sh"
 # shellcheck source=/dev/null
 source "${_ENTRY_DIR}/lib/prereq.sh"
+# Sourced HERE, at the root of every run, for one reason beyond the serialiser
+# it exports: on a host whose jq writes CRLF (Windows) this installs the wrapper
+# that strips it, and a wrapper installed after the first jq call is a wrapper
+# that missed one. Every module that needs it sources it too — the include guard
+# makes that free.
+# shellcheck source=/dev/null
+source "${_ENTRY_DIR}/lib/output.sh"
 
 : "${SPEC_KIT_JIRA_COMMANDS_DIR:=${_ENTRY_DIR}/commands}"
 

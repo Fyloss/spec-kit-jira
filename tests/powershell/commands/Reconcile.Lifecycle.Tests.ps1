@@ -18,17 +18,11 @@ BeforeAll {
     # Relies on config.yml-based routing (folder prefix "001-" -> COMP); clear
     # any override an earlier suite in the same Pester process left behind.
     Remove-Item Env:\SPEC_KIT_JIRA_PROJECT_KEY -ErrorAction SilentlyContinue
-    Remove-Item Env:\SPEC_KIT_JIRA_EPIC_STRATEGY -ErrorAction SilentlyContinue
 
     $script:ConfigYaml = @'
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_feature
-    task_strategy: subtask
-    issue_types:
-      Epic: "10001"
-      Story: "10002"
     priority_map:
       P1: Highest
       P2: Medium
@@ -75,7 +69,7 @@ Describe 'Invoke-JiraReconcile — the drift, halted, and Flagged rules engage a
         $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
         $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
 
-        Invoke-RestMethod -Method Put -Uri "$($script:M.BaseUrl)/rest/api/3/issue/COMP-1" `
+        Invoke-RestMethod -Method Put -Uri "$($script:M.BaseUrl)/rest/api/3/issue/COMP-2" `
             -ContentType 'application/json' `
             -Body '{"fields":{"status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}}}}' | Out-Null
 
@@ -90,7 +84,7 @@ Describe 'Invoke-JiraReconcile — the drift, halted, and Flagged rules engage a
         finally { Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue }
         @($r.warnings).Count | Should -BeGreaterOrEqual 1
         $r.warnings[0] | Should -BeLike '*In Progress*'
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-1' }).Count | Should -Be 1
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-2' }).Count | Should -Be 1
     }
 
     It 'a halted ticket has its content write suppressed and a named warning' {
@@ -98,7 +92,7 @@ Describe 'Invoke-JiraReconcile — the drift, halted, and Flagged rules engage a
         $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
         $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
 
-        Invoke-RestMethod -Method Put -Uri "$($script:M.BaseUrl)/rest/api/3/issue/COMP-1" `
+        Invoke-RestMethod -Method Put -Uri "$($script:M.BaseUrl)/rest/api/3/issue/COMP-2" `
             -ContentType 'application/json' `
             -Body '{"fields":{"status":{"name":"Blocked","statusCategory":{"key":"indeterminate"}}}}' | Out-Null
 
@@ -112,7 +106,7 @@ Describe 'Invoke-JiraReconcile — the drift, halted, and Flagged rules engage a
         }
         finally { Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue }
         $r.warnings[0] | Should -BeLike '*halted*'
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-1' }).Count | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-2' }).Count | Should -Be 0
     }
 
     It 'a Flagged ticket has its transition withheld, is surfaced, and no flag write is emitted' {
@@ -120,7 +114,7 @@ Describe 'Invoke-JiraReconcile — the drift, halted, and Flagged rules engage a
         $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
         $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
 
-        Invoke-RestMethod -Method Put -Uri "$($script:M.BaseUrl)/rest/api/3/issue/COMP-2" `
+        Invoke-RestMethod -Method Put -Uri "$($script:M.BaseUrl)/rest/api/3/issue/COMP-3" `
             -ContentType 'application/json' `
             -Body '{"fields":{"Flagged":[{"value":"Impediment"}]}}' | Out-Null
 

@@ -30,7 +30,6 @@ setup() {
   # a matching epic-strategy override — both bypass config.yml, which this
   # isolated work dir never has.
   export SPEC_KIT_JIRA_PROJECT_KEY="TEST"
-  export SPEC_KIT_JIRA_EPIC_STRATEGY="per_repo"
   export SPEC_KIT_JIRA_EXTENSIONS_YML="${WORK}/.specify/extensions.yml"
   export JIRA_NO_SLEEP=1
   export JIRA_MAX_ATTEMPTS=1

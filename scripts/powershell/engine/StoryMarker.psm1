@@ -6,11 +6,15 @@
 # string and the ticket key it is ever paired with is opaque text handed in by
 # the caller — exactly as ManagedSection.psm1 takes its markers as parameters
 # without knowing about READMEs (Constitution VIII).
+#
+# The byte-offset, line-ending, atomic-write and line-replacement primitives
+# live in MarkerSplice.psm1 (T064) — SpecMarker.psm1 reuses the same routines
+# rather than duplicating a splice.
 
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'ManagedSection.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'MarkerSplice.psm1') -Force
 
 $script:JiraStoryMarkerIdIndex = 0
 
@@ -67,6 +71,10 @@ function ConvertTo-JiraStoryMarkerInfo {
         {"kind":"valid","id":"..","state":"creating"}
         {"kind":"valid","id":"..","state":"bound","ticket":".."}
         {"kind":"malformed","id":".."}
+
+      A "spec=" body is a DIFFERENT marker (contracts/parent-marker.md
+      "Non-collision with the story marker") and MUST fall through to
+      'none' here, by construction: the body is matched against '^story='.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Line)
@@ -104,26 +112,6 @@ function ConvertTo-JiraStoryMarkerInfo {
     return (ConvertTo-JiraJsonValue ([ordered]@{ kind = 'malformed'; id = $idval }))
 }
 
-# --- Byte-offset primitives (mirrors ManagedSection.psm1's discipline) ------
-
-function Get-JiraStoryMarkerOffsetAfterLine {
-    # Byte offset immediately after the terminating newline of 1-based line
-    # <N> (the start of line N+1); or the length of <Content> when the file
-    # has fewer than <N> newlines. Mirror of _smk_offset_after_line.
-    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Content, [Parameter(Mandatory)] [int] $N)
-    $rest = $Content
-    $consumed = 0
-    $count = 0
-    while ($count -lt $N -and $rest.Contains("`n")) {
-        $idx = $rest.IndexOf("`n")
-        $consumed += $idx + 1
-        $rest = $rest.Substring($idx + 1)
-        $count++
-    }
-    if ($count -lt $N) { return $Content.Length }
-    return $consumed
-}
-
 function Get-JiraStoryMarkerAnchors {
     <#
     .SYNOPSIS
@@ -132,6 +120,7 @@ function Get-JiraStoryMarkerAnchors {
       H1; else 0 (the sole element), meaning "before line 1". Mirror of
       _smk_scan_anchors.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Names the set of anchor line numbers it derives; a singular name would misdescribe the value.')]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Content)
     $lines = $Content -split "`n"
     $story = [System.Collections.Generic.List[int]]::new()
@@ -212,13 +201,6 @@ function Get-JiraStoryMarkerSectionInfo {
     return (ConvertTo-JiraJsonValue ([ordered]@{ state = 'duplicate'; id = ''; lines = @($foundLines) }))
 }
 
-function Get-JiraStoryMarkerLineCount {
-    # The total number of lines (an unterminated final line still counts).
-    # Mirror of _smk_line_count.
-    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Content)
-    return ($Content -split "`n").Count
-}
-
 function Find-JiraStoryMarkerLineForId {
     # The 1-based line number of the marker line naming <Id> (any state), or
     # 0 when absent. Mirror of _smk_find_line_for_id.
@@ -232,40 +214,6 @@ function Find-JiraStoryMarkerLineForId {
     return 0
 }
 
-function Insert-JiraStoryMarkerAfterLine {
-    # Insert <Text> as a new line immediately after 1-based line <N> (N=0:
-    # before line 1). Mirror of _smk_insert_after_line.
-    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Content, [Parameter(Mandatory)] [int] $N, [Parameter(Mandatory)] [string] $Text, [Parameter(Mandatory)] [string] $Nl)
-    if ($N -eq 0) {
-        return "$Text$Nl$Content"
-    }
-    $off = Get-JiraStoryMarkerOffsetAfterLine -Content $Content -N $N
-    if ($off -eq $Content.Length -and $Content.Length -gt 0 -and -not $Content.EndsWith("`n")) {
-        return "$Content$Nl$Text"
-    }
-    return $Content.Substring(0, $off) + $Text + $Nl + $Content.Substring($off)
-}
-
-function Set-JiraStoryMarkerReplaceLine {
-    # Replace the WHOLE of 1-based line <N> (its text and terminator) with
-    # <Text><Nl>, preserving every other byte exactly. Mirror of
-    # _smk_replace_line.
-    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Content, [Parameter(Mandatory)] [int] $N, [Parameter(Mandatory)] [string] $Text, [Parameter(Mandatory)] [string] $Nl)
-    $startOff = Get-JiraStoryMarkerOffsetAfterLine -Content $Content -N ($N - 1)
-    $endOff = Get-JiraStoryMarkerOffsetAfterLine -Content $Content -N $N
-    $before = $Content.Substring(0, $startOff)
-    $after = $Content.Substring($endOff)
-    return "$before$Text$Nl$after"
-}
-
-function Get-JiraStoryMarkerDominantNl {
-    # The literal newline to use for a written/rewritten marker line.
-    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Content)
-    $token = Get-JiraManagedSectionLineEnding -Text $Content
-    if ($token -eq 'CRLF') { return "`r`n" }
-    return "`n"
-}
-
 function Set-JiraStoryMarkerAssign {
     <#
     .SYNOPSIS
@@ -277,7 +225,7 @@ function Set-JiraStoryMarkerAssign {
     [CmdletBinding()]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
     $content = $Text
-    $nl = Get-JiraStoryMarkerDominantNl -Content $content
+    $nl = Get-JiraMarkerSpliceDominantNl -Content $content
 
     $anchors = @(Get-JiraStoryMarkerAnchors -Content $content)
     $n = $anchors.Count
@@ -285,7 +233,7 @@ function Set-JiraStoryMarkerAssign {
     for ($i = 0; $i -lt $n; $i++) {
         $a = $anchors[$i]
         $spanStart = if ($a -eq 0) { 1 } else { $a + 1 }
-        $spanEnd = if ($i + 1 -lt $n) { $anchors[$i + 1] - 1 } else { Get-JiraStoryMarkerLineCount -Content $content }
+        $spanEnd = if ($i + 1 -lt $n) { $anchors[$i + 1] - 1 } else { Get-JiraMarkerSpliceLineCount -Content $content }
         if (-not (Test-JiraStoryMarkerSectionHasMarker -Content $content -Start $spanStart -End $spanEnd)) {
             $need.Add($a)
         }
@@ -305,7 +253,7 @@ function Set-JiraStoryMarkerAssign {
 
     foreach ($pair in $sorted) {
         $lineText = Format-JiraStoryMarkerLine -Id $pair.Id
-        $content = Insert-JiraStoryMarkerAfterLine -Content $content -N $pair.Anchor -Text $lineText -Nl $nl
+        $content = Add-JiraMarkerSpliceAfterLine -Content $content -N $pair.Anchor -Text $lineText -Nl $nl
     }
     return $content
 }
@@ -320,14 +268,14 @@ function Set-JiraStoryMarkerMarkCreating {
     [CmdletBinding()]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text, [Parameter(Mandatory)] [string] $IdsJson)
     $content = $Text
-    $nl = Get-JiraStoryMarkerDominantNl -Content $content
+    $nl = Get-JiraMarkerSpliceDominantNl -Content $content
     $ids = @($IdsJson | ConvertFrom-Json -Depth 20)
     foreach ($id in $ids) {
         $idStr = [string]$id
         if ([string]::IsNullOrEmpty($idStr)) { continue }
         $lineno = Find-JiraStoryMarkerLineForId -Content $content -Id $idStr
         if ($lineno -eq 0) { continue }
-        $content = Set-JiraStoryMarkerReplaceLine -Content $content -N $lineno -Text (Format-JiraStoryMarkerLine -Id $idStr -State 'creating') -Nl $nl
+        $content = Set-JiraMarkerSpliceReplaceLine -Content $content -N $lineno -Text (Format-JiraStoryMarkerLine -Id $idStr -State 'creating') -Nl $nl
     }
     return $content
 }
@@ -342,35 +290,13 @@ function Set-JiraStoryMarkerRecordTicket {
     [CmdletBinding()]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text, [Parameter(Mandatory)] [string] $Id, [Parameter(Mandatory)] [string] $Key)
     $content = $Text
-    $nl = Get-JiraStoryMarkerDominantNl -Content $content
+    $nl = Get-JiraMarkerSpliceDominantNl -Content $content
     $lineno = Find-JiraStoryMarkerLineForId -Content $content -Id $Id
     if ($lineno -eq 0) { return $content }
-    return (Set-JiraStoryMarkerReplaceLine -Content $content -N $lineno -Text (Format-JiraStoryMarkerLine -Id $Id -State 'bound' -Ticket $Key) -Nl $nl)
-}
-
-function Write-JiraStoryMarkerFile {
-    <#
-    .SYNOPSIS
-      Write <NewContent> to <Path> ONLY IF it differs from the file's current
-      bytes, atomically (a temporary file in the SAME directory, renamed over
-      the original). Prints 'written' or 'unchanged'. Mirror of
-      story_marker_write_file.
-    #>
-    [CmdletBinding(SupportsShouldProcess)]
-    param([Parameter(Mandatory)] [string] $Path, [Parameter(Mandatory)] [AllowEmptyString()] [string] $NewContent)
-    $current = if (Test-Path -LiteralPath $Path) { Get-Content -Raw -LiteralPath $Path } else { '' }
-    if ($null -eq $current) { $current = '' }
-    if ($current -eq $NewContent) { return 'unchanged' }
-    if (-not $PSCmdlet.ShouldProcess($Path, 'write story marker')) { return 'unchanged' }
-    $dir = Split-Path -Parent (Resolve-Path -LiteralPath $Path).Path
-    $tmp = Join-Path $dir ([System.IO.Path]::GetRandomFileName())
-    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-    [System.IO.File]::WriteAllText($tmp, $NewContent, $utf8NoBom)
-    Move-Item -LiteralPath $tmp -Destination $Path -Force
-    return 'written'
+    return (Set-JiraMarkerSpliceReplaceLine -Content $content -N $lineno -Text (Format-JiraStoryMarkerLine -Id $Id -State 'bound' -Ticket $Key) -Nl $nl)
 }
 
 Export-ModuleMember -Function New-JiraStoryMarkerId, Format-JiraStoryMarkerLine, ConvertTo-JiraStoryMarkerInfo, `
     Get-JiraStoryMarkerAnchors, Set-JiraStoryMarkerAssign, Set-JiraStoryMarkerMarkCreating, `
-    Set-JiraStoryMarkerRecordTicket, Write-JiraStoryMarkerFile, Find-JiraStoryMarkerLineForId, `
-    Get-JiraStoryMarkerSectionInfo, Get-JiraStoryMarkerLineCount
+    Set-JiraStoryMarkerRecordTicket, Find-JiraStoryMarkerLineForId, `
+    Get-JiraStoryMarkerSectionInfo

@@ -1,0 +1,15 @@
+# Team config for the non-Latin-hierarchy conformance fixture (US1) — a Jira
+# whose issue-type names are CJK, Cyrillic and parenthesised punctuation
+# (committable, credential-free). Spec FR-003b and US1 acceptance scenario 7.
+projects:
+  - key: NL
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: NL
+routing_default: NL

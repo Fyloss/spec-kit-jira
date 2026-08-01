@@ -62,9 +62,9 @@ credential-shaped values in either YAML layer are rejected at config time (exit 
    A bound repository needs **no environment variables** for this: the target
    project, the issue type, and the priority are all resolved from
    `.specify/jira/config.yml` and the binding `/speckit.jira.config` recorded.
-   The `SPEC_KIT_JIRA_PROJECT_KEY`, `SPEC_KIT_JIRA_EPIC_STRATEGY`, and
-   `SPEC_KIT_JIRA_PLAN_CONTEXT` variables remain supported as explicit
-   overrides, taking precedence over the config-derived values when set.
+   The `SPEC_KIT_JIRA_PROJECT_KEY` and `SPEC_KIT_JIRA_PLAN_CONTEXT` variables
+   remain supported as explicit overrides, taking precedence over the
+   config-derived values when set.
 
 ## The lifecycle hooks: active from install
 
@@ -121,6 +121,27 @@ The extension reports this as `duplicated` and names each affected event. Removi
 it is a one-time manual edit: open `.specify/extensions.yml` and delete, under
 each named event, the entry that has **no** `extension: jira` line. The remaining
 entry is the canonical one the install wrote.
+
+### Upgrading to the parent-hierarchy release
+
+Every installation that ran `/speckit.jira.config` on a release before the
+parent hierarchy shipped is bound, but its `.specify/jira/config.local.yml`
+records issue types as a plain name-to-id map with no hierarchy level and no
+sub-task flag — the shape this release replaces. The first `reconcile` after
+upgrading refuses with:
+
+> `reconcile: the local binding for <PROJECT> predates parent support and does
+> not record issue-type hierarchy. The project is bound — its binding is
+> simply a version behind. Run /speckit.jira.config to refresh it (zero
+> writes)`
+
+This is expected, and it happens before the first read, so nothing is written
+and nothing is lost. Run `/speckit.jira.config` once — the ceremony
+rediscovers the project's issue types in the new shape, may ask which type
+mirrors a user story when the base hierarchy level holds more than one
+candidate, and then `reconcile` proceeds normally. Tickets already mirrored
+flat (no parent, created before this release) are left exactly as they are —
+they are not migrated; see the CHANGELOG's Migration note.
 
 ## Verifying the install
 

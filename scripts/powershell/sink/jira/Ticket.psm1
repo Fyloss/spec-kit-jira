@@ -64,9 +64,9 @@ function Get-JiraCreateFieldsBase {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)] [string] $ProjectKey,
-        [Parameter(Mandatory)] [string] $Summary,
-        [Parameter(Mandatory)] [string] $IssueTypeId
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $ProjectKey,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $Summary,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $IssueTypeId
     )
     return '{"project":{"key":' + (ConvertTo-JiraJsonString $ProjectKey) +
         '},"issuetype":{"id":' + (ConvertTo-JiraJsonString $IssueTypeId) +

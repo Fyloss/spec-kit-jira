@@ -1,0 +1,48 @@
+# Machine-owned resolved identifiers (gitignored in a real repository;
+# committed here only as a fixture). New list shape (data-model.md §3): level
+# 0 holds one candidate (Story), so child_type is derived, not asked.
+resolved_ids:
+  SAFE:
+    style: company_managed
+    style_source: api
+    issue_types:
+      - logical_name: "Epic"
+        id: "10401"
+        hierarchy_level: "2"
+        subtask: false
+      - logical_name: "Feature"
+        id: "10402"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "10403"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "Sub-task"
+        id: "10404"
+        hierarchy_level: "-1"
+        subtask: true
+    child_type:
+      logical_name: "Story"
+      id: "10403"
+      source: derived
+    parent_type:
+      logical_name: "Feature"
+      id: "10402"
+      source: derived
+    required_fields:
+      "10402":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "10403":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "10403": true
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"
+    estimation_field_id: null

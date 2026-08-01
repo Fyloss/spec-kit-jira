@@ -49,3 +49,28 @@ Describe 'Get-JiraIdentity / Set-JiraIdentity' {
         (Get-JiraMockCallLog -Mock $script:M) -join "`n" | Should -BeLike '*PUT /rest/api/3/issue/ABC-1/properties/spec-kit-jira*'
     }
 }
+
+Describe 'T053 [Phase 5, US2] — the identity marker gains role (data-model.md §4)' {
+    It 'a marker with no role is the legacy shape (feature-ceremony / mentioned-ticket tickets, unchanged)' {
+        $m = Get-JiraIdentityMarker -SpecRefJson $script:SpecA -Origin 'bridge-created' | ConvertFrom-Json
+        ($m.PSObject.Properties.Name -contains 'role') | Should -BeFalse
+    }
+
+    It 'records role=story alongside the story identifier' {
+        $m = Get-JiraIdentityMarker -SpecRefJson $script:SpecA -Origin 'bridge-created' -Story '7f3a9c1e40b2d85a' -Role 'story' | ConvertFrom-Json
+        $m.role | Should -Be 'story'
+        $m.story | Should -Be '7f3a9c1e40b2d85a'
+    }
+
+    It 'records role=parent with no story field' {
+        $m = Get-JiraIdentityMarker -SpecRefJson $script:SpecA -Origin 'bridge-created' -Role 'parent' | ConvertFrom-Json
+        $m.role | Should -Be 'parent'
+        ($m.PSObject.Properties.Name -contains 'story') | Should -BeFalse
+    }
+
+    It 'Test-JiraIdentityClaimedByOther still compares repo and spec_slug alone, regardless of role' {
+        $marker = Get-JiraIdentityMarker -SpecRefJson $script:SpecA -Origin 'bridge-created' -Role 'parent'
+        Test-JiraIdentityClaimedByOther -MarkerJson $marker -SpecRefJson $script:SpecB | Should -BeTrue
+        Test-JiraIdentityClaimedByOther -MarkerJson $marker -SpecRefJson $script:SpecA | Should -BeFalse
+    }
+}

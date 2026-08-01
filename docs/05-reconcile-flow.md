@@ -1,0 +1,216 @@
+# 5. The reconcile flow — mirroring a specification
+
+`reconcile` is what all six `after_*` hooks fire. It is the largest single
+piece of the system, and it reads as one ordered pipeline.
+
+## The pipeline
+
+```mermaid
+flowchart TD
+    Start(["reconcile spec.md --json"]) --> Guard["0 · Dispatch guard<br/>is this event disabled by the operator?"]
+    Guard -->|"disabled"| Inert(["exit 0, silently — no config read, no network"])
+    Guard -->|"active"| Spec{"Readable spec file argument?"}
+    Spec -->|"no"| Usage(["exit 1"])
+    Spec -->|"yes"| Bound{"Base URL set and config.yml present?"}
+
+    Bound -->|"no"| Notice(["Not bound yet — 3-line notice, exit 0"])
+    Bound -->|"yes"| Avail{"Bridge entry points intact?"}
+    Avail -->|"no"| Notice2(["Incomplete install — notice, exit 0"])
+
+    Avail -->|"yes"| Route["1 · Resolve routing<br/>folder → project key, or an explicit override"]
+    Route --> Validate["2 · Refuse a missing, malformed,<br/>placeholder, or undeclared project key"]
+    Validate --> Assign["3 · ASSIGN durable story identifiers<br/>splice the marker line into spec.md"]
+    Assign --> Parse["4 · PARSE — neutral content, engine only"]
+    Parse --> Build["5 · ASSEMBLE + schema-VALIDATE<br/>the neutral interchange document"]
+    Build --> Recognise["6 · RECOGNISE — read every recorded ticket back by key"]
+    Recognise --> Context["7 · Build the plan context from the local binding"]
+    Context --> Plan["8 · PLAN the ordered action set"]
+    Plan --> Lifecycle["9 · LIFECYCLE filter<br/>drift, halted states, flagged, zero-churn drop"]
+    Lifecycle --> Apply{"--dry-run?"}
+
+    Apply -->|"yes"| Summary
+    Apply -->|"no"| Write["10 · APPLY — privacy guard, then write<br/>stamp and record each created key immediately"]
+    Write --> Summary["11 · Run summary<br/>counts · actions · warnings · notes · hook health"]
+    Summary --> Hook{"Running inside a hook<br/>with a non-zero exit?"}
+    Hook -->|"yes"| Downgrade(["one WARNING, exit downgraded to 0"])
+    Hook -->|"no"| Exit(["exit with the mapped code"])
+```
+
+Every failure between step 1 and step 9 exits with **zero Jira writes**. That
+is not incidental: the write path is the last thing that happens, after every
+decision has already been made.
+
+## Engine to sink, in sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Cmd as commands/reconcile
+    participant Marker as engine/story_marker
+    participant Parse as engine/parse
+    participant Inter as engine/interchange
+    participant Recog as sink/recognition
+    participant Adf as sink/adf
+    participant Guard as sink/privacy_guard
+    participant Apply as sink/plan_apply
+    participant Jira as Jira Cloud
+
+    Cmd->>Marker: assign an identifier to every unmarked story
+    Marker->>Marker: byte-preserving splice into spec.md
+    Note over Marker: a dry run computes the SAME assignment<br/>but never writes it
+    Marker-->>Cmd: assigned document text
+
+    Cmd->>Parse: parse the assigned text
+    Parse-->>Cmd: title ladder, description blocks, Gherkin, design, priority, estimation
+
+    Cmd->>Inter: assemble + validate against the schema
+    alt invalid
+        Inter-->>Cmd: errors — every write is blocked
+    else valid
+        Inter-->>Cmd: neutral interchange document
+    end
+
+    Cmd->>Recog: recognition_run for the recorded markers
+    Recog->>Jira: GET each recorded key, folding in the identity property
+    Jira-->>Recog: issue fields + identity marker, or 404
+    Recog-->>Cmd: bound / new / blocked
+
+    Cmd->>Adf: render neutral content blocks
+    Adf-->>Cmd: Atlassian Document Format
+    Cmd->>Apply: apply_writes with the ordered action set
+    Apply->>Guard: scan EVERY content payload first
+    alt a BLOCK-tier match
+        Guard-->>Apply: refuse
+        Apply-->>Cmd: exit 9, zero writes
+    else clean
+        Apply->>Jira: POST /issue · PUT /issue/KEY · POST transitions
+        Jira-->>Apply: created keys
+        Apply->>Apply: stamp the identity marker and record the key, per ticket, immediately
+    end
+```
+
+The ordering in the last block is the invariant: **guard, then write**. A single
+blocked payload aborts the whole apply — there is no gap through which a leak
+could reach Jira.
+
+## What the engine extracts from a specification
+
+```mermaid
+flowchart LR
+    subgraph Doc["spec.md"]
+        H1["# Title"]
+        H2["### User Story headings"]
+        H3["Given / When / Then"]
+        H4["Design section"]
+        H5["Priority P1 / P2 / P3"]
+        H6["Declared estimation"]
+    end
+
+    subgraph Neutral["Neutral content — zero Jira identifiers"]
+        N1["deterministic title ladder"]
+        N2["never-empty structured description"]
+        N3["acceptance_criteria"]
+        N4["design"]
+        N5["logical priority level"]
+        N6["estimation value"]
+    end
+
+    subgraph Rendered["Rendered by the sink"]
+        R1["summary field"]
+        R2["ADF description body"]
+        R3["ADF info panel"]
+        R4["ADF Design section"]
+        R5["priority id, via the team priority_map"]
+        R6["estimation field id — create only, never re-sent"]
+    end
+
+    H1 --> N1 --> R1
+    H2 --> N2 --> R2
+    H3 --> N3 --> R3
+    H4 --> N4 --> R4
+    H5 --> N5 --> R5
+    H6 --> N6 --> R6
+```
+
+The engine emits *logical* content; the sink resolves logical names to ids and
+renders ADF. `sink/jira/adf.sh` is the only place ADF node names exist.
+
+## The plan context — the facts the engine cannot know
+
+```mermaid
+flowchart TD
+    Base["SPEC_KIT_JIRA_BASE_URL"] --> Ctx
+    Local["config.local.yml<br/>resolved ids for the routed project"] --> Ctx
+    Team["config.yml<br/>priority_map, epic_strategy, phase_status_map, halted_statuses"] --> Ctx
+    Recognised["recognition results<br/>bound tickets, origins, current descriptions"] --> Ctx
+
+    Ctx["Plan context"] --> Plan["plan_writes → ordered action set"]
+
+    Ctx -.->|"an explicit SPEC_KIT_JIRA_PLAN_CONTEXT<br/>overrides the whole derived object"| Plan
+```
+
+Four failure states of the context resolve to four distinct, actionable
+messages rather than one generic error:
+
+| Situation | Outcome |
+|---|---|
+| No local binding file at all | Not bound yet — notice, exit `0` |
+| Binding exists, this project is not in it | Run `/speckit.jira.config` to discover it — exit `4` |
+| Binding predates parent support | The project *is* bound, its binding is a version behind — refresh it, exit `4` |
+| Binding unreadable | Fail closed, zero writes — exit `4` |
+
+## The run summary
+
+Structured prose by default, JSON with `--json` — never the other way round.
+
+```mermaid
+classDiagram
+    class RunSummary {
+        +string schema_version
+        +string command
+        +bool dry_run
+        +Counts counts
+        +Action actions
+        +list~string~ warnings
+        +list~string~ notes
+        +HookHealth hook_health
+        +int exit_code
+    }
+
+    class Counts {
+        +int created
+        +int updated
+        +int skipped
+        +int recognised
+        +int assigned
+        +int warnings
+        +int errors
+    }
+
+    class Action {
+        +string method
+        +string url
+        +object body
+    }
+
+    class HookHealth {
+        +list~string~ present
+        +list~string~ missing
+        +list~string~ disabled
+        +list~string~ duplicated
+        +list~string~ held_disabled
+        +bool unreadable
+    }
+
+    RunSummary *-- Counts
+    RunSummary "1" *-- "0..n" Action
+    RunSummary *-- HookHealth
+```
+
+Two details that make the summary trustworthy:
+
+- **The base URL is stripped** from every reported action URL. The site host is
+  a coordinate that must never appear in output.
+- **A second, unchanged run reads `created: 0`, `updated: 0`, `recognised` equal
+  to the story count, and `skipped` equal to it too.** That is the correct
+  signature of an idempotent re-run, not a failure to mirror anything.

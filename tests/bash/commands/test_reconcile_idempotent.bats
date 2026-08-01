@@ -45,7 +45,7 @@ teardown() {
 
   run cmd_reconcile reconcile "${SPEC}" --json
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.counts.created' <<< "$output")" -eq 3 ]
+  [ "$(jq -r '.counts.created' <<< "$output")" -eq 4 ]
 
   : > "${MOCK_CALLLOG}"
   run cmd_reconcile reconcile "${SPEC}" --json
@@ -65,13 +65,13 @@ teardown() {
   [ "$output" -eq 3 ]
 }
 
-@test "the full call log shows exactly 3 creation POSTs across two runs, not 6" {
+@test "the full call log shows exactly 4 creation POSTs across two runs, not 8" {
   mock_start "${MOCK}/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
   run mock_calls
-  [ "$(grep -c '^POST /rest/api/3/issue$' <<< "$output")" -eq 3 ]
+  [ "$(grep -c '^POST /rest/api/3/issue$' <<< "$output")" -eq 4 ]
 }
 
 @test "the PowerShell port: a second run against its own mock instance creates nothing" {
@@ -108,7 +108,7 @@ teardown() {
 
   run cmd_reconcile reconcile "${SPEC}" --json
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.counts.created' <<< "$output")" -eq 3 ]
+  [ "$(jq -r '.counts.created' <<< "$output")" -eq 4 ]
 
   # Reorder (move story 3 above story 1) and retitle story 2, keeping each
   # marker line with its story.
@@ -134,6 +134,6 @@ teardown() {
 
   # Each ticket still holds the content of the story whose marker names it —
   # not the story that now sits in its old POSITION.
-  run curl -s "${MOCK_BASE_URL}/rest/api/3/issue/COMP-2"
+  run curl -s "${MOCK_BASE_URL}/rest/api/3/issue/COMP-3"
   [ "$(jq -r '.fields.summary' <<< "$output")" = "Export a date range (renamed)" ]
 }

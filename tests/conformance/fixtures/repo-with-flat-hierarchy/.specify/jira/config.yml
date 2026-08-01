@@ -1,0 +1,7 @@
+# Team config for the no-parent-level conformance fixture (US1, T040) — a
+# team-managed project offering only a base-level type (Story), with no level
+# above it for a specification to hang from.
+projects:
+  - key: FLAT
+    style: company_managed
+routing_default: FLAT

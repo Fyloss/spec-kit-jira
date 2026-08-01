@@ -66,3 +66,22 @@ mock_stop() {
 mock_calls() {
   [ -f "${MOCK_CALLLOG:-}" ] && cat "${MOCK_CALLLOG}"
 }
+
+# mock_write_config <json> — writes an ad hoc mock config (e.g. per-issue-type
+# createmeta overrides via "createmetaFields") to a temp file and prints its
+# path, so a test can build one inline instead of maintaining a static file
+# under configs/ (T003).
+mock_write_config() {
+  local json="$1" f
+  f="$(mktemp)"
+  printf '%s' "${json}" > "${f}"
+  printf '%s' "${f}"
+}
+
+# mock_issue_field <key> <jq-path> — read back a field of an issue the mock
+# already holds (e.g. `.fields.parent.key`), for parent-link assertions
+# (T002/T003) without every caller re-deriving the GET and the jq filter.
+mock_issue_field() {
+  local key="$1" path="$2"
+  curl -sf "${MOCK_BASE_URL}/rest/api/3/issue/${key}" | jq -r "${path}"
+}

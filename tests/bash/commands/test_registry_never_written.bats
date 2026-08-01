@@ -39,8 +39,6 @@ setup() {
   {
     printf 'projects:\n'
     printf '  - key: TEAM\n'
-    printf '    epic_strategy: per_repo\n'
-    printf '    task_strategy: subtask\n'
     printf 'routing_default: TEAM\n'
   } > "${JIRA_CONFIG_DIR}/config.yml"
 

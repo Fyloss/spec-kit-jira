@@ -49,6 +49,31 @@ teardown() { rm -rf "${WORK}"; }
   [ "$output" = "LF" ]
 }
 
+# The CRLF count must come from a CR-by-CR walk, never from a $'\r\n' glob
+# needle: the MSYS bash pattern matcher lets a CRLF inside a pattern match a
+# bare LF, which made every LF host detect as CRLF on windows-latest (the
+# fifteen bash=0d/pwsh=0a conformance divergences). These pin the pairwise
+# semantics the walk and the PowerShell twin's regex count share.
+@test "CRLF pair count ignores lone CR bytes" {
+  run _ms_count_crlf $'a\rb\rc\n'
+  [ "$output" = "0" ]
+}
+
+@test "CRLF pair count is zero on LF-only text" {
+  run _ms_count_crlf $'a\nb\nc\n'
+  [ "$output" = "0" ]
+}
+
+@test "CRLF pair count matches the pairs, including after a lone CR" {
+  run _ms_count_crlf $'a\r\r\nb\r\n'
+  [ "$output" = "2" ]
+}
+
+@test "line-ending detection reports LF for a lone-CR (classic Mac) host" {
+  run bash -c "printf 'a\rb\rc\n' | { source '${ENGINE}/managed_section.sh'; managed_section_line_ending; }"
+  [ "$output" = "LF" ]
+}
+
 @test "an empty host yields a new block terminated with LF (never CRLF)" {
   managed_section_splice "${BEGIN}" "${END}" "${BLOCK}" < /dev/null > "${WORK}/out"
   printf '<!-- x:begin v1 -->\nMANAGED LINE A\nMANAGED LINE B\n<!-- x:end v1 -->\n' > "${WORK}/exp"

@@ -1,0 +1,6 @@
+{
+  "issueTypes": [
+    { "id": "10601", "name": "Story", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10602", "name": "Sub-task", "subtask": true, "hierarchyLevel": -1 }
+  ]
+}

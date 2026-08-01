@@ -1,13 +1,44 @@
 # Machine-owned local binding (gitignored in a real repository). This copy
 # reproduces the bug report's own binding for a Jira instance whose issue
 # types, priorities and statuses carry the instance's own language and
-# ordinary punctuation — written in the BARE key form the writer emitted
-# before 007, which is exactly what made it unreadable.
+# ordinary punctuation. New list shape (data-model.md §3, tasks.md T014a).
+# T014b decision: the pre-migration binding declared only base-level types
+# (Récit, Story) — it gains a parent type at level 1 ("Chantier") so the
+# unicode-survival property this fixture exists to prove covers the parent
+# tier too, rather than becoming a no-parent-level refusal fixture.
 resolved_ids:
   JET:
+    style: company_managed
     issue_types:
-      Récit: "10004"
-      Story: "10005"
+      - logical_name: "Chantier"
+        id: "10003"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Récit"
+        id: "10004"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "Story"
+        id: "10005"
+        hierarchy_level: "0"
+        subtask: false
+    child_type:
+      logical_name: "Récit"
+      id: "10004"
+      source: operator
+    parent_type:
+      logical_name: "Chantier"
+      id: "10003"
+      source: derived
+    required_fields:
+      "10003":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "10004":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "10004": true
     priorities:
       Faible: "4"
       Élevée: "1"
@@ -20,4 +51,3 @@ resolved_ids:
       完了: "10003"
       Done (QA): "10005"
       high/low: "6"
-    style: company_managed

@@ -38,7 +38,7 @@ Describe 'The operator release flag' {
         New-Item -ItemType Directory -Path (Join-Path $script:Work '.specify/jira') -Force | Out-Null
         $env:JIRA_CONFIG_DIR = Join-Path $script:Work '.specify/jira'
         $env:SPEC_KIT_JIRA_EXTENSIONS_YML = Join-Path $script:Work '.specify/extensions.yml'
-        $lines = @('projects:', '  - key: TEAM', '    epic_strategy: per_repo', '    task_strategy: subtask', 'routing_default: TEAM')
+        $lines = @('projects:', '  - key: TEAM', 'routing_default: TEAM')
         [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines -join "`n") + "`n"))
         # No connection: the run is degraded, which is exactly where an operator
         # reaching for this flag is most likely to be.

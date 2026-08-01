@@ -11,7 +11,7 @@ setup() {
   CFG="$(config_load "${FIXTURE}")"
 }
 
-@test "story_type_id comes from resolved_ids.<KEY>.issue_types.Story (FR-007)" {
+@test "story_type_id comes from resolved_ids.<KEY>.child_type.id (FR-007)" {
   run _reconcile_plan_context "https://mock" "COMP" "${FIXTURE}" "${CFG}"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.story_type_id' <<< "$output")" = "10004" ]
@@ -85,7 +85,6 @@ setup() {
   export SPEC_KIT_JIRA_SPEC_SLUG="001-feature"
   export SPEC_KIT_JIRA_REPO="acme/app"
   export SPEC_KIT_JIRA_PROJECT_KEY="TEST"
-  export SPEC_KIT_JIRA_EPIC_STRATEGY="per_repo"
   export JIRA_CONFIG_DIR="${legacy}"
   unset SPEC_KIT_JIRA_PLAN_CONTEXT
 
@@ -95,5 +94,5 @@ setup() {
   # config.local.yml resolves Highest -> "1" — resolvable only if config.yml
   # is actually read when SPEC_KIT_JIRA_PLAN_CONTEXT is not overridden, even
   # though the project key and epic strategy are.
-  [ "$(jq -r '.actions[0].body.fields.priority.id' <<< "$output")" = "1" ]
+  [ "$(jq -r '.actions[1].body.fields.priority.id' <<< "$output")" = "1" ]
 }

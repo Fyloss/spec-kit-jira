@@ -1,0 +1,163 @@
+# .github/workflows/windows-conformance.yml — the Windows conformance probe.
+#
+# A divergence that only windows-latest exposes (line endings, a text-mode jq,
+# path separators, shell quoting) cannot be reproduced on a POSIX host. Emulating
+# it was tried — a stub jq on PATH that appends CR the way jq.exe's text-mode
+# stdout does — and the emulation passed the whole corpus while the real runner
+# failed fifteen scenarios. A model of Windows is not Windows.
+#
+# So this workflow exists to make the REAL host reachable BEFORE a commit lands
+# on a feature branch. It is `workflow_dispatch` only: nothing about pushing a
+# branch starts it, and no pull request is needed to reach a Windows runner —
+# which is what ci.yml's `push: [main] / pull_request` triggers would otherwise
+# force. Drive it from a throwaway branch:
+#
+#   git push --force origin HEAD:ci/windows-probe
+#   gh workflow run windows-conformance.yml --ref ci/windows-probe
+#   gh run watch
+#
+# It runs the conformance corpus and nothing else — no bats, no Pester, no
+# coverage — so a round trip is minutes rather than the full three-OS matrix.
+name: Windows conformance (manual probe)
+
+# The `push` trigger is the one that actually works from a feature branch, and
+# the branch name is pinned so no other push can start a Windows job. GitHub
+# only registers a `workflow_dispatch` workflow once it exists on the DEFAULT
+# branch — until this file reaches main, `gh workflow run` answers 404 whatever
+# `--ref` it is given. A push-triggered workflow has no such rule: it runs the
+# definition carried by the pushed ref itself. `workflow_dispatch` stays for
+# after this lands on main, when re-dispatching without a push becomes useful.
+on:
+  push:
+    branches: [ci/windows-probe]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A probe is pushed repeatedly by design — that is the whole loop it exists to
+# shorten — and each push claims four Windows runners for ten minutes. Without
+# this, the superseded run keeps them while the one carrying the answer queues
+# behind it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    name: Conformance corpus ${{ matrix.shard }}/4 (windows-latest)
+    runs-on: windows-latest
+    strategy:
+      # Every shard reports: a probe exists to enumerate divergences, and
+      # cancelling its siblings on the first failure would hide most of them.
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      SPEC_KIT_JIRA_SHARD_TOTAL: 4
+      SPEC_KIT_JIRA_SHARD_INDEX: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Emitted as a NOTICE, not just printed: workflow-command annotations are
+      # readable through the check-runs API by anyone with push rights, while
+      # the raw job log requires admin. On a repository where the log is out of
+      # reach, an annotation is the only channel that carries a fact home — and
+      # the facts below are exactly the ones a POSIX host cannot answer about
+      # this runner.
+      - name: Report the toolchain this host actually provides
+        if: matrix.shard == 0
+        shell: bash
+        run: |
+          crlf=no
+          [[ "$(jq -rn '"a\nb"' 2> /dev/null)" == *$'\r'* ]] && crlf=yes
+          cs=no
+          [[ "$(printf 'x\r\n' | cat)" == *$'\r'* ]] && cs=yes
+          {
+            printf 'uname: %s%%0A' "$(uname -a)"
+            printf 'bash: %s%%0A' "${BASH_VERSION}"
+            printf 'jq: %s (emits CRLF: %s)%%0A' "$(jq --version)" "${crlf}"
+            printf 'sed: %s%%0A' "$(sed --version 2> /dev/null | head -n1 || echo unknown)"
+            printf 'curl: %s%%0A' "$(curl --version | head -n1)"
+            # shellcheck disable=SC2016  # $PSVersionTable is a PowerShell
+            # variable read by pwsh, not a shell expansion.
+            printf 'pwsh: %s%%0A' "$(pwsh -NoProfile -c '$PSVersionTable.PSVersion.ToString()')"
+            printf 'cores: %s%%0A' "${NUMBER_OF_PROCESSORS:-unknown}"
+            printf 'CR survives a capture: %s%%0A' "${cs}"
+            # What the CHECKOUT produced, which decides which line ending both
+            # ports detect as the host file's own. The fixtures are LF in the
+            # index and .gitattributes pins `* text=auto eol=lf`, so a non-zero
+            # count here means the attribute is not reaching this checkout —
+            # and that is a different defect from anything in the ports.
+            printf 'core.autocrlf: %s%%0A' "$(git config --get core.autocrlf || echo unset)"
+            printf 'eol attr on a fixture: %s%%0A' "$(git check-attr eol -- tests/conformance/fixtures/repo-with-readme/README.md)"
+            for f in tests/conformance/fixtures/repo-with-readme/README.md \
+                     tests/conformance/fixtures/repo-with-spec/specs/001-feature/spec.md; do
+              printf 'CR bytes in %s: %s%%0A' "${f##*/fixtures/}" \
+                "$(LC_ALL=C tr -dc '\r' < "${f}" | wc -c | tr -d '[:space:]')"
+            done
+            # Which spelling of a data-file path this host's curl can actually
+            # open, asked of curl rather than reasoned about. The config goes on
+            # stdin exactly as jira_request builds it, and the target is a dead
+            # port, so the exit code separates the two outcomes cleanly:
+            #   26 = could not read the local data file  -> spelling rejected
+            #    7 = could not connect                   -> file was read fine
+            probe=$(mktemp); printf '{}' > "${probe}"
+            # `|| rc=$?` is load-bearing: a GitHub `shell: bash` step runs under
+            # `-eo pipefail`, and BOTH outcomes this probe is looking for are
+            # non-zero curl exits — so an unguarded call kills the step before
+            # it can report the very code it was measuring.
+            try() {
+              local rc=0
+              printf 'url = "http://127.0.0.1:1/"\nrequest = "POST"\ndata = "@%s"\n' "$2" \
+                | curl --silent --config - --output "${probe}.out" > /dev/null 2>&1 || rc=$?
+              printf '%s=%s ' "$1" "${rc}"
+            }
+            printf 'curl data-path spelling (26=unreadable, 7=read ok): '
+            try posix "${probe}"
+            try win "$(cygpath -w "${probe}")"
+            try mixed "$(cygpath -m "${probe}")"
+            printf '%%0A'
+            # Where the CR in a written spec.md/README.md enters. The splice
+            # preserves whatever the block already carries — `${block//\n/${nl}}`
+            # is an identity when the host is LF, and does not strip a CR — so
+            # the question is whether the detector misreads the host or the text
+            # arrives contaminated. Asked of the port's own functions, here.
+            ( set +e
+              # shellcheck source=/dev/null
+              . scripts/bash/engine/managed_section.sh
+              f=tests/conformance/fixtures/repo-with-readme/README.md
+              printf 'detector on a known-LF fixture: %s%%0A' "$(managed_section_line_ending < "${f}")"
+              # shellcheck source=/dev/null
+              . scripts/bash/hooks/readme_block.sh
+              printf 'CR bytes in the rendered README block: %s%%0A' \
+                "$(readme_block_render 2> /dev/null | LC_ALL=C tr -dc '\r' | wc -c | tr -d '[:space:]')"
+              # The detector answered CRLF on that same 0-CR fixture, so the
+              # defect sits in one of its three moving parts: the
+              # `$(cat; printf x)` capture, the `_ms_count` substring count, or
+              # the -gt comparison. All three are sane on a POSIX bash 5.3.15;
+              # which one turns on this host is a fact only this host can give.
+              c="$(cat < "${f}"; printf x)"; c="${c%x}"
+              crs="${c//[!$'\r']/}"
+              # glob-crlf documents the host quirk (a $'\r\n' glob needle
+              # matches bare LF here); pair-crlf is the CR-by-CR walk the
+              # detector now uses. On a sane matcher the two agree.
+              printf 'capture on the same fixture: len=%s cr=%s glob-crlf=%s pair-crlf=%s lf=%s%%0A' \
+                "${#c}" "${#crs}" "$(_ms_count "${c}" $'\r\n')" "$(_ms_count_crlf "${c}")" "$(_ms_count "${c}" $'\n')"
+              # The splice feeds the detector through a builtin printf and a
+              # pipe (managed_section.sh line 79), not through a file redirect —
+              # if CR enters at that pipe, the two answers below split.
+              printf 'detector fed the splice way: %s%%0A' \
+                "$(printf '%s' "${c}" | managed_section_line_ending)"
+              printf 'CR bytes a builtin printf grows crossing a pipe: %s%%0A' \
+                "$(printf 'a\nb\n' | LC_ALL=C tr -dc '\r' | wc -c | tr -d '[:space:]')"
+              printf 'CRLF count in an LF-only literal: %s (0 on POSIX)%%0A' \
+                "$(_ms_count $'a\nb\n' $'\r\n')"
+              printf 'igncr: %s%%0A' "$(shopt -o igncr 2>&1 || true)"
+            )
+            printf 'end of report'
+          } | { printf '::notice title=Host toolchain::'; cat; printf '\n'; }
+
+      - name: Run the conformance corpus against both ports and diff the captures
+        shell: bash
+        run: bash tests/conformance/ci-conformance.sh

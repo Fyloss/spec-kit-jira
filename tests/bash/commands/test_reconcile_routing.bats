@@ -2,8 +2,7 @@
 # T009 [US1] — Routing resolution: the mirror resolves its own target project
 # from the repository's own config, with no environment variable required
 # (FR-001–FR-006, FR-013). RED before reconcile.sh gains
-# _reconcile_resolve_routing / _reconcile_epic_strategy and the PROJ fallback
-# is removed.
+# _reconcile_resolve_routing and the PROJ fallback is removed.
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
@@ -72,14 +71,3 @@ _spec_with_folder() {
   [ "$(jq -r '.actions // empty' <<< "$output" 2>/dev/null)" = "" ]
 }
 
-@test "epic strategy is taken from the resolved project's config declaration (FR-006)" {
-  run _reconcile_epic_strategy "COMP" "${CFG}"
-  [ "$status" -eq 0 ]
-  [ "$output" = "per_feature" ]
-}
-
-@test "epic strategy falls back to per_repo when the project has none declared" {
-  run _reconcile_epic_strategy "NOPE" "${CFG}"
-  [ "$status" -eq 0 ]
-  [ "$output" = "per_repo" ]
-}

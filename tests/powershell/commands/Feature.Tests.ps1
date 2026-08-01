@@ -12,7 +12,7 @@ BeforeAll {
 
     function Write-TeamsConfig {
         $lines = @(
-            'projects:', '  - key: IJT', '    epic_strategy: per_repo', '    task_strategy: subtask',
+            'projects:', '  - key: IJT',
             'routing_default: IJT', 'teams:',
             '  - id: ijt', '    project: IJT', '    folder_prefix: "ijt-"', '    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"',
             '  - id: wex', '    project: WEX', '    folder_prefix: "wex-"', '    branch_pattern: "wex-<ID>/<FEATURE_NAME>"'
@@ -32,6 +32,14 @@ BeforeAll {
         $script:M = Start-JiraMock -ConfigPath $cfg
         $env:SPEC_KIT_JIRA_BASE_URL = $M.BaseUrl
     }
+
+    # One Pester process runs the whole suite, so a BeforeAll that only ever
+    # sets is a leak into every later file — and into every child process those
+    # files spawn. SPEC_KIT_JIRA_PLAN_CONTEXT in particular is read wholesale
+    # (FR-013): leaked, it replaces every id a later run resolves from its own
+    # binding. See tests/conformance/run-scenario.sh for what that class of
+    # leak cost once already.
+    $script:LeakedEnv = @('JIRA_EMAIL', 'JIRA_API_TOKEN', 'JIRA_NO_SLEEP', 'SPEC_KIT_JIRA_PLAN_CONTEXT', 'SPEC_KIT_JIRA_BASE_URL')
 
     function Invoke-FeatureCaptured {
         param([string[]]$CmdArgs)
@@ -58,6 +66,7 @@ Describe 'Feature command' {
     AfterEach {
         if ($M) { Stop-JiraMock -Mock $M; $script:M = $null }
         Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath 'Env:\JIRA_CONFIG_DIR' -ErrorAction SilentlyContinue
     }
 
     It 'passes through with {active:false} and zero Jira calls when no team is selected (FR-017)' {
@@ -195,5 +204,9 @@ Describe 'Feature command' {
         $r = Invoke-FeatureCaptured @('feature', 'WEX-7', 'invoice export')
         $r.ExitCode | Should -Be 0
         $r.Out | Should -Be "Feature: confirmation required`nTicket: WEX-7 (team: wex)`nSelected team: ijt`n"
+    }
+
+    AfterAll {
+        foreach ($name in $script:LeakedEnv) { Remove-Item -LiteralPath "Env:\$name" -ErrorAction SilentlyContinue }
     }
 }

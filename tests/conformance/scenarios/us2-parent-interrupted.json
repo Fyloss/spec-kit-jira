@@ -1,0 +1,21 @@
+{
+  "name": "us2-parent-interrupted",
+  "description": "US2 (T063) \u2014 quickstart Step 9: a specification whose spec.md carries the interrupted-run window `<!-- speckit-jira spec=<id> creating -->` refuses the WHOLE specification (contracts/parent-marker.md `parent-key-unrecorded`) \u2014 no parent and no story is ever created, since none of them may be created without a verified parent (FR-012).",
+  "mock": {
+    "projects": {
+      "COMP": "company"
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-parent-creating",
+  "argv": [
+    "reconcile",
+    "--json",
+    "specs/001-billing-invoices/spec.md"
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222 3333333333333333"
+  }
+}

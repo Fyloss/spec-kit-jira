@@ -36,7 +36,6 @@ setup() {
   # with a matching epic-strategy override — both bypass config.yml, which
   # this isolated work dir never has.
   export SPEC_KIT_JIRA_PROJECT_KEY="TEST"
-  export SPEC_KIT_JIRA_EPIC_STRATEGY="per_repo"
   export SPEC_KIT_JIRA_EXTENSIONS_YML="${WORK}/.specify/extensions.yml"
   export JIRA_NO_SLEEP=1
   export JIRA_MAX_ATTEMPTS=1
@@ -165,7 +164,6 @@ teardown() {
   local PS_CMD="${ROOT}/scripts/powershell/commands"
   local status_ps
   status_ps="$(SPEC_KIT_JIRA_BASE_URL="http://127.0.0.1:1" SPEC_KIT_JIRA_SPEC_SLUG="001-feature" \
-    SPEC_KIT_JIRA_PROJECT_KEY="TEST" SPEC_KIT_JIRA_EPIC_STRATEGY="per_repo" \
     SPEC_KIT_JIRA_PLAN_CONTEXT='{"story_type_id":"10004"}' \
     SPEC_KIT_JIRA_EXTENSIONS_YML="${SPEC_KIT_JIRA_EXTENSIONS_YML}" \
     SPEC_KIT_JIRA_HOOK_CONTEXT=1 JIRA_NO_SLEEP=1 JIRA_MAX_ATTEMPTS=1 \

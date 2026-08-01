@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-01
+
+### Added
+
+- Every specification now mirrors as one parent Jira issue plus its children,
+  not just the children on their own. The parent is created first, before any
+  child, and every child's creation carries the parent's key. Its own durable
+  identifier is recorded in an HTML comment line beside the document's title,
+  read back on every later run so the parent is recognised rather than
+  recreated.
+- The parent's description carries the specification's overview prose, a
+  named Success Criteria section, and a named Out of Scope section — never a
+  list of user stories, since Jira already shows the children under their
+  parent in its own issue view.
+- When the feature folder holds an implementation plan, the parent also
+  carries a named Implementation Plan section built from `plan.md`'s
+  `## Summary` prose. A later run replaces that section in place; an
+  unchanged plan is not rewritten.
+- The child issue type is the operator-recorded (or unambiguously derived)
+  answer already in use; the parent type is now derived from the project's
+  own issue-type hierarchy — the level immediately above the child's, when
+  exactly one type occupies it. A project with no such level, or two or more
+  candidates at that level, refuses before any write, naming every candidate
+  by its own Jira name — no Atlassian default name is ever assumed.
+- A project whose parent type declares a required field this bridge cannot
+  supply, or whose child type's create metadata offers no `parent` field at
+  all, refuses before any write, naming every unsatisfiable field of every
+  affected type in one message. Both refusals are reported as their own
+  named cause, never a transport or rejected-request error, and `--dry-run`
+  predicts them exactly as a real run would.
+- A child ticket that already carries a parent link, but the WRONG one, is
+  re-linked to the correct parent on a later run, counted as a write; an
+  already-correct link is left untouched, and a child carrying no parent
+  link at all (a flat mirror from before this release) is never touched —
+  see the Migration note below.
+- CI now runs `shellcheck` over the Bash port and `Invoke-ScriptAnalyzer`
+  over the PowerShell port as a blocking lint gate, per the repository's own
+  `.shellcheckrc` and `PSScriptAnalyzerSettings.psd1`.
+
+### Fixed
+
+- On Windows, the Bash port and the PowerShell port disagreed byte for byte
+  whenever a command handled more than one of something — two project keys,
+  three stories, a multi-line configuration document. The native `jq.exe`
+  writes its stdout as a text-mode stream, so every line but the last carried a
+  stray carriage return: `config.local.yml` came out CRLF-terminated where the
+  PowerShell twin wrote LF, a second project key was read as an unknown key,
+  and a hook-health repair hint came out truncated. The Bash port now strips
+  that terminator artefact — once, around `jq` itself, and only on a host whose
+  `jq` actually emits CRLF — and the two ports produce identical bytes again.
+
+### Removed
+
+- Three configuration keys from an earlier, never-built mechanism —
+  `epic_strategy`, `task_strategy`, `link_type` — are now refused wherever
+  they appear in `config.yml`, naming the project and the retired key.
+
+### Migration note
+
+Mirrors created before this release carry no parent. Reconciling one of them
+again does not retroactively attach a child that carries no parent link at
+all to a newly created parent — that flat-mirror case is never touched — so a
+full hierarchy for an existing specification is only available by
+re-mirroring it from a clean state, or by creating the parent by hand in
+Jira and recording its key in `spec.md` under the same marker grammar
+reconcile uses for its own writes. A child that already carries A parent
+link, just the wrong one, is a different case and IS corrected on a later
+run (see Added, above).
+
+Every repository already bound to a Jira project (every installation that
+ran `/speckit.jira.config` before this release) will see its first
+`reconcile` after upgrading refuse once, before any read, naming the
+project and saying its local binding "predates parent support". This is
+expected — the project is already bound, its binding is simply a version
+behind — and it costs nothing: zero writes, and running
+`/speckit.jira.config` once resolves it permanently. See INSTALL.md,
+"Upgrading to the parent-hierarchy release".
+
 ## [0.7.0] - 2026-07-31
 
 ### Fixed
@@ -131,7 +209,7 @@ new golden scenarios (company-managed and team-managed routing).
 Hooks active from installation (003).
 
 The extension registered no lifecycle hook at install, registered them itself as
-*optional* (which the host reads as "offer this", not "perform it"), pointed them
+_optional_ (which the host reads as "offer this", not "perform it"), pointed them
 at a `speckit.jira.reconcile` command that did not exist, and told the assistant
 to invoke a bare `spec-kit-jira` executable the install never provides. Four
 independent breaks, each sufficient on its own to make the extension inert. This
@@ -160,25 +238,25 @@ release closes all four.
   ```yaml
   hooks:
     after_plan:
-    - command: speckit.jira.reconcile   # ← DELETE this entry (no `extension:` field)
-      description: Mirror the updated spec-kit artifacts into Jira Cloud (non-blocking).
-      enabled: true
-      optional: true
-    - extension: jira                   # ← KEEP this one (written by the install)
-      command: speckit.jira.reconcile
-      enabled: true
-      optional: false
-      priority: 10
-      prompt: Execute speckit.jira.reconcile?
-      description: Mirror the implementation plan into Jira Cloud.
-      condition: null
+      - command: speckit.jira.reconcile # ← DELETE this entry (no `extension:` field)
+        description: Mirror the updated spec-kit artifacts into Jira Cloud (non-blocking).
+        enabled: true
+        optional: true
+      - extension: jira # ← KEEP this one (written by the install)
+        command: speckit.jira.reconcile
+        enabled: true
+        optional: false
+        priority: 10
+        prompt: Execute speckit.jira.reconcile?
+        description: Mirror the implementation plan into Jira Cloud.
+        condition: null
   ```
 
 ### Added
 
 - The extension manifest declares all seven lifecycle events (`before_specify`
   plus the six `after_*`) as a **top-level `hooks:` block**, so `specify extension
-  add` registers and activates them with no configuration ceremony. A block nested
+add` registers and activates them with no configuration ceremony. A block nested
   under `provides:` validates and registers nothing, which is what shipped before.
 - `speckit.jira.reconcile` now **exists**: a declared, installed, assistant-
   invocable command with an ordered procedure. Six `after_*` hooks had named it
@@ -188,7 +266,7 @@ release closes all four.
   changes dispatch only — a hook failure still never fails a spec-kit command.
 - An operator disable record in the gitignored `.specify/jira/config.local.yml`
   (`hooks.disabled`), honoured at dispatch. It exists because `specify extension
-  add` rewrites `enabled: true` unconditionally, so the registry cannot remember
+add` rewrites `enabled: true` unconditionally, so the registry cannot remember
   the decision across a reinstall.
 - `/speckit.jira.config --enable-hook <event>` (repeatable) releases a held event.
 - The hook health report gains `held_disabled`, `duplicated` and `unreadable`, and
@@ -378,7 +456,7 @@ First public release.
   now splits at the explicit clause boundaries and survives intact (FR-015).
 - The `--json` run summary now conforms to `run-summary.schema.json`: hook
   health is reported under `hook_health` as `{present, missing, disabled,
-  repair_hint?}`, and the contract documents the `actions`, `warnings`, and
+repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
 [Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.7.0...HEAD

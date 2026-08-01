@@ -1,14 +1,1 @@
-{
-  "name": "us2-team-managed-discovery",
-  "description": "Team-managed (next-gen) project discovery: project-owned objects, Epic/Sub-task hierarchy only, and the project's own estimation field ranked (never the global Story Points, research §3). Both ports must produce a byte-identical binding, exit code, and Jira API call sequence (NFR-1). Discovery parity is asserted directly in tests/bash/sink/test_discovery_team.bats; this golden scenario is wired end-to-end through the config command in US1.",
-  "mock": {
-    "projects": { "TEAM": "team" }
-  },
-  "fixture": "tests/conformance/fixtures/repo-with-config",
-  "argv": ["config", "--json"],
-  "env": {
-    "JIRA_EMAIL": "user@example.com",
-    "JIRA_API_TOKEN": "RAWSECRETXYZ",
-    "JIRA_NO_SLEEP": "1"
-  }
-}
+{"name":"us2-team-managed-discovery","description":"Team-managed (next-gen) project discovery: project-owned objects, Epic/Sub-task hierarchy only, and the project's own estimation field ranked (never the global Story Points, research §3). Both ports must produce a byte-identical binding, exit code, and Jira API call sequence (NFR-1). Discovery parity is asserted directly in tests/bash/sink/test_discovery_team.bats; this golden scenario is wired end-to-end through the config command in US1. The fixture is repo-with-two-styles because the project the mock provisions as team-managed has to be one the committed config both declares and declares as team_managed: routed against a fixture declaring only a company_managed COMP, this scenario discovered COMP as company_managed and never called TEAM at all, proving nothing about team-managed discovery. Resolving both styles in one run also pins the two discovery paths against each other.","mock":{"projects":{"TEAM":"team"}},"fixture":"tests/conformance/fixtures/repo-with-two-styles","argv":["config","--child-type","COMP=Story","--child-type","TEAM=Story","--json"],"env":{"JIRA_EMAIL":"user@example.com","JIRA_API_TOKEN":"RAWSECRETXYZ","JIRA_NO_SLEEP":"1"}}

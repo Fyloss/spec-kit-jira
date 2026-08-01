@@ -76,6 +76,7 @@ if ($cfg.ContainsKey('issues')) {
             priority    = if ($seed.ContainsKey('priority')) { $seed.priority } else { $null }
             status      = if ($seed.ContainsKey('status')) { $seed.status } else { @{ name = 'To Do'; statusCategory = @{ key = 'new' } } }
             issuelinks  = if ($seed.ContainsKey('issuelinks')) { $seed.issuelinks } else { @() }
+            parent      = if ($seed.ContainsKey('parent')) { $seed.parent } else { $null }
         }
         if ($seed.ContainsKey('flagged') -and $seed.flagged) {
             $fields['Flagged'] = @(@{ value = 'Impediment' })
@@ -110,6 +111,21 @@ function New-MockIssueKey {
 # metadata declares `allowedValues` on its priority field, without touching
 # Get-Style/Get-MetaStyle or either of the two existing style-keyed fixtures.
 $CreateMetaFields = if ($cfg.ContainsKey('createmetaFields')) { $cfg.createmetaFields } else { @{} }
+# Optional per-project issue-type-hierarchy override (T001/T004): a non-default
+# Jira (French, SAFe, non-Latin, flat, ambiguous) still answers GET
+# /project/{key} and .../statuses as an ordinary company- or team-managed
+# project — only its issue-type NAMES differ. This map lets the createmeta
+# issuetypes/fields routes select the dedicated hierarchy fixture without
+# inventing a parallel project/statuses fixture per hierarchy.
+$IssueTypeStyle = if ($cfg.ContainsKey('issueTypeStyle')) { $cfg.issueTypeStyle } else { @{} }
+
+function Get-IssueTypeStyleName {
+    param([string]$Path, [string]$DefaultStyle)
+    foreach ($key in $IssueTypeStyle.Keys) {
+        if ($Path -match "/$([regex]::Escape($key))(/|$)") { return $IssueTypeStyle[$key] }
+    }
+    return $DefaultStyle
+}
 
 # --- Helpers ----------------------------------------------------------------
 
@@ -122,21 +138,35 @@ function Get-Style {
 }
 
 function Get-MetaStyle {
-    # The metadata fixtures (createmeta / statuses) exist only for the two real
-    # styles; an ambiguous/contradictory project reuses the company set — those
-    # tests exercise the style signal, never the metadata content.
+    # The metadata fixtures (createmeta / statuses) exist for the two default
+    # styles plus the non-default hierarchies this feature adds (T001/T004);
+    # an ambiguous/contradictory project reuses the company set — those tests
+    # exercise the style signal, never the metadata content.
     param([string]$Style)
-    if ($Style -in @('company', 'team')) { return $Style }
+    # 'hier-ambiguous', not 'ambiguous': the latter is already the project-
+    # style-CONTRADICTION fixture's style token (project-ambiguous.json,
+    # test_config_style.bats) — a completely different concept from this
+    # feature's parent-level-ambiguous hierarchy fixture. Reusing it would
+    # silently reroute every style-ambiguity test onto a hierarchy fixture
+    # that has nothing to do with what they exercise.
+    if ($Style -in @('company', 'team', 'french', 'safe', 'nonlatin', 'flat', 'hier-ambiguous')) { return $Style }
     return 'company'
 }
 
 function Get-CreateMetaFieldsName {
-    # The fixture basename for the createmeta/{key}/issuetypes/{typeId} route:
-    # a configured per-project override wins, else the existing style-keyed
-    # default (createmeta-fields-company / createmeta-fields-team).
+    # The fixture basename for the createmeta/{key}/issuetypes/{typeId} route
+    # (T001): a configured per-project override wins; else a per-issue-type
+    # fixture named createmeta-fields-<style>-<typeId> when one exists, so two
+    # different types can return two different field sets; else the existing
+    # style-keyed default (createmeta-fields-company / createmeta-fields-team).
     param([string]$Path, [string]$MetaStyle)
     foreach ($key in $CreateMetaFields.Keys) {
         if ($Path -match "/$([regex]::Escape($key))(/|$)") { return "createmeta-fields-$($CreateMetaFields[$key])" }
+    }
+    if ($Path -match '/issuetypes/([^/]+)$') {
+        $typeId = $Matches[1]
+        $perType = "createmeta-fields-$MetaStyle-$typeId"
+        if (Test-Path -LiteralPath (Join-Path $FixtureDir "$perType.json")) { return $perType }
     }
     return "createmeta-fields-$MetaStyle"
 }
@@ -217,11 +247,12 @@ function Read-FixtureBody {
 function Resolve-Route {
     param([string]$Method, [string]$Path, [string]$Query = '', [string]$Body = '')
     $style = Get-Style -Path $Path
-    $metaStyle = Get-MetaStyle -Style $style
+    $statusStyle = Get-MetaStyle -Style $style
+    $metaStyle = Get-MetaStyle -Style (Get-IssueTypeStyleName -Path $Path -DefaultStyle $style)
     switch -regex ($Path) {
         '^/__mock/health$'                                           { return @{ status = 200; body = '{"ok":true}' } }
         '^/rest/api/3/project/search$'                                { if ($Method -eq 'GET') { return (Get-ProjectSearchPage -Query $Query) } }
-        '^/rest/api/3/project/[^/]+/statuses$'                        { return (Read-FixtureBody "statuses-$metaStyle") }
+        '^/rest/api/3/project/[^/]+/statuses$'                        { return (Read-FixtureBody "statuses-$statusStyle") }
         '^/rest/api/3/project/[^/]+$'                                 { return (Read-FixtureBody "project-$style") }
         '^/rest/api/3/issue/createmeta/[^/]+/issuetypes/[^/]+$'       { return (Read-FixtureBody (Get-CreateMetaFieldsName -Path $Path -MetaStyle $metaStyle)) }
         '^/rest/api/3/issue/createmeta/[^/]+/issuetypes$'            { return (Read-FixtureBody "createmeta-issuetypes-$metaStyle") }
@@ -248,6 +279,8 @@ function Resolve-Route {
                     priority    = if ($suppliedFields.ContainsKey('priority')) { $suppliedFields.priority } else { $null }
                     status      = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }
                     issuelinks  = @()
+                    parent      = if ($suppliedFields.ContainsKey('parent')) { $suppliedFields.parent } else { $null }
+                    issuetype   = if ($suppliedFields.ContainsKey('issuetype')) { $suppliedFields.issuetype } else { $null }
                 }
                 $script:Issues[$key] = @{ fields = $fields; properties = @{} }
                 return @{ status = 201; body = "{`"id`":`"99001`",`"key`":`"$key`",`"self`":`"/rest/api/3/issue/99001`"}" }

@@ -24,7 +24,7 @@
 # Mapping validation (US2) refuses an impossible mapping at config time (FR-007):
 # a team-managed project supports only an Epic parent and Sub-task children
 # (research §3), so a hierarchy level ABOVE Epic is rejected with EXIT_CONFIG (4).
-# The "Epic" tier is identified from the DISCOVERED binding — the top non-subtask
+# The Epic tier is identified from the DISCOVERED binding — the top non-subtask
 # hierarchy level — never a name compiled into the script (Constitution VII).
 
 [[ -n ${_JIRA_CMD_CONFIG:-} ]] && return 0
@@ -39,6 +39,8 @@ source "${_cmd_config_dir}/../lib/output.sh"
 source "${_cmd_config_dir}/../lib/config.sh"
 # shellcheck source=/dev/null
 source "${_cmd_config_dir}/../sink/jira/discovery.sh"
+# shellcheck source=/dev/null
+source "${_cmd_config_dir}/../sink/jira/hierarchy.sh"
 # shellcheck source=/dev/null
 source "${_cmd_config_dir}/../hooks/readme_block.sh"
 # shellcheck source=/dev/null
@@ -78,36 +80,42 @@ config_validate_mapping() {
   return 0
 }
 
-# config_project_mapping <key> <style> <epic_strategy> <task_strategy> [link_type]
-# Build the canonical project mapping entry by logical name. When task_strategy is
-# `linked_story`, a link_type is REQUIRED (FR-009) — its absence is refused with
-# EXIT_CONFIG (4). Prints the canonical project object on stdout.
+# config_project_mapping <key> <style> — build the canonical project mapping
+# entry by logical name. Prints the canonical project object on stdout. Three
+# keys and their linked-story requirement are retired (008 T028, FR-030).
 config_project_mapping() {
-  local key="$1" style="$2" epic_strategy="$3" task_strategy="$4" link_type="${5:-}"
-
-  if [[ "${task_strategy}" == "linked_story" && -z "${link_type}" ]]; then
-    printf 'mapping: task_strategy=linked_story requires a link_type (FR-009)\n' >&2
-    return "${EXIT_CONFIG}"
-  fi
-
-  jq -n \
-    --arg key "${key}" --arg style "${style}" \
-    --arg epic "${epic_strategy}" --arg task "${task_strategy}" \
-    --arg link "${link_type}" '
-    {key: $key, style: $style, epic_strategy: $epic, task_strategy: $task}
-    + (if $link == "" then {} else {link_type: $link} end)
-  ' | json_canonical
+  local key="$1" style="$2"
+  jq -n --arg key "${key}" --arg style "${style}" '{key: $key, style: $style}' | json_canonical
 }
 
 # config_resolved_ids_for <binding-json> — reshape a discovered project binding
-# into the resolved-id lookup table the reconcile path consumes: logical name ->
-# id for issue types, priorities, and statuses. Prints the canonical object.
+# into the resolved-id table the reconcile path consumes. Issue types keep
+# their hierarchy_level and subtask flag as a LIST, in discovered order
+# (data-model.md §3, R5) — a name-to-id map discarded both the moment they
+# became durable, which is exactly the defect this feature repairs. Priorities
+# and statuses are unaffected: logical name -> id / name -> id maps, as before.
+# hierarchy_level is carried as a STRING like every other identifier here —
+# the YAML writer's scalar round-trip has no number type (config_to_yaml
+# emits a bare numeral, and the reader reads a bare numeral back as a string),
+# so hierarchy.sh converts with `tonumber` at every comparison site instead of
+# relying on a type the persisted file cannot actually preserve.
 config_resolved_ids_for() {
   jq -c '{
-    issue_types: ( reduce .issue_types[] as $t ({}; .[$t.logical_name] = $t.id) ),
+    issue_types: [ .issue_types[] | {
+      logical_name: .logical_name, id: .id,
+      hierarchy_level: (.hierarchy_level | tostring), subtask: .subtask
+    } ],
     priorities:  ( reduce .priorities[] as $p ({}; .[$p.logical_name] = $p.id) ),
     statuses:    ( reduce .statuses[] as $s ({}; .[$s.name] = $s.id) )
-  }' <<< "$1" | json_canonical
+  }
+  # required_fields and parent_link_available (T017-T020) carry straight
+  # through — discovery already shapes them keyed by issue-type id — and are
+  # omitted rather than emitted empty when discovery resolved neither type
+  # (the ambiguous-child case), so an old-style call site building this
+  # object by hand does not have to know about them.
+  + (if (.required_fields // {}) != {} then {required_fields: .required_fields} else {} end)
+  + (if (.parent_link_available // {}) != {} then {parent_link_available: .parent_link_available} else {} end)
+  ' <<< "$1" | json_canonical
 }
 
 # _config_degraded_run <json:true|false> <dry_run:true|false> <missing-vars>
@@ -194,6 +202,55 @@ _config_resolve_style() {
   [[ -n "${api_style}" ]] && reason="the committed style conflicts with the API signal"
   printf 'config: project %s: style is ambiguous (%s); pass --style %s=company_managed or --style %s=team_managed\n' \
     "${pkey}" "${reason}" "${pkey}" "${pkey}" >&2
+  return "${EXIT_CONFIG}"
+}
+
+# _config_child_type_flag_for <project-key> <child-types-string> — the
+# operator's --child-type answer for one project (last occurrence wins), or
+# empty when none was given. Mirror of _config_style_flag_for.
+_config_child_type_flag_for() {
+  local key="$1" child_types="$2" tok out=""
+  for tok in ${child_types}; do
+    [[ "${tok}" == "${key}="* ]] && out="${tok#*=}"
+  done
+  printf '%s' "${out}"
+}
+
+# _config_resolve_child_type <project-key> <issue_types-json> <child-type-flag>
+# The child TYPE (research R1/R2, contract §2): derived when the child
+# hierarchy level holds exactly one non-sub-task candidate; otherwise the
+# operator's --child-type answer (matched by logical name against that
+# level's candidates); otherwise fail closed (EXIT_CONFIG), naming the level
+# and every candidate. Prints the canonical {logical_name,id,source} object.
+_config_resolve_child_type() {
+  local pkey="$1" itypes="$2" flag="$3"
+  local child_level child_candidates
+  child_level="$(hierarchy_child_level "${itypes}")"
+  if [[ -z "${child_level}" ]]; then
+    printf 'config: project %s: the discovered project declares no issue types at all\n' "${pkey}" >&2
+    return "${EXIT_CONFIG}"
+  fi
+  child_candidates="$(jq -c --argjson lvl "${child_level}" '[ .[] | select((.subtask | not) and .hierarchy_level == $lvl) ]' <<< "${itypes}")"
+  local n
+  n="$(jq -r 'length' <<< "${child_candidates}")"
+  if [[ "${n}" -eq 1 ]]; then
+    jq -c '.[0] | {logical_name, id, source: "derived"}' <<< "${child_candidates}"
+    return 0
+  fi
+  if [[ -n "${flag}" ]]; then
+    local match
+    match="$(jq -c --arg n "${flag}" '[ .[] | select(.logical_name == $n) ][0] // empty' <<< "${child_candidates}")"
+    if [[ -n "${match}" ]]; then
+      jq -c '{logical_name, id, source: "operator"}' <<< "${match}"
+      return 0
+    fi
+    printf 'config: project %s: --child-type %s names no candidate at the child level\n' "${pkey}" "${flag}" >&2
+    return "${EXIT_CONFIG}"
+  fi
+  local list
+  list="$(jq -r 'map(.logical_name) | join(", ")' <<< "${child_candidates}")"
+  printf 'config: project %s: the child level holds more than one issue type (%s); pass --child-type %s=<one of them>\n' \
+    "${pkey}" "${list}" "${pkey}" >&2
   return "${EXIT_CONFIG}"
 }
 
@@ -346,13 +403,14 @@ _config_hooks_effect() {
 cmd_config() {
   # Parse flags (config-read, no model judgement). The dispatcher already handled
   # --help; re-parse here so the command is runnable standalone.
-  local parsed json="false" dry_run="false" exit_code="0" error="" styles="" args="" enable_hooks=""
+  local parsed json="false" dry_run="false" exit_code="0" error="" styles="" args="" enable_hooks="" child_types=""
   parsed="$(cli_parse "$@")"
   while IFS='=' read -r key value; do
     case "${key}" in
       json) json="${value}" ;;
       dry_run) dry_run="${value}" ;;
       styles) styles="${value}" ;;
+      child_types) child_types="${value}" ;;
       enable_hooks) enable_hooks="${value}" ;;
       args) args="${value}" ;;
       exit) exit_code="${value}" ;;
@@ -459,6 +517,23 @@ cmd_config() {
     rids="$(config_resolved_ids_for "${binding}")"
     rids="$(jq -c --arg s "${style}" --arg src "${style_source}" \
       '. + {style: $s, style_source: $src}' <<< "${rids}")"
+
+    # Hierarchy derivation (008 T042/T044/T045, research R1/R2, contract §2/§3):
+    # the parent TYPE is derived; the child TYPE is a recorded operator/derived
+    # answer, resolved here at configuration time and persisted with its
+    # provenance beside style/style_source.
+    local itypes derivation child_type_flag child_type_resolved
+    itypes="$(jq -c '.issue_types // []' <<< "${binding}")"
+    derivation="$(hierarchy_derive "${pkey}" "${itypes}")"
+    if [[ "$(jq -r '.status' <<< "${derivation}")" != "ok" ]]; then
+      jq -r '.message' <<< "${derivation}" >&2
+      return "${EXIT_CONFIG}"
+    fi
+    child_type_flag="$(_config_child_type_flag_for "${pkey}" "${child_types}")"
+    child_type_resolved="$(_config_resolve_child_type "${pkey}" "${itypes}" "${child_type_flag}")" || return $?
+    rids="$(jq -c --argjson ct "${child_type_resolved}" --argjson pt "$(jq -c '.parent' <<< "${derivation}")" \
+      '. + {child_type: $ct, parent_type: ($pt + {source: "derived"})}' <<< "${rids}")"
+
     resolved="$(jq -c --arg k "${pkey}" --argjson r "${rids}" '. + {($k): $r}' <<< "${resolved}")"
     proj_styles="$(jq -c --arg k "${pkey}" --arg s "${style}" --arg src "${style_source}" \
       '. + {($k): {style: $s, style_source: $src}}' <<< "${proj_styles}")"

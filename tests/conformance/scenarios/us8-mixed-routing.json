@@ -1,12 +1,1 @@
-{
-  "name": "us8-mixed-routing",
-  "description": "One repository routes distinct specs to two projects of MIXED styles (FR-041, FR-042): a company-managed project (COMP) and a team-managed project (TEAM), each discovered with its own style, hierarchy, and estimation field. The config command iterates both projects and persists a per-project resolved-id table scoped under each key (no collision, FR-044). Both ports must produce a byte-identical run summary, config.local.yml, exit code, and Jira API call sequence (NFR-1).",
-  "mock": { "projects": { "COMP": "company", "TEAM": "team" } },
-  "fixture": "tests/conformance/fixtures/repo-with-multi-project",
-  "argv": ["config", "--json"],
-  "env": {
-    "JIRA_EMAIL": "user@example.com",
-    "JIRA_API_TOKEN": "RAWSECRETXYZ",
-    "JIRA_NO_SLEEP": "1"
-  }
-}
+{"name":"us8-mixed-routing","description":"One repository routes distinct specs to two projects of MIXED styles (FR-041, FR-042): a company-managed project (COMP) and a team-managed project (TEAM), each discovered with its own style, hierarchy, and estimation field. The config command iterates both projects and persists a per-project resolved-id table scoped under each key (no collision, FR-044). Both ports must produce a byte-identical run summary, config.local.yml, exit code, and Jira API call sequence (NFR-1).","mock":{"projects":{"COMP":"company","TEAM":"team"}},"fixture":"tests/conformance/fixtures/repo-with-multi-project","argv":["config","--child-type","COMP=Story","--json"],"env":{"JIRA_EMAIL":"user@example.com","JIRA_API_TOKEN":"RAWSECRETXYZ","JIRA_NO_SLEEP":"1"}}

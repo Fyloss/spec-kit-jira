@@ -16,6 +16,12 @@
 #   argv    (array,  opt)    arguments passed to the entry point
 #   env     (object, opt)    extra environment variables for the run
 #
+# The run's environment is the scenario's, never the caller's: every ambient
+# SPEC_KIT_JIRA_* / JIRA_* variable is scrubbed before the scenario's own `env`
+# is applied. A caller that deliberately needs one more variable for a single
+# run declares it in SPEC_KIT_JIRA_HARNESS_ENV as newline-separated KEY=VALUE
+# pairs; see the "Environment" section below.
+#
 # The entry point defaults to the canonical port path but can be overridden with
 # SPEC_KIT_JIRA_ENTRY_BASH / SPEC_KIT_JIRA_ENTRY_PWSH (used to pin paths in CI
 # and to exercise this harness before the real dispatcher lands, T024).
@@ -40,6 +46,24 @@ source "${CONF_DIR}/mock-jira/lib.sh"
 
 [ -f "${SCENARIO}" ] || { echo "scenario not found: ${SCENARIO}" >&2; exit 1; }
 mkdir -p "${OUTDIR}"
+
+# Every scalar this harness reads out of jq goes through here.
+#
+# On Windows the `jq` on PATH is the NATIVE jq.exe, and its stdout is a
+# text-mode stream: it terminates each line with CRLF, not LF. Nothing
+# downstream removes that CR — `$( )` strips trailing NEWLINES only, and
+# `read` strips the delimiter, so the CR rides into the last field of every
+# line. A scenario's `SPEC_KIT_JIRA_SPEC_SLUG: 001-billing` then reached the
+# port as $'001-billing\r', which fails the anchored slug pattern (in both
+# ports' regex flavours `$` tolerates a trailing \n, never a trailing \r) and
+# refused the whole run with "spec_ref.spec_slug is malformed".
+#
+# Stripping here rather than at each consumer is deliberate: the CR is an
+# artefact of how this one process emits lines, so it is removed where the
+# lines are read. It also covers the ARGV path for BOTH ports — pwsh-invoke.ps1
+# already defends its own argv file, but the Bash port receives argv directly
+# and had no such guard.
+jq_lines() { jq "$@" | sed $'s/\r$//'; }
 
 case "${PORT}" in
   bash)
@@ -67,7 +91,7 @@ esac
 
 # --- Isolated workdir (the "repository" the port runs against) ---------------
 WORKDIR="$(mktemp -d)"
-FIXTURE="$(jq -r '.fixture // empty' "${SCENARIO}")"
+FIXTURE="$(jq_lines -r '.fixture // empty' "${SCENARIO}")"
 if [ -n "${FIXTURE}" ]; then
   [ -d "${REPO_ROOT}/${FIXTURE}" ] || { echo "fixture not found: ${FIXTURE}" >&2; exit 1; }
   cp -R "${REPO_ROOT}/${FIXTURE}/." "${WORKDIR}/"
@@ -89,7 +113,7 @@ trap mock_stop EXIT
 # --- Optional git repository (degraded-mode / branch-state scenarios) --------
 # `git_branch` initialises the workdir as a git repo checked out on that branch
 # (deterministic default branch so both ports see identical refs).
-GIT_BRANCH="$(jq -r '.git_branch // empty' "${SCENARIO}")"
+GIT_BRANCH="$(jq_lines -r '.git_branch // empty' "${SCENARIO}")"
 if [ -n "${GIT_BRANCH}" ]; then
   (
     cd "${WORKDIR}"
@@ -101,12 +125,59 @@ if [ -n "${GIT_BRANCH}" ]; then
 fi
 
 # --- Environment -------------------------------------------------------------
+# A scenario's environment is the one the SCENARIO declares, never the one the
+# caller happened to be holding. Both ports read a broad SPEC_KIT_JIRA_* /
+# JIRA_* override surface — project key, plan context, hook context, config
+# dir, credentials — and any of those left ambient silently rewrites the run.
+# A scenario's `env` block can only ADD variables, so without this scrub there
+# is no way for a scenario to say "and nothing else".
+#
+# Not hypothetical: tests/powershell/lib/TokenLeak.Tests.ps1 exports
+# SPEC_KIT_JIRA_PROJECT_KEY=PROJ (the shipped placeholder) and never clears it.
+# Pester discovers lib/ immediately before conformance/ on the Linux CI host,
+# but after commands/ — whose Reconcile.* files scrub that same variable — on
+# the author's macOS host. Every reconcile scenario therefore refused with the
+# placeholder-key message (exit 4, zero writes) instead of mirroring: four red
+# conformance tests in CI, green locally, and nothing in either log naming the
+# cause. The leak is fixed at its source too; this is the guard that stops the
+# next one costing another CI-only debugging round.
+#
+# Scrubbing by PREFIX rather than by an enumerated list is deliberate: that
+# list grows with every new override the ports read, and a list somebody has to
+# remember to extend is one that will be a variable behind the day it matters.
+# The exemptions are the variables the HARNESS itself is configured with.
+for _ambient in ${!SPEC_KIT_JIRA_@} ${!JIRA_@}; do
+  case "${_ambient}" in
+    SPEC_KIT_JIRA_ENTRY_BASH | SPEC_KIT_JIRA_ENTRY_PWSH | SPEC_KIT_JIRA_COVERAGE_INPROCESS | SPEC_KIT_JIRA_HARNESS_*) continue ;;
+  esac
+  unset "${_ambient}"
+done
+unset _ambient
+
 # The mock base URL is set FIRST so a scenario's env can override it (e.g. to
 # the empty string, which the ports treat as unset — the degraded-mode trigger).
 export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 while IFS=$'\t' read -r key value; do
   [ -n "${key}" ] && export "${key}=${value}"
-done < <(jq -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv' "${SCENARIO}")
+done < <(jq_lines -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv' "${SCENARIO}")
+
+# The one way a CALLER may set a port variable for a single run: newline-
+# separated KEY=VALUE pairs in SPEC_KIT_JIRA_HARNESS_ENV, applied last so they
+# win over the scenario's own env. This exists so that a test running the SAME
+# scenario twice — once plain, once under a hook — does not need a second
+# scenario file for the one variable that differs (the retired-key refusal,
+# T025). Routing it through a named channel is the point: after the scrub
+# above, an override that reaches the port is one somebody wrote down, and
+# anything else in the ambient environment is a leak by definition.
+if [ -n "${SPEC_KIT_JIRA_HARNESS_ENV:-}" ]; then
+  while IFS= read -r pair; do
+    [ -n "${pair}" ] || continue
+    case "${pair}" in
+      *=*) export "${pair%%=*}=${pair#*=}" ;;
+      *) echo "SPEC_KIT_JIRA_HARNESS_ENV entry is not KEY=VALUE: ${pair}" >&2; exit 1 ;;
+    esac
+  done <<< "${SPEC_KIT_JIRA_HARNESS_ENV}"
+fi
 
 # --- Runs ----------------------------------------------------------------
 # A scenario is either a single implicit run (top-level `argv`, unchanged
@@ -116,16 +187,18 @@ done < <(jq -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv
 # one mock process. Captured as stdout.N / stderr.N / exit.N, N = 1-based;
 # stdout/stderr/exit (unsuffixed) always mirror the LAST run, so a
 # single-run scenario's existing consumers see no difference.
-RUN_COUNT="$(jq '(.runs // []) | length' "${SCENARIO}")"
+RUN_COUNT="$(jq_lines '(.runs // []) | length' "${SCENARIO}")"
 if [ "${RUN_COUNT}" -eq 0 ]; then RUN_COUNT=1; fi
 
 set +e
 for ((i = 1; i <= RUN_COUNT; i++)); do
   ARGV=()
-  if [ "${RUN_COUNT}" -gt 1 ] || [ "$(jq '(.runs // []) | length' "${SCENARIO}")" -gt 0 ]; then
-    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq -r --argjson i "$((i - 1))" '.runs[$i].argv[]? // empty' "${SCENARIO}")
+  if [ "${RUN_COUNT}" -gt 1 ] || [ "$(jq_lines '(.runs // []) | length' "${SCENARIO}")" -gt 0 ]; then
+    # shellcheck disable=SC2016  # $i is a jq variable bound by --argjson, not a
+    # shell expansion; shellcheck only recognises that for the literal name `jq`.
+    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq_lines -r --argjson i "$((i - 1))" '.runs[$i].argv[]? // empty' "${SCENARIO}")
   else
-    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq -r '.argv[]? // empty' "${SCENARIO}")
+    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq_lines -r '.argv[]? // empty' "${SCENARIO}")
   fi
 
   if [ "${PORT}" = "bash" ]; then

@@ -26,11 +26,6 @@ setup() {
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_feature
-    task_strategy: subtask
-    issue_types:
-      Epic: "10001"
-      Story: "10002"
     priority_map:
       P1: Highest
       P2: Medium
@@ -64,10 +59,11 @@ teardown() {
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
 
-  # Advance COMP-1 to "In Progress" — a status the phase map DOES declare
-  # (for after_plan), so it classifies "mapped" and is comparable in the
-  # declared order — ahead of what after_specify's "To Do" implies.
-  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-1" \
+  # Advance COMP-2 (the first story; COMP-1 is now the parent) to "In
+  # Progress" — a status the phase map DOES declare (for after_plan), so
+  # it classifies "mapped" and is comparable in the declared order —
+  # ahead of what after_specify's "To Do" implies.
+  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-2" \
     -H 'Content-Type: application/json' \
     -d '{"fields":{"status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}}}}' > /dev/null
 
@@ -82,7 +78,7 @@ teardown() {
   # Content still reconciles (FR-031): only the STATUS TRANSITION is
   # withheld — reconcile never issues transitions at all in this release
   # (R9), so the content PUT proceeds normally.
-  [ "$(grep -c '^PUT /rest/api/3/issue/COMP-1$' "${MOCK_CALLLOG}")" -eq 1 ]
+  [ "$(grep -c '^PUT /rest/api/3/issue/COMP-2$' "${MOCK_CALLLOG}")" -eq 1 ]
   unset SPEC_KIT_JIRA_HOOK_EVENT
 }
 
@@ -91,7 +87,7 @@ teardown() {
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
 
-  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-1" \
+  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-2" \
     -H 'Content-Type: application/json' \
     -d '{"fields":{"status":{"name":"Blocked","statusCategory":{"key":"indeterminate"}}}}' > /dev/null
 
@@ -102,7 +98,7 @@ teardown() {
   run cmd_reconcile reconcile "${SPEC}" --json
   [ "$status" -eq 0 ]
   [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"halted"* ]]
-  [ "$(grep -c '^PUT /rest/api/3/issue/COMP-1$' "${MOCK_CALLLOG}")" -eq 0 ]
+  [ "$(grep -c '^PUT /rest/api/3/issue/COMP-2$' "${MOCK_CALLLOG}")" -eq 0 ]
   unset SPEC_KIT_JIRA_HOOK_EVENT
 }
 
@@ -111,7 +107,7 @@ teardown() {
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
 
-  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-2" \
+  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-3" \
     -H 'Content-Type: application/json' \
     -d '{"fields":{"Flagged":[{"value":"Impediment"}]}}' > /dev/null
 
@@ -165,11 +161,6 @@ EOF
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_feature
-    task_strategy: subtask
-    issue_types:
-      Epic: "10001"
-      Story: "10002"
     priority_map:
       P1: Highest
       P2: Medium
@@ -192,7 +183,7 @@ YAML
       \$null = Invoke-JiraReconcile -Arguments @('reconcile','--json','${pspec}')
     " > /dev/null 2>/dev/null
 
-  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-1" \
+  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-2" \
     -H 'Content-Type: application/json' \
     -d '{"fields":{"status":{"name":"Blocked","statusCategory":{"key":"indeterminate"}}}}' > /dev/null
   sed -i.bak 's/export one invoice as a PDF/export one invoice as a PDF file/' "${pspec}"
@@ -204,5 +195,5 @@ YAML
       \$null = Invoke-JiraReconcile -Arguments @('reconcile','--json','${pspec}')
     " 2>/dev/null)"
   [[ "$(jq -r '.warnings[0]' <<< "${out}")" == *"halted"* ]]
-  [ "$(grep -c '^PUT /rest/api/3/issue/COMP-1$' "${MOCK_CALLLOG}")" -eq 0 ]
+  [ "$(grep -c '^PUT /rest/api/3/issue/COMP-2$' "${MOCK_CALLLOG}")" -eq 0 ]
 }

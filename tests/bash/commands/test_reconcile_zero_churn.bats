@@ -59,7 +59,7 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.counts.updated' <<< "$output")" -eq 1 ]
   [ "$(jq -r '.counts.skipped' <<< "$output")" -eq 2 ]
-  [ "$(grep -c '^PUT /rest/api/3/issue/COMP-2$' "${MOCK_CALLLOG}")" -eq 1 ]
+  [ "$(grep -c '^PUT /rest/api/3/issue/COMP-3$' "${MOCK_CALLLOG}")" -eq 1 ]
   [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 1 ]
 }
 
@@ -81,7 +81,7 @@ teardown() {
 
   run cmd_reconcile reconcile "${SPEC}" --dry-run --json
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.counts.created' <<< "$output")" -eq 3 ]
+  [ "$(jq -r '.counts.created' <<< "$output")" -eq 4 ]
   run cmp "${SPEC}" "${BATS_TEST_TMPDIR}/before-any-run.md"
   [ "$status" -eq 0 ]
   run mock_calls

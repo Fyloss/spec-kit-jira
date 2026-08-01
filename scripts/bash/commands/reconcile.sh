@@ -31,6 +31,8 @@ source "${_cmd_reconcile_dir}/../engine/interchange.sh"
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../engine/story_marker.sh" # R5 step 1 — assign identifiers
 # shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../sink/jira/hierarchy.sh" # the mandatory-field gate (Phase 6, US3)
+# shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/recognition.sh" # R5 step 2 — recognise recorded tickets
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/plan_apply.sh"
@@ -114,19 +116,6 @@ _reconcile_resolve_routing() {
   routing_resolve "$(basename "${folder}")" '[]' "${cfg}" 2>/dev/null
 }
 
-# _reconcile_epic_strategy <project-key> <cfg-json> — this run's epic strategy
-# (FR-006): the resolved project's own declaration in the team config. Falls
-# back to the legacy per_repo default only when that project carries no
-# declaration at all (an override-only invocation whose project key is not
-# even declared in config.yml) — never a silently-preferred default over a
-# real declaration.
-_reconcile_epic_strategy() {
-  local key="$1" cfg="$2" v
-  v="$(jq -r --arg k "${key}" '(.projects // [])[] | select(.key==$k) | .epic_strategy // empty' <<< "${cfg}")"
-  [[ -z "${v}" ]] && v="per_repo"
-  printf '%s' "${v}"
-}
-
 # _reconcile_phase_status_map <project-key> <cfg-json> — the resolved
 # project's declared phase->status map (Phase 6, US4, research R9), or {}
 # when the project declares none — the same inert default the phase-status
@@ -199,6 +188,16 @@ _reconcile_local_binding_for() {
   ((rc != 0)) && return "${rc}"
   entry="$(jq -c --arg k "${key}" '.resolved_ids[$k] // empty' <<< "${json}" 2>/dev/null)"
   [[ -z "${entry}" || "${entry}" == "null" ]] && return 3
+  # binding-shape-stale (008 T016, research R5): a binding written before
+  # this feature stores issue_types as a name-to-id MAP, not the hierarchy-
+  # carrying list (data-model.md §3). Detected here, before any type
+  # resolution is attempted, so an old binding never falls through to
+  # plan_writes with an empty issue type — it refuses with its OWN message
+  # instead (contracts/hierarchy-resolution.md §1, §6), never the "not bound
+  # yet" text: the project IS bound, its binding is simply a version behind.
+  local itypes_type
+  itypes_type="$(jq -r 'if has("issue_types") then (.issue_types|type) else "absent" end' <<< "${entry}")"
+  [[ "${itypes_type}" == "object" ]] && return 6
   printf '%s' "${entry}"
   return 0
 }
@@ -233,7 +232,19 @@ _reconcile_plan_context() {
   [[ "${rc}" -ne 0 ]] && return "${rc}"
 
   local story_type priority_map priorities est_field priority_ids
-  story_type="$(jq -r '.issue_types.Story // empty' <<< "${binding}")"
+  local parent_type_id parent_supports_link
+  # child_type.id, not the literal .issue_types.Story (008 T046/R5): the
+  # binding's issue_types is a hierarchy-carrying LIST now, and the child
+  # type is whatever the persisted binding recorded — derived or an operator
+  # answer (contracts/hierarchy-resolution.md §2).
+  story_type="$(jq -r '.child_type.id // empty' <<< "${binding}")"
+  # child-type-unresolved (contract §6): a binding in the new shape but with
+  # no recorded child_type (never configured past discovery, or the ceremony
+  # left it unresolved) refuses by name — never a silent empty story type
+  # reaching plan_writes far later (research R5's obscure-failure defect).
+  [[ -z "${story_type}" ]] && return 7
+  parent_type_id="$(jq -r '.parent_type.id // empty' <<< "${binding}")"
+  parent_supports_link="$(jq -r --arg t "${story_type}" '(.parent_link_available[$t] // false)' <<< "${binding}")"
   priority_map="$(jq -c --arg k "${key}" '(.projects // [])[] | select(.key==$k) | .priority_map // {}' <<< "${cfg}")"
   [[ -z "${priority_map}" ]] && priority_map='{}'
   priorities="$(jq -c '.priorities // {}' <<< "${binding}")"
@@ -255,20 +266,30 @@ _reconcile_plan_context() {
   # behaviour, unchanged) — the same meaning an absent map entry has always
   # had. Including "bridge" here would wrongly route a bridge-created
   # ticket through the human-origin managed-panel splice.
-  local tickets ticket_origins ticket_descriptions
+  local tickets ticket_origins ticket_descriptions ticket_parents
   tickets="$(jq -c '(.bound // {}) | with_entries(.value |= .key)' <<< "${recog}")"
   ticket_origins="$(jq -c '(.bound // {}) | with_entries(select(.value.origin != "bridge")) | with_entries(.value |= .origin)' <<< "${recog}")"
   ticket_descriptions="$(jq -c '(.bound // {}) | with_entries(.value |= .current.description)' <<< "${recog}")"
+  # ticket_parents (T109): only the entries whose CURRENT parent is non-null —
+  # a flat mirror with no parent at all is left alone (plan.md "No
+  # migration"); a child linked to the wrong parent is what plan_writes
+  # corrects.
+  ticket_parents="$(jq -c '(.bound // {}) | with_entries(select(.value.current.parent != null)) | with_entries(.value |= .current.parent)' <<< "${recog}")"
 
   jq -cn --arg b "${base}" --arg st "${story_type}" --argjson pids "${priority_ids}" --arg ef "${est_field}" \
-    --argjson tk "${tickets}" --argjson to "${ticket_origins}" --argjson td "${ticket_descriptions}" '
+    --arg pt "${parent_type_id}" --argjson psl "${parent_supports_link}" \
+    --argjson tk "${tickets}" --argjson to "${ticket_origins}" --argjson td "${ticket_descriptions}" \
+    --argjson tp "${ticket_parents}" '
     {base_url:$b}
     + (if $st == "" then {} else {story_type_id:$st} end)
+    + (if $pt == "" then {} else {parent_type_id:$pt} end)
+    + {parent_supports_link: $psl}
     + (if ($pids|length) == 0 then {} else {priority_ids:$pids} end)
     + (if $ef == "" then {} else {estimation_field_id:$ef} end)
     + (if ($tk|length) == 0 then {} else {tickets:$tk} end)
     + (if ($to|length) == 0 then {} else {ticket_origins:$to} end)
-    + (if ($td|length) == 0 then {} else {ticket_descriptions:$td} end)'
+    + (if ($td|length) == 0 then {} else {ticket_descriptions:$td} end)
+    + (if ($tp|length) == 0 then {} else {ticket_parents:$tp} end)'
 }
 
 # cmd_reconcile <argv...> — reconcile one specification into its Jira project.
@@ -363,9 +384,9 @@ cmd_reconcile() {
   slug="${SPEC_KIT_JIRA_SPEC_SLUG:-$(basename "${folder}")}"
   repo="${SPEC_KIT_JIRA_REPO:-local/repo}"
 
-  local override_project="${SPEC_KIT_JIRA_PROJECT_KEY:-}" override_epic="${SPEC_KIT_JIRA_EPIC_STRATEGY:-}"
+  local override_project="${SPEC_KIT_JIRA_PROJECT_KEY:-}"
   local cfg_dir="${JIRA_CONFIG_DIR:-.specify/jira}" cfg="{}"
-  if [[ -z "${override_project}" || -z "${override_epic}" || -z "${SPEC_KIT_JIRA_PLAN_CONTEXT:-}" ]]; then
+  if [[ -z "${override_project}" || -z "${SPEC_KIT_JIRA_PLAN_CONTEXT:-}" ]]; then
     if [[ ! -f "${cfg_dir}/config.yml" ]]; then
       _reconcile_notice \
         'Jira mirror skipped: this repository is not bound to a Jira project yet.' \
@@ -411,13 +432,6 @@ cmd_reconcile() {
     return $?
   fi
 
-  local epic_strategy
-  if [[ -n "${override_epic}" ]]; then
-    epic_strategy="${override_epic}"
-  else
-    epic_strategy="$(_reconcile_epic_strategy "${project_key}" "${cfg}")"
-  fi
-
   local spec_ref
   spec_ref="$(jq -cn --arg r "${repo}" --arg s "${slug}" --arg f "${folder}" \
     '{repo:$r, spec_slug:$s, folder:$f}')"
@@ -445,15 +459,24 @@ cmd_reconcile() {
     return $?
   fi
   assigned_count="$(jq '[.stories[] | select((.marker.state // "absent")=="absent")] | length' <<< "${pre_parse}")"
+  local parent_needs_assign; parent_needs_assign="$(jq -r '(.epic.marker.state // "absent")=="absent"' <<< "${pre_parse}")"
 
+  # Ordering within one run, step 1/2 (contracts/parent-marker.md): stories
+  # first, the parent second — same pass, same file, ONE splice.
   local assigned_spec="${raw_spec}"
+  local need_write="false"
   if ((assigned_count > 0)); then
-    assigned_spec="$(printf '%s' "${raw_spec}" | story_marker_assign; printf x)"; assigned_spec="${assigned_spec%x}"
-    if [[ "${dry_run}" != "true" ]]; then
-      if ! story_marker_write_file "${spec_file}" "${assigned_spec}" > /dev/null 2>&1; then
-        _reconcile_fault "${EXIT_CONFIG}" "reconcile: ${spec_file} could not be written — no ticket may be created before its identifier is recorded (zero writes)"
-        return $?
-      fi
+    assigned_spec="$(printf '%s' "${assigned_spec}" | story_marker_assign; printf x)"; assigned_spec="${assigned_spec%x}"
+    need_write="true"
+  fi
+  if [[ "${parent_needs_assign}" == "true" ]]; then
+    assigned_spec="$(printf '%s' "${assigned_spec}" | spec_marker_assign; printf x)"; assigned_spec="${assigned_spec%x}"
+    need_write="true"
+  fi
+  if [[ "${need_write}" == "true" && "${dry_run}" != "true" ]]; then
+    if ! marker_splice_write_file "${spec_file}" "${assigned_spec}" > /dev/null 2>&1; then
+      _reconcile_fault "${EXIT_CONFIG}" "reconcile: ${spec_file} could not be written — no ticket may be created before its identifier is recorded (zero writes)"
+      return $?
     fi
   fi
 
@@ -462,17 +485,74 @@ cmd_reconcile() {
     _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the specification could not be parsed (zero writes)'
     return $?
   fi
-  ctx="$(jq -cn --argjson sr "${spec_ref}" --arg pk "${project_key}" --arg es "${epic_strategy}" \
-    '{spec_ref:$sr, project_key:$pk, epic_strategy:$es}')"
+  ctx="$(jq -cn --argjson sr "${spec_ref}" --arg pk "${project_key}" \
+    '{spec_ref:$sr, project_key:$pk}')"
   if ! doc="$(interchange_build "${parse}" "${ctx}")"; then
     _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the specification could not be assembled into a valid neutral document (zero writes)'
     return $?
   fi
 
-  # R5 step 2 — RECOGNISE (Phase 3, US1; contracts/recognition-contract.md):
-  # one read per recorded ticket, verified against the SAME identity marker
-  # the read returns. A read failure is NEVER downgraded to "no ticket
-  # exists" (FR-004) — it fails the WHOLE specification closed here.
+  # The implementation plan (Phase 7, US5; data-model.md §7; spec FR-026/
+  # FR-027/FR-028): plan.md sits alongside spec.md in the same feature
+  # folder. A missing file, or a file with no `## Summary` section, yields
+  # no blocks and no warning (FR-028) — parse_plan_summary already handles
+  # both.
+  local plan_file plan_blocks
+  plan_file="$(dirname "${spec_file}")/plan.md"
+  if [[ -f "${plan_file}" ]]; then
+    plan_blocks="$(parse_plan_summary < "${plan_file}")"
+  else
+    plan_blocks="[]"
+  fi
+  if [[ "$(jq 'length' <<< "${plan_blocks}")" -gt 0 ]]; then
+    doc="$(jq -c --argjson pb "${plan_blocks}" '.epic.description.blocks += $pb' <<< "${doc}")"
+  fi
+
+  # Mandatory-field gate (Phase 6, US3, T086/T087/T088; contracts/
+  # hierarchy-resolution.md §4/§5): runs after derivation and before
+  # recognition, so no read and no write has happened yet. Reads the SAME
+  # persisted binding the plan context reads later; a binding that cannot
+  # be read yet, or resolves to no bound project, is reported exactly as
+  # the plan-context path already reports it — that error surfaces at its
+  # usual point below rather than being duplicated here.
+  local gate_binding rc_gate_binding=0
+  gate_binding="$(_reconcile_local_binding_for "${project_key}" "${cfg_dir}")" || rc_gate_binding=$?
+  if [[ "${rc_gate_binding}" -eq 0 ]]; then
+    local gate_child_type; gate_child_type="$(jq -r '.child_type.id // empty' <<< "${gate_binding}")"
+    if [[ -n "${gate_child_type}" ]]; then
+      local gate_result gate_status
+      gate_result="$(hierarchy_mandatory_gate "${gate_binding}" "${project_key}")"
+      gate_status="$(jq -r '.status' <<< "${gate_result}")"
+      if [[ "${gate_status}" != "ok" ]]; then
+        _reconcile_fault "${EXIT_CONFIG}" "$(jq -r '.message' <<< "${gate_result}")"
+        return $?
+      fi
+    fi
+  fi
+
+  # R5 step 2a — RECOGNISE THE PARENT (Phase 5, US2, T070/T077;
+  # contracts/parent-marker.md "Ordering within one run" step 5). One read
+  # by the recorded key, before any story is recognised. A blocked parent
+  # blocks the WHOLE specification — no story is planned (FR-012).
+  local epic_marker recog_parent rc_recog_parent=0
+  epic_marker="$(jq -c '.epic.marker' <<< "${doc}")"
+  recog_parent="$(recognition_parent_run "${epic_marker}" "${spec_ref}" "${project_key}" "${spec_file}")" || rc_recog_parent=$?
+  if ((rc_recog_parent != 0)); then
+    _reconcile_fault "${rc_recog_parent}" 'reconcile: the parent could not be recognised (zero writes)'
+    return $?
+  fi
+  local parent_state; parent_state="$(jq -r '.state' <<< "${recog_parent}")"
+  if [[ "${parent_state}" == "blocked" ]]; then
+    local parent_detail; parent_detail="$(jq -r '.detail' <<< "${recog_parent}")"
+    _reconcile_fault "${EXIT_CONFIG}" "reconcile: ${parent_detail}"
+    return $?
+  fi
+
+  # R5 step 2b — RECOGNISE the stories (Phase 3, US1;
+  # contracts/recognition-contract.md): one read per recorded ticket,
+  # verified against the SAME identity marker the read returns. A read
+  # failure is NEVER downgraded to "no ticket exists" (FR-004) — it fails
+  # the WHOLE specification closed here.
   local stories_slim recog rc_recog=0
   stories_slim="$(jq -c '[.stories[] | {local_id, marker}]' <<< "${doc}")"
   recog="$(recognition_run "${stories_slim}" "${spec_ref}" "${project_key}" "${spec_file}")" || rc_recog=$?
@@ -494,7 +574,7 @@ cmd_reconcile() {
   # map instead of only from the override). An explicit
   # SPEC_KIT_JIRA_PLAN_CONTEXT overrides the derived object wholesale;
   # otherwise it is built from the resolved project's persisted binding.
-  local plan_ctx actions rc_pc=0
+  local plan_ctx rc_pc=0
   plan_ctx="$(_reconcile_plan_context "${base}" "${project_key}" "${cfg_dir}" "${cfg}" "${recog}")" || rc_pc=$?
   if [[ "${rc_pc}" -eq 2 ]]; then
     _reconcile_notice \
@@ -505,14 +585,36 @@ cmd_reconcile() {
   elif [[ "${rc_pc}" -eq 3 ]]; then
     _reconcile_fault "${EXIT_CONFIG}" "reconcile: the project \"${project_key}\" has not been bound yet — run /speckit.jira.config to discover its issue types and priorities (zero writes)"
     return $?
+  elif [[ "${rc_pc}" -eq 6 ]]; then
+    _reconcile_fault "${EXIT_CONFIG}" "reconcile: the local binding for ${project_key} predates parent support and does not record issue-type hierarchy. The project is bound — its binding is simply a version behind. Run /speckit.jira.config to refresh it (zero writes)"
+    return $?
+  elif [[ "${rc_pc}" -eq 7 ]]; then
+    _reconcile_fault "${EXIT_CONFIG}" "reconcile: project ${project_key} has no recorded issue type for user stories. Run /speckit.jira.config to record it (zero writes)"
+    return $?
   elif [[ "${rc_pc}" -eq "${EXIT_CONFIG}" ]]; then
     _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the local Jira binding could not be read (zero writes)'
     return $?
   fi
-  if ! actions="$(plan_writes "${doc_for_write}" "${plan_ctx}")"; then
+  # Merge the parent's recognition facts into the plan context (T077): a
+  # bound parent carries its key, current content (for zero churn) and
+  # origin; a new/absent parent contributes nothing extra.
+  if [[ "${parent_state}" == "bound" ]]; then
+    local parent_key_known parent_current_known parent_origin_known
+    parent_key_known="$(jq -r '.key' <<< "${recog_parent}")"
+    parent_current_known="$(jq -c '.current' <<< "${recog_parent}")"
+    parent_origin_known="$(jq -r '.origin // "bridge"' <<< "${recog_parent}")"
+    plan_ctx="$(jq -c --arg k "${parent_key_known}" --argjson c "${parent_current_known}" --arg o "${parent_origin_known}" \
+      '. + {parent_key:$k, parent_current:$c, parent_origin:$o}' <<< "${plan_ctx}")"
+  fi
+
+  local plan
+  if ! plan="$(plan_writes "${doc_for_write}" "${plan_ctx}")"; then
     _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the write plan could not be assembled (zero writes)'
     return $?
   fi
+  local parent_action actions
+  parent_action="$(jq -c '.parent' <<< "${plan}")"
+  actions="$(jq -c '.stories' <<< "${plan}")"
 
   # US6 lifecycle safety (Phase 4, US2): the lifecycle context is now built
   # from recognition's `bound` map on EVERY run — not only under the
@@ -590,6 +692,13 @@ cmd_reconcile() {
   local created updated warn_count rc=0
   created="$(jq '[.[] | select(.method=="POST" and (.url|endswith("/issue")))] | length' <<< "${actions}")"
   updated="$(jq '[.[] | select(.method=="PUT")] | length' <<< "${actions}")"
+  # The parent's own creation/update counts toward the same tallies (T079).
+  if [[ "${parent_action}" != "null" ]]; then
+    case "$(jq -r '.method' <<< "${parent_action}")" in
+      POST) created=$((created + 1)) ;;
+      PUT) updated=$((updated + 1)) ;;
+    esac
+  fi
   warn_count="$(jq 'length' <<< "${warns}")"
   local recognised_count; recognised_count="$(jq '.bound | length' <<< "${recog}")"
   local skipped_count; skipped_count="$(jq --argjson u "${updated}" '(.bound | length) - $u' <<< "${recog}")"
@@ -600,10 +709,14 @@ cmd_reconcile() {
   if [[ "${dry_run}" != "true" ]]; then
     # `|| rc=$?` keeps a fail-closed apply (exit >= 2) from aborting the command
     # under the dispatcher's `set -e`, so the run summary always prints (FR-032).
-    # R5 steps 4/6: apply_writes_with_recognition marks every planned creation
-    # `creating` before the first create, and stamps + records each created
-    # ticket's key IMMEDIATELY, per ticket — never batched.
-    apply_writes_with_recognition "${actions}" "${spec_ref}" "${spec_file}" || rc=$?
+    # R5 steps 4/6, contract steps 8-11: apply_writes_with_recognition performs
+    # the parent first, marks every planned creation `creating` before the
+    # first create, and stamps + records each created ticket's key
+    # IMMEDIATELY, per ticket — never batched.
+    local apply_plan known_parent_key=""
+    apply_plan="$(jq -cn --argjson p "${parent_action}" --argjson s "${actions}" '{parent:$p, stories:$s}')"
+    [[ "${parent_state}" == "bound" ]] && known_parent_key="$(jq -r '.key' <<< "${recog_parent}")"
+    apply_writes_with_recognition "${apply_plan}" "${spec_ref}" "${spec_file}" "${known_parent_key}" || rc=$?
   fi
 
   # T071: the catalogued `re-routed` notice, once the new key is recorded.
@@ -612,6 +725,24 @@ cmd_reconcile() {
   # so the command layer re-reads the just-written spec_file for it. Skipped
   # under --dry-run (no key is ever recorded there) and skipped for a story
   # whose creation did not complete this run — a future run reports it then.
+  # T079/parent-marker.md `parent-recreated`: a summary note, not a refusal
+  # — the recorded parent no longer existed, so a new one was created and
+  # the record was updated. The new key is only known after the create
+  # response, so re-read the just-written spec_file for it.
+  if [[ "${dry_run}" != "true" ]] && [[ "${parent_state}" == "new" ]] && [[ "$(jq -r '.recreated_from.key // ""' <<< "${recog_parent}")" != "" ]]; then
+    local former_parent_key post_epic_content post_epic_info new_parent_key
+    former_parent_key="$(jq -r '.recreated_from.key' <<< "${recog_parent}")"
+    post_epic_content="$(cat "${spec_file}" 2> /dev/null; printf x)"; post_epic_content="${post_epic_content%x}"
+    post_epic_info="$(spec_marker_document_info "${post_epic_content}")"
+    new_parent_key="$(jq -r '.ticket // empty' <<< "${post_epic_info}")"
+    if [[ -n "${new_parent_key}" ]]; then
+      notes="$(jq -c --arg d \
+        "${former_parent_key}, recorded as the parent of ${spec_file}, no longer exists in Jira; a new parent was created and the record updated (now ${new_parent_key})." \
+        '. + [$d]' <<< "${notes}")"
+      has_lifecycle="true"
+    fi
+  fi
+
   local rerouted; rerouted="$(jq -c '.rerouted // {}' <<< "${recog}")"
   if [[ "${dry_run}" != "true" ]] && [[ "$(jq 'length' <<< "${rerouted}")" -gt 0 ]]; then
     local post_content post_parse
@@ -672,8 +803,15 @@ cmd_reconcile() {
   # and it also keeps the summary stable across the mock's per-run ephemeral port.
   # `local_id` is internal bookkeeping (which story a creation stamps) and is
   # never part of the published action shape.
-  local disp_actions
+  # The reported action list stays FLAT (T080a): the parent — when present —
+  # is reported first, exactly like any other action, host-relative and
+  # stripped of its internal local_id bookkeeping.
+  local disp_actions disp_parent
   disp_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b) | del(.local_id)]' <<< "${actions}")"
+  if [[ "${parent_action}" != "null" ]]; then
+    disp_parent="$(jq -c --arg b "${base}" '.url |= ltrimstr($b) | del(.local_id)' <<< "${parent_action}")"
+    disp_actions="$(jq -c --argjson p "${disp_parent}" '[$p] + .' <<< "${disp_actions}")"
+  fi
 
   # The warnings/notes keys appear when the lifecycle facts were supplied OR
   # a story was blocked, so the content-only reconcile (US3) summary with

@@ -76,3 +76,34 @@ Describe 'Get-JiraParsedSpec — marker exclusion' {
         $r.stories[1].title | Should -Be 'First Renamed'
     }
 }
+
+Describe 'Get-JiraParsedSpec — T052 [Phase 5, US2] spec= marker exclusion' {
+    It 'a spec= line right after the H1 never lands in the epic description' {
+        $doc = "# Feature Specification: X`n<!-- speckit-jira spec=3f2a91c04b7e6d18 ticket=COMP-412 -->`n`nOverview prose.`n"
+        $r = Invoke-ParseWrapper $doc
+        (Get-JiraParsedSpec -Text $doc -FolderSlug '001-x') | Should -Not -BeLike '*speckit-jira*'
+        $r.epic.description.blocks[0].text | Should -Be 'Overview prose.'
+    }
+
+    It "a spec= line inside a story section never lands in that story's title, description or acceptance criteria" {
+        $doc = "### User Story 1 - First (Priority: P1)`n<!-- speckit-jira story=7f3a9c1e40b2d85a -->`n<!-- speckit-jira spec=3f2a91c04b7e6d18 -->`n`nAs a user I want X.`n`n- **Given** a thing`n- **When** it happens`n- **Then** it works`n"
+        $r = Invoke-ParseWrapper $doc
+        (Get-JiraParsedSpec -Text $doc -FolderSlug '001-x') | Should -Not -BeLike '*speckit-jira*'
+        $r.stories[0].title | Should -Be 'First'
+    }
+
+    It 'a spec= line inside a story section never lands in the design section' {
+        $doc = "### User Story 1 - First (Priority: P1)`n<!-- speckit-jira story=7f3a9c1e40b2d85a -->`n<!-- speckit-jira spec=3f2a91c04b7e6d18 -->`n`nBody.`n`n#### Design`n`nSome guidance here.`n"
+        $r = Invoke-ParseWrapper $doc
+        (Get-JiraParsedSpec -Text $doc -FolderSlug '001-x') | Should -Not -BeLike '*speckit-jira*'
+        (ConvertTo-Json $r.stories[0].design -Compress) | Should -Be '[{"kind":"guidance","value":"Some guidance here."}]'
+    }
+
+    It 'a spec= line inside a story section never lands in priority or estimation extraction' {
+        $doc = "### User Story 1 - First (Priority: P1)`n<!-- speckit-jira story=7f3a9c1e40b2d85a -->`n<!-- speckit-jira spec=3f2a91c04b7e6d18 -->`n`nEstimation: 5`n"
+        $r = Invoke-ParseWrapper $doc
+        (Get-JiraParsedSpec -Text $doc -FolderSlug '001-x') | Should -Not -BeLike '*speckit-jira*'
+        $r.stories[0].priority_logical | Should -Be 'P1'
+        [string]$r.stories[0].estimation | Should -Be '5'
+    }
+}

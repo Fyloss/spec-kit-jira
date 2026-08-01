@@ -42,6 +42,7 @@ function Invoke-JiraCliParse {
     $useTeam = ''
     $positional = [System.Collections.Generic.List[string]]::new()
     $styles = [System.Collections.Generic.List[string]]::new()
+    $childTypes = [System.Collections.Generic.List[string]]::new()
     $enableHooks = [System.Collections.Generic.List[string]]::new()
 
     for ($idx = 0; $idx -lt $Arguments.Count; $idx++) {
@@ -65,6 +66,22 @@ function Invoke-JiraCliParse {
                     $v = $Arguments[$idx]
                     if ($v -cmatch '^[A-Z][A-Z0-9_]+=(company_managed|team_managed)$') { $styles.Add($v) }
                     else { $parseError = "invalid --style value: $v (expected <PROJECT_KEY>=company_managed|team_managed)" }
+                }
+                break
+            }
+            '^--child-type$' {
+                # Repeatable operator answer to the child-type closed
+                # question (008 T044, research R1/R2), asked only when the
+                # child hierarchy level holds several candidates. The
+                # logical name is opaque text (Constitution VII).
+                if ($idx + 1 -ge $Arguments.Count) {
+                    $parseError = '--child-type requires a value (--child-type KEY=<logical name>)'
+                }
+                else {
+                    $idx++
+                    $v = $Arguments[$idx]
+                    if ($v -cmatch '^[A-Z][A-Z0-9_]+=\S+$') { $childTypes.Add($v) }
+                    else { $parseError = "invalid --child-type value: $v (expected <PROJECT_KEY>=<logical name>, no whitespace)" }
                 }
                 break
             }
@@ -123,6 +140,7 @@ function Invoke-JiraCliParse {
         $lines.Add("verbose=$verbose")
         $lines.Add("help=$help")
         $lines.Add("styles=$($styles -join ' ')")
+        $lines.Add("child_types=$($childTypes -join ' ')")
         $lines.Add("use_team=$useTeam")
         $lines.Add("enable_hooks=$($enableHooks -join ' ')")
         $lines.Add("args=$($positional -join ' ')")

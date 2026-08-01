@@ -229,7 +229,8 @@ _cfg_raise_duplicate_key() {
 _CFG_KEY=""
 _CFG_REST=""
 _cfg_map_entry_key() {
-  local content="$1" n=${#content}
+  local content="$1"
+  local n=${#content}
   _CFG_KEY=""
   _CFG_REST=""
   ((n == 0)) && return 1
@@ -241,7 +242,7 @@ _cfg_map_entry_key() {
     # followed by whitespace or end of line.
     local q="${first}" i close=-1
     for ((i = 1; i < n; i++)); do
-      if [[ "${content:i:1}" == "${q}" ]]; then close=$i; break; fi
+      if [[ "${content:i:1}" == "${q}" ]]; then close=${i}; break; fi
     done
     ((close < 0)) && return 1
     local colon_idx=$((close + 1))
@@ -521,6 +522,13 @@ yemit("")'
 # Refuses (EXIT_CONFIG) a key or string value containing `"` or `\`, printing a
 # named error per offending path and nothing else — no partial YAML is ever
 # emitted for a document this writer cannot faithfully represent.
+#
+# This is the port's largest MULTI-LINE jq read and the only one whose bytes land
+# in a file the operator keeps, so it is where a text-mode jq on Windows was seen
+# first: config.local.yml came out with a CRLF on every line but the last while
+# the PowerShell twin wrote LF, and ci-conformance.sh failed the written-files
+# diff (NFR-1). The line endings are not repaired here — lib/output.sh installs
+# one guard around jq itself, for the whole class.
 config_to_yaml() {
   local input errs
   input="$(cat)"
@@ -637,10 +645,10 @@ def branchpattern:
   ((.projects // []) | to_entries[] | .key as $i | .value as $p |
     ( [ (if (($p.key // "")|projkey) != true then "projects[\($i)].key is not a valid project key" else empty end),
         (if ($p | has("style")) and ($p.style|IN("company_managed","team_managed")|not) then "projects[\($i)].style is invalid" else empty end),
-        (if ($p.epic_strategy|IN("per_repo","per_feature")|not) then "projects[\($i)].epic_strategy is invalid" else empty end),
-        (if ($p.task_strategy|IN("subtask","linked_story")|not) then "projects[\($i)].task_strategy is invalid" else empty end),
-        (if ($p.task_strategy == "linked_story" and (($p.link_type // "")|length) < 1)
-         then "projects[\($i)].link_type is required when task_strategy=linked_story" else empty end),
+        ( ["epic_strategy","task_strategy","link_type"][] as $retired
+          | if ($p | has($retired))
+            then "projects[\($i)] declares `\($retired)`, which this version of spec-kit-jira no longer uses. Delete the line"
+            else empty end ),
         (if ($p | has("phase_status_map")) and
             (($p.phase_status_map|type) != "object" or ([$p.phase_status_map[]|type] | any(. != "string")))
          then "projects[\($i)].phase_status_map must be a mapping of lifecycle-event name to status name" else empty end),

@@ -1,6 +1,47 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 1.1.0 → 1.2.0 (MINOR — materially expanded guidance: one new rule added
+to an existing principle. No principle added, removed, renumbered, or redefined; nothing
+existing weakened or restated.)
+Modified principles:
+  VI. macOS / Linux / Windows Portability — added a measurement-over-emulation rule: a
+      divergence that manifests on only one operating system MUST be diagnosed by
+      measurement on a real runner of that OS, never by emulating its toolchain on
+      another host; a platform-specific fix is unproven until a run on the affected
+      platform is green; for a single-OS defect the conformance suite on that OS's
+      runner IS the failing test Principle XIII requires first, because the other hosts
+      cannot reproduce the behavior being fixed; quirks established by such measurement
+      MUST be recorded in the repository documentation. The enforcement test gains two
+      clauses: a platform-specific fix without a green run on the affected platform is
+      a failing gate, and a single-OS divergence closed on the strength of an emulation
+      alone is a review rejection. The rest of Principle VI (two native ports, the
+      conformance suite, the three-OS matrix gate, byte-identical outputs, interpreter
+      minimums) is unchanged.
+Rationale: surfaced by a real defect. Fifteen conformance scenarios diverged on
+windows-latest only (bash=0d pwsh=0a — the Bash port wrote CRLF on every line it
+authored). A faithful emulation — a stub jq on PATH appending CR exactly as jq.exe's
+text-mode stdout does — passed the entire corpus while the real runner kept failing,
+and three plausible Windows hypotheses (checkout line endings, cygpath -w spelling,
+bash version) were each disproved by measurement on the runner. The root cause was
+measurable only there: the MSYS bash pattern matcher lets a CRLF inside a glob pattern
+match a bare LF, so the line-ending detector counted every LF as a CRLF and called
+every LF host CRLF (fixed by the CR-by-CR walk _ms_count_crlf in
+scripts/bash/engine/managed_section.sh, proven by a green probe run; quirks catalog in
+docs/10-windows-portability.md; probe loop in .github/workflows/windows-conformance.yml).
+The rule generalizes the method that worked: a model of Windows is not Windows, and a
+fix claimed without a run on the affected platform is a hypothesis, not a fix.
+Added sections: none
+Removed sections: none
+Templates: re-verified — no template changes required
+  - ✅ .specify/templates/plan-template.md — no reference to Principle VI wording
+  - ✅ .specify/templates/spec-template.md — no reference to Principle VI wording
+  - ✅ .specify/templates/tasks-template.md — no reference to Principle VI wording
+  - ✅ .specify/templates/checklist-template.md — no changes required
+Follow-up TODOs: none
+
+Prior report (1.1.0)
+--------------------
 Version change: 1.0.1 → 1.1.0 (MINOR — materially expanded guidance: one new rule added
 to an existing principle. No principle added, removed, renumbered, or redefined; nothing
 existing weakened or restated.)
@@ -255,6 +296,16 @@ single portable runtime.
   inside each implementation; any output that crosses platforms (files written into
   the repository, run summaries, the neutral interchange document) MUST be
   byte-identical between the two implementations.
+- **Measurement over emulation**: a divergence that manifests on only one operating
+  system MUST be diagnosed by measurement on a real runner of that OS — never by
+  emulating its toolchain on another host. An emulation can pass where the real host
+  fails; only the real host's answer counts. A platform-specific fix is unproven until
+  a run on the affected platform is green: for a single-OS defect, the conformance
+  suite on that OS's runner IS the failing test that Principle XIII requires first,
+  because the other hosts cannot reproduce the behavior being fixed. Every host quirk
+  established by such measurement MUST be recorded in the repository documentation
+  (the Windows catalog lives in `docs/10-windows-portability.md`) so the next feature
+  inherits the measurement instead of rediscovering the divergence.
 - The Bash implementation MUST declare its minimum Bash version and check it as an
   explicit prerequisite before any other action; the PowerShell implementation MUST
   declare and check PowerShell 7+ the same way. A host below the declared minimum
@@ -271,7 +322,9 @@ failing on the other, is a failing gate; a run on a host below the declared mini
 shell version must fail before any Jira interaction with a named, remediable error;
 the installation documentation states each implementation's minimum interpreter version
 and, for macOS, that the OS-shipped Bash does not qualify; the three-OS matrix green is
-a merge gate.
+a merge gate; a platform-specific fix merged without a green run on the affected
+platform is a failing gate, and a single-OS divergence closed on the strength of an
+emulation alone is a review rejection.
 
 ### VII. No Hard-Coded Assumptions About the Jira Workflow
 
@@ -506,4 +559,4 @@ whose review requires verbal explanations to be understood fails this principle.
 - Every PR review verifies compliance with all sixteen principles; any deviation MUST
   be justified in the plan's "Complexity Tracking" section or the PR is rejected.
 
-**Version**: 1.1.0 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-07-30
+**Version**: 1.2.0 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-08-02

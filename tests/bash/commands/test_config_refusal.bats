@@ -36,18 +36,11 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-@test "persists epic/task strategy and link type by logical name" {
-  run config_project_mapping COMP company_managed per_repo linked_story "blocks"
+@test "persists key and style by logical name" {
+  run config_project_mapping COMP company_managed
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.key' <<< "$(_refusal_summary)")" = "COMP" ]
-  [ "$(jq -r '.epic_strategy' <<< "$(_refusal_summary)")" = "per_repo" ]
-  [ "$(jq -r '.task_strategy' <<< "$(_refusal_summary)")" = "linked_story" ]
-  [ "$(jq -r '.link_type' <<< "$(_refusal_summary)")" = "blocks" ]
-}
-
-@test "refuses linked_story without a link type (exit 4)" {
-  run config_project_mapping TEAM team_managed per_feature linked_story
-  [ "$status" -eq 4 ]
+  [ "$(jq -r '.key' <<< "$output")" = "COMP" ]
+  [ "$(jq -r '.style' <<< "$output")" = "company_managed" ]
 }
 
 @test "the PowerShell port refuses the level-above-Epic identically (NFR-1)" {
@@ -91,8 +84,6 @@ _refusal_work() {
   {
     printf 'projects:\n'
     printf '  - key: TEAM\n'
-    printf '    epic_strategy: per_repo\n'
-    printf '    task_strategy: subtask\n'
     printf 'routing_default: TEAM\n'
   } > "${JIRA_CONFIG_DIR}/config.yml"
   unset SPEC_KIT_JIRA_BASE_URL

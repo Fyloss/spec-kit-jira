@@ -26,8 +26,12 @@ teardown() {
 
 _assert_jet_entry() {
   local localj="$1"
-  [ "$(jq -r '.resolved_ids.JET.issue_types["Récit"]' <<< "${localj}")" = "10004" ]
-  [ "$(jq -r '.resolved_ids.JET.issue_types["Story"]' <<< "${localj}")" = "10005" ]
+  # New list shape (008 T014a): issue_types is a list of
+  # {logical_name, id, hierarchy_level, subtask}, not a name-to-id map.
+  [ "$(jq -r '.resolved_ids.JET.issue_types[] | select(.logical_name=="Récit") | .id' <<< "${localj}")" = "10004" ]
+  [ "$(jq -r '.resolved_ids.JET.issue_types[] | select(.logical_name=="Story") | .id' <<< "${localj}")" = "10005" ]
+  [ "$(jq -r '.resolved_ids.JET.child_type.logical_name' <<< "${localj}")" = "Récit" ]
+  [ "$(jq -r '.resolved_ids.JET.parent_type.logical_name' <<< "${localj}")" = "Chantier" ]
   [ "$(jq -r '.resolved_ids.JET.priorities["Faible"]' <<< "${localj}")" = "4" ]
   [ "$(jq -r '.resolved_ids.JET.priorities["Élevée"]' <<< "${localj}")" = "1" ]
   [ "$(jq -r '.resolved_ids.JET.priorities["Приоритет"]' <<< "${localj}")" = "2" ]

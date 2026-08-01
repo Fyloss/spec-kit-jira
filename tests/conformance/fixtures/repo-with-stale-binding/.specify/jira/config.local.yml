@@ -1,0 +1,18 @@
+# Machine-owned resolved identifiers (gitignored in a real repository;
+# committed here only as a fixture). Deliberately left in the OLD shape
+# (issue_types as a name-to-id map, no hierarchy_level, no subtask, no
+# child_type, no parent_type) — this is the subject of T015/T016, and MUST
+# NOT be migrated to the new list shape (tasks.md T014a).
+resolved_ids:
+  STALE:
+    style: company_managed
+    issue_types:
+      Epic: "10001"
+      Story: "10004"
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"
+    estimation_field_id: "customfield_20011"

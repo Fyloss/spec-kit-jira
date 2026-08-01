@@ -22,7 +22,9 @@ Import-Module (Join-Path $PSScriptRoot '../../engine/ManagedSection.psm1') -Forc
 Import-Module (Join-Path $PSScriptRoot 'PrivacyGuard.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Client.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Ticket.psm1') -Force # Get-JiraCreateFieldsBase — the shared creation-fields builder (research R3)
-Import-Module (Join-Path $PSScriptRoot '../../engine/StoryMarker.psm1') -Force # R5 steps 4/6 — mark `creating`, stamp + record per ticket
+Import-Module (Join-Path $PSScriptRoot '../../engine/MarkerSplice.psm1') -Force # Write-JiraMarkerSpliceFile — a nested import inside StoryMarker.psm1 is not enough
+Import-Module (Join-Path $PSScriptRoot '../../engine/StoryMarker.psm1') -Force -Global # R5 steps 4/6 — mark `creating`, stamp + record per ticket
+Import-Module (Join-Path $PSScriptRoot '../../engine/SpecMarker.psm1') -Force # the parent marker's same splice (Phase 5, US2)
 Import-Module (Join-Path $PSScriptRoot 'Identity.psm1') -Force # stamp the identity marker on each created ticket (R5 step 6)
 
 function Get-JiraPlanProp {
@@ -38,10 +40,18 @@ function Get-JiraPlanProp {
 function Get-JiraPlanWriteSet {
     <#
     .SYNOPSIS
-      Resolve the validated neutral document into an ordered action set. Mirror of
-      plan_writes (US3, T058). Each story becomes a create OR an update, priority
-      resolved by logical name (FR-017), estimation written on CREATE ONLY
-      (FR-018). No Jira mutation happens here.
+      Resolve the validated neutral document into an ordered write plan. Mirror of
+      plan_writes (US3, T058; Phase 5, US2, T072, R7). Each story becomes a create
+      OR an update, priority resolved by logical name (FR-017), estimation written
+      on CREATE ONLY (FR-018). No Jira mutation happens here.
+
+      Returns {parent, stories} (data-model.md §6): `parent` is $null when a
+      recognised parent's bridge-owned content already matches (zero churn); a PUT
+      when it differs; a POST — carrying local_id and role:"parent" — when no
+      parent is yet recognised. Every STORY creation carries the literal
+      placeholder fields.parent.key = "<resolved at apply time>", resolved by
+      Invoke-JiraApplyWriteSetWithRecognition once the parent's real key is known.
+      An update never re-touches the parent link.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $NeutralDocJson, [Parameter(Mandatory)] [string] $PlanContextJson)
@@ -83,16 +93,19 @@ function Get-JiraPlanWriteSet {
                 throw "plan_writes: refusing to assemble a creation for `"$sid`" with no project or issue type (zero writes)"
             }
             # CREATE: the shared mandatory base (research R3, FR-025) + the
-            # optional attributes. A bridge-created ticket owns its whole
-            # description (no delimiter, FR-040).
+            # optional attributes + the parent-key placeholder (T072/T073),
+            # resolved once the parent's create response is read. A
+            # bridge-created ticket owns its whole description (no delimiter,
+            # FR-040).
             $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $title -IssueTypeId $storyType | ConvertFrom-Json
             $fields = [ordered]@{}
             foreach ($p in $baseFields.PSObject.Properties) { $fields[$p.Name] = $p.Value }
             $fields['description'] = $adf
+            $fields['parent'] = [ordered]@{ key = '<resolved at apply time>' }
             if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
             $estValue = Get-JiraPlanProp $story 'estimation'
             if ($estId -ne '' -and $null -ne $estValue) { $fields[$estId] = $estValue }
-            $actions.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue"; body = [ordered]@{ fields = $fields }; local_id = $sid })
+            $actions.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue"; body = [ordered]@{ fields = $fields }; local_id = $sid; role = 'story' })
         }
         else {
             # UPDATE: content + priority; no project or issuetype is required
@@ -110,10 +123,98 @@ function Get-JiraPlanWriteSet {
                 $fields['description'] = $adf
             }
             if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
-            $actions.Add([ordered]@{ method = 'PUT'; url = "$base/rest/api/3/issue/$ticket"; body = [ordered]@{ fields = $fields } })
+
+            # Parent-link correction (T109): a child ALREADY linked to a
+            # parent (never a flat mirror carrying none — that is Out of
+            # Scope, "no migration") whose current parent disagrees with the
+            # resolved one is re-linked. The resolved key is either already
+            # known (a recognised parent) or, when the parent is being
+            # created this same run, filled in later by the same
+            # "<resolved at apply time>" placeholder every story creation
+            # already uses (Invoke-JiraApplyWritesWithRecognition step 11).
+            $ticketParents = Get-JiraPlanProp $ctx 'ticket_parents'
+            $curParent = [string](Get-JiraPlanProp $ticketParents $sid)
+            if ($curParent -ne '') {
+                $targetParent = [string](Get-JiraPlanProp $ctx 'parent_key')
+                if ($targetParent -ne '') {
+                    if ($curParent -ne $targetParent) { $fields['parent'] = [ordered]@{ key = $targetParent } }
+                }
+                else {
+                    $fields['parent'] = [ordered]@{ key = '<resolved at apply time>' }
+                }
+            }
+
+            $actions.Add([ordered]@{ method = 'PUT'; url = "$base/rest/api/3/issue/$ticket"; body = [ordered]@{ fields = $fields }; role = 'story' })
         }
     }
-    return (ConvertTo-JiraJsonValue $actions)
+
+    $parent = Get-JiraPlanWriteSetParent -DocObject $doc -CtxObject $ctx -Base $base
+    return (ConvertTo-JiraJsonValue ([ordered]@{ parent = $parent; stories = $actions }))
+}
+
+function Get-JiraPlanWriteSetParent {
+    <#
+    .SYNOPSIS
+      The parent half of Get-JiraPlanWriteSet's return shape (Phase 5, US2,
+      T072/T076). Mirror of _plan_writes_parent.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $DocObject, [Parameter(Mandatory)] $CtxObject, [Parameter(Mandatory)] [string] $Base)
+    $doc = $DocObject
+    $ctx = $CtxObject
+    $parentType = [string](Get-JiraPlanProp $ctx 'parent_type_id')
+    $project = [string](Get-JiraPlanProp (Get-JiraPlanProp $doc 'routing') 'project_key')
+    $epic = Get-JiraPlanProp $doc 'epic'
+    $epicTitle = [string](Get-JiraPlanProp $epic 'title')
+    $epicLocalId = [string](Get-JiraPlanProp $epic 'local_id')
+    $epicJson = ConvertTo-JiraJsonValue $epic
+
+    $epicAdf = ConvertTo-JiraAdfDocument -ContentJson $epicJson | ConvertFrom-Json -Depth 100
+
+    $parentKey = [string](Get-JiraPlanProp $ctx 'parent_key')
+
+    if ($parentKey -eq '') {
+        # CREATE: no parent recognised yet.
+        $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $epicTitle -IssueTypeId $parentType | ConvertFrom-Json
+        $fields = [ordered]@{}
+        foreach ($p in $baseFields.PSObject.Properties) { $fields[$p.Name] = $p.Value }
+        $fields['description'] = $epicAdf
+        return [ordered]@{ method = 'POST'; url = "$Base/rest/api/3/issue"; body = [ordered]@{ fields = $fields }; local_id = $epicLocalId; role = 'parent' }
+    }
+
+    # A recognised parent: compare its bridge-owned content before planning a
+    # write (T076) — a human-origin parent's description is rendered through
+    # the SAME managed-panel splice a human-origin story uses (FR-039's
+    # rule, extended to the parent), so its prose above the panel survives,
+    # and is then compared on its managed section alone.
+    $current = Get-JiraPlanProp $ctx 'parent_current'
+    $origin = [string](Get-JiraPlanProp $ctx 'parent_origin')
+
+    if ($origin -ne '' -and $origin -ne 'bridge') {
+        $existing = Get-JiraPlanProp $current 'description'
+        $existingJson = if ($null -eq $existing) { '{}' } else { ConvertTo-JiraJsonValue $existing }
+        $epicAdf = ConvertTo-JiraManagedAdfDocument -ContentJson $epicJson -Origin $origin -ExistingJson $existingJson | ConvertFrom-Json -Depth 100
+    }
+    $desiredFields = [ordered]@{ summary = $epicTitle; description = $epicAdf }
+
+    if ($null -eq $current) {
+        $status = 'changed'
+    }
+    elseif ($origin -ne '' -and $origin -ne 'bridge') {
+        $curDesc = Get-JiraPlanProp $current 'description'; if ($null -eq $curDesc) { $curDesc = [ordered]@{} }
+        $newDesc = $desiredFields['description']
+        $descSt = Get-JiraManagedDescriptionStatus -CurrentDescJson (ConvertTo-JiraJsonValue $curDesc) -NewDescJson (ConvertTo-JiraJsonValue $newDesc)
+        $curRest = [ordered]@{}; foreach ($p in $current.PSObject.Properties) { if ($p.Name -ne 'description') { $curRest[$p.Name] = $p.Value } }
+        $desRest = [ordered]@{}; foreach ($k in $desiredFields.Keys) { if ($k -ne 'description') { $desRest[$k] = $desiredFields[$k] } }
+        $otherSt = Get-JiraIdempotentFieldStatus -CurrentFieldsJson (ConvertTo-JiraJsonValue $curRest) -DesiredFieldsJson (ConvertTo-JiraJsonValue $desRest)
+        $status = if ($descSt -eq 'unchanged' -and $otherSt -eq 'unchanged') { 'unchanged' } else { 'changed' }
+    }
+    else {
+        $status = Get-JiraIdempotentFieldStatus -CurrentFieldsJson (ConvertTo-JiraJsonValue $current) -DesiredFieldsJson (ConvertTo-JiraJsonValue $desiredFields)
+    }
+
+    if ($status -eq 'unchanged') { return $null }
+    return [ordered]@{ method = 'PUT'; url = "$Base/rest/api/3/issue/$parentKey"; body = [ordered]@{ fields = $desiredFields }; role = 'parent' }
 }
 
 function Get-JiraManagedDescriptionStatus {
@@ -320,71 +421,144 @@ function Invoke-JiraApplyWriteSetWithRecognition {
     <#
     .SYNOPSIS
       Mirror of apply_writes_with_recognition. Guards every payload (US11,
-      unchanged), then adds R5 steps 4 and 6: every story whose action is a
-      creation (`local_id` present on a `POST .../issue` action —
-      Get-JiraPlanWriteSet stamps this) is marked `creating` in $SpecFile in
-      ONE splice, immediately after the guard and before the first create
-      (step 4); then, for each ticket actually created, its identity marker
-      is stamped and its `creating` mark is replaced with the recorded key
-      IN $SpecFile — per ticket, IMMEDIATELY, never batched (step 6).
+      unchanged), then adds R5 steps 4 and 6, and Phase 5/US2's parent-first
+      ordering (contracts/parent-marker.md "Ordering within one run", steps
+      8-11). $PlanJson is Get-JiraPlanWriteSet's {parent, stories} shape.
+
+      The parent (when present) is performed FIRST; its response key is
+      read before any story is written, and every story creation's
+      fields.parent.key placeholder ("<resolved at apply time>") is
+      resolved to that key — the just-created key, or $KnownParentKey (the
+      plan context's already-known parent_key) when the parent was
+      unchanged or updated rather than created. Every story whose action is
+      a creation is marked `creating` in $SpecFile, in the SAME splice that
+      marks the parent `creating` (step 9); then, for each ticket actually
+      created (parent or story), its identity marker is stamped and its
+      `creating` mark is replaced with the recorded key IN $SpecFile — per
+      ticket, IMMEDIATELY, never batched (step 6/11).
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)] [string] $ActionsJson,
+        [Parameter(Mandatory)] [string] $PlanJson,
         [Parameter(Mandatory)] [string] $SpecRefJson,
         [Parameter(Mandatory)] [string] $SpecFile,
+        [string] $KnownParentKey = '',
         [string] $ExtraKnownCoordinatesJson = '[]'
     )
     $coords = Get-JiraApplyKnownCoordinate -ExtraJson $ExtraKnownCoordinatesJson
     $allow = if ($env:SPEC_KIT_JIRA_ALLOWLIST) { $env:SPEC_KIT_JIRA_ALLOWLIST } else { '[]' }
-    $actions = @($ActionsJson | ConvertFrom-Json -Depth 100)
+    $plan = $PlanJson | ConvertFrom-Json -Depth 100
+    $parent = Get-JiraPlanProp $plan 'parent'
+    $stories = @()
+    $storiesProp = Get-JiraPlanProp $plan 'stories'
+    if ($null -ne $storiesProp) { $stories = @($storiesProp) }
 
-    # (1) Pre-write gate — unchanged: scan every payload before writing anything.
-    foreach ($a in $actions) {
+    # (1) Pre-write gate — scan every payload, parent then stories, before
+    # writing anything.
+    if ($null -ne $parent) {
+        $bodyObj = Get-JiraPlanProp $parent 'body'
+        $bodyText = if ($null -eq $bodyObj) { '{}' } else { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 }
+        $code = Test-JiraPrivacyBlock -Payload $bodyText -KnownCoordinatesJson $coords -AllowlistJson $allow
+        if ($code -ne 0) { return [int]$code }
+    }
+    foreach ($a in $stories) {
         $bodyObj = if ($a.PSObject.Properties.Name -contains 'body') { $a.body } else { $null }
         $bodyText = if ($null -eq $bodyObj) { '{}' } else { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 }
         $code = Test-JiraPrivacyBlock -Payload $bodyText -KnownCoordinatesJson $coords -AllowlistJson $allow
         if ($code -ne 0) { return [int]$code }
     }
 
-    # (2) R5 step 4 — mark every planned creation `creating`, one splice.
+    # (2) R5 step 4 / contract step 9 — mark the parent (when it is a
+    # creation) and every planned story creation `creating`, in ONE splice.
+    $current = if (Test-Path -LiteralPath $SpecFile) { Get-Content -Raw -LiteralPath $SpecFile } else { '' }
+    if ($null -eq $current) { $current = '' }
+    $newContent = $current
+    $parentLocalId = ''
+    if ($null -ne $parent -and $parent.method -eq 'POST') {
+        $parentLocalId = [string](Get-JiraPlanProp $parent 'local_id')
+        if ($parentLocalId -ne '') {
+            $newContent = Set-JiraSpecMarkerMarkCreating -Text $newContent -Id $parentLocalId
+        }
+    }
     $creatingIds = [System.Collections.Generic.List[string]]::new()
-    foreach ($a in $actions) {
+    foreach ($a in $stories) {
         $lid = [string](Get-JiraPlanProp $a 'local_id')
         if ($a.method -eq 'POST' -and ([string]$a.url).EndsWith('/issue') -and $lid -ne '') { $creatingIds.Add($lid) }
     }
     if ($creatingIds.Count -gt 0) {
-        $current = if (Test-Path -LiteralPath $SpecFile) { Get-Content -Raw -LiteralPath $SpecFile } else { '' }
-        if ($null -eq $current) { $current = '' }
-        $newContent = Set-JiraStoryMarkerMarkCreating -Text $current -IdsJson (ConvertTo-JiraJsonValue $creatingIds)
-        Write-JiraStoryMarkerFile -Path $SpecFile -NewContent $newContent | Out-Null
+        $newContent = Set-JiraStoryMarkerMarkCreating -Text $newContent -IdsJson (ConvertTo-JiraJsonValue $creatingIds)
+    }
+    if ($newContent -ne $current) {
+        Write-JiraMarkerSpliceFile -Path $SpecFile -NewContent $newContent | Out-Null
     }
 
-    # (3) Write pass, in order; a CREATE stamps + records IMMEDIATELY (step 6).
+    # (3) Write pass — the parent FIRST (step 10): its response key is read
+    # before the first story action is scanned for writing.
     $worst = 0
-    foreach ($a in $actions) {
-        $bodyObj = if ($a.PSObject.Properties.Name -contains 'body') { $a.body } else { $null }
+    $parentKey = $KnownParentKey
+    if ($null -ne $parent) {
+        $bodyObj = Get-JiraPlanProp $parent 'body'
         if ($null -ne $bodyObj) {
             $bodyText = ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100
-            $r = Invoke-JiraRequest -Method $a.method -Url $a.url -Body $bodyText
+            $r = Invoke-JiraRequest -Method $parent.method -Url $parent.url -Body $bodyText
         }
         else {
-            $r = Invoke-JiraRequest -Method $a.method -Url $a.url
+            $r = Invoke-JiraRequest -Method $parent.method -Url $parent.url
+        }
+        if ([int]$r.ExitCode -gt $worst) { $worst = [int]$r.ExitCode }
+        if ([int]$r.ExitCode -ge 2) { return $worst }
+        if ($parent.method -eq 'POST') {
+            $respObj = $null
+            # A body that fails to parse is not fatal: $respObj stays $null
+            # and the caller below treats a missing key as "not recorded".
+            try { $respObj = $r.Body | ConvertFrom-Json -Depth 100 } catch { $null = $_ }
+            $parentKey = if ($respObj) { [string](Get-JiraPlanProp $respObj 'key') } else { '' }
+            if ($parentKey -ne '' -and $parentLocalId -ne '') {
+                Set-JiraIdentity -IssueKey $parentKey -SpecRefJson $SpecRefJson -Origin 'bridge' -Role 'parent' | Out-Null
+                $cur = if (Test-Path -LiteralPath $SpecFile) { Get-Content -Raw -LiteralPath $SpecFile } else { '' }
+                if ($null -eq $cur) { $cur = '' }
+                $new = Set-JiraSpecMarkerRecordTicket -Text $cur -Id $parentLocalId -Key $parentKey
+                Write-JiraMarkerSpliceFile -Path $SpecFile -NewContent $new | Out-Null
+            }
+        }
+    }
+
+    # (4) Story writes (step 11) — the parent-key placeholder resolved to
+    # the key just created, or the already-known parent_key when the
+    # parent was recognised (unchanged or updated) rather than created.
+    foreach ($a in $stories) {
+        $action = $a
+        if ($parentKey -ne '') {
+            $fields = Get-JiraPlanProp (Get-JiraPlanProp $action 'body') 'fields'
+            $parentField = Get-JiraPlanProp $fields 'parent'
+            if ($null -ne $parentField -and [string](Get-JiraPlanProp $parentField 'key') -eq '<resolved at apply time>') {
+                $parentField.key = $parentKey
+            }
+        }
+        $bodyObj = if ($action.PSObject.Properties.Name -contains 'body') { $action.body } else { $null }
+        if ($null -ne $bodyObj) {
+            $bodyText = ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100
+            $r = Invoke-JiraRequest -Method $action.method -Url $action.url -Body $bodyText
+        }
+        else {
+            $r = Invoke-JiraRequest -Method $action.method -Url $action.url
         }
         if ([int]$r.ExitCode -gt $worst) { $worst = [int]$r.ExitCode }
         if ([int]$r.ExitCode -ge 2) { return $worst }
 
-        if ($a.method -eq 'POST' -and ([string]$a.url).EndsWith('/issue')) {
+        if ($action.method -eq 'POST' -and ([string]$action.url).EndsWith('/issue')) {
             $respObj = $null
-            try { $respObj = $r.Body | ConvertFrom-Json -Depth 100 } catch { }
+            # A body that fails to parse is not fatal: $respObj stays $null
+            # and the caller below treats a missing key as "not recorded".
+            try { $respObj = $r.Body | ConvertFrom-Json -Depth 100 } catch { $null = $_ }
             $key = if ($respObj) { [string](Get-JiraPlanProp $respObj 'key') } else { '' }
-            $localId = [string](Get-JiraPlanProp $a 'local_id')
+            $localId = [string](Get-JiraPlanProp $action 'local_id')
             if ($key -ne '' -and $localId -ne '') {
-                Set-JiraIdentity -IssueKey $key -SpecRefJson $SpecRefJson -Origin 'bridge' -Story $localId | Out-Null
+                Set-JiraIdentity -IssueKey $key -SpecRefJson $SpecRefJson -Origin 'bridge' -Story $localId -Role 'story' | Out-Null
                 $cur = if (Test-Path -LiteralPath $SpecFile) { Get-Content -Raw -LiteralPath $SpecFile } else { '' }
                 if ($null -eq $cur) { $cur = '' }
                 $new = Set-JiraStoryMarkerRecordTicket -Text $cur -Id $localId -Key $key
-                Write-JiraStoryMarkerFile -Path $SpecFile -NewContent $new | Out-Null
+                Write-JiraMarkerSpliceFile -Path $SpecFile -NewContent $new | Out-Null
             }
         }
     }

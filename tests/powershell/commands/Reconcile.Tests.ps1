@@ -14,7 +14,6 @@ BeforeAll {
     # "Precedence"); the fixture's config.local.yml supplies the persisted
     # binding this suite's creation-context assertions now resolve through.
     $env:SPEC_KIT_JIRA_PROJECT_KEY = 'TEST'
-    $env:SPEC_KIT_JIRA_EPIC_STRATEGY = 'per_repo'
     $env:JIRA_CONFIG_DIR = Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-reconcile-legacy/.specify/jira'
     $env:SPEC_KIT_JIRA_PLAN_CONTEXT = $null
 
@@ -41,16 +40,18 @@ BeforeAll {
 Describe 'Invoke-JiraReconcile (dry-run)' {
     It 'plans a create with the story title and a rich ADF description' {
         $out = Invoke-Captured @('reconcile', '--dry-run', '--json', $script:SpecWith) | ConvertFrom-Json
-        $out.actions[0].method | Should -Be 'POST'
-        $out.actions[0].body.fields.summary | Should -Be 'The core story'
-        $out.actions[0].body.fields.description.type | Should -Be 'doc'
-        @($out.actions[0].body.fields.description.content | Where-Object { $_.type -eq 'panel' }).Count | Should -Be 1
+        # actions[0] is the parent (Phase 5, US2); the story creation follows it.
+        $out.actions[0].role | Should -Be 'parent'
+        $out.actions[1].method | Should -Be 'POST'
+        $out.actions[1].body.fields.summary | Should -Be 'The core story'
+        $out.actions[1].body.fields.description.type | Should -Be 'doc'
+        @($out.actions[1].body.fields.description.content | Where-Object { $_.type -eq 'panel' }).Count | Should -Be 1
     }
 
     It 'yields a non-empty description for a spec with no ## Summary (SC-002)' {
         $out = Invoke-Captured @('reconcile', '--dry-run', '--json', $script:SpecNoSummary) | ConvertFrom-Json
-        $out.actions[0].body.fields.summary | Should -Be 'Only A Title'
-        @($out.actions[0].body.fields.description.content | Where-Object { $_.type -eq 'paragraph' }).Count | Should -BeGreaterOrEqual 1
+        $out.actions[1].body.fields.summary | Should -Be 'Only A Title'
+        @($out.actions[1].body.fields.description.content | Where-Object { $_.type -eq 'paragraph' }).Count | Should -BeGreaterOrEqual 1
     }
 
     It 'never re-sends the estimation on update (FR-018)' {
@@ -58,18 +59,18 @@ Describe 'Invoke-JiraReconcile (dry-run)' {
         # (research R4) rather than the retired positional "s1", since a
         # marker-less story is now assigned a fresh identifier before parsing.
         $env:SPEC_KIT_JIRA_ID_SOURCE = '1111111111111111'
-        $env:SPEC_KIT_JIRA_PLAN_CONTEXT = '{"estimation_field_id":"customfield_30044","tickets":{"1111111111111111":"ABC-1"}}'
+        $env:SPEC_KIT_JIRA_PLAN_CONTEXT = '{"estimation_field_id":"customfield_30044","tickets":{"1111111111111111":"ABC-1"},"parent_type_id":"10101","parent_local_id":"aaaaaaaaaaaaaaaa"}'
         try {
             $out = Invoke-Captured @('reconcile', '--dry-run', '--json', $script:SpecWith) | ConvertFrom-Json
-            $out.actions[0].method | Should -Be 'PUT'
-            $out.actions[0].body.fields.PSObject.Properties.Name | Should -Not -Contain 'customfield_30044'
+            $out.actions[1].method | Should -Be 'PUT'
+            $out.actions[1].body.fields.PSObject.Properties.Name | Should -Not -Contain 'customfield_30044'
         }
         finally { $env:SPEC_KIT_JIRA_PLAN_CONTEXT = $null; $env:SPEC_KIT_JIRA_ID_SOURCE = $null }
     }
 
     It 'reports host-relative action urls (no coordinate leaks)' {
         $out = Invoke-Captured @('reconcile', '--dry-run', '--json', $script:SpecWith) | ConvertFrom-Json
-        $out.actions[0].url | Should -Be '/rest/api/3/issue'
+        $out.actions[1].url | Should -Be '/rest/api/3/issue'
     }
 
     It 'resolves a bare relative spec filename from the current directory (NFR-1)' {
@@ -80,7 +81,7 @@ Describe 'Invoke-JiraReconcile (dry-run)' {
         try {
             $out = Invoke-Captured @('reconcile', '--dry-run', '--json', 'with.md') 2> $null | ConvertFrom-Json
             $script:code | Should -Be 0
-            $out.actions[0].body.fields.summary | Should -Be 'The core story'
+            $out.actions[1].body.fields.summary | Should -Be 'The core story'
         }
         finally { Pop-Location }
     }

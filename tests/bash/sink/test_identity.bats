@@ -106,3 +106,50 @@ SPEC_B='{"repo":"acme/app","spec_slug":"002-feature-b","folder":"specs/002-featu
   p="$(pwsh -NoProfile -Command "Import-Module '${PS_SINK}/Identity.psm1' -Force; [Console]::Out.Write((Get-JiraIdentityMarker -SpecRefJson '${SPEC_A}' -Origin 'human' -Story '7f3a9c1e40b2d85a'))")"
   [ "${b}" = "${p}" ]
 }
+
+# --- T053 [Phase 5, US2]: the identity marker gains `role` (data-model.md §4) -
+
+@test "T053: a marker with no role is the legacy shape (feature-ceremony / mentioned-ticket tickets, unchanged)" {
+  run identity_marker "${SPEC_A}" bridge-created
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("role")' <<< "$output")" = "false" ]
+}
+
+@test "T053: identity_marker records role=story alongside the story identifier" {
+  run identity_marker "${SPEC_A}" bridge-created "7f3a9c1e40b2d85a" "story"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.role' <<< "$output")" = "story" ]
+  [ "$(jq -r '.story' <<< "$output")" = "7f3a9c1e40b2d85a" ]
+}
+
+@test "T053: identity_marker records role=parent with no story field" {
+  run identity_marker "${SPEC_A}" bridge-created "" "parent"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.role' <<< "$output")" = "parent" ]
+  [ "$(jq -r 'has("story")' <<< "$output")" = "false" ]
+}
+
+@test "T053: a marker with no role is never treated as a parent by role-based recognition" {
+  # data-model.md §4: "A marker with no role was written before this
+  # feature... never as a parent." Pinned here as a property of the marker
+  # itself — recognition-level behaviour is asserted in test_recognition_parent.bats.
+  run identity_marker "${SPEC_A}" bridge-created
+  [ "$(jq -r '.role // "unrecognised"' <<< "$output")" != "parent" ]
+}
+
+@test "T053: identity_claimed_by_other still compares repo and spec_slug alone, regardless of role" {
+  local marker
+  marker="$(identity_marker "${SPEC_A}" bridge-created "" "parent")"
+  run identity_claimed_by_other "${marker}" "${SPEC_B}"
+  [ "$status" -eq 0 ]   # claimed by another spec
+  run identity_claimed_by_other "${marker}" "${SPEC_A}"
+  [ "$status" -ne 0 ]   # same spec => not claimed by other
+}
+
+@test "T053: the PowerShell port builds an identical marker with role (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local b p
+  b="$(identity_marker "${SPEC_A}" bridge-created "" "parent")"
+  p="$(pwsh -NoProfile -Command "Import-Module '${PS_SINK}/Identity.psm1' -Force; [Console]::Out.Write((Get-JiraIdentityMarker -SpecRefJson '${SPEC_A}' -Origin 'bridge-created' -Role 'parent'))")"
+  [ "${b}" = "${p}" ]
+}

@@ -21,7 +21,6 @@ setup() {
   export JIRA_NO_SLEEP=1
   export JIRA_MAX_ATTEMPTS=1
   unset SPEC_KIT_JIRA_PROJECT_KEY
-  unset SPEC_KIT_JIRA_EPIC_STRATEGY
   unset SPEC_KIT_JIRA_PLAN_CONTEXT
   unset SPEC_KIT_JIRA_HOOK_CONTEXT
 
@@ -80,8 +79,6 @@ _assert_fault_properties() {
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: COMP
 EOF
   cat > "${JIRA_CONFIG_DIR}/config.local.yml" <<'EOF'
@@ -96,8 +93,6 @@ EOF
 projects:
   - key: PROJ
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: PROJ
 EOF
   _assert_fault_properties "placeholder"
@@ -108,8 +103,6 @@ EOF
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: NOPE
 EOF
   _assert_fault_properties "not declared"
@@ -120,8 +113,6 @@ EOF
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: COMP
 EOF
   cat > "${JIRA_CONFIG_DIR}/config.local.yml" <<'EOF'
@@ -137,8 +128,6 @@ EOF
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: COMP
 EOF
   printf 'resolved_ids:\n  COMP:\n    this line has no delimiter\n' > "${JIRA_CONFIG_DIR}/config.local.yml"
@@ -155,8 +144,6 @@ EOF
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: COMP
 EOF
   cat > "${JIRA_CONFIG_DIR}/config.local.yml" <<'EOF'
@@ -171,8 +158,6 @@ EOF
 projects:
   - key: PROJ
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: PROJ
 EOF
   run cmd_reconcile reconcile --dry-run --json "${SPEC}"
@@ -182,8 +167,6 @@ EOF
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: NOPE
 EOF
   run cmd_reconcile reconcile --dry-run --json "${SPEC}"
@@ -193,8 +176,6 @@ EOF
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: COMP
 EOF
   rm -f "${JIRA_CONFIG_DIR}/config.local.yml"

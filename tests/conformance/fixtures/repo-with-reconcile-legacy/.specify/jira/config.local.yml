@@ -1,15 +1,40 @@
 # Minimal machine-owned binding for the pre-existing reconcile test suite
-# (T059, 002/003 features), migrated off the placeholder project key by T014b.
-# Both SPEC_KIT_JIRA_PROJECT_KEY and SPEC_KIT_JIRA_EPIC_STRATEGY are overridden
-# by that suite, so config.yml is never read; this file exists only so the
-# creation-context resolution this feature adds (US2) finds a persisted
-# binding for the overridden project key, exactly as it would for any bound
-# repository.
+# (T059, 002/003 features). SPEC_KIT_JIRA_PROJECT_KEY is overridden by that
+# suite; this file exists only so the creation-context resolution finds a
+# persisted binding for the overridden project key. New list shape
+# (data-model.md §3, tasks.md T014a). T014b decision: the pre-migration
+# binding declared only a base-level type (Story) — this suite exercises
+# ordinary successful reconcile, so it gains an Epic parent type at level 1
+# rather than becoming a no-parent-level refusal fixture.
 resolved_ids:
   TEST:
     style: company_managed
     issue_types:
-      Story: "10004"
+      - logical_name: "Epic"
+        id: "10003"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "10004"
+        hierarchy_level: "0"
+        subtask: false
+    child_type:
+      logical_name: "Story"
+      id: "10004"
+      source: derived
+    parent_type:
+      logical_name: "Epic"
+      id: "10003"
+      source: derived
+    required_fields:
+      "10003":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "10004":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "10004": true
     priorities:
       Highest: "1"
       Medium: "3"

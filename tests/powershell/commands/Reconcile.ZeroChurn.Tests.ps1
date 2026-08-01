@@ -24,7 +24,6 @@ BeforeAll {
     # Reconcile.Tests.ps1's SPEC_KIT_JIRA_PROJECT_KEY='TEST', which Pester
     # runs in the same process and never cleans up) must be cleared here.
     Remove-Item Env:\SPEC_KIT_JIRA_PROJECT_KEY -ErrorAction SilentlyContinue
-    Remove-Item Env:\SPEC_KIT_JIRA_EPIC_STRATEGY -ErrorAction SilentlyContinue
     Remove-Item Env:\SPEC_KIT_JIRA_SPEC_SLUG -ErrorAction SilentlyContinue
     Remove-Item Env:\SPEC_KIT_JIRA_REPO -ErrorAction SilentlyContinue
 
@@ -72,7 +71,7 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
         $r = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
         $r.counts.updated | Should -Be 1
         $r.counts.skipped | Should -Be 2
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-2' }).Count | Should -Be 1
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-3' }).Count | Should -Be 1
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 1
     }
 
@@ -86,7 +85,7 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
     It '--dry-run writes neither Jira nor spec.md' {
         $before = Get-Content -Raw -LiteralPath $script:Spec
         $r = Invoke-Captured @('reconcile', $script:Spec, '--dry-run', '--json') | ConvertFrom-Json
-        $r.counts.created | Should -Be 3
+        $r.counts.created | Should -Be 4
         (Get-Content -Raw -LiteralPath $script:Spec) | Should -Be $before
         @(Get-JiraMockCallLog -Mock $script:M).Count | Should -Be 0
     }

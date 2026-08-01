@@ -1,0 +1,15 @@
+# Team config for the mandatory-field conformance fixture (US3) — a
+# company-managed project whose parent type declares required custom fields
+# the bridge cannot supply (committable, credential-free).
+projects:
+  - key: PM
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: PM
+routing_default: PM

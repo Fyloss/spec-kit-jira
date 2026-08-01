@@ -21,7 +21,6 @@ setup() {
   # fixture's config.local.yml supplies the persisted binding this suite's
   # creation-context assertions (issue type, estimation) now resolve through.
   export SPEC_KIT_JIRA_PROJECT_KEY="TEST"
-  export SPEC_KIT_JIRA_EPIC_STRATEGY="per_repo"
   export JIRA_CONFIG_DIR="${ROOT}/tests/conformance/fixtures/repo-with-reconcile-legacy/.specify/jira"
   unset SPEC_KIT_JIRA_PLAN_CONTEXT
 
@@ -39,18 +38,20 @@ setup() {
 @test "dry-run plans a create with a ladder title and rich ADF description" {
   run cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.actions[0].method' <<< "$output")" = "POST" ]
-  [ "$(jq -r '.actions[0].body.fields.summary' <<< "$output")" = "The core story" ]
+  # actions[0] is the parent (Phase 5, US2); the story creation follows it.
+  [ "$(jq -r '.actions[0].role' <<< "$output")" = "parent" ]
+  [ "$(jq -r '.actions[1].method' <<< "$output")" = "POST" ]
+  [ "$(jq -r '.actions[1].body.fields.summary' <<< "$output")" = "The core story" ]
   # Non-empty structured description as an ADF doc with the Gherkin panel.
-  [ "$(jq -r '.actions[0].body.fields.description.type' <<< "$output")" = "doc" ]
-  [ "$(jq '[.actions[0].body.fields.description.content[] | select(.type=="panel")] | length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.actions[1].body.fields.description.type' <<< "$output")" = "doc" ]
+  [ "$(jq '[.actions[1].body.fields.description.content[] | select(.type=="panel")] | length' <<< "$output")" -eq 1 ]
 }
 
 @test "a spec with NO ## Summary still yields a non-empty description (SC-002)" {
   run cmd_reconcile reconcile --dry-run --json "${SPEC_NOSUMMARY}"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.actions[0].body.fields.summary' <<< "$output")" = "Only A Title" ]
-  [ "$(jq '[.actions[0].body.fields.description.content[] | select(.type=="paragraph")] | length' <<< "$output")" -ge 1 ]
+  [ "$(jq -r '.actions[1].body.fields.summary' <<< "$output")" = "Only A Title" ]
+  [ "$(jq '[.actions[1].body.fields.description.content[] | select(.type=="paragraph")] | length' <<< "$output")" -ge 1 ]
 }
 
 @test "an update never re-sends the estimation (FR-018)" {
@@ -58,17 +59,17 @@ setup() {
   # (research R4) rather than the retired positional "s1", since a
   # marker-less story is now assigned a fresh identifier before parsing.
   export SPEC_KIT_JIRA_ID_SOURCE="1111111111111111"
-  export SPEC_KIT_JIRA_PLAN_CONTEXT='{"estimation_field_id":"customfield_30044","tickets":{"1111111111111111":"ABC-1"}}'
+  export SPEC_KIT_JIRA_PLAN_CONTEXT='{"estimation_field_id":"customfield_30044","tickets":{"1111111111111111":"ABC-1"},"parent_type_id":"10101","parent_local_id":"aaaaaaaaaaaaaaaa"}'
   run cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.actions[0].method' <<< "$output")" = "PUT" ]
-  [ "$(jq 'has("customfield_30044") | not' <<< "$(jq -c '.actions[0].body.fields' <<< "$output")")" = "true" ]
+  [ "$(jq -r '.actions[1].method' <<< "$output")" = "PUT" ]
+  [ "$(jq 'has("customfield_30044") | not' <<< "$(jq -c '.actions[1].body.fields' <<< "$output")")" = "true" ]
 }
 
 @test "a create writes the estimation to the discovered field (FR-018)" {
-  export SPEC_KIT_JIRA_PLAN_CONTEXT='{"estimation_field_id":"customfield_30044","story_type_id":"10004"}'
+  export SPEC_KIT_JIRA_PLAN_CONTEXT='{"estimation_field_id":"customfield_30044","story_type_id":"10004","parent_type_id":"10101","parent_local_id":"aaaaaaaaaaaaaaaa"}'
   run cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}"
-  [ "$(jq -r '.actions[0].body.fields.customfield_30044' <<< "$output")" = "5" ]
+  [ "$(jq -r '.actions[1].body.fields.customfield_30044' <<< "$output")" = "5" ]
 }
 
 @test "an override equal to the shipped placeholder is refused, zero writes (004 FR-005)" {

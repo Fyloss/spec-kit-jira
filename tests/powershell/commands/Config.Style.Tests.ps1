@@ -21,8 +21,6 @@ BeforeAll {
         $lines.Add('projects:')
         $lines.Add("  - key: $Key")
         if ($Style) { $lines.Add("    style: $Style") }
-        $lines.Add('    epic_strategy: per_repo')
-        $lines.Add('    task_strategy: subtask')
         $lines.Add("routing_default: $Key")
         [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines -join "`n") + "`n"))
     }
@@ -91,7 +89,7 @@ Describe 'Config style resolution matrix' {
     It 'resolves ambiguity via --style with style_source operator' {
         Write-TestConfig 'AMBI'
         Start-TestMock '{"AMBI":"ambiguous"}'
-        $r = Invoke-ConfigCaptured @('config', '--style', 'AMBI=team_managed', '--json')
+        $r = Invoke-ConfigCaptured @('config', '--style', 'AMBI=team_managed', '--child-type', 'AMBI=Story', '--json')
         $r.ExitCode | Should -Be 0
         $local = Read-LocalBinding
         $local.resolved_ids.AMBI.style | Should -Be 'team_managed'
@@ -101,7 +99,7 @@ Describe 'Config style resolution matrix' {
     It 'resolves an ambiguous payload from a committed declaration as operator' {
         Write-TestConfig 'AMBI' 'team_managed'
         Start-TestMock '{"AMBI":"ambiguous"}'
-        $r = Invoke-ConfigCaptured @('config', '--json')
+        $r = Invoke-ConfigCaptured @('config', '--child-type', 'AMBI=Story', '--json')
         $r.ExitCode | Should -Be 0
         $local = Read-LocalBinding
         $local.resolved_ids.AMBI.style | Should -Be 'team_managed'
@@ -140,7 +138,7 @@ Describe 'Config style resolution matrix' {
     It 'reports operator provenance in the prose audit too (FR-003, T098)' {
         Write-TestConfig 'AMBI'
         Start-TestMock '{"AMBI":"ambiguous"}'
-        $r = Invoke-ConfigCaptured @('config', '--style', 'AMBI=team_managed')
+        $r = Invoke-ConfigCaptured @('config', '--style', 'AMBI=team_managed', '--child-type', 'AMBI=Story')
         $r.ExitCode | Should -Be 0
         $r.Out | Should -BeLike '*    AMBI: team_managed (operator)*'
     }

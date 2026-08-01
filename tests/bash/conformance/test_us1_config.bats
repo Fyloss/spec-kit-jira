@@ -43,7 +43,7 @@ teardown() {
   local localf="${TMP}/out-bash/workdir/.specify/jira/config.local.yml"
   # The resolved-id table lands in the gitignored local layer.
   source "${ROOT}/scripts/bash/lib/config.sh"
-  run jq -e '.resolved_ids.COMP.issue_types.Initiative == "10100"' <<< "$(config_yaml_to_json "${localf}")"
+  run jq -e '(.resolved_ids.COMP.issue_types[] | select(.logical_name=="Initiative") | .id) == "10100"' <<< "$(config_yaml_to_json "${localf}")"
   [ "$status" -eq 0 ]
   # The committed config.yml must be untouched by the run.
   run diff "${FIXTURE}/.specify/jira/config.yml" "${TMP}/out-bash/workdir/.specify/jira/config.yml"
@@ -63,9 +63,9 @@ teardown() {
   export JIRA_EMAIL="user@example.com" JIRA_API_TOKEN="RAWSECRETXYZ" JIRA_NO_SLEEP=1
   ENTRY="${ROOT}/scripts/bash/spec-kit-jira.sh"
 
-  ( cd "${WD}" && bash "${ENTRY}" config --json ) > "${TMP}/run1" 2>/dev/null
+  ( cd "${WD}" && bash "${ENTRY}" config --child-type COMP=Story --json ) > "${TMP}/run1" 2>/dev/null
   cp "${WD}/.specify/jira/config.local.yml" "${TMP}/local1"
-  ( cd "${WD}" && bash "${ENTRY}" config --json ) > "${TMP}/run2" 2>/dev/null
+  ( cd "${WD}" && bash "${ENTRY}" config --child-type COMP=Story --json ) > "${TMP}/run2" 2>/dev/null
   cp "${WD}/.specify/jira/config.local.yml" "${TMP}/local2"
   mock_stop
 

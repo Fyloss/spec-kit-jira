@@ -2,8 +2,8 @@
 # T052 [US3] — plan_writes content rules (FR-017, FR-018). The spec's P1/P2/P3
 # priority resolves to the project priority field BY LOGICAL NAME; the declared
 # estimation is written to the discovered estimation field ON CREATE ONLY and is
-# NEVER re-sent on update. plan_writes produces the neutral action set; the
-# PowerShell port emits an identical set (NFR-1).
+# NEVER re-sent on update. plan_writes produces the neutral write plan; the
+# PowerShell port emits an identical plan (NFR-1).
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
@@ -15,6 +15,9 @@ setup() {
 
 DOC='{
   "routing": {"project_key":"COMP"},
+  "epic": {"title":"The Epic", "local_id":"3f2a91c04b7e6d18",
+           "marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},
+           "description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},
   "stories": [
     {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},
      "acceptance_criteria":[{"given":["g"],"when":["w"],"then":["t"]}],
@@ -25,6 +28,8 @@ DOC='{
 CTX_CREATE='{
   "base_url":"https://mock",
   "story_type_id":"10002",
+  "parent_type_id":"10101",
+  "parent_local_id":"3f2a91c04b7e6d18",
   "priority_ids":{"P1":"1","P2":"2","P3":"3"},
   "estimation_field_id":"customfield_30044",
   "tickets":{}
@@ -33,6 +38,8 @@ CTX_CREATE='{
 CTX_UPDATE='{
   "base_url":"https://mock",
   "story_type_id":"10002",
+  "parent_type_id":"10101",
+  "parent_local_id":"3f2a91c04b7e6d18",
   "priority_ids":{"P1":"1","P2":"2","P3":"3"},
   "estimation_field_id":"customfield_30044",
   "tickets":{"s1":"ABC-1"}
@@ -41,29 +48,99 @@ CTX_UPDATE='{
 @test "create action maps the P1 priority to the project priority id (FR-017)" {
   run plan_writes "${DOC}" "${CTX_CREATE}"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.[0].method' <<< "$output")" = "POST" ]
-  [ "$(jq -r '.[0].body.fields.priority.id' <<< "$output")" = "1" ]
+  [ "$(jq -r '.stories[0].method' <<< "$output")" = "POST" ]
+  [ "$(jq -r '.stories[0].body.fields.priority.id' <<< "$output")" = "1" ]
 }
 
 @test "estimation is written on CREATE to the discovered field (FR-018)" {
   run plan_writes "${DOC}" "${CTX_CREATE}"
-  [ "$(jq -r '.[0].body.fields.customfield_30044' <<< "$output")" = "5" ]
+  [ "$(jq -r '.stories[0].body.fields.customfield_30044' <<< "$output")" = "5" ]
 }
 
 @test "the created story description carries the ADF panel (rich content)" {
   run plan_writes "${DOC}" "${CTX_CREATE}"
-  [ "$(jq -r '.[0].body.fields.description.type' <<< "$output")" = "doc" ]
-  [ "$(jq '[.[0].body.fields.description.content[] | select(.type=="panel")] | length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.stories[0].body.fields.description.type' <<< "$output")" = "doc" ]
+  [ "$(jq '[.stories[0].body.fields.description.content[] | select(.type=="panel")] | length' <<< "$output")" -eq 1 ]
 }
 
 @test "update action NEVER re-sends the estimation field (FR-018)" {
   run plan_writes "${DOC}" "${CTX_UPDATE}"
-  [ "$(jq -r '.[0].method' <<< "$output")" = "PUT" ]
-  [ "$(jq -r '.[0].url' <<< "$output")" = "https://mock/rest/api/3/issue/ABC-1" ]
+  [ "$(jq -r '.stories[0].method' <<< "$output")" = "PUT" ]
+  [ "$(jq -r '.stories[0].url' <<< "$output")" = "https://mock/rest/api/3/issue/ABC-1" ]
   # No estimation field on update.
-  [ "$(jq 'has("customfield_30044") | not' <<< "$(jq -c '.[0].body.fields' <<< "$output")")" = "true" ]
+  [ "$(jq 'has("customfield_30044") | not' <<< "$(jq -c '.stories[0].body.fields' <<< "$output")")" = "true" ]
   # Priority is still updated.
-  [ "$(jq -r '.[0].body.fields.priority.id' <<< "$output")" = "1" ]
+  [ "$(jq -r '.stories[0].body.fields.priority.id' <<< "$output")" = "1" ]
+}
+
+@test "T109: an update re-links a child whose current parent disagrees with the resolved one" {
+  local ctx='{
+    "base_url":"https://mock",
+    "story_type_id":"10002",
+    "priority_ids":{"P1":"1","P2":"2","P3":"3"},
+    "tickets":{"s1":"ABC-1"},
+    "ticket_parents":{"s1":"OLD-9"},
+    "parent_key":"NEW-1"
+  }'
+  run plan_writes "${DOC}" "${ctx}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.stories[0].method' <<< "$output")" = "PUT" ]
+  [ "$(jq -r '.stories[0].body.fields.parent.key' <<< "$output")" = "NEW-1" ]
+}
+
+@test "T109: an update leaves a child carrying NO parent untouched (Out of Scope, no migration)" {
+  local ctx='{
+    "base_url":"https://mock",
+    "story_type_id":"10002",
+    "priority_ids":{"P1":"1","P2":"2","P3":"3"},
+    "tickets":{"s1":"ABC-1"},
+    "parent_key":"NEW-1"
+  }'
+  run plan_writes "${DOC}" "${ctx}"
+  [ "$(jq -r '.stories[0].body.fields | has("parent")' <<< "$output")" = "false" ]
+}
+
+@test "T109: an update whose current parent already matches the resolved one adds no parent field" {
+  local ctx='{
+    "base_url":"https://mock",
+    "story_type_id":"10002",
+    "priority_ids":{"P1":"1","P2":"2","P3":"3"},
+    "tickets":{"s1":"ABC-1"},
+    "ticket_parents":{"s1":"NEW-1"},
+    "parent_key":"NEW-1"
+  }'
+  run plan_writes "${DOC}" "${ctx}"
+  [ "$(jq -r '.stories[0].body.fields | has("parent")' <<< "$output")" = "false" ]
+}
+
+@test "T109: an update whose target parent is not yet known (created this run) uses the apply-time placeholder" {
+  local ctx='{
+    "base_url":"https://mock",
+    "story_type_id":"10002",
+    "priority_ids":{"P1":"1","P2":"2","P3":"3"},
+    "tickets":{"s1":"ABC-1"},
+    "ticket_parents":{"s1":"OLD-9"}
+  }'
+  run plan_writes "${DOC}" "${ctx}"
+  [ "$(jq -r '.stories[0].body.fields.parent.key' <<< "$output")" = "<resolved at apply time>" ]
+}
+
+@test "T109: the PowerShell port produces an identical re-link update action (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local ctx b p
+  ctx='{
+    "base_url":"https://mock",
+    "story_type_id":"10002",
+    "priority_ids":{"P1":"1","P2":"2","P3":"3"},
+    "tickets":{"s1":"ABC-1"},
+    "ticket_parents":{"s1":"OLD-9"},
+    "parent_key":"NEW-1"
+  }'
+  b="$(plan_writes "${DOC}" "${ctx}")"
+  p="$(pwsh -NoProfile -Command "
+    Import-Module '${PS_SINK}/PlanApply.psm1' -Force
+    [Console]::Out.Write((Get-JiraPlanWriteSet -NeutralDocJson '$(printf '%s' "${DOC}" | jq -c .)' -PlanContextJson '$(printf '%s' "${ctx}" | jq -c .)'))")"
+  [ "${b}" = "${p}" ]
 }
 
 @test "the PowerShell port produces an identical create action set (NFR-1)" {

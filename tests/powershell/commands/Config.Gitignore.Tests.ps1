@@ -25,7 +25,7 @@ Describe 'Config gitignore effect' {
         $script:Work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
         New-Item -ItemType Directory -Path (Join-Path $Work '.specify/jira') -Force | Out-Null
         $env:JIRA_CONFIG_DIR = Join-Path $Work '.specify/jira'
-        $lines = @('projects:', '  - key: TEAM', '    epic_strategy: per_repo', '    task_strategy: subtask', 'routing_default: TEAM')
+        $lines = @('projects:', '  - key: TEAM', 'routing_default: TEAM')
         [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines -join "`n") + "`n"))
         $cfg = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString() + '.json')
         [System.IO.File]::WriteAllText($cfg, '{"projects":{"TEAM":"team"}}')

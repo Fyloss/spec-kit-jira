@@ -47,6 +47,17 @@ Describe 'Ticket sink' {
         $obj.summary | Should -Be 'invoice export'
     }
 
+    It 'tolerates an empty issue-type id — validation is the CALLER''s job (regression, Phase 5 US2)' {
+        # The parent's own creation path (PlanApply.psm1, Get-JiraPlanWriteSetParent)
+        # calls this builder before any mandatory-field gate exists (Phase 6,
+        # US3). A prior defect had these parameters reject an empty string at
+        # the binding level — a stricter behaviour bash's jq-based builder
+        # does not share (NFR-1).
+        { Get-JiraCreateFieldsBase -ProjectKey 'TEST' -Summary 'The Epic' -IssueTypeId '' -ErrorAction Stop } | Should -Not -Throw
+        $base = Get-JiraCreateFieldsBase -ProjectKey 'TEST' -Summary 'The Epic' -IssueTypeId ''
+        ($base | ConvertFrom-Json).issuetype.id | Should -Be ''
+    }
+
     It 'Get-JiraTicketCreateBody is built from Get-JiraCreateFieldsBase, unchanged (FR-025)' {
         $base = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'invoice export' -IssueTypeId '10201'
         $body = Get-JiraTicketCreateBody -ProjectKey 'IJT' -Summary 'invoice export' -StoryTypeId '10201'

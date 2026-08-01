@@ -1,2 +1,26 @@
-{"name":"us4-port-selection","description":"003 T043 [US4] — The two ports are interchangeable for the same input state (FR-013, Constitution VI). The install places no machine-wide executable, so the assistant selects the entry point from the host: `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` on macOS and Linux, `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1` on Windows. That only helps if the two produce the same outcome, which is what this scenario pins: over one fixture carrying the registry exactly as `specify extension add` writes it, both ports must report the same registered entries in the same hook_health object, reach the same bridge outcome, and leave a byte-identical repository tree — the registry included, since neither port may write it (FR-022). The harness runs the scenario through each port's own entry point, so the port selection the command documents describe is exercised rather than assumed.","mock":{"projects":{"PROJ":"company"}},"fixture":"tests/conformance/fixtures/repo-with-spec","argv":["reconcile","--json","specs/001-feature/spec.md"],"env":{"JIRA_EMAIL":"user@example.com","JIRA_API_TOKEN":"RAWSECRETXYZ","JIRA_NO_SLEEP":"1","SPEC_KIT_JIRA_SPEC_SLUG":"001-feature","SPEC_KIT_JIRA_REPO":"acme/app","SPEC_KIT_JIRA_PROJECT_KEY":"TEST","SPEC_KIT_JIRA_EXTENSIONS_YML":".specify/extensions.yml","SPEC_KIT_JIRA_PLAN_CONTEXT":"{\"story_type_id\":\"10002\",\"priority_ids\":{\"P1\":\"1\",\"P2\":\"2\",\"P3\":\"3\"},\"estimation_field_id\":\"customfield_30044\"}","SPEC_KIT_JIRA_EPIC_STRATEGY":"per_repo","SPEC_KIT_JIRA_ID_SOURCE":"1111111111111111"}}
-
+{
+  "name": "us4-port-selection",
+  "description": "003 T043 [US4] — The two ports are interchangeable for the same input state (FR-013, Constitution VI). The install places no machine-wide executable, so the assistant selects the entry point from the host: `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` on macOS and Linux, `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1` on Windows. That only helps if the two produce the same outcome, which is what this scenario pins: over one fixture carrying the registry exactly as `specify extension add` writes it, both ports must report the same registered entries in the same hook_health object, reach the same bridge outcome, and leave a byte-identical repository tree — the registry included, since neither port may write it (FR-022). The harness runs the scenario through each port's own entry point, so the port selection the command documents describe is exercised rather than assumed.",
+  "mock": {
+    "projects": {
+      "PROJ": "company"
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-spec",
+  "argv": [
+    "reconcile",
+    "--json",
+    "specs/001-feature/spec.md"
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-feature",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_PROJECT_KEY": "TEST",
+    "SPEC_KIT_JIRA_EXTENSIONS_YML": ".specify/extensions.yml",
+    "SPEC_KIT_JIRA_PLAN_CONTEXT": "{\"story_type_id\":\"10002\",\"priority_ids\":{\"P1\":\"1\",\"P2\":\"2\",\"P3\":\"3\"},\"estimation_field_id\":\"customfield_30044\"}",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111"
+  }
+}

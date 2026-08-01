@@ -89,11 +89,4 @@ Describe 'Routing resolution (US1)' {
         }
     }
 
-    It "epic strategy is taken from the resolved project's config declaration (FR-006)" {
-        Get-JiraReconcileEpicStrategy -ProjectKey 'COMP' -ConfigJson $script:Cfg | Should -Be 'per_feature'
-    }
-
-    It 'epic strategy falls back to per_repo when the project has none declared' {
-        Get-JiraReconcileEpicStrategy -ProjectKey 'NOPE' -ConfigJson $script:Cfg | Should -Be 'per_repo'
-    }
 }

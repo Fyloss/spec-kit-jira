@@ -1,0 +1,49 @@
+# Machine-owned resolved identifiers (gitignored in a real repository;
+# committed here only as a fixture). New list shape (data-model.md §3): level
+# 0 holds two candidates (ストーリー, Задача (QA)), so child_type is an
+# operator answer. Every logical_name is quoted, per feature 007 and FR-003b.
+resolved_ids:
+  NL:
+    style: company_managed
+    style_source: api
+    issue_types:
+      - logical_name: "エピック"
+        id: "10501"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "ストーリー"
+        id: "10502"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "Задача (QA)"
+        id: "10503"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "サブタスク"
+        id: "10504"
+        hierarchy_level: "-1"
+        subtask: true
+    child_type:
+      logical_name: "ストーリー"
+      id: "10502"
+      source: operator
+    parent_type:
+      logical_name: "エピック"
+      id: "10501"
+      source: derived
+    required_fields:
+      "10501":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "10502":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "10502": true
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"
+    estimation_field_id: null
