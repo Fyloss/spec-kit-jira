@@ -47,6 +47,7 @@ flowchart LR
 | 7 | [Configuration and secrets](07-configuration-and-secrets.md) | The three config layers and credential resolution |
 | 8 | [The safety model](08-safety-model.md) | Idempotency, recognition, drift, privacy guard, exit codes |
 | 9 | [Twin ports and quality gates](09-ports-and-quality.md) | Why there are two implementations and how they stay identical |
+| 10 | [Windows portability](10-windows-portability.md) | The measured windows-latest quirks and the probe loop that established them |
 
 ## The five rules that explain most of the design
 
