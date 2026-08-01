@@ -62,13 +62,22 @@ jobs:
             "mediaSingle"                    # ADF node name
             "bodiedExtension"                # ADF node name
           )
+          # Tokens that share the issue-key shape but name no Jira issue: this
+          # repository's own artifact labels (FR-011, NFR-004, SC-003, US-2,
+          # AC-1) and standard names (UTF-8, ISO-8601, SHA-256). They are erased
+          # from each line BEFORE the patterns are applied, rather than the line
+          # being skipped, so a real issue key sharing a line with one of them is
+          # still caught. Comments stay in scope: a comment naming a real issue
+          # key is Jira knowledge in the engine just the same (Constitution VIII).
+          neutral="(FR|NFR|SC|US|AC|UTF|ISO|SHA)-[0-9]+"
           violations=0
           for dir in \
             scripts/bash/engine \
             scripts/powershell/engine; do
             [ -d "${dir}" ] || continue
             for pat in "${patterns[@]}"; do
-              if grep -rnE "${pat}" "${dir}"; then
+              if hits="$(grep -rnE "${pat}" "${dir}" | sed -E "s/${neutral}//g" | grep -E "${pat}")"; then
+                printf '%s\n' "${hits}"
                 echo "::error::engine/ script contains a forbidden Atlassian identifier matching /${pat}/"
                 violations=1
               fi
