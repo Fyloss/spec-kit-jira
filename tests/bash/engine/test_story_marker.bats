@@ -8,6 +8,8 @@ setup() {
   PS_ENGINE="${ROOT}/scripts/powershell/engine"
   # shellcheck source=/dev/null
   source "${ENGINE_DIR}/story_marker.sh"
+  # shellcheck source=/dev/null
+  source "${ROOT}/tests/bash/helpers/mtime.bash"
 }
 
 # --- Identifier generation ---------------------------------------------------
@@ -166,11 +168,11 @@ setup() {
   local f; f="${BATS_TEST_TMPDIR}/spec.md"
   printf 'unchanged content' > "${f}"
   local before after
-  before="$(stat -f %m "${f}" 2> /dev/null || stat -c %Y "${f}")"
+  before="$(helper_file_mtime "${f}")"
   sleep 1.1
   run marker_splice_write_file "${f}" "unchanged content"
   [ "$output" = "unchanged" ]
-  after="$(stat -f %m "${f}" 2> /dev/null || stat -c %Y "${f}")"
+  after="$(helper_file_mtime "${f}")"
   [ "${before}" = "${after}" ]
 }
 
