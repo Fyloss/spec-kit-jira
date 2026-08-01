@@ -132,6 +132,25 @@ jobs:
               . scripts/bash/hooks/readme_block.sh
               printf 'CR bytes in the rendered README block: %s%%0A' \
                 "$(readme_block_render 2> /dev/null | LC_ALL=C tr -dc '\r' | wc -c | tr -d '[:space:]')"
+              # The detector answered CRLF on that same 0-CR fixture, so the
+              # defect sits in one of its three moving parts: the
+              # `$(cat; printf x)` capture, the `_ms_count` substring count, or
+              # the -gt comparison. All three are sane on a POSIX bash 5.3.15;
+              # which one turns on this host is a fact only this host can give.
+              c="$(cat < "${f}"; printf x)"; c="${c%x}"
+              crs="${c//[!$'\r']/}"
+              printf 'capture on the same fixture: len=%s cr=%s crlf=%s lf=%s%%0A' \
+                "${#c}" "${#crs}" "$(_ms_count "${c}" $'\r\n')" "$(_ms_count "${c}" $'\n')"
+              # The splice feeds the detector through a builtin printf and a
+              # pipe (managed_section.sh line 79), not through a file redirect —
+              # if CR enters at that pipe, the two answers below split.
+              printf 'detector fed the splice way: %s%%0A' \
+                "$(printf '%s' "${c}" | managed_section_line_ending)"
+              printf 'CR bytes a builtin printf grows crossing a pipe: %s%%0A' \
+                "$(printf 'a\nb\n' | LC_ALL=C tr -dc '\r' | wc -c | tr -d '[:space:]')"
+              printf 'CRLF count in an LF-only literal: %s (0 on POSIX)%%0A' \
+                "$(_ms_count $'a\nb\n' $'\r\n')"
+              printf 'igncr: %s%%0A' "$(shopt -o igncr 2>&1 || true)"
             )
             printf 'end of report'
           } | { printf '::notice title=Host toolchain::'; cat; printf '\n'; }
