@@ -75,7 +75,20 @@ jobs:
             # variable read by pwsh, not a shell expansion.
             printf 'pwsh: %s%%0A' "$(pwsh -NoProfile -c '$PSVersionTable.PSVersion.ToString()')"
             printf 'cores: %s%%0A' "${NUMBER_OF_PROCESSORS:-unknown}"
-            printf 'CR survives a capture: %s' "${cs}"
+            printf 'CR survives a capture: %s%%0A' "${cs}"
+            # What the CHECKOUT produced, which decides which line ending both
+            # ports detect as the host file's own. The fixtures are LF in the
+            # index and .gitattributes pins `* text=auto eol=lf`, so a non-zero
+            # count here means the attribute is not reaching this checkout —
+            # and that is a different defect from anything in the ports.
+            printf 'core.autocrlf: %s%%0A' "$(git config --get core.autocrlf || echo unset)"
+            printf 'eol attr on a fixture: %s%%0A' "$(git check-attr eol -- tests/conformance/fixtures/repo-with-readme/README.md)"
+            for f in tests/conformance/fixtures/repo-with-readme/README.md \
+                     tests/conformance/fixtures/repo-with-spec/specs/001-feature/spec.md; do
+              printf 'CR bytes in %s: %s%%0A' "${f##*/fixtures/}" \
+                "$(LC_ALL=C tr -dc '\r' < "${f}" | wc -c | tr -d '[:space:]')"
+            done
+            printf 'end of report'
           } | { printf '::notice title=Host toolchain::'; cat; printf '\n'; }
 
       - name: Run the conformance corpus against both ports and diff the captures

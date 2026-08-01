@@ -27,6 +27,37 @@ source "${_client_dir}/../../lib/credentials.sh"
 # transport suites can pin the exact number of calls that reach the mock.
 : "${JIRA_MAX_ATTEMPTS:=3}"
 
+# JIRA_PATH_STYLE — how the curl on PATH spells a filesystem path: `native` on
+# git-bash, where curl is a Windows binary that cannot open the POSIX paths this
+# shell speaks, and `posix` everywhere else. Detected once from the host and
+# overridable, so the guard below is exercisable on a host that does not need
+# it — tests/bash/sink/test_client_body_path.bats runs it everywhere.
+: "${JIRA_PATH_STYLE:=$(
+  case "$(uname -s 2> /dev/null || true)" in
+    MINGW* | MSYS* | CYGWIN*) printf 'native' ;;
+    *) printf 'posix' ;;
+  esac
+)}"
+
+# _jira_curl_path <posix-path> — that path spelled for the curl on PATH.
+#
+# It matters in exactly one place, and that place is invisible to MSYS. The body
+# is kept OFF argv (NFR-3) by writing it to a file and naming that file from the
+# curl config, and the config travels on STDIN. MSYS rewrites paths it sees in
+# argv — which is why --output and --dump-header need nothing here — but stdin
+# is opaque bytes to it. A POSIX path in the config therefore reached a native
+# curl untranslated, curl could not open it, and the transport mapped the
+# non-zero curl status to fail-closed: on windows-latest EVERY write failed
+# before reaching the network while every read succeeded, because only a request
+# with a body has a path to mistranslate.
+_jira_curl_path() {
+  if [[ "${JIRA_PATH_STYLE}" == "native" ]] && command -v cygpath > /dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
 # HTTP status of the most recent request (0 = network-level failure). Exported so
 # sink callers (plan_apply, discovery) can read it for diagnostics; the mapped
 # exit code remains the return value.
@@ -89,7 +120,7 @@ jira_request() {
     cfg="${cfg}"$'\n'"request = \"${method}\""
     cfg="${cfg}"$'\n'"header = \"Content-Type: application/json\""
     cfg="${cfg}"$'\n'"header = \"Accept: application/json\""
-    [[ -n "${bodyfile}" ]] && cfg="${cfg}"$'\n'"data = \"@${bodyfile}\""
+    [[ -n "${bodyfile}" ]] && cfg="${cfg}"$'\n'"data = \"@$(_jira_curl_path "${bodyfile}")\""
 
     local http_code curl_rc
     http_code="$(
