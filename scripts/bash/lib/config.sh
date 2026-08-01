@@ -522,6 +522,13 @@ yemit("")'
 # Refuses (EXIT_CONFIG) a key or string value containing `"` or `\`, printing a
 # named error per offending path and nothing else — no partial YAML is ever
 # emitted for a document this writer cannot faithfully represent.
+#
+# This is the port's largest MULTI-LINE jq read and the only one whose bytes land
+# in a file the operator keeps, so it is where a text-mode jq on Windows was seen
+# first: config.local.yml came out with a CRLF on every line but the last while
+# the PowerShell twin wrote LF, and ci-conformance.sh failed the written-files
+# diff (NFR-1). The line endings are not repaired here — lib/output.sh installs
+# one guard around jq itself, for the whole class.
 config_to_yaml() {
   local input errs
   input="$(cat)"

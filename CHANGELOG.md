@@ -46,6 +46,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   over the PowerShell port as a blocking lint gate, per the repository's own
   `.shellcheckrc` and `PSScriptAnalyzerSettings.psd1`.
 
+### Fixed
+
+- On Windows, the Bash port and the PowerShell port disagreed byte for byte
+  whenever a command handled more than one of something — two project keys,
+  three stories, a multi-line configuration document. The native `jq.exe`
+  writes its stdout as a text-mode stream, so every line but the last carried a
+  stray carriage return: `config.local.yml` came out CRLF-terminated where the
+  PowerShell twin wrote LF, a second project key was read as an unknown key,
+  and a hook-health repair hint came out truncated. The Bash port now strips
+  that terminator artefact — once, around `jq` itself, and only on a host whose
+  `jq` actually emits CRLF — and the two ports produce identical bytes again.
+
 ### Removed
 
 - Three configuration keys from an earlier, never-built mechanism —
@@ -197,7 +209,7 @@ new golden scenarios (company-managed and team-managed routing).
 Hooks active from installation (003).
 
 The extension registered no lifecycle hook at install, registered them itself as
-*optional* (which the host reads as "offer this", not "perform it"), pointed them
+_optional_ (which the host reads as "offer this", not "perform it"), pointed them
 at a `speckit.jira.reconcile` command that did not exist, and told the assistant
 to invoke a bare `spec-kit-jira` executable the install never provides. Four
 independent breaks, each sufficient on its own to make the extension inert. This
@@ -226,25 +238,25 @@ release closes all four.
   ```yaml
   hooks:
     after_plan:
-    - command: speckit.jira.reconcile   # ← DELETE this entry (no `extension:` field)
-      description: Mirror the updated spec-kit artifacts into Jira Cloud (non-blocking).
-      enabled: true
-      optional: true
-    - extension: jira                   # ← KEEP this one (written by the install)
-      command: speckit.jira.reconcile
-      enabled: true
-      optional: false
-      priority: 10
-      prompt: Execute speckit.jira.reconcile?
-      description: Mirror the implementation plan into Jira Cloud.
-      condition: null
+      - command: speckit.jira.reconcile # ← DELETE this entry (no `extension:` field)
+        description: Mirror the updated spec-kit artifacts into Jira Cloud (non-blocking).
+        enabled: true
+        optional: true
+      - extension: jira # ← KEEP this one (written by the install)
+        command: speckit.jira.reconcile
+        enabled: true
+        optional: false
+        priority: 10
+        prompt: Execute speckit.jira.reconcile?
+        description: Mirror the implementation plan into Jira Cloud.
+        condition: null
   ```
 
 ### Added
 
 - The extension manifest declares all seven lifecycle events (`before_specify`
   plus the six `after_*`) as a **top-level `hooks:` block**, so `specify extension
-  add` registers and activates them with no configuration ceremony. A block nested
+add` registers and activates them with no configuration ceremony. A block nested
   under `provides:` validates and registers nothing, which is what shipped before.
 - `speckit.jira.reconcile` now **exists**: a declared, installed, assistant-
   invocable command with an ordered procedure. Six `after_*` hooks had named it
@@ -254,7 +266,7 @@ release closes all four.
   changes dispatch only — a hook failure still never fails a spec-kit command.
 - An operator disable record in the gitignored `.specify/jira/config.local.yml`
   (`hooks.disabled`), honoured at dispatch. It exists because `specify extension
-  add` rewrites `enabled: true` unconditionally, so the registry cannot remember
+add` rewrites `enabled: true` unconditionally, so the registry cannot remember
   the decision across a reinstall.
 - `/speckit.jira.config --enable-hook <event>` (repeatable) releases a held event.
 - The hook health report gains `held_disabled`, `duplicated` and `unreadable`, and
@@ -444,7 +456,7 @@ First public release.
   now splits at the explicit clause boundaries and survives intact (FR-015).
 - The `--json` run summary now conforms to `run-summary.schema.json`: hook
   health is reported under `hook_health` as `{present, missing, disabled,
-  repair_hint?}`, and the contract documents the `actions`, `warnings`, and
+repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
 [Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.7.0...HEAD

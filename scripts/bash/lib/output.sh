@@ -12,6 +12,57 @@
 [[ -n ${_JIRA_LIB_OUTPUT:-} ]] && return 0
 _JIRA_LIB_OUTPUT=1
 
+# --- The text-mode-jq guard (Windows) ----------------------------------------
+#
+# On Windows the `jq` on PATH is the native jq.exe and its stdout is a TEXT-MODE
+# stream: every `\n` it writes leaves the process as CRLF. What made this so
+# hard to see is that it does NOT corrupt everything. MSYS bash — the bash the
+# port runs under there — strips a trailing CRLF from command substitution, so a
+# single-scalar `$(jq -r '.k' ...)` arrives clean, and the great majority of the
+# port's jq reads are exactly that. Only output with EMBEDDED newlines keeps its
+# CRs, and then on every line but the last: a two-project key list yields
+# $'COMP\r' then 'TEAM'; the canonical YAML writer put a CRLF on all but the
+# final line of config.local.yml; a hook-health repair hint carried one mid
+# string. The PowerShell twin joins with an explicit `n and writes through
+# File::WriteAllText, which translates nothing, so every one of those is a byte
+# divergence between the ports (NFR-1) — and every one of them surfaced only on
+# windows-latest, only in the scenarios that happen to have more than one of
+# something.
+#
+# Two decisions here, both deliberate.
+#
+# It is a WRAPPER rather than a guard at each multi-line read. Fixing the reads
+# one by one was tried first and was wrong: the sites are not enumerable by
+# inspection — the CR also travels INSIDE jq-built JSON strings and re-enters
+# through a later read, which no grep for `while read` finds. A single seam that
+# every jq invocation already passes through is the only place the whole class
+# can be closed.
+#
+# It is INSTALLED CONDITIONALLY, and the condition is asked of jq rather than of
+# the OS. On a host whose jq emits LF the wrapper is not defined at all, so the
+# POSIX runtime keeps exactly the behaviour it has always had — no extra process
+# per call, and no chance of this stripping a CR that a Jira description
+# legitimately carries, which would be a divergence introduced by the fix. On a
+# host whose jq emits CRLF that content CR is already unrecoverable — jq
+# CRLF-ified it on the way out — so stripping the terminator is strictly a
+# repair. Probing jq also means the PATH-stub tests exercise the real guard
+# instead of a test-only flag.
+if [[ "$(command jq -rn '"a\nb"' 2> /dev/null)" == *$'\r'* ]]; then
+  jq() {
+    # `local -` scopes the option change to this function, and `pipefail` is not
+    # optional: without it the pipeline reports SED's status, and every
+    # `if jq -e ...` in the port — recognition's duplicate-claim check, the
+    # lifecycle-event membership test — would read as TRUE unconditionally. That
+    # failure is silent and total, which is why it is enforced here rather than
+    # assumed from the entry point's `set -o pipefail`: this function has to be
+    # correct for a caller that never set it, including a sourced unit test.
+    local -
+    set -o pipefail
+    # `command` is required: without it this function calls itself.
+    command jq "$@" | sed $'s/\r$//'
+  }
+fi
+
 # json_canonical — read JSON on stdin, write the canonical form to stdout.
 #   - keys sorted (-S), compact (-c)
 #   - raw UTF-8 (jq does not \u-escape non-ASCII)

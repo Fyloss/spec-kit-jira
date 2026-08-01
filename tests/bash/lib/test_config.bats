@@ -146,6 +146,54 @@ YAML
   grep -q '"Élevée": "1"' "${DIR}/emitted.yml"
 }
 
+# --- The writer against a text-mode jq (Windows) -----------------------------
+#
+# On Windows the `jq` on PATH is the native jq.exe and its stdout is a text-mode
+# stream: every `\n` it writes leaves the process as CRLF. config_to_yaml is the
+# port's largest MULTI-LINE jq read and the only one whose bytes land in a file
+# the operator keeps, so it is where that CR was first seen: the Bash port wrote
+# config.local.yml CRLF-terminated while the PowerShell twin — which joins with
+# an explicit `n and writes through File::WriteAllText — wrote LF, and
+# ci-conformance.sh failed the written-files diff on windows-latest only.
+#
+# A POSIX host cannot reproduce a text-mode stream natively, so it is supplied
+# by a stub `jq` on PATH — the real jq with a CR appended to each output line,
+# the same faithful emulation tests/bash/conformance/test_run_scenario_crlf_jq.bats
+# uses for the harness's own reads.
+@test "the writer emits LF line endings even when jq's stdout is text-mode (Windows)" {
+  local stub="${DIR}/stub"
+  mkdir -p "${stub}"
+  # `command jq` inside the stub would re-enter it, so resolve the real binary
+  # by path here, BEFORE the stub shadows the name.
+  cat > "${stub}/jq" << EOF
+#!/usr/bin/env bash
+set -o pipefail
+"$(command -v jq)" "\$@" | sed \$'s/\$/\\r/'
+EOF
+  chmod +x "${stub}/jq"
+
+  local input='{"resolved_ids":{"COMP":{"style":"company_managed","style_source":"api"}}}'
+  # Two things this subshell has to get right, and both bite silently.
+  # `hash -r`: an earlier test in this file has already run jq, and the
+  # inherited hash table would resolve the name straight to the real binary.
+  # Re-sourcing output.sh: its guard is installed by PROBING jq at source time,
+  # and setup() sourced it while the real jq was still the one on PATH — a
+  # process that starts with a text-mode jq, which is the Windows case, probes
+  # the stub and installs it.
+  ( PATH="${stub}:${PATH}"; hash -r
+    unset _JIRA_LIB_OUTPUT; source "${LIB_DIR}/output.sh"
+    printf '%s' "${input}" | config_to_yaml ) > "${DIR}/crlf.yml"
+
+  # The written bytes are the contract (NFR-1): not one CR anywhere. Counted
+  # rather than `! grep -q`, which `set -e` ignores by rule — a negated pipeline
+  # cannot fail a bats test, and this assertion has to.
+  local crs
+  crs="$(LC_ALL=C tr -dc '\r' < "${DIR}/crlf.yml" | wc -c | tr -d '[:space:]')"
+  [ "${crs}" -eq 0 ]
+  # And stripping it cost the document nothing.
+  [ "$(jq -cS . <<< "${input}")" = "$(jq -cS . <<< "$(config_yaml_to_json "${DIR}/crlf.yml")")" ]
+}
+
 @test "a key containing a double quote is refused on write, and the key text never appears (007 research R3)" {
   local out status=0
   out="$(printf '%s' '{"a":{"say \"hi\"":"1"}}' | config_to_yaml 2>&1)" || status=$?

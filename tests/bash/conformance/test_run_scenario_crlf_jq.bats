@@ -39,9 +39,34 @@ setup() {
   mkdir -p "${STUB_DIR}"
   cat > "${STUB_DIR}/jq" << EOF
 #!/usr/bin/env bash
+set -o pipefail
 "${REAL_JQ}" "\$@" | sed \$'s/\$/\\r/'
 EOF
   chmod +x "${STUB_DIR}/jq"
+
+  # A second stub for the tests that drive a PORT rather than the harness, and
+  # the difference between the two is the whole reason the port's own defect
+  # hid behind this one. MSYS bash — the bash the ports run under on Windows —
+  # strips a trailing CRLF from command substitution, so a `$(jq -r ...)`
+  # SCALAR arrives clean and only the newlines INSIDE a multi-line document
+  # survive as CR. The stub above appends a CR to every line including the
+  # last, which is right for the harness's `read`-from-a-pipeline loops but
+  # would hand the port a CR on every scalar it captures — a state Windows
+  # never produces, and one that refuses the run long before anything is
+  # written. This stub models what the port actually observes there.
+  #
+  # `set -o pipefail` is what makes it an emulation rather than a second bug:
+  # without it the stub reports SED's status and swallows jq's, so every
+  # `jq -e` predicate in the port reads TRUE and the run fails for a reason
+  # the real jq.exe would never produce.
+  PORT_STUB_DIR="${BATS_TEST_TMPDIR}/stub-port"
+  mkdir -p "${PORT_STUB_DIR}"
+  cat > "${PORT_STUB_DIR}/jq" << EOF
+#!/usr/bin/env bash
+set -o pipefail
+"${REAL_JQ}" "\$@" | sed -e \$'\$!s/\$/\\r/'
+EOF
+  chmod +x "${PORT_STUB_DIR}/jq"
 }
 
 @test "a CRLF-emitting jq does not corrupt the scenario env (Windows text-mode stdout)" {
@@ -54,6 +79,49 @@ EOF
   # tells the two states apart.
   [ "$(cat "${out}/exit")" = "0" ]
   ! grep -q 'spec_slug is malformed' "${out}/stderr"
+}
+
+# The same text-mode stream reaches the BASH PORT's own jq, and there it lands
+# somewhere the harness cannot repair: a file the port writes. config_to_yaml
+# captures a MULTI-LINE jq document and writes it verbatim, so on windows-latest
+# config.local.yml came out CRLF-terminated while the PowerShell twin — which
+# joins with an explicit `n and writes through File::WriteAllText — wrote LF.
+# ci-conformance.sh diffs the written tree byte for byte, so the pair failed
+# with 55 identical-looking lines on both sides of the diff (NFR-1).
+#
+# Asserted over the WHOLE written tree rather than the one known file: the
+# defect is a class — any jq output with embedded newlines that reaches disk —
+# and this catches the next member of it on every host, not just on Windows.
+# lib/output.sh's jq_lines is the guard the whole class now goes through.
+@test "a CRLF-emitting jq leaves no CR in anything the Bash port writes" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local out="${BATS_TEST_TMPDIR}/out-written"
+  local scenario="${ROOT}/tests/conformance/scenarios/sc009-core-untouched.json"
+  PATH="${PORT_STUB_DIR}:${PATH}" bash "${HARNESS}" "${scenario}" bash "${out}" > /dev/null
+
+  [ "$(cat "${out}/exit")" = "0" ]
+  [ -f "${out}/workdir/.specify/jira/config.local.yml" ]
+  local crs
+  crs="$(find "${out}/workdir" -type f -exec cat {} + | LC_ALL=C tr -dc '\r' | wc -c | tr -d '[:space:]')"
+  [ "${crs}" -eq 0 ]
+}
+
+# The written tree is only half of it. A jq read with embedded newlines also
+# feeds control flow, and the corruption there is not cosmetic: this scenario's
+# config.yml declares TWO projects, so the key list arrives as $'COMP\r' then
+# 'TEAM' and the first key names a project that does not exist. On Windows the
+# run refused (exit 2) where the PowerShell twin succeeded — a divergence in the
+# exit code, before any file was written.
+@test "a CRLF-emitting jq does not corrupt a multi-project key list" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local out="${BATS_TEST_TMPDIR}/out-multi"
+  local scenario="${ROOT}/tests/conformance/scenarios/us8-mixed-routing.json"
+  PATH="${PORT_STUB_DIR}:${PATH}" bash "${HARNESS}" "${scenario}" bash "${out}" > /dev/null
+
+  [ "$(cat "${out}/exit")" = "0" ]
+  # Both declared projects reached the resolved-id table, spelled correctly.
+  grep -q '"COMP":' "${out}/workdir/.specify/jira/config.local.yml"
+  grep -q '"TEAM":' "${out}/workdir/.specify/jira/config.local.yml"
 }
 
 @test "a CRLF-emitting jq does not corrupt argv either" {
