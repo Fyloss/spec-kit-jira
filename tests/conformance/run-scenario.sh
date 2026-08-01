@@ -41,6 +41,24 @@ source "${CONF_DIR}/mock-jira/lib.sh"
 [ -f "${SCENARIO}" ] || { echo "scenario not found: ${SCENARIO}" >&2; exit 1; }
 mkdir -p "${OUTDIR}"
 
+# Every scalar this harness reads out of jq goes through here.
+#
+# On Windows the `jq` on PATH is the NATIVE jq.exe, and its stdout is a
+# text-mode stream: it terminates each line with CRLF, not LF. Nothing
+# downstream removes that CR — `$( )` strips trailing NEWLINES only, and
+# `read` strips the delimiter, so the CR rides into the last field of every
+# line. A scenario's `SPEC_KIT_JIRA_SPEC_SLUG: 001-billing` then reached the
+# port as $'001-billing\r', which fails the anchored slug pattern (in both
+# ports' regex flavours `$` tolerates a trailing \n, never a trailing \r) and
+# refused the whole run with "spec_ref.spec_slug is malformed".
+#
+# Stripping here rather than at each consumer is deliberate: the CR is an
+# artefact of how this one process emits lines, so it is removed where the
+# lines are read. It also covers the ARGV path for BOTH ports — pwsh-invoke.ps1
+# already defends its own argv file, but the Bash port receives argv directly
+# and had no such guard.
+jq_lines() { jq "$@" | sed $'s/\r$//'; }
+
 case "${PORT}" in
   bash)
     ENTRY="${SPEC_KIT_JIRA_ENTRY_BASH:-${REPO_ROOT}/scripts/bash/spec-kit-jira.sh}"
@@ -67,7 +85,7 @@ esac
 
 # --- Isolated workdir (the "repository" the port runs against) ---------------
 WORKDIR="$(mktemp -d)"
-FIXTURE="$(jq -r '.fixture // empty' "${SCENARIO}")"
+FIXTURE="$(jq_lines -r '.fixture // empty' "${SCENARIO}")"
 if [ -n "${FIXTURE}" ]; then
   [ -d "${REPO_ROOT}/${FIXTURE}" ] || { echo "fixture not found: ${FIXTURE}" >&2; exit 1; }
   cp -R "${REPO_ROOT}/${FIXTURE}/." "${WORKDIR}/"
@@ -89,7 +107,7 @@ trap mock_stop EXIT
 # --- Optional git repository (degraded-mode / branch-state scenarios) --------
 # `git_branch` initialises the workdir as a git repo checked out on that branch
 # (deterministic default branch so both ports see identical refs).
-GIT_BRANCH="$(jq -r '.git_branch // empty' "${SCENARIO}")"
+GIT_BRANCH="$(jq_lines -r '.git_branch // empty' "${SCENARIO}")"
 if [ -n "${GIT_BRANCH}" ]; then
   (
     cd "${WORKDIR}"
@@ -106,7 +124,7 @@ fi
 export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 while IFS=$'\t' read -r key value; do
   [ -n "${key}" ] && export "${key}=${value}"
-done < <(jq -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv' "${SCENARIO}")
+done < <(jq_lines -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv' "${SCENARIO}")
 
 # --- Runs ----------------------------------------------------------------
 # A scenario is either a single implicit run (top-level `argv`, unchanged
@@ -116,16 +134,18 @@ done < <(jq -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv
 # one mock process. Captured as stdout.N / stderr.N / exit.N, N = 1-based;
 # stdout/stderr/exit (unsuffixed) always mirror the LAST run, so a
 # single-run scenario's existing consumers see no difference.
-RUN_COUNT="$(jq '(.runs // []) | length' "${SCENARIO}")"
+RUN_COUNT="$(jq_lines '(.runs // []) | length' "${SCENARIO}")"
 if [ "${RUN_COUNT}" -eq 0 ]; then RUN_COUNT=1; fi
 
 set +e
 for ((i = 1; i <= RUN_COUNT; i++)); do
   ARGV=()
-  if [ "${RUN_COUNT}" -gt 1 ] || [ "$(jq '(.runs // []) | length' "${SCENARIO}")" -gt 0 ]; then
-    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq -r --argjson i "$((i - 1))" '.runs[$i].argv[]? // empty' "${SCENARIO}")
+  if [ "${RUN_COUNT}" -gt 1 ] || [ "$(jq_lines '(.runs // []) | length' "${SCENARIO}")" -gt 0 ]; then
+    # shellcheck disable=SC2016  # $i is a jq variable bound by --argjson, not a
+    # shell expansion; shellcheck only recognises that for the literal name `jq`.
+    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq_lines -r --argjson i "$((i - 1))" '.runs[$i].argv[]? // empty' "${SCENARIO}")
   else
-    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq -r '.argv[]? // empty' "${SCENARIO}")
+    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq_lines -r '.argv[]? // empty' "${SCENARIO}")
   fi
 
   if [ "${PORT}" = "bash" ]; then
