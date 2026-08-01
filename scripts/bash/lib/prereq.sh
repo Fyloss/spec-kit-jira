@@ -35,6 +35,8 @@ PREREQ_BRIDGE_PWSH='.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps
 # — is what FR-017 and T090 require. The state where NEITHER port starts is
 # covered by the verbatim fallback block in the command documents (FR-030),
 # because there is no code of ours left running to say anything.
+#
+# shellcheck disable=SC2120  # [extension-root] is optional; every caller omits it
 prereq_bridge_missing() {
   local root="${1:-${SPEC_KIT_JIRA_EXTENSION_ROOT:-}}"
   if [[ -z "${root}" ]]; then
