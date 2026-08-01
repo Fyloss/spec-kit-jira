@@ -118,6 +118,21 @@ jobs:
             try win "$(cygpath -w "${probe}")"
             try mixed "$(cygpath -m "${probe}")"
             printf '%%0A'
+            # Where the CR in a written spec.md/README.md enters. The splice
+            # preserves whatever the block already carries — `${block//\n/${nl}}`
+            # is an identity when the host is LF, and does not strip a CR — so
+            # the question is whether the detector misreads the host or the text
+            # arrives contaminated. Asked of the port's own functions, here.
+            ( set +e
+              # shellcheck source=/dev/null
+              . scripts/bash/engine/managed_section.sh
+              f=tests/conformance/fixtures/repo-with-readme/README.md
+              printf 'detector on a known-LF fixture: %s%%0A' "$(managed_section_line_ending < "${f}")"
+              # shellcheck source=/dev/null
+              . scripts/bash/hooks/readme_block.sh
+              printf 'CR bytes in the rendered README block: %s%%0A' \
+                "$(readme_block_render 2> /dev/null | LC_ALL=C tr -dc '\r' | wc -c | tr -d '[:space:]')"
+            )
             printf 'end of report'
           } | { printf '::notice title=Host toolchain::'; cat; printf '\n'; }
 
