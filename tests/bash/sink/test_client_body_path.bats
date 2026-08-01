@@ -58,12 +58,21 @@ printf '200'
 EOF
   chmod +x "${STUB}/curl"
 
-  # cygpath's answer shape matters, not its accuracy: a drive-lettered,
-  # backslash-separated path is what a native curl can open and a POSIX one is
-  # not, so the assertion is about which spelling reaches the config.
+  # The stub answers in cygpath's MIXED form — a drive letter with FORWARD
+  # slashes — and the mode flag is checked, because which of the two Windows
+  # spellings is used is the whole point. Asked of the runner directly:
+  #
+  #   curl data-path spelling (26=unreadable, 7=read ok): posix=26 win=26 mixed=7
+  #
+  # `-w` fails exactly like the POSIX path it replaced: curl's config parser
+  # reads a quoted value's backslashes as escape sequences, so `C:\Users\...`
+  # arrives mangled. Only `-m` survives. This was not deduced — a first fix
+  # shipped `-w` and the probe came back byte-identical, which is what sent
+  # someone to ask curl instead.
   cat > "${STUB}/cygpath" << 'EOF'
 #!/usr/bin/env bash
-printf 'C:\\native\\%s' "$(basename "${2:-$1}")"
+[ "$1" = "-m" ] || { echo "cygpath stub: expected -m, got $1" >&2; exit 64; }
+printf 'C:/native/%s' "$(basename "$2")"
 EOF
   chmod +x "${STUB}/cygpath"
 }
@@ -77,9 +86,11 @@ EOF
     JIRA_PATH_STYLE=native jira_request POST "http://127.0.0.1:1/rest/api/3/issue" '{"fields":{}}'
   ) > /dev/null
 
-  grep -q 'data = "@C:\\native\\' "${CAPTURE}"
+  grep -q 'data = "@C:/native/' "${CAPTURE}"
   # And the POSIX spelling is gone, not merely accompanied.
   ! grep -q 'data = "@/' "${CAPTURE}" || false
+  # No backslash reaches the config: curl would read it as an escape.
+  ! grep -q 'data = .*\\' "${CAPTURE}" || false
 }
 
 @test "a posix host is untouched — the body file keeps its own spelling" {

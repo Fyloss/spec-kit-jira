@@ -50,9 +50,21 @@ source "${_client_dir}/../../lib/credentials.sh"
 # non-zero curl status to fail-closed: on windows-latest EVERY write failed
 # before reaching the network while every read succeeded, because only a request
 # with a body has a path to mistranslate.
+#
+# `-m` (mixed: `C:/Users/...`), never `-w` (`C:\Users\...`). Asked of the runner
+# rather than reasoned about, by building this exact config against a dead port
+# and reading curl's exit code — 26 for a data file it cannot open, 7 for one it
+# read before failing to connect:
+#
+#   posix=26  win=26  mixed=7
+#
+# `-w` fails identically to the POSIX path it replaces, because curl's config
+# parser reads a quoted value's backslashes as escape sequences. A first fix
+# shipped `-w` and the probe came back byte-identical; that is what prompted
+# measuring instead of deducing.
 _jira_curl_path() {
   if [[ "${JIRA_PATH_STYLE}" == "native" ]] && command -v cygpath > /dev/null 2>&1; then
-    cygpath -w "$1"
+    cygpath -m "$1"
   else
     printf '%s' "$1"
   fi
