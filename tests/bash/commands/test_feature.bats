@@ -37,8 +37,6 @@ write_teams_config() {
   {
     printf 'projects:\n'
     printf '  - key: IJT\n'
-    printf '    epic_strategy: per_repo\n'
-    printf '    task_strategy: subtask\n'
     printf 'routing_default: IJT\n'
     printf 'teams:\n'
     printf '  - id: ijt\n'

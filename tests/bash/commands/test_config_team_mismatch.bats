@@ -33,8 +33,6 @@ write_config() {
   {
     printf 'projects:\n'
     printf '  - key: IJT\n'
-    printf '    epic_strategy: per_repo\n'
-    printf '    task_strategy: subtask\n'
     printf 'routing_default: IJT\n'
     if [ "${1:-true}" = "true" ]; then
       printf 'teams:\n'

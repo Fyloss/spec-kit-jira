@@ -40,7 +40,6 @@ Describe 'Hook resilience' {
         # a real key with a matching epic-strategy override — both bypass
         # config.yml, which this isolated work dir never has.
         $env:SPEC_KIT_JIRA_PROJECT_KEY = 'TEST'
-        $env:SPEC_KIT_JIRA_EPIC_STRATEGY = 'per_repo'
         $env:SPEC_KIT_JIRA_EXTENSIONS_YML = Join-Path $Work '.specify/extensions.yml'
         $env:JIRA_NO_SLEEP = '1'
         $env:JIRA_MAX_ATTEMPTS = '1'
@@ -54,7 +53,6 @@ Describe 'Hook resilience' {
     AfterEach {
         Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue
         Remove-Item Env:\SPEC_KIT_JIRA_PLAN_CONTEXT -ErrorAction SilentlyContinue
-        Remove-Item Env:\SPEC_KIT_JIRA_EPIC_STRATEGY -ErrorAction SilentlyContinue
         Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
     }
 

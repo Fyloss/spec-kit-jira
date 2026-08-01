@@ -62,9 +62,9 @@ credential-shaped values in either YAML layer are rejected at config time (exit 
    A bound repository needs **no environment variables** for this: the target
    project, the issue type, and the priority are all resolved from
    `.specify/jira/config.yml` and the binding `/speckit.jira.config` recorded.
-   The `SPEC_KIT_JIRA_PROJECT_KEY`, `SPEC_KIT_JIRA_EPIC_STRATEGY`, and
-   `SPEC_KIT_JIRA_PLAN_CONTEXT` variables remain supported as explicit
-   overrides, taking precedence over the config-derived values when set.
+   The `SPEC_KIT_JIRA_PROJECT_KEY` and `SPEC_KIT_JIRA_PLAN_CONTEXT` variables
+   remain supported as explicit overrides, taking precedence over the
+   config-derived values when set.
 
 ## The lifecycle hooks: active from install
 

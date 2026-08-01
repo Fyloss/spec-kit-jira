@@ -11,7 +11,7 @@ BeforeAll {
 
     function Write-TestConfig {
         param([bool]$Teams = $true)
-        $lines = @('projects:', '  - key: IJT', '    epic_strategy: per_repo', '    task_strategy: subtask', 'routing_default: IJT')
+        $lines = @('projects:', '  - key: IJT', 'routing_default: IJT')
         if ($Teams) {
             $lines += @('teams:',
                 '  - id: ijt', '    project: IJT', '    folder_prefix: "ijt-"', '    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"',

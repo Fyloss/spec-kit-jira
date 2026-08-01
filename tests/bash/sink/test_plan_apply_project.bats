@@ -18,7 +18,7 @@ _doc() {
     schema_version:"1.0",
     spec_ref:{repo:"acme/app", spec_slug:"001-x", folder:"/tmp/001-x"},
     routing:{project_key:$p},
-    epic:{strategy:"per_repo", title:"E", description:{blocks:[{type:"paragraph", text:"e"}]}},
+    epic:{local_id:"3f2a91c04b7e6d18", title:"E", description:{blocks:[{type:"paragraph", text:"e"}]}},
     stories:[{local_id:"s1", title:"Story One", priority_logical:"P2",
               description:{blocks:[{type:"paragraph", text:"d"}]}}]
   }'
@@ -27,17 +27,17 @@ _doc() {
 @test "every POST body carries a non-empty fields.project.key equal to routing.project_key (FR-022, FR-023)" {
   local doc ctx
   doc="$(_doc "COMP")"
-  ctx='{"base_url":"https://mock","story_type_id":"10004"}'
+  ctx='{"base_url":"https://mock","story_type_id":"10004","parent_type_id":"10101","parent_local_id":"3f2a91c04b7e6d18"}'
   run plan_writes "${doc}" "${ctx}"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.[0].method' <<< "$output")" = "POST" ]
-  [ "$(jq -r '.[0].body.fields.project.key' <<< "$output")" = "COMP" ]
+  [ "$(jq -r '.stories[0].method' <<< "$output")" = "POST" ]
+  [ "$(jq -r '.stories[0].body.fields.project.key' <<< "$output")" = "COMP" ]
 }
 
 @test "assembly refuses to emit a creation with an empty project (FR-024)" {
   local doc ctx
   doc="$(_doc "")"
-  ctx='{"base_url":"https://mock","story_type_id":"10004"}'
+  ctx='{"base_url":"https://mock","story_type_id":"10004","parent_type_id":"10101","parent_local_id":"3f2a91c04b7e6d18"}'
   run --separate-stderr plan_writes "${doc}" "${ctx}"
   [ "$status" -ne 0 ]
   [ -z "$output" ]
@@ -46,7 +46,7 @@ _doc() {
 @test "assembly refuses to emit a creation with an empty issue type (FR-024)" {
   local doc ctx
   doc="$(_doc "COMP")"
-  ctx='{"base_url":"https://mock"}'
+  ctx='{"base_url":"https://mock","parent_type_id":"10101","parent_local_id":"3f2a91c04b7e6d18"}'
   run --separate-stderr plan_writes "${doc}" "${ctx}"
   [ "$status" -ne 0 ]
   [ -z "$output" ]
@@ -55,19 +55,19 @@ _doc() {
 @test "an UPDATE is unaffected by the assembly guard (no issuetype required)" {
   local doc ctx
   doc="$(_doc "COMP")"
-  ctx='{"base_url":"https://mock","tickets":{"s1":"COMP-9"}}'
+  ctx='{"base_url":"https://mock","tickets":{"s1":"COMP-9"},"parent_type_id":"10101","parent_local_id":"3f2a91c04b7e6d18"}'
   run plan_writes "${doc}" "${ctx}"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.[0].method' <<< "$output")" = "PUT" ]
+  [ "$(jq -r '.stories[0].method' <<< "$output")" = "PUT" ]
 }
 
 @test "the base fields come from jira_create_fields_base, unchanged (FR-025, SC-010)" {
   local doc ctx base
   doc="$(_doc "COMP")"
-  ctx='{"base_url":"https://mock","story_type_id":"10004"}'
+  ctx='{"base_url":"https://mock","story_type_id":"10004","parent_type_id":"10101","parent_local_id":"3f2a91c04b7e6d18"}'
   base="$(jira_create_fields_base "COMP" "Story One" "10004")"
   run plan_writes "${doc}" "${ctx}"
   [ "$status" -eq 0 ]
-  [ "$(jq -c '.[0].body.fields.project, .[0].body.fields.issuetype, .[0].body.fields.summary' <<< "$output" | jq -cs .)" \
+  [ "$(jq -c '.stories[0].body.fields.project, .stories[0].body.fields.issuetype, .stories[0].body.fields.summary' <<< "$output" | jq -cs .)" \
     = "$(jq -c '.project, .issuetype, .summary' <<< "${base}" | jq -cs .)" ]
 }

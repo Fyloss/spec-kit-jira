@@ -1,14 +1,1 @@
-{
-  "name": "us2-team-managed-discovery",
-  "description": "Team-managed (next-gen) project discovery: project-owned objects, Epic/Sub-task hierarchy only, and the project's own estimation field ranked (never the global Story Points, research §3). Both ports must produce a byte-identical binding, exit code, and Jira API call sequence (NFR-1). Discovery parity is asserted directly in tests/bash/sink/test_discovery_team.bats; this golden scenario is wired end-to-end through the config command in US1.",
-  "mock": {
-    "projects": { "TEAM": "team" }
-  },
-  "fixture": "tests/conformance/fixtures/repo-with-config",
-  "argv": ["config", "--json"],
-  "env": {
-    "JIRA_EMAIL": "user@example.com",
-    "JIRA_API_TOKEN": "RAWSECRETXYZ",
-    "JIRA_NO_SLEEP": "1"
-  }
-}
+{"name":"us2-team-managed-discovery","description":"Team-managed (next-gen) project discovery: project-owned objects, Epic/Sub-task hierarchy only, and the project's own estimation field ranked (never the global Story Points, research §3). Both ports must produce a byte-identical binding, exit code, and Jira API call sequence (NFR-1). Discovery parity is asserted directly in tests/bash/sink/test_discovery_team.bats; this golden scenario is wired end-to-end through the config command in US1.","mock":{"projects":{"TEAM":"team"}},"fixture":"tests/conformance/fixtures/repo-with-config","argv":["config","--child-type","COMP=Story","--json"],"env":{"JIRA_EMAIL":"user@example.com","JIRA_API_TOKEN":"RAWSECRETXYZ","JIRA_NO_SLEEP":"1"}}

@@ -2,8 +2,6 @@
 # the no-selection pass-through fixture (002 US3, FR-017).
 projects:
   - key: IJT
-    epic_strategy: per_repo
-    task_strategy: subtask
     priority_map:
       P1: Highest
       P2: Medium

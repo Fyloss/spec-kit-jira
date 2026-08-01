@@ -637,10 +637,10 @@ def branchpattern:
   ((.projects // []) | to_entries[] | .key as $i | .value as $p |
     ( [ (if (($p.key // "")|projkey) != true then "projects[\($i)].key is not a valid project key" else empty end),
         (if ($p | has("style")) and ($p.style|IN("company_managed","team_managed")|not) then "projects[\($i)].style is invalid" else empty end),
-        (if ($p.epic_strategy|IN("per_repo","per_feature")|not) then "projects[\($i)].epic_strategy is invalid" else empty end),
-        (if ($p.task_strategy|IN("subtask","linked_story")|not) then "projects[\($i)].task_strategy is invalid" else empty end),
-        (if ($p.task_strategy == "linked_story" and (($p.link_type // "")|length) < 1)
-         then "projects[\($i)].link_type is required when task_strategy=linked_story" else empty end),
+        ( ["epic_strategy","task_strategy","link_type"][] as $retired
+          | if ($p | has($retired))
+            then "projects[\($i)] declares `\($retired)`, which this version of spec-kit-jira no longer uses. Delete the line"
+            else empty end ),
         (if ($p | has("phase_status_map")) and
             (($p.phase_status_map|type) != "object" or ([$p.phase_status_map[]|type] | any(. != "string")))
          then "projects[\($i)].phase_status_map must be a mapping of lifecycle-event name to status name" else empty end),

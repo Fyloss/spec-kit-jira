@@ -12,21 +12,24 @@
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force # canonical serialiser only — lib/, never sink/
-Import-Module (Join-Path $PSScriptRoot 'StoryMarker.psm1') -Force # the durable identifier's grammar (Phase 2)
+Import-Module (Join-Path $PSScriptRoot 'MarkerSplice.psm1') -Force # Get-JiraMarkerSpliceLineCount — a nested import inside StoryMarker.psm1 is not enough
+Import-Module (Join-Path $PSScriptRoot 'SpecMarker.psm1') -Force # Get-JiraSpecMarkerDocumentInfo, ConvertTo-JiraSpecMarkerInfo (Phase 5, US2)
+Import-Module (Join-Path $PSScriptRoot 'StoryMarker.psm1') -Force -Global # the durable identifier's grammar (Phase 2)
 
 function Remove-JiraParseMarkerLines {
     <#
     .SYNOPSIS
-      Remove every speckit-jira marker attempt line (valid or malformed —
-      contract "Reading rules" #2) from $Text, so it never lands in a title,
-      description, acceptance criterion, or design item.
+      Remove every speckit-jira marker attempt line (story= or spec=, valid
+      or malformed — contract "Reading rules" #2) from $Text, so it never
+      lands in a title, description, acceptance criterion, or design item.
     #>
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
     $lines = Split-JiraParseLine $Text
     $out = [System.Collections.Generic.List[string]]::new()
     foreach ($line in $lines) {
-        $info = ConvertTo-JiraStoryMarkerInfo -Line $line | ConvertFrom-Json -Depth 20
-        if ($info.kind -ne 'none') { continue }
+        $storyInfo = ConvertTo-JiraStoryMarkerInfo -Line $line | ConvertFrom-Json -Depth 20
+        $specInfo = ConvertTo-JiraSpecMarkerInfo -Line $line | ConvertFrom-Json -Depth 20
+        if ($storyInfo.kind -ne 'none' -or $specInfo.kind -ne 'none') { continue }
         $out.Add($line)
     }
     return ($out -join "`n")
@@ -343,6 +346,145 @@ function Get-JiraParsedStory {
     return (ConvertTo-JiraJsonValue $story)
 }
 
+function Remove-JiraParseSCLabel {
+    <#
+    .SYNOPSIS
+      Strip a leading "SC-NNN:" label (optionally wrapped in markdown bold)
+      from a Success Criteria bullet item. Mirror of _parse_strip_sc_label.
+    #>
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
+    $bare = $Text -replace '\*\*', ''
+    if ($bare -match '^SC-\d+:\s*(.*)$') { return $Matches[1] }
+    return $bare
+}
+
+function Get-JiraParsedEpicExtraBlocks {
+    <#
+    .SYNOPSIS
+      The Success Criteria and Out of Scope sections as neutral content
+      blocks (data-model.md §7, Phase 5 US2): a named heading plus a bullet
+      list for each section present. Empty when the document carries
+      neither. Mirror of _parse_epic_extra_blocks.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
+    $lines = Split-JiraParseLine $Text
+    $scItems = [System.Collections.Generic.List[string]]::new()
+    $oosItems = [System.Collections.Generic.List[string]]::new()
+    $mode = ''
+    $cur = ''
+    $section = ''
+
+    foreach ($line in $lines) {
+        $t = $line.Trim()
+        $hm = [regex]::Match($t, '^(#{1,6})\s+(.*)$')
+        if ($hm.Success) {
+            if (-not [string]::IsNullOrEmpty($cur)) {
+                $trimmed = $cur.Trim()
+                if ($mode -eq 'sc') { $scItems.Add((Remove-JiraParseSCLabel -Text $trimmed)) }
+                elseif ($mode -eq 'oos') { $oosItems.Add($trimmed) }
+            }
+            $cur = ''
+            $mode = ''
+            $hl = $hm.Groups[1].Value.Length
+            $htext = $hm.Groups[2].Value
+            if ($hl -eq 2 -and $htext -match '^Success\sCriteria') {
+                $section = 'sc-outer'
+            }
+            elseif ($hl -eq 3 -and $section -eq 'sc-outer' -and $htext -match '^Measurable\sOutcomes') {
+                $section = 'sc-outcomes'
+            }
+            elseif ($hl -eq 2 -and $htext -match '^Out\sof\sScope') {
+                $section = 'oos'
+            }
+            else {
+                $section = ''
+            }
+            continue
+        }
+        if ($section -eq 'sc-outcomes' -or $section -eq 'oos') {
+            $bm = [regex]::Match($t, '^([-*]|\d+\.)\s+(.*)$')
+            if ($bm.Success) {
+                if (-not [string]::IsNullOrEmpty($cur)) {
+                    $trimmed = $cur.Trim()
+                    if ($mode -eq 'sc') { $scItems.Add((Remove-JiraParseSCLabel -Text $trimmed)) }
+                    elseif ($mode -eq 'oos') { $oosItems.Add($trimmed) }
+                }
+                $mode = if ($section -eq 'sc-outcomes') { 'sc' } else { 'oos' }
+                $cur = $bm.Groups[2].Value
+            }
+            elseif (-not [string]::IsNullOrEmpty($t) -and -not [string]::IsNullOrEmpty($cur)) {
+                $cur = "$cur $t"
+            }
+        }
+    }
+    if (-not [string]::IsNullOrEmpty($cur)) {
+        $trimmed = $cur.Trim()
+        if ($mode -eq 'sc') { $scItems.Add((Remove-JiraParseSCLabel -Text $trimmed)) }
+        elseif ($mode -eq 'oos') { $oosItems.Add($trimmed) }
+    }
+
+    $blocks = [System.Collections.Generic.List[object]]::new()
+    if ($scItems.Count -gt 0) {
+        $blocks.Add([ordered]@{ type = 'heading'; level = 3; text = 'Success Criteria' })
+        $blocks.Add([ordered]@{ type = 'bullet_list'; items = @($scItems) })
+    }
+    if ($oosItems.Count -gt 0) {
+        $blocks.Add([ordered]@{ type = 'heading'; level = 3; text = 'Out of Scope' })
+        $blocks.Add([ordered]@{ type = 'bullet_list'; items = @($oosItems) })
+    }
+    return $blocks
+}
+
+function Get-JiraParsedPlanSummary {
+    <#
+    .SYNOPSIS
+      The feature folder's plan.md, as neutral content blocks (data-model.md
+      §7, US5, spec FR-026/FR-027/FR-028): a named "Implementation Plan"
+      heading plus one paragraph block per paragraph under `## Summary`,
+      stopping at the next heading. Empty when the input is empty or carries
+      no `## Summary` section. Mirror of parse_plan_summary. Returns the
+      canonical JSON array as a string.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
+    $lines = Split-JiraParseLine $Text
+    $paras = [System.Collections.Generic.List[string]]::new()
+    $para = ''
+    $inSummary = $false
+
+    foreach ($line in $lines) {
+        $t = $line.Trim()
+        $hm = [regex]::Match($t, '^(#{1,6})\s+(.*)$')
+        if ($hm.Success) {
+            if ($para -ne '') { $paras.Add($para); $para = '' }
+            $hl = $hm.Groups[1].Value.Length
+            $htext = $hm.Groups[2].Value
+            $inSummary = ($hl -eq 2 -and $htext -match '^Summary')
+            continue
+        }
+        if (-not $inSummary) { continue }
+        if ([string]::IsNullOrEmpty($t)) {
+            if ($para -ne '') { $paras.Add($para); $para = '' }
+            continue
+        }
+        $t = (Remove-JiraParseMarker $t).Trim()
+        if ($para -ne '') { $para = "$para $t" } else { $para = $t }
+    }
+    if ($para -ne '') { $paras.Add($para) }
+
+    if ($paras.Count -eq 0) {
+        return (ConvertTo-JiraJsonValue @())
+    }
+
+    $blocks = [System.Collections.Generic.List[object]]::new()
+    $blocks.Add([ordered]@{ type = 'heading'; level = 3; text = 'Implementation Plan' })
+    foreach ($p in $paras) {
+        $blocks.Add([ordered]@{ type = 'paragraph'; text = $p })
+    }
+    return (ConvertTo-JiraJsonValue $blocks)
+}
+
 function Get-JiraParsedSpec {
     <#
     .SYNOPSIS
@@ -356,6 +498,14 @@ function Get-JiraParsedSpec {
     $cleanText = Remove-JiraParseMarkerLines -Text $Text
     $etitle = Get-JiraParsedTitle -Text $cleanText -FolderSlug $FolderSlug
     $edesc = Get-JiraParsedDescription -Text $cleanText | ConvertFrom-Json -Depth 100
+
+    # Phase 5, US2, T059/T067: the parent's description also carries a named
+    # Success Criteria section and a named Out of Scope section, as prose
+    # (data-model.md §7) — never a list of user stories (FR-011).
+    $epicExtra = @(Get-JiraParsedEpicExtraBlocks -Text $cleanText)
+    if ($epicExtra.Count -gt 0) {
+        $edesc.blocks = @($edesc.blocks) + $epicExtra
+    }
 
     # Split into user-story sections, tracking each heading's ABSOLUTE
     # 1-based line number (the "anchor", exactly as StoryMarker.psm1's
@@ -379,7 +529,7 @@ function Get-JiraParsedSpec {
     }
     if ($inStory) { $sections.Add($cur) }
 
-    $totalLines = Get-JiraStoryMarkerLineCount -Content $Text
+    $totalLines = Get-JiraMarkerSpliceLineCount -Content $Text
     $stories = [System.Collections.Generic.List[object]]::new()
 
     if ($sections.Count -eq 0) {
@@ -408,8 +558,14 @@ function Get-JiraParsedSpec {
         }
     }
 
+    # epic.local_id / epic.marker (data-model.md §2, Phase 5 US2, T066): the
+    # SAME slim marker view a story carries, read from the whole document —
+    # the parent marker has no section of its own to scope a search to.
+    $epicMinfo = Get-JiraSpecMarkerDocumentInfo -Content $Text
+    $epicLocalId = Get-JiraParseLocalIdForMarker -InfoJson $epicMinfo
+
     $doc = [ordered]@{
-        epic    = [ordered]@{ title = $etitle; description = $edesc }
+        epic    = [ordered]@{ title = $etitle; description = $edesc; local_id = $epicLocalId; marker = ($epicMinfo | ConvertFrom-Json -Depth 20) }
         stories = $stories
     }
     return (ConvertTo-JiraJsonValue $doc)
@@ -417,4 +573,4 @@ function Get-JiraParsedSpec {
 
 Export-ModuleMember -Function Get-JiraParsedTitle, Get-JiraParsedDescription,
 Get-JiraParsedAcceptance, Get-JiraParsedDesign, Get-JiraParsedPriority,
-Get-JiraParsedEstimation, Get-JiraParsedStory, Get-JiraParsedSpec
+Get-JiraParsedEstimation, Get-JiraParsedStory, Get-JiraParsedSpec, Get-JiraParsedPlanSummary

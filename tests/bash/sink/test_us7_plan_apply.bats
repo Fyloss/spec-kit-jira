@@ -13,7 +13,11 @@ setup() {
   # shellcheck source=/dev/null
   source "${SINK_DIR}/plan_apply.sh"
 
-  DOC='{"stories":[{"local_id":"s1","title":"Story One","priority_logical":"P2","description":{"blocks":[{"type":"paragraph","text":"New managed body."}]}}]}'
+  DOC='{"routing":{"project_key":"COMP"},
+        "epic":{"title":"The Epic","local_id":"3f2a91c04b7e6d18",
+                "marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},
+                "description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},
+        "stories":[{"local_id":"s1","title":"Story One","priority_logical":"P2","description":{"blocks":[{"type":"paragraph","text":"New managed body."}]}}]}'
   MARKER="$(adf_managed_marker)"
   # An existing human-origin description: one human paragraph, then a prior panel.
   EXISTING="$(jq -cn --arg m "${MARKER}" '
@@ -23,7 +27,8 @@ setup() {
       {type:"paragraph", content:[{type:"text", text:"stale managed body"}]}
     ]}')"
   CTX="$(jq -cn --argjson ex "${EXISTING}" '{
-    base_url:"https://mock", tickets:{s1:"PROJ-1"},
+    base_url:"https://mock", parent_type_id:"10101", parent_local_id:"3f2a91c04b7e6d18",
+    tickets:{s1:"PROJ-1"},
     ticket_origins:{s1:"human"}, ticket_descriptions:{s1:$ex}
   }')"
 }
@@ -32,7 +37,7 @@ setup() {
   run plan_writes "${DOC}" "${CTX}"
   [ "$status" -eq 0 ]
   local desc
-  desc="$(jq -c '.[0].body.fields.description' <<< "$output")"
+  desc="$(jq -c '.stories[0].body.fields.description' <<< "$output")"
   [ "$(jq -r '.content[0].content[0].text' <<< "${desc}")" = "PO handwritten note." ]
   [[ "$(jq -c '.' <<< "${desc}")" == *"do not edit below this line"* ]]
   [[ "$(jq -c '.' <<< "${desc}")" != *"stale managed body"* ]]
@@ -41,10 +46,10 @@ setup() {
 
 @test "a bridge-created update (no origin) keeps the US3 whole-description behaviour" {
   local ctx
-  ctx="$(jq -cn '{base_url:"https://mock", tickets:{s1:"PROJ-1"}}')"
+  ctx="$(jq -cn '{base_url:"https://mock", parent_type_id:"10101", parent_local_id:"3f2a91c04b7e6d18", tickets:{s1:"PROJ-1"}}')"
   run plan_writes "${DOC}" "${ctx}"
   [ "$status" -eq 0 ]
-  [[ "$output" != *"do not edit below this line"* ]]
+  [[ "$(jq -c '.stories' <<< "$output")" != *"do not edit below this line"* ]]
 }
 
 @test "an edit to the human prose above the panel is not churn (FR-039)" {

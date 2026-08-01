@@ -43,21 +43,35 @@ source "${_plan_apply_dir}/../../engine/story_marker.sh" # R5 steps 4/6 — mark
 source "${_plan_apply_dir}/identity.sh" # stamp the identity marker on each created ticket (R5 step 6)
 
 # plan_writes <neutral-doc-json> <plan-context-json> — resolve the validated
-# neutral document into an ordered action set (US3, T058). Each story becomes a
-# create OR an update, with logical values resolved to ids (FR-017 priority by
-# logical name) and the estimation written to the discovered field ON CREATE ONLY
-# (FR-018 — never re-sent on update). The `--dry-run` report is exactly this
-# action set (FR-033); no Jira mutation happens here. apply_writes performs it.
+# neutral document into an ordered write plan (US3, T058; Phase 5, US2,
+# T072, R7). Each story becomes a create OR an update, with logical values
+# resolved to ids (FR-017 priority by logical name) and the estimation
+# written to the discovered field ON CREATE ONLY (FR-018 — never re-sent on
+# update). The `--dry-run` report is exactly this plan (FR-033); no Jira
+# mutation happens here. apply_writes_with_recognition performs it.
 #
 # plan-context carries the resolved facts the engine cannot know:
 #   { base_url, story_type_id, priority_ids:{P1,P2,P3}, estimation_field_id|null,
 #     tickets:{<local_id>: <existing-issue-key>},   (a local_id absent => create)
 #     ticket_origins:{<local_id>: "bridge-created"|"human"},  (optional, US7)
-#     ticket_descriptions:{<local_id>: <existing-adf-doc>} }   (optional, US7)
-# When a ticket carries a human origin and its existing description, the update's
-# description is rendered through the managed-panel splice so the human-authored
-# prose above the panel is preserved verbatim (FR-038); absent that context the
-# whole description is bridge-owned (the US3 behaviour, byte-for-byte unchanged).
+#     ticket_descriptions:{<local_id>: <existing-adf-doc>},   (optional, US7)
+#     parent_type_id, parent_key|absent (a recognised parent's key),
+#     parent_local_id (the parent marker's id, for a creation),
+#     parent_current|absent ({summary, description}, for the zero-churn
+#       comparison), parent_origin|absent ("bridge"|"human") }
+# When a ticket carries a human origin and its existing description, the
+# update's description is rendered through the managed-panel splice so the
+# human-authored prose above the panel is preserved verbatim (FR-038);
+# absent that context the whole description is bridge-owned.
+#
+# Returns {parent, stories} (data-model.md §6): `parent` is `null` when a
+# recognised parent's bridge-owned content already matches (zero churn); a
+# PUT when it differs; a POST — carrying `local_id` and `role:"parent"` —
+# when no parent is yet recognised. Every STORY creation carries the literal
+# placeholder `fields.parent.key = "<resolved at apply time>"`, resolved by
+# apply_writes_with_recognition once the parent's real key is known (the
+# parent is always performed first — contracts/parent-marker.md "Ordering
+# within one run"). An update never re-touches the parent link.
 plan_writes() {
   local doc="$1" ctx="$2"
   local base story_type estid project
@@ -69,7 +83,7 @@ plan_writes() {
   # with the run summary's resolved project (research R2, FR-023).
   project="$(jq -r '.routing.project_key // ""' <<< "${doc}")"
 
-  local actions="[]" n i
+  local stories="[]" n i
   n="$(jq '.stories | length' <<< "${doc}")"
   for ((i = 0; i < n; i++)); do
     local story sid title prio est ticket priority_id adf fields action base_fields
@@ -90,18 +104,21 @@ plan_writes() {
         return 1
       fi
       # CREATE: the shared mandatory base (research R3, FR-025) + description +
-      # priority + estimation (create-only). A bridge-created ticket owns its
-      # whole description (no delimiter, FR-040).
+      # priority + estimation (create-only) + the parent-key placeholder
+      # (T072/T073), resolved once the parent's create response is read. A
+      # bridge-created ticket owns its whole description (no delimiter, FR-040).
       base_fields="$(jira_create_fields_base "${project}" "${title}" "${story_type}")"
-      fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${adf}" '$base + {description:$d}')"
+      fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${adf}" \
+        '$base + {description:$d, parent:{key:"<resolved at apply time>"}}')"
       [[ -n "${priority_id}" ]] && fields="$(jq -c --arg pid "${priority_id}" '. + {priority:{id:$pid}}' <<< "${fields}")"
       if [[ -n "${estid}" && "${est}" != "null" ]]; then
         fields="$(jq -c --arg fid "${estid}" --argjson v "${est}" '. + {($fid): $v}' <<< "${fields}")"
       fi
       action="$(jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" --arg sid "${sid}" \
-        '{method:"POST", url:$u, body:{fields:$f}, local_id:$sid}')"
+        '{method:"POST", url:$u, body:{fields:$f}, local_id:$sid, role:"story"}')"
     else
-      # UPDATE: content + priority; the estimation is NEVER re-sent (FR-018). On a
+      # UPDATE: content + priority; the estimation is NEVER re-sent (FR-018),
+      # and the parent link is never re-touched (it was set at creation). On a
       # human-origin ticket the description is spliced into the managed panel so the
       # human prose above it survives (FR-038).
       local origin existing
@@ -113,11 +130,77 @@ plan_writes() {
       fields="$(jq -cn --arg t "${title}" --argjson d "${adf}" '{summary:$t, description:$d}')"
       [[ -n "${priority_id}" ]] && fields="$(jq -c --arg pid "${priority_id}" '. + {priority:{id:$pid}}' <<< "${fields}")"
       action="$(jq -cn --arg u "${base}/rest/api/3/issue/${ticket}" --argjson f "${fields}" \
-        '{method:"PUT", url:$u, body:{fields:$f}}')"
+        '{method:"PUT", url:$u, body:{fields:$f}, role:"story"}')"
     fi
-    actions="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${actions}")"
+    stories="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${stories}")"
   done
-  json_canonical <<< "${actions}"
+
+  local parent; parent="$(_plan_writes_parent "${doc}" "${ctx}" "${base}")"
+  jq -cn --argjson p "${parent}" --argjson s "${stories}" '{parent:$p, stories:$s}' | json_canonical
+}
+
+# _plan_writes_parent <neutral-doc-json> <plan-context-json> <base-url> —
+# the parent half of plan_writes' return shape (Phase 5, US2, T072/T076).
+# `epic.local_id`/`epic.title`/`epic.description` come from the neutral
+# document; the recognised-parent facts come from the plan context.
+_plan_writes_parent() {
+  local doc="$1" ctx="$2" base="$3"
+  local parent_type project epic_title epic_local_id
+  parent_type="$(jq -r '.parent_type_id // ""' <<< "${ctx}")"
+  project="$(jq -r '.routing.project_key // ""' <<< "${doc}")"
+  epic_title="$(jq -r '.epic.title // ""' <<< "${doc}")"
+  epic_local_id="$(jq -r '.epic.local_id // ""' <<< "${doc}")"
+
+  local epic_adf; epic_adf="$(adf_render_description "$(jq -c '.epic' <<< "${doc}")")"
+
+  local parent_key; parent_key="$(jq -r '.parent_key // ""' <<< "${ctx}")"
+
+  if [[ -z "${parent_key}" ]]; then
+    # CREATE: no parent recognised yet.
+    local base_fields fields
+    base_fields="$(jira_create_fields_base "${project}" "${epic_title}" "${parent_type}")"
+    fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${epic_adf}" '$base + {description:$d}')"
+    jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" --arg lid "${epic_local_id}" \
+      '{method:"POST", url:$u, body:{fields:$f}, local_id:$lid, role:"parent"}'
+    return 0
+  fi
+
+  # A recognised parent: compare its bridge-owned content before planning a
+  # write (T076) — a human-origin parent's description is rendered through
+  # the SAME managed-panel splice a human-origin story uses (FR-039's rule,
+  # extended to the parent), so its prose above the panel survives, and is
+  # then compared on its managed section alone.
+  local current origin status
+  current="$(jq -c '.parent_current // null' <<< "${ctx}")"
+  origin="$(jq -r '.parent_origin // ""' <<< "${ctx}")"
+
+  if [[ -n "${origin}" && "${origin}" != "bridge" ]]; then
+    local existing; existing="$(jq -c '.description // {}' <<< "${current}")"
+    epic_adf="$(adf_render_managed_description "$(jq -c '.epic' <<< "${doc}")" "${origin}" "${existing}")"
+  fi
+  local desired_fields; desired_fields="$(jq -cn --arg t "${epic_title}" --argjson d "${epic_adf}" '{summary:$t, description:$d}')"
+
+  if [[ "${current}" == "null" ]]; then
+    status="changed"
+  elif [[ -n "${origin}" && "${origin}" != "bridge" ]]; then
+    local desc_st other_st cur_desc new_desc cur_rest des_rest
+    cur_desc="$(jq -c '.description // {}' <<< "${current}")"
+    new_desc="$(jq -c '.description // {}' <<< "${desired_fields}")"
+    desc_st="$(plan_managed_description_status "${cur_desc}" "${new_desc}")"
+    cur_rest="$(jq -c 'del(.description)' <<< "${current}")"
+    des_rest="$(jq -c 'del(.description)' <<< "${desired_fields}")"
+    other_st="$(idempotency_field_status "${cur_rest}" "${des_rest}")"
+    if [[ "${desc_st}" == "unchanged" && "${other_st}" == "unchanged" ]]; then status="unchanged"; else status="changed"; fi
+  else
+    status="$(idempotency_field_status "${current}" "${desired_fields}")"
+  fi
+
+  if [[ "${status}" == "unchanged" ]]; then
+    printf 'null'
+    return 0
+  fi
+  jq -cn --arg u "${base}/rest/api/3/issue/${parent_key}" --argjson f "${desired_fields}" \
+    '{method:"PUT", url:$u, body:{fields:$f}, role:"parent"}'
 }
 
 # plan_managed_description_status <current-desc-json> <new-desc-json>
@@ -307,50 +390,113 @@ apply_writes() {
   return "${worst}"
 }
 
-# apply_writes_with_recognition <actions-json> <spec-ref-json> <spec-file>
-#   [extra-known-coords-json]
+# apply_writes_with_recognition <plan-json> <spec-ref-json> <spec-file>
+#   [known-parent-key] [extra-known-coords-json]
 #   Mirror of apply_writes's guard-then-write discipline (US11), extended
-#   with R5 steps 4 and 6: every story whose action is a creation
-#   (`local_id` present on a `POST .../issue` action — plan_writes stamps
-#   this) is marked `creating` in spec-file in ONE splice, immediately after
-#   the guard and before the first create (step 4, research R5); then, for
-#   each ticket actually created, its identity marker is stamped and its
-#   `creating` mark is replaced with the recorded key IN spec-file — per
-#   ticket, IMMEDIATELY, never batched (step 6): a run interrupted between
-#   one create's response and its record leaves every OTHER story's
-#   identifier untouched and creatable by the next run.
+#   with R5 steps 4 and 6, and with Phase 5/US2's parent-first ordering
+#   (contracts/parent-marker.md "Ordering within one run", steps 8-11).
+#   plan-json is plan_writes' {parent, stories} shape.
+#
+#   The parent (when present) is performed FIRST; its response key is read
+#   before any story is written, and every story creation's
+#   fields.parent.key placeholder ("<resolved at apply time>") is resolved
+#   to that key -- the just-created key, or known-parent-key (the plan
+#   context's already-known parent_key) when the parent was unchanged or
+#   updated rather than created. Every story whose action is a creation is
+#   marked `creating` in spec-file, in the SAME splice that marks the
+#   parent `creating` (step 9); then, for each ticket actually created
+#   (parent or story), its identity marker is stamped and its `creating`
+#   mark is replaced with the recorded key IN spec-file -- per ticket,
+#   IMMEDIATELY, never batched (step 6/11): a run interrupted between one
+#   create's response and its record leaves every OTHER story's identifier
+#   untouched and creatable by the next run.
 apply_writes_with_recognition() {
-  local actions="$1" spec_ref="$2" spec_file="$3" extra="${4:-[]}"
+  local plan="$1" spec_ref="$2" spec_file="$3" known_parent_key="${4:-}" extra="${5:-[]}"
   local coords allow
   coords="$(_apply_known_coords "${extra}")"
   allow="${SPEC_KIT_JIRA_ALLOWLIST:-[]}"
 
-  local n
-  n="$(jq 'length' <<< "${actions}")"
+  local parent stories
+  parent="$(jq -c '.parent' <<< "${plan}")"
+  stories="$(jq -c '.stories' <<< "${plan}")"
 
-  # (1) Pre-write gate — unchanged: scan every payload before writing anything.
-  local i body
+  # (1) Pre-write gate -- scan every payload, parent then stories, before
+  # writing anything.
+  local body
+  if [[ "${parent}" != "null" ]]; then
+    body="$(jq -c '.body // {}' <<< "${parent}")"
+    privacy_guard_scan "${body}" "${coords}" "${allow}" || return $?
+  fi
+  local n i
+  n="$(jq 'length' <<< "${stories}")"
   for ((i = 0; i < n; i++)); do
-    body="$(jq -c ".[${i}].body // {}" <<< "${actions}")"
+    body="$(jq -c ".[${i}].body // {}" <<< "${stories}")"
     privacy_guard_scan "${body}" "${coords}" "${allow}" || return $?
   done
 
-  # (2) R5 step 4 — mark every planned creation `creating`, one splice.
+  # (2) R5 step 4 / contract step 9 -- mark the parent (when it is a
+  # creation) and every planned story creation `creating`, in ONE splice.
+  local current new_content parent_local_id=""
+  current="$(cat "${spec_file}" 2> /dev/null; printf x)"; current="${current%x}"
+  new_content="${current}"
+  if [[ "${parent}" != "null" ]] && [[ "$(jq -r '.method' <<< "${parent}")" == "POST" ]]; then
+    parent_local_id="$(jq -r '.local_id // ""' <<< "${parent}")"
+    if [[ -n "${parent_local_id}" ]]; then
+      new_content="$(printf '%s' "${new_content}" | spec_marker_mark_creating "${parent_local_id}"; printf x)"; new_content="${new_content%x}"
+    fi
+  fi
   local creating_ids
-  creating_ids="$(jq -c '[.[] | select(.method=="POST" and (.url|endswith("/issue")) and (.local_id // "") != "") | .local_id]' <<< "${actions}")"
+  creating_ids="$(jq -c '[.[] | select(.method=="POST" and (.url|endswith("/issue")) and (.local_id // "") != "") | .local_id]' <<< "${stories}")"
   if [[ "$(jq 'length' <<< "${creating_ids}")" -gt 0 ]]; then
-    local current new_content
-    current="$(cat "${spec_file}" 2> /dev/null; printf x)"; current="${current%x}"
-    new_content="$(printf '%s' "${current}" | story_marker_mark_creating "${creating_ids}"; printf x)"; new_content="${new_content%x}"
-    story_marker_write_file "${spec_file}" "${new_content}" > /dev/null
+    new_content="$(printf '%s' "${new_content}" | story_marker_mark_creating "${creating_ids}"; printf x)"; new_content="${new_content%x}"
+  fi
+  if [[ "${new_content}" != "${current}" ]]; then
+    marker_splice_write_file "${spec_file}" "${new_content}" > /dev/null
   fi
 
-  # (3) Write pass, in order; a CREATE stamps + records IMMEDIATELY (step 6).
-  local worst=0 method url rc resp
+  # (3) Write pass -- the parent FIRST (step 10): its response key is read
+  # before the first story action is scanned for writing.
+  local worst=0 method url rc resp parent_key="${known_parent_key}"
+  if [[ "${parent}" != "null" ]]; then
+    method="$(jq -r '.method' <<< "${parent}")"
+    url="$(jq -r '.url' <<< "${parent}")"
+    body="$(jq -c '.body // empty' <<< "${parent}")"
+    resp="$(mktemp)"
+    if [[ -n "${body}" ]]; then jira_request "${method}" "${url}" "${body}" > "${resp}"; else jira_request "${method}" "${url}" > "${resp}"; fi
+    rc=$?
+    ((rc > worst)) && worst=${rc}
+    if ((rc >= 2)); then
+      rm -f "${resp}"
+      return "${worst}"
+    fi
+    if [[ "${method}" == "POST" ]]; then
+      parent_key="$(jq -r '.key // empty' < "${resp}")"
+      if [[ -n "${parent_key}" && -n "${parent_local_id}" ]]; then
+        identity_write "${parent_key}" "${spec_ref}" "bridge" "" "parent" || true
+        local cur new
+        cur="$(cat "${spec_file}" 2> /dev/null; printf x)"; cur="${cur%x}"
+        new="$(printf '%s' "${cur}" | spec_marker_record_ticket "${parent_local_id}" "${parent_key}"; printf x)"; new="${new%x}"
+        marker_splice_write_file "${spec_file}" "${new}" > /dev/null
+      fi
+    fi
+    rm -f "${resp}"
+  fi
+
+  # (4) Story writes (step 11) -- the parent-key placeholder resolved to
+  # the key just created, or the already-known parent_key when the parent
+  # was recognised (unchanged or updated) rather than created.
+  n="$(jq 'length' <<< "${stories}")"
   for ((i = 0; i < n; i++)); do
-    method="$(jq -r ".[${i}].method" <<< "${actions}")"
-    url="$(jq -r ".[${i}].url" <<< "${actions}")"
-    body="$(jq -c ".[${i}].body // empty" <<< "${actions}")"
+    local action
+    action="$(jq -c ".[${i}]" <<< "${stories}")"
+    if [[ -n "${parent_key}" ]]; then
+      action="$(jq -c --arg k "${parent_key}" \
+        'if (.body.fields.parent.key? == "<resolved at apply time>") then .body.fields.parent.key = $k else . end' \
+        <<< "${action}")"
+    fi
+    method="$(jq -r '.method' <<< "${action}")"
+    url="$(jq -r '.url' <<< "${action}")"
+    body="$(jq -c '.body // empty' <<< "${action}")"
     resp="$(mktemp)"
     if [[ -n "${body}" ]]; then
       jira_request "${method}" "${url}" "${body}" > "${resp}"
@@ -367,13 +513,13 @@ apply_writes_with_recognition() {
     if [[ "${method}" == "POST" && "${url}" == */issue ]]; then
       local key local_id
       key="$(jq -r '.key // empty' < "${resp}")"
-      local_id="$(jq -r ".[${i}].local_id // empty" <<< "${actions}")"
+      local_id="$(jq -r '.local_id // empty' <<< "${action}")"
       if [[ -n "${key}" && -n "${local_id}" ]]; then
-        identity_write "${key}" "${spec_ref}" "bridge" "${local_id}" || true
+        identity_write "${key}" "${spec_ref}" "bridge" "${local_id}" "story" || true
         local cur new
         cur="$(cat "${spec_file}" 2> /dev/null; printf x)"; cur="${cur%x}"
         new="$(printf '%s' "${cur}" | story_marker_record_ticket "${local_id}" "${key}"; printf x)"; new="${new%x}"
-        story_marker_write_file "${spec_file}" "${new}" > /dev/null
+        marker_splice_write_file "${spec_file}" "${new}" > /dev/null
       fi
     fi
     rm -f "${resp}"

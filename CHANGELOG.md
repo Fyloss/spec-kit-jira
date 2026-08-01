@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-01
+
+### Added
+
+- Every specification now mirrors as one parent Jira issue plus its children,
+  not just the children on their own. The parent is created first, before any
+  child, and every child's creation carries the parent's key. Its own durable
+  identifier is recorded in an HTML comment line beside the document's title,
+  read back on every later run so the parent is recognised rather than
+  recreated.
+- The parent's description carries the specification's overview prose, a
+  named Success Criteria section, and a named Out of Scope section — never a
+  list of user stories, since Jira already shows the children under their
+  parent in its own issue view.
+- When the feature folder holds an implementation plan, the parent also
+  carries a named Implementation Plan section built from `plan.md`'s
+  `## Summary` prose. A later run replaces that section in place; an
+  unchanged plan is not rewritten.
+- The child issue type is the operator-recorded (or unambiguously derived)
+  answer already in use; the parent type is now derived from the project's
+  own issue-type hierarchy — the level immediately above the child's, when
+  exactly one type occupies it. A project with no such level, or two or more
+  candidates at that level, refuses before any write, naming every candidate
+  by its own Jira name — no Atlassian default name is ever assumed.
+- A project whose parent type declares a required field this bridge cannot
+  supply, or whose child type's create metadata offers no `parent` field at
+  all, refuses before any write, naming every unsatisfiable field of every
+  affected type in one message. Both refusals are reported as their own
+  named cause, never a transport or rejected-request error, and `--dry-run`
+  predicts them exactly as a real run would.
+
+### Removed
+
+- Three configuration keys from an earlier, never-built mechanism —
+  `epic_strategy`, `task_strategy`, `link_type` — are now refused wherever
+  they appear in `config.yml`, naming the project and the retired key.
+
+### Migration note
+
+Mirrors created before this release carry no parent. Reconciling one of them
+again does not retroactively attach its existing children to a newly created
+parent — a story's parent link is set only at the moment of its own creation,
+never on a later update — so a full hierarchy for an existing specification
+is only available by re-mirroring it from a clean state, or by creating the
+parent by hand in Jira and recording its key in `spec.md` under the same
+marker grammar reconcile uses for its own writes.
+
 ## [0.7.0] - 2026-07-31
 
 ### Fixed

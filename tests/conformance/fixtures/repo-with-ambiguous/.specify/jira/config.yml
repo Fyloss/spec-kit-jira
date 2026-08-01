@@ -2,6 +2,4 @@
 # style declaration: resolution depends entirely on the API signal / --style.
 projects:
   - key: AMBI
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: AMBI

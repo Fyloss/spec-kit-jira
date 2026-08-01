@@ -1,0 +1,15 @@
+# Team config for the stale-binding conformance fixture (spec FR-003a) —
+# reproduces the state of every existing installation on its first run after
+# this feature: a binding written by the earlier config_resolved_ids_for.
+projects:
+  - key: STALE
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: STALE
+routing_default: STALE

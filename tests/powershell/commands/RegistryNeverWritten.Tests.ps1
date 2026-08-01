@@ -77,7 +77,7 @@ Describe 'The registry is never written (FR-022, SC-007, SC-012)' {
 
         # A minimal committed config so the ceremony gets past its config read.
         Set-Content -Path (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -NoNewline `
-            -Value "projects:`n  - key: TEAM`n    epic_strategy: per_repo`n    task_strategy: subtask`nrouting_default: TEAM`n"
+            -Value "projects:`n  - key: TEAM`nrouting_default: TEAM`n"
 
         $script:Spec = Join-Path $script:Work 'spec.md'
         @(

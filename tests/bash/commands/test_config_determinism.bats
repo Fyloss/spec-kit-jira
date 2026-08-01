@@ -38,7 +38,7 @@ boot() {
 
 @test "config --json emits a valid machine-readable run summary (FR-002)" {
   boot
-  run cmd_config config --json
+  run cmd_config config --child-type COMP=Story --json
   [ "$status" -eq 0 ]
   [ "$(jq -r '.schema_version' <<< "$output")" = "1.0" ]
   [ "$(jq -r '.command' <<< "$output")" = "config" ]
@@ -47,7 +47,7 @@ boot() {
 
 @test "the ceremony reads only — no create/update Jira calls during config (FR-001)" {
   boot
-  cmd_config config --json > /dev/null
+  cmd_config config --child-type COMP=Story --json > /dev/null
   run mock_calls
   # Every recorded call is a read (GET); a config run never mutates Jira.
   while IFS= read -r line; do
@@ -58,9 +58,9 @@ boot() {
 
 @test "two runs against an unchanged project write a byte-identical config.local.yml (FR-003)" {
   boot
-  cmd_config config --json > "${WORK}/run1"
+  cmd_config config --child-type COMP=Story --json > "${WORK}/run1"
   cp "${JIRA_CONFIG_DIR}/config.local.yml" "${WORK}/local1"
-  cmd_config config --json > "${WORK}/run2"
+  cmd_config config --child-type COMP=Story --json > "${WORK}/run2"
   cp "${JIRA_CONFIG_DIR}/config.local.yml" "${WORK}/local2"
   # The persisted resolved-id table is byte-identical on re-run (the FR-003 artifact).
   run diff "${WORK}/local1" "${WORK}/local2"
@@ -72,10 +72,12 @@ boot() {
 
 @test "the resolved-id table preserves the discovered ids by logical name" {
   boot
-  cmd_config config --json > /dev/null
+  cmd_config config --child-type COMP=Story --json > /dev/null
   local json
   json="$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")"
-  [ "$(jq -r '.resolved_ids.COMP.issue_types.Story' <<< "$json")" = "10102" ]
+  # New list shape (008 T014a): issue_types is a list of
+  # {logical_name, id, hierarchy_level, subtask}, not a name-to-id map.
+  [ "$(jq -r '.resolved_ids.COMP.issue_types[] | select(.logical_name=="Story") | .id' <<< "$json")" = "10102" ]
   [ "$(jq -r '.resolved_ids.COMP.priorities.Critical' <<< "$json")" = "1" ]
   [ "$(jq -r '.resolved_ids.COMP.statuses.Backlog' <<< "$json")" = "1" ]
   # The operator-authored local layer (site_alias, overrides) is preserved.
@@ -85,7 +87,7 @@ boot() {
 @test "the PowerShell port writes a byte-identical config.local.yml (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   boot
-  cmd_config config --json > /dev/null
+  cmd_config config --child-type COMP=Story --json > /dev/null
   cp "${JIRA_CONFIG_DIR}/config.local.yml" "${WORK}/local-bash"
 
   local pswork
@@ -95,7 +97,7 @@ boot() {
     JIRA_EMAIL="${JIRA_EMAIL}" JIRA_API_TOKEN="${JIRA_API_TOKEN}" JIRA_NO_SLEEP=1 \
     pwsh -NoProfile -Command "
       Import-Module '${PS_CMD}/Config.psm1' -Force
-      [void](Invoke-JiraConfig -Arguments @('config','--json'))
+      [void](Invoke-JiraConfig -Arguments @('config','--child-type','COMP=Story','--json'))
     " > /dev/null
   run diff "${WORK}/local-bash" "${pswork}/.specify/jira/config.local.yml"
   [ "$status" -eq 0 ]

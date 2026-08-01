@@ -128,6 +128,40 @@ is spec-kit-jira's own bookkeeping; leave it exactly where it is. Deleting it (o
 regenerating `spec.md` from the template) makes the next run treat that story as
 new, mirroring it again — the ticket it used to point at is left untouched.
 
+## The parent artifact
+
+Every specification mirrors as one parent issue plus its children. The parent is
+created first, before any child, and every child's creation carries the parent's
+key. Immediately after the document's `#` title, reconcile writes one HTML
+comment line naming the parent, using the same durable-identifier discipline as
+the story marker:
+
+```markdown
+<!-- speckit-jira spec=3f2a91c04b7e6d18 ticket=PROJ-140 -->
+```
+
+The parent's description carries the specification's overview prose, a named
+Success Criteria section, a named Out of Scope section, and — when the feature
+folder holds an implementation plan — a named Implementation Plan section built
+from `plan.md`'s `## Summary` prose. It never carries a list of user stories:
+Jira already shows the children under their parent in its own issue view.
+
+The child issue type is whichever type the project's binding records (an
+operator answer, recorded once by `/speckit.jira.config`); the parent type is
+derived from the project's issue-type hierarchy — the level immediately above
+the child's, when exactly one type occupies it. A project with no level above
+the child's, or two or more candidates at that level, refuses before any write,
+naming every candidate.
+
+A project whose parent type declares a required field the bridge cannot supply
+(anything beyond summary, description, issue type, project, priority, reporter,
+and — on the child type only, when the project's own metadata offers it — a
+parent reference) refuses before any write too, naming every unsatisfiable
+field of every affected type in one message, and a project whose child type's
+create metadata offers no `parent` field at all refuses the same way. Both
+refusals are reported as their own named cause, never a rejected-request or
+transport error, and `--dry-run` predicts them exactly as a real run would.
+
 ## Recognition and the run summary
 
 Before planning any write, reconcile reads back every ticket a story's marker

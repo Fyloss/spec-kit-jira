@@ -27,8 +27,6 @@ write_valid_team() {
 projects:
   - key: PROJ
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
     issue_types:
       Epic: "10001"
       Story: "10002"
@@ -257,26 +255,21 @@ YAML
 projects:
   - key: PROJ
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
   - key: OPS
     style: team_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: PROJ
 YAML
   cat > "${DIR}/config.local.yml" <<'YAML'
 overrides:
   projects:
     - key: PROJ
-      epic_strategy: per_feature
+      style: team_managed
 YAML
   JIRA_CONFIG_DIR="${DIR}" run config_load
   [ "$status" -eq 0 ]
   [ "$(jq -r '.projects | length' <<< "${output}")" -eq 2 ]
   [ "$(jq -r '.projects[0].key' <<< "${output}")" = "PROJ" ]
-  [ "$(jq -r '.projects[0].epic_strategy' <<< "${output}")" = "per_feature" ]
-  [ "$(jq -r '.projects[0].style' <<< "${output}")" = "company_managed" ]
+  [ "$(jq -r '.projects[0].style' <<< "${output}")" = "team_managed" ]
   [ "$(jq -r '.projects[1].key' <<< "${output}")" = "OPS" ]
 }
 
@@ -329,8 +322,6 @@ YAML
 projects:
   - key: PROJ
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 YAML
   JIRA_CONFIG_DIR="${DIR}" run config_load
   [ "$status" -eq 4 ]
@@ -342,8 +333,6 @@ YAML
 projects:
   - key: PROJ
     style: bespoke
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: PROJ
 YAML
   JIRA_CONFIG_DIR="${DIR}" run config_load
@@ -351,27 +340,11 @@ YAML
   [[ "$output" == *"style"* ]]
 }
 
-@test "config_load requires link_type when task_strategy is linked_story (exit 4)" {
-  cat > "${DIR}/config.yml" <<'YAML'
-projects:
-  - key: PROJ
-    style: company_managed
-    epic_strategy: per_repo
-    task_strategy: linked_story
-routing_default: PROJ
-YAML
-  JIRA_CONFIG_DIR="${DIR}" run config_load
-  [ "$status" -eq 4 ]
-  [[ "$output" == *"link_type"* ]]
-}
-
 @test "config_load rejects a phase_status_map that is not a mapping to status names (exit 4, T074)" {
   cat > "${DIR}/config.yml" <<'YAML'
 projects:
   - key: PROJ
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
     phase_status_map: "not-a-mapping"
 routing_default: PROJ
 YAML
@@ -385,8 +358,6 @@ YAML
 projects:
   - key: PROJ
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
     phase_status_map:
       after_specify: "To Do"
       after_plan: "In Progress"
@@ -403,8 +374,6 @@ YAML
 projects:
   - key: PROJ
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
     halted_statuses:
       count: 3
 routing_default: PROJ

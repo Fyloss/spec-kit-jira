@@ -47,9 +47,15 @@ Describe 'Test-JiraInterchange' {
         Test-JiraInterchange ($bad | ConvertTo-Json -Depth 100) 2>$null | Should -BeFalse
     }
 
-    It 'rejects a case-variant epic.strategy like the Bash port — "Per_repo" is not "per_repo" (NFR-1)' {
+    It 'a document still carrying epic.strategy is not an error — it is simply ignored (008 T024/T026, FR-030)' {
         $bad = ($script:Valid | ConvertFrom-Json)
-        $bad.epic.strategy = 'Per_repo'
-        Test-JiraInterchange ($bad | ConvertTo-Json -Depth 100) 2>$null | Should -BeFalse
+        $bad.epic | Add-Member -NotePropertyName strategy -NotePropertyValue 'per_repo' -Force
+        Test-JiraInterchange ($bad | ConvertTo-Json -Depth 100) | Should -BeTrue
+    }
+
+    It 'epic.strategy absent is not an error either — the schema no longer requires it (008 T024/T026)' {
+        $ok = ($script:Valid | ConvertFrom-Json)
+        $ok.epic.PSObject.Properties.Remove('strategy')
+        Test-JiraInterchange ($ok | ConvertTo-Json -Depth 100) | Should -BeTrue
     }
 }

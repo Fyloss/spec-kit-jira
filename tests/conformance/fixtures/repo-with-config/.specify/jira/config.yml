@@ -3,8 +3,6 @@
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
     issue_types:
       Epic: "10001"
       Story: "10002"

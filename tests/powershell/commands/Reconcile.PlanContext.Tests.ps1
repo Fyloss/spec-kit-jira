@@ -10,7 +10,7 @@ BeforeAll {
 }
 
 Describe 'Creation context resolution (US2)' {
-    It 'story_type_id comes from resolved_ids.<KEY>.issue_types.Story (FR-007)' {
+    It 'story_type_id comes from resolved_ids.<KEY>.child_type.id (FR-007)' {
         $r = Get-JiraReconcilePlanContextFromBinding -BaseUrl 'https://mock' -ProjectKey 'COMP' -ConfigDir $script:Fixture -ConfigJson $script:Cfg
         $r.ExitCode | Should -Be 0
         ($r.Json | ConvertFrom-Json).story_type_id | Should -Be '10004'
@@ -83,7 +83,6 @@ Describe 'Creation context resolution (US2)' {
         $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-feature'
         $env:SPEC_KIT_JIRA_REPO = 'acme/app'
         $env:SPEC_KIT_JIRA_PROJECT_KEY = 'TEST'
-        $env:SPEC_KIT_JIRA_EPIC_STRATEGY = 'per_repo'
         $env:JIRA_CONFIG_DIR = $legacy
         $env:SPEC_KIT_JIRA_PLAN_CONTEXT = $null
         try {
@@ -98,7 +97,7 @@ Describe 'Creation context resolution (US2)' {
             # config.yml is actually read when SPEC_KIT_JIRA_PLAN_CONTEXT is
             # not overridden, even though the project key and epic strategy
             # are.
-            $out.actions[0].body.fields.priority.id | Should -Be '1'
+            $out.actions[1].body.fields.priority.id | Should -Be '1'
         }
         finally {
             $env:JIRA_CONFIG_DIR = $null

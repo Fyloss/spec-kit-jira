@@ -26,18 +26,11 @@ Describe 'Config-time mapping refusal' {
         $code | Should -Be 0
     }
 
-    It 'persists epic/task strategy and link type by logical name' {
-        $r = New-JiraProjectMapping -Key 'COMP' -Style 'company_managed' -EpicStrategy 'per_repo' -TaskStrategy 'linked_story' -LinkType 'blocks'
+    It 'persists key and style by logical name' {
+        $r = New-JiraProjectMapping -Key 'COMP' -Style 'company_managed'
         $r.ExitCode | Should -Be 0
         $obj = $r.Json | ConvertFrom-Json
         $obj.key | Should -Be 'COMP'
-        $obj.epic_strategy | Should -Be 'per_repo'
-        $obj.task_strategy | Should -Be 'linked_story'
-        $obj.link_type | Should -Be 'blocks'
-    }
-
-    It 'refuses linked_story without a link type (exit 4)' {
-        $r = New-JiraProjectMapping -Key 'TEAM' -Style 'team_managed' -EpicStrategy 'per_feature' -TaskStrategy 'linked_story'
-        $r.ExitCode | Should -Be 4
+        $obj.style | Should -Be 'company_managed'
     }
 }

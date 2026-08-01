@@ -21,7 +21,6 @@ BeforeAll {
     # Relies on config.yml-based routing (folder prefix "001-" -> COMP); clear
     # any override an earlier suite in the same Pester process left behind.
     Remove-Item Env:\SPEC_KIT_JIRA_PROJECT_KEY -ErrorAction SilentlyContinue
-    Remove-Item Env:\SPEC_KIT_JIRA_EPIC_STRATEGY -ErrorAction SilentlyContinue
 
     function Invoke-Captured {
         param([string[]] $ArgList)
@@ -34,7 +33,7 @@ BeforeAll {
 }
 
 Describe 'Invoke-JiraReconcile — no machine-local state' {
-    AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
+    AfterEach { Remove-Item Env:\SPEC_KIT_JIRA_SPEC_SLUG -ErrorAction SilentlyContinue; if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
 
     It 'recognition succeeds with no local run history at all — no state file, empty HOME' {
         $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
@@ -66,7 +65,15 @@ Describe 'Invoke-JiraReconcile — no machine-local state' {
         (Test-Path (Join-Path $emptyHome '.state')) | Should -BeFalse
     }
 
-    It 'a renamed specification folder still recognises its tickets and creates none' {
+    It 'a renamed specification folder still recognises its STORY tickets and creates none' {
+        # This proves story recognition's rename tolerance (its durable
+        # `story` identifier, decoupled from spec_slug) — not the parent's,
+        # which the contract deliberately keeps slug-sensitive
+        # (contracts/hierarchy-resolution.md §7); that is covered on its
+        # own in Recognition.Parent.Tests.ps1. A caller that renames a spec
+        # folder mid-lifecycle keeps SPEC_KIT_JIRA_SPEC_SLUG stable across
+        # the rename in practice, which this test mirrors.
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-billing-invoices'
         $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
         $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
 
@@ -107,24 +114,25 @@ Describe 'Invoke-JiraReconcile — no machine-local state' {
         ) -join "`n" | Set-Content -NoNewline -Path $spec
 
         $r = Invoke-Captured @('reconcile', $spec, '--json') | ConvertFrom-Json
-        $r.counts.created | Should -Be 1
+        $r.counts.created | Should -Be 2
 
         $note = if (@($r.notes).Count -gt 0) { [string]$r.notes[0] } else { '' }
         $note | Should -BeLike '*1111111111111111*'
         $note | Should -BeLike '*LEGACY-42*'
         $note | Should -BeLike '*in project LEGACY*'
-        $note | Should -BeLike '*mirrored into COMP as COMP-1*'
+        $note | Should -BeLike '*mirrored into COMP as COMP-2*'
 
         # the recorded marker now names the new ticket; the former one is
-        # left untouched — no write was ever issued to it.
-        (Get-Content -Raw -LiteralPath $spec) | Should -BeLike '*ticket=COMP-1*'
+        # left untouched — no write was ever issued to it. COMP-1 is the
+        # parent (Phase 5, US2), created first.
+        (Get-Content -Raw -LiteralPath $spec) | Should -BeLike '*ticket=COMP-2*'
         (Get-Content -Raw -LiteralPath $spec) | Should -Not -BeLike '*ticket=LEGACY-42*'
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match 'LEGACY-42' }).Count | Should -Be 0
     }
 }
 
 Describe 'Invoke-JiraRecognitionRun — scoped to the routed project' {
-    AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
+    AfterEach { Remove-Item Env:\SPEC_KIT_JIRA_SPEC_SLUG -ErrorAction SilentlyContinue; if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
 
     It "recognition is scoped to the routed project: two specs mirrored into different projects never recognise each other's tickets" {
         $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')

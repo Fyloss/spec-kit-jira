@@ -58,6 +58,128 @@ _recognition_project_of() {
   printf '%s' "${1%%-*}"
 }
 
+# _recognition_read_parent <key> — one GET folding the identity property
+# into the issue fetch, fields limited to summary,description (contract
+# hierarchy-resolution.md §7: parent recognition never needs priority,
+# status or links, unlike a story's read). Prints canonical JSON on success:
+# {"gone":false,"marker":<marker-or-null>,"fields":{...}}, or {"gone":true}
+# on a 404. Any other transport failure returns the mapped exit code, zero
+# stdout (fail-closed, Constitution III).
+_recognition_read_parent() {
+  local key="$1" base url resp rc tmp
+  base="${SPEC_KIT_JIRA_BASE_URL:-}"
+  url="${base}/rest/api/3/issue/${key}?properties=${SPEC_KIT_JIRA_IDENTITY_KEY}&fields=summary,description"
+  tmp="$(mktemp)"
+  jira_request GET "${url}" > "${tmp}"
+  rc=$?
+  resp="$(cat "${tmp}")"
+  rm -f "${tmp}"
+  if ((rc == 0)); then
+    jq -c --arg k "${SPEC_KIT_JIRA_IDENTITY_KEY}" \
+      '{gone:false, marker:(.properties[$k] // null), fields:(.fields // {})}' <<< "${resp}" | json_canonical
+    return 0
+  fi
+  if [[ "${JIRA_LAST_STATUS:-}" == "404" ]]; then
+    printf '{"gone":true}'
+    return 0
+  fi
+  return "${rc}"
+}
+
+# recognition_parent_run <marker-info-json> <spec-ref-json> <project-key>
+#   <spec-path>
+#   marker-info-json: {state, id, ticket?, lines} — spec_marker_document_info's
+#   own shape (data-model.md §1 "epic.marker").
+#   Prints on success:
+#     {"state":"new"}
+#     {"state":"new", "recreated_from":{"key":".."}}       — a recorded key returned 404
+#     {"state":"bound", "key":"..", "current":{...}}
+#     {"state":"blocked", "reason":"..", "detail":".."}
+#   Returns a transport exit code (>=2) with ZERO stdout when the bound read
+#   is inconclusive — the whole specification fails closed (contract §7:
+#   "An inconclusive read is never downgraded to 'no parent exists'").
+recognition_parent_run() {
+  local minfo="$1" spec_ref="$2" project="$3" spec_path="$4"
+  local state; state="$(jq -r '.state' <<< "${minfo}")"
+
+  case "${state}" in
+    absent | assigned)
+      jq -cn '{state:"new"}' | json_canonical
+      return 0
+      ;;
+    creating)
+      local id; id="$(jq -r '.id' <<< "${minfo}")"
+      jq -cn --arg r "parent-key-unrecorded" \
+        --arg d "${spec_path} marks its parent \`creating\`: a previous run was interrupted after creating the parent and before recording its key, so whether it exists cannot be determined. Find the issue carrying identifier ${id} in project ${project} and record it as \`<!-- speckit-jira spec=${id} ticket=<KEY> -->\`, or delete \`creating\` to mirror a new parent." \
+        '{state:"blocked", reason:$r, detail:$d}' | json_canonical
+      return 0
+      ;;
+    malformed)
+      local line; line="$(jq -r '.lines[0] // 0' <<< "${minfo}")"
+      jq -cn --arg r "parent-marker-malformed" \
+        --arg d "${spec_path} line ${line}: malformed speckit-jira parent marker; nothing was written for this specification. Expected \`<!-- speckit-jira spec=<16 hex> ticket=<KEY> -->\`." \
+        '{state:"blocked", reason:$r, detail:$d}' | json_canonical
+      return 0
+      ;;
+    duplicate)
+      local lines_csv count
+      lines_csv="$(jq -r '.lines | join(", ")' <<< "${minfo}")"
+      count="$(jq -r '.lines | length' <<< "${minfo}")"
+      jq -cn --arg r "parent-marker-duplicate" \
+        --arg d "${spec_path} carries ${count} speckit-jira parent markers (lines ${lines_csv}); a specification has exactly one parent. Keep the line naming the parent that exists in Jira and delete the others." \
+        '{state:"blocked", reason:$r, detail:$d}' | json_canonical
+      return 0
+      ;;
+    bound)
+      local key; key="$(jq -r '.ticket' <<< "${minfo}")"
+      local read_result rc=0
+      read_result="$(_recognition_read_parent "${key}")" || rc=$?
+      ((rc != 0)) && return "${rc}"
+
+      local gone; gone="$(jq -r '.gone' <<< "${read_result}")"
+      if [[ "${gone}" == "true" ]]; then
+        jq -cn --arg k "${key}" '{state:"new", recreated_from:{key:$k}}' | json_canonical
+        return 0
+      fi
+
+      local marker; marker="$(jq -c '.marker' <<< "${read_result}")"
+      if [[ "${marker}" == "null" ]]; then
+        jq -cn --arg r "parent-identity-unverifiable" \
+          --arg d "${key} is recorded as the parent of ${spec_path} but carries no spec-kit-jira parent identity; nothing was written. The bridge never adopts a ticket it did not create — clear the ticket= value to create a new parent, or restore the identity by hand." \
+          '{state:"blocked", reason:$r, detail:$d}' | json_canonical
+        return 0
+      fi
+
+      local role; role="$(jq -r '.role // ""' <<< "${marker}")"
+      if [[ "${role}" != "parent" ]]; then
+        jq -cn --arg r "parent-identity-unverifiable" \
+          --arg d "${key} is recorded as the parent of ${spec_path} but carries no spec-kit-jira parent identity; nothing was written. The bridge never adopts a ticket it did not create — clear the ticket= value to create a new parent, or restore the identity by hand." \
+          '{state:"blocked", reason:$r, detail:$d}' | json_canonical
+        return 0
+      fi
+
+      local repo slug m_repo m_slug
+      repo="$(jq -r '.repo // ""' <<< "${spec_ref}")"
+      slug="$(jq -r '.spec_slug // ""' <<< "${spec_ref}")"
+      m_repo="$(jq -r '.repo // ""' <<< "${marker}")"
+      m_slug="$(jq -r '.spec_slug // ""' <<< "${marker}")"
+      if [[ "${m_repo}" != "${repo}" || "${m_slug}" != "${slug}" ]]; then
+        jq -cn --arg other "${m_slug}" --arg r "parent-claimed-by-other" \
+          --arg d "${key} is recorded as the parent of ${spec_path} but its identity names specification ${m_slug}; nothing was written. Correct the ticket= value, or clear it to create a new parent." \
+          '{state:"blocked", reason:$r, detail:$d}' | json_canonical
+        return 0
+      fi
+
+      local fields current origin
+      fields="$(jq -c '.fields' <<< "${read_result}")"
+      current="$(jq -c '{summary:(.summary // ""), description:(.description // {})}' <<< "${fields}")"
+      origin="$(jq -r '.origin // "bridge"' <<< "${marker}")"
+      jq -cn --arg k "${key}" --argjson c "${current}" --arg o "${origin}" '{state:"bound", key:$k, current:$c, origin:$o}' | json_canonical
+      return 0
+      ;;
+  esac
+}
+
 # recognition_run <stories-json> <spec-ref-json> <project-key> <spec-path>
 #   stories-json: [{local_id, marker:{state,id,ticket?,lines?}}, ...] — the
 #     slim per-story marker view sliced from the parsed document.

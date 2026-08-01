@@ -2,6 +2,7 @@
   "fields": [
     { "fieldId": "summary", "name": "Summary", "required": true, "schema": { "type": "string" } },
     { "fieldId": "description", "name": "Description", "required": false, "schema": { "type": "doc" } },
-    { "fieldId": "customfield_30044", "name": "Effort Points", "required": false, "schema": { "type": "number", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:float" } }
+    { "fieldId": "customfield_30044", "name": "Effort Points", "required": false, "schema": { "type": "number", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:float" } },
+    { "fieldId": "parent", "name": "Parent", "required": false, "schema": { "type": "issuelink" } }
   ]
 }

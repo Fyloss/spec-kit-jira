@@ -25,8 +25,6 @@ write_cfg() {
   {
     printf 'projects:\n'
     printf '  - key: IJT\n'
-    printf '    epic_strategy: per_repo\n'
-    printf '    task_strategy: subtask\n'
     printf 'routing_default: IJT\n'
     if [ -n "${1:-}" ]; then printf '%s\n' "$1"; fi
   } > "${DIR}/config.yml"

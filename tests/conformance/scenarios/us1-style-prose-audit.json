@@ -1,14 +1,1 @@
-{
-  "name": "us1-style-prose-audit",
-  "description": "T098 — FR-003 requires the run summary to state how each project's style was resolved so a wrong binding can be audited after the fact. Prose is the DEFAULT output (no --json), so the per-project audit at effects.discovery.projects.<KEY>.{style,style_source} must be rendered there too, nested under the discovery effect and ordered by project key. Both ports must emit byte-identical prose (NFR-1/FR-020).",
-  "mock": {
-    "projects": { "COMP": "company" }
-  },
-  "fixture": "tests/conformance/fixtures/repo-with-config",
-  "argv": ["config"],
-  "env": {
-    "JIRA_EMAIL": "user@example.com",
-    "JIRA_API_TOKEN": "RAWSECRETXYZ",
-    "JIRA_NO_SLEEP": "1"
-  }
-}
+{"name":"us1-style-prose-audit","description":"T098 — FR-003 requires the run summary to state how each project's style was resolved so a wrong binding can be audited after the fact. Prose is the DEFAULT output (no --json), so the per-project audit at effects.discovery.projects.<KEY>.{style,style_source} must be rendered there too, nested under the discovery effect and ordered by project key. Both ports must emit byte-identical prose (NFR-1/FR-020).","mock":{"projects":{"COMP":"company"}},"fixture":"tests/conformance/fixtures/repo-with-config","argv":["config","--child-type","COMP=Story"],"env":{"JIRA_EMAIL":"user@example.com","JIRA_API_TOKEN":"RAWSECRETXYZ","JIRA_NO_SLEEP":"1"}}

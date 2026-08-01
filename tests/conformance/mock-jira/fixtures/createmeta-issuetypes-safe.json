@@ -1,0 +1,8 @@
+{
+  "issueTypes": [
+    { "id": "10401", "name": "Epic", "subtask": false, "hierarchyLevel": 2 },
+    { "id": "10402", "name": "Feature", "subtask": false, "hierarchyLevel": 1 },
+    { "id": "10403", "name": "Story", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10404", "name": "Sub-task", "subtask": true, "hierarchyLevel": -1 }
+  ]
+}

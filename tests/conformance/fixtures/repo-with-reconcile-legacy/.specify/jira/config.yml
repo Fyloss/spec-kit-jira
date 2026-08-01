@@ -1,13 +1,11 @@
 # Minimal team config for the pre-existing reconcile test suite (T059,
-# 002/003 features). SPEC_KIT_JIRA_PROJECT_KEY and SPEC_KIT_JIRA_EPIC_STRATEGY
-# are overridden by that suite, but T057 (004) requires config.yml whenever
-# the creation context is not ALSO overridden via SPEC_KIT_JIRA_PLAN_CONTEXT,
-# so priority_map resolution still needs a readable file here.
+# 002/003 features). SPEC_KIT_JIRA_PROJECT_KEY is overridden by that suite,
+# but T057 (004) requires config.yml whenever the creation context is not
+# ALSO overridden via SPEC_KIT_JIRA_PLAN_CONTEXT, so priority_map resolution
+# still needs a readable file here.
 projects:
   - key: TEST
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
     priority_map:
       P1: Highest
       P2: Medium

@@ -148,6 +148,53 @@ function Get-JiraDiscoveryPrioritiesForProject {
     return $result
 }
 
+function Get-JiraDiscoveryHierarchyCandidates {
+    <#
+    .SYNOPSIS
+      The SOLE-candidate child and parent type ids, when the level is
+      unambiguous (research R1/R2). No refusal here: an ambiguous level
+      simply yields no candidate for that tier. The full derivation and its
+      refusals (no-parent-level, parent-level-ambiguous) live in
+      sink/jira/Hierarchy.psm1 (Phase 4, US1); this is only enough to know
+      which types' create metadata discovery can usefully fetch before the
+      child type has been resolved by the ceremony. Mirror of
+      _disc_hierarchy_candidates.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $IssueTypes)
+    $cand = @($IssueTypes | Where-Object { -not [bool]$_.subtask })
+    if ($cand.Count -eq 0) { return [pscustomobject]@{ Child = $null; Parent = $null } }
+    $childLevel = ($cand | ForEach-Object { [int]$_.hierarchyLevel } | Measure-Object -Minimum).Minimum
+    $childCands = @($cand | Where-Object { [int]$_.hierarchyLevel -eq $childLevel })
+    $above = @($cand | Where-Object { [int]$_.hierarchyLevel -gt $childLevel })
+    $parentCands = @()
+    if ($above.Count -gt 0) {
+        $parentLevel = ($above | ForEach-Object { [int]$_.hierarchyLevel } | Measure-Object -Minimum).Minimum
+        $parentCands = @($above | Where-Object { [int]$_.hierarchyLevel -eq $parentLevel })
+    }
+    return [pscustomobject]@{
+        Child  = $(if ($childCands.Count -eq 1) { $childCands[0].id } else { $null })
+        Parent = $(if ($parentCands.Count -eq 1) { $parentCands[0].id } else { $null })
+    }
+}
+
+function Get-JiraDiscoveryRequiredFields {
+    <#
+    .SYNOPSIS
+      Every field this type's create metadata marks required, by its Jira
+      NAME (never a customfield_NNNNN id) — the mandatory-field gate of
+      contracts/hierarchy-resolution.md §5 (Phase 6, US3). Mirror of
+      _disc_required_fields.
+    #>
+    [CmdletBinding()]
+    param($Fields)
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($f in @($Fields)) {
+        if ([bool] $f.required) { $out.Add([ordered]@{ logical_name = $f.name; field_id = $f.fieldId }) }
+    }
+    return $out
+}
+
 function Get-JiraDiscoveryBindingResult {
     <#
     .SYNOPSIS
@@ -183,8 +230,34 @@ function Get-JiraDiscoveryBindingResult {
         $itypes = & $get "$api/issue/createmeta/$ProjectKey/issuetypes"
         $firstType = if (@($itypes.issueTypes).Count -gt 0) { $itypes.issueTypes[0].id } else { '' }
 
-        # (3) Project field schema (estimation candidates + flagged field source).
-        $meta = & $get "$api/issue/createmeta/$ProjectKey/issuetypes/$firstType"
+        # (2b) The child/parent candidates resolvable without asking
+        # (research R1/R2) — used only to pick which type(s) get a per-type
+        # createmeta fetch (T017/T018, contract §4).
+        $hier = Get-JiraDiscoveryHierarchyCandidates -IssueTypes @($itypes.issueTypes)
+        $childId = $hier.Child
+        $parentId = $hier.Parent
+
+        # (3) Project field schema (estimation candidates + flagged field
+        # source). Sourced from the CHILD type when resolvable — the type
+        # this bridge actually writes — falling back to the old arbitrary-
+        # first-type fetch only when the child level is itself ambiguous.
+        $metaTypeId = if ($childId) { $childId } else { $firstType }
+        $meta = & $get "$api/issue/createmeta/$ProjectKey/issuetypes/$metaTypeId"
+
+        # (3b) required_fields and parent-link availability, per written
+        # type actually resolvable at this point (T017–T020, contract §4) —
+        # reusing the (3) fetch when a type coincides with it. Parent-link
+        # availability is READ from the type's own metadata, never assumed
+        # from project style (R4).
+        $requiredFields = [ordered]@{}
+        $parentLinkAvailable = [ordered]@{}
+        foreach ($tid in @($childId, $parentId)) {
+            if (-not $tid) { continue }
+            if ($requiredFields.Contains([string]$tid)) { continue }
+            $tmeta = if ($tid -eq $metaTypeId) { $meta } else { & $get "$api/issue/createmeta/$ProjectKey/issuetypes/$tid" }
+            $requiredFields[[string]$tid] = @(Get-JiraDiscoveryRequiredFields -Fields $tmeta.fields)
+            $parentLinkAvailable[[string]$tid] = [bool]@($tmeta.fields | Where-Object { $_.fieldId -eq 'parent' }).Count
+        }
 
         # (4) Statuses + statusCategory.
         $statusGroups = & $get "$api/project/$ProjectKey/statuses"
@@ -272,6 +345,8 @@ function Get-JiraDiscoveryBindingResult {
         fields                = $fieldList
         estimation_candidates = [System.Collections.Generic.List[object]]::new($sortedCands)
         flagged_field         = $flagged
+        required_fields       = $requiredFields
+        parent_link_available = $parentLinkAvailable
     }
 
     return [pscustomobject]@{ ExitCode = 0; Binding = (ConvertTo-JiraJsonValue $binding) }

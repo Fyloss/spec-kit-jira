@@ -60,7 +60,6 @@ Describe 'Diagnostics catalogue (US3)' {
         $env:JIRA_NO_SLEEP = '1'
         $env:JIRA_MAX_ATTEMPTS = '1'
         Remove-Item Env:\SPEC_KIT_JIRA_PROJECT_KEY -ErrorAction SilentlyContinue
-        Remove-Item Env:\SPEC_KIT_JIRA_EPIC_STRATEGY -ErrorAction SilentlyContinue
         Remove-Item Env:\SPEC_KIT_JIRA_PLAN_CONTEXT -ErrorAction SilentlyContinue
         Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue
 
@@ -89,8 +88,6 @@ Describe 'Diagnostics catalogue (US3)' {
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: COMP
 '@ | Set-Content -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -NoNewline
         @'
@@ -105,8 +102,6 @@ overrides:
 projects:
   - key: PROJ
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: PROJ
 '@ | Set-Content -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -NoNewline
         Assert-FaultProperties -Needle 'placeholder'
@@ -117,8 +112,6 @@ routing_default: PROJ
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: NOPE
 '@ | Set-Content -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -NoNewline
         Assert-FaultProperties -Needle 'not declared'
@@ -129,8 +122,6 @@ routing_default: NOPE
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: COMP
 '@ | Set-Content -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -NoNewline
         @'
@@ -146,8 +137,6 @@ resolved_ids:
 projects:
   - key: COMP
     style: company_managed
-    epic_strategy: per_repo
-    task_strategy: subtask
 routing_default: COMP
 '@ | Set-Content -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -NoNewline
         @'

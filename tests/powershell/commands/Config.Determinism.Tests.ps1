@@ -37,7 +37,7 @@ Describe 'Config ceremony determinism' {
         $sw = [System.IO.StringWriter]::new()
         $orig = [Console]::Out
         [Console]::SetOut($sw)
-        try { [void](Invoke-JiraConfig -Arguments @('config', '--json')) }
+        try { [void](Invoke-JiraConfig -Arguments @('config', '--child-type', 'COMP=Story', '--json')) }
         finally { [Console]::SetOut($orig) }
         $obj = $sw.ToString().Trim() | ConvertFrom-Json
         $obj.schema_version | Should -Be '1.0'
@@ -46,18 +46,18 @@ Describe 'Config ceremony determinism' {
     }
 
     It 'writes a byte-identical config.local.yml on two runs (FR-003)' {
-        [void](Invoke-JiraConfig -Arguments @('config', '--json'))
+        [void](Invoke-JiraConfig -Arguments @('config', '--child-type', 'COMP=Story', '--json'))
         $first = Get-Content -Raw -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml')
-        [void](Invoke-JiraConfig -Arguments @('config', '--json'))
+        [void](Invoke-JiraConfig -Arguments @('config', '--child-type', 'COMP=Story', '--json'))
         $second = Get-Content -Raw -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml')
         $second | Should -BeExactly $first
     }
 
     It 'preserves the discovered ids by logical name and the operator local layer' {
-        [void](Invoke-JiraConfig -Arguments @('config', '--json'))
+        [void](Invoke-JiraConfig -Arguments @('config', '--child-type', 'COMP=Story', '--json'))
         $json = ConvertFrom-JiraConfigYaml -Path (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml')
         $obj = $json | ConvertFrom-Json
-        $obj.resolved_ids.COMP.issue_types.Story | Should -Be '10102'
+        ($obj.resolved_ids.COMP.issue_types | Where-Object { $_.logical_name -eq "Story" }).id | Should -Be '10102'
         $obj.resolved_ids.COMP.priorities.Critical | Should -Be '1'
         $obj.resolved_ids.COMP.statuses.Backlog | Should -Be '1'
         $obj.site_alias | Should -Be 'prod'

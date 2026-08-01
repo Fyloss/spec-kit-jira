@@ -9,7 +9,7 @@ BeforeAll {
     Import-Module (Join-Path $SinkDir 'PlanApply.psm1') -Force
     Import-Module (Join-Path $SinkDir 'Adf.psm1') -Force
     $script:Marker = Get-JiraManagedMarker
-    $script:Doc = '{"stories":[{"local_id":"s1","title":"Story One","priority_logical":"P2","description":{"blocks":[{"type":"paragraph","text":"New managed body."}]}}]}'
+    $script:Doc = '{"routing":{"project_key":"COMP"},"epic":{"title":"The Epic","local_id":"3f2a91c04b7e6d18","marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},"description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},"stories":[{"local_id":"s1","title":"Story One","priority_logical":"P2","description":{"blocks":[{"type":"paragraph","text":"New managed body."}]}}]}'
     $m = $script:Marker
     $script:Existing = @"
 {"type":"doc","version":1,"content":[
@@ -19,14 +19,14 @@ BeforeAll {
 ]}
 "@
     $script:Ctx = @"
-{"base_url":"https://mock","tickets":{"s1":"PROJ-1"},"ticket_origins":{"s1":"human"},"ticket_descriptions":{"s1":$($script:Existing)}}
+{"base_url":"https://mock","parent_type_id":"10101","parent_local_id":"3f2a91c04b7e6d18","tickets":{"s1":"PROJ-1"},"ticket_origins":{"s1":"human"},"ticket_descriptions":{"s1":$($script:Existing)}}
 "@
 }
 
 Describe 'Get-JiraPlanWriteSet (US7 human origin)' {
     It 'preserves the human prefix and drops the stale managed body (FR-038)' {
-        $a = Get-JiraPlanWriteSet -NeutralDocJson $script:Doc -PlanContextJson $script:Ctx | ConvertFrom-Json
-        $desc = $a[0].body.fields.description
+        $r = Get-JiraPlanWriteSet -NeutralDocJson $script:Doc -PlanContextJson $script:Ctx | ConvertFrom-Json
+        $desc = $r.stories[0].body.fields.description
         $desc.content[0].content[0].text | Should -Be 'PO handwritten note.'
         $out = ConvertTo-Json -InputObject $desc -Depth 100 -Compress
         $out | Should -BeLike '*do not edit below this line*'
@@ -35,9 +35,9 @@ Describe 'Get-JiraPlanWriteSet (US7 human origin)' {
     }
 
     It 'keeps the whole-description behaviour when no origin is given' {
-        $ctx = '{"base_url":"https://mock","tickets":{"s1":"PROJ-1"}}'
-        $a = Get-JiraPlanWriteSet -NeutralDocJson $script:Doc -PlanContextJson $ctx | ConvertFrom-Json
-        $out = ConvertTo-Json -InputObject $a[0].body.fields.description -Depth 100 -Compress
+        $ctx = '{"base_url":"https://mock","parent_type_id":"10101","parent_local_id":"3f2a91c04b7e6d18","tickets":{"s1":"PROJ-1"}}'
+        $r = Get-JiraPlanWriteSet -NeutralDocJson $script:Doc -PlanContextJson $ctx | ConvertFrom-Json
+        $out = ConvertTo-Json -InputObject $r.stories[0].body.fields.description -Depth 100 -Compress
         $out | Should -Not -BeLike '*do not edit below this line*'
     }
 }

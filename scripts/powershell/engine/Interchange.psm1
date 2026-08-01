@@ -71,8 +71,16 @@ function Test-JiraInterchange {
     }
     else {
         if ([string]::IsNullOrEmpty([string](Get-JiraInterchangeProp $epic 'title'))) { $errors.Add('epic.title is required') }
-        if (@('per_repo', 'per_feature') -cnotcontains (Get-JiraInterchangeProp $epic 'strategy')) { $errors.Add('epic.strategy is invalid') }
         if ((Get-JiraArrayCount (Get-JiraInterchangeProp $epic 'description') 'blocks') -lt 1) { $errors.Add('epic.description.blocks must be non-empty') }
+        $marker = Get-JiraInterchangeProp $epic 'marker'
+        $markerState = [string](Get-JiraInterchangeProp $marker 'state')
+        if ([string]::IsNullOrEmpty($markerState)) { $markerState = 'absent' }
+        if ($markerState -ne 'absent') {
+            $epicLocalId = [string](Get-JiraInterchangeProp $epic 'local_id')
+            if ($epicLocalId -notmatch '^[0-9a-f]{16}$') {
+                $errors.Add('epic.local_id is required and must be 16 hex characters unless the marker state is absent')
+            }
+        }
     }
 
     if ((Get-JiraArrayCount $d 'stories') -lt 1) {
@@ -106,20 +114,24 @@ function Build-JiraNeutralDocument {
     $ctx = $ContextJson | ConvertFrom-Json -Depth 100
 
     $projectKey = [string](Get-JiraInterchangeProp $ctx 'project_key')
-    $strategy = [string](Get-JiraInterchangeProp $ctx 'epic_strategy')
     $specRef = Get-JiraInterchangeProp $ctx 'spec_ref'
     $epic = Get-JiraInterchangeProp $parse 'epic'
     $epicTitle = [string](Get-JiraInterchangeProp $epic 'title')
     $epicDesc = Get-JiraInterchangeProp $epic 'description'
     if ($null -eq $epicDesc) { $epicDesc = [ordered]@{ blocks = @() } }
+    $epicLocalId = [string](Get-JiraInterchangeProp $epic 'local_id')
+    $epicMarker = Get-JiraInterchangeProp $epic 'marker'
+    if ($null -eq $epicMarker) { $epicMarker = [ordered]@{ state = 'absent'; id = ''; lines = @() } }
     $stories = Get-JiraInterchangeProp $parse 'stories'
     if ($null -eq $stories) { $stories = @() }
 
+    # epic.strategy is gone (008 T026, FR-030): the field, its validation
+    # rule, and the epic_strategy context key are retired together.
     $doc = [ordered]@{
         schema_version = '1.0'
         spec_ref       = $specRef
         routing        = [ordered]@{ project_key = $projectKey }
-        epic           = [ordered]@{ strategy = $strategy; title = $epicTitle; description = $epicDesc }
+        epic           = [ordered]@{ title = $epicTitle; description = $epicDesc; local_id = $epicLocalId; marker = $epicMarker }
         stories        = @($stories)
     }
     $json = ConvertTo-JiraJsonValue $doc

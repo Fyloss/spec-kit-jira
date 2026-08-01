@@ -139,7 +139,11 @@ function ConvertTo-JiraAdfDocument {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $ContentJson)
-    $docContent = Get-JiraAdfContentNode -ContentJson $ContentJson
+    # @(...): PowerShell unwraps a single-item pipeline output to a bare
+    # scalar, which would serialise `content` as a JSON object instead of a
+    # one-element array (a real, reproduced defect — see test_adf.bats
+    # "a single content node still renders...").
+    $docContent = @(Get-JiraAdfContentNode -ContentJson $ContentJson)
     return (ConvertTo-JiraJsonValue ([ordered]@{ type = 'doc'; version = 1; content = $docContent }))
 }
 
@@ -172,7 +176,7 @@ function ConvertTo-JiraManagedAdfDocument {
         [Parameter(Mandatory)] [string] $Origin,
         [Parameter()] [AllowEmptyString()] [string] $ExistingJson = ''
     )
-    $managed = Get-JiraAdfContentNode -ContentJson $ContentJson
+    $managed = @(Get-JiraAdfContentNode -ContentJson $ContentJson)
 
     if ($Origin -eq 'bridge-created') {
         return (ConvertTo-JiraJsonValue ([ordered]@{ type = 'doc'; version = 1; content = $managed }))

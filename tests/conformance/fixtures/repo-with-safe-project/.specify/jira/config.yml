@@ -1,0 +1,15 @@
+# Team config for the SAFe-hierarchy conformance fixture (US1) — a Jira with
+# a three-level SAFe programme hierarchy above the child level (committable,
+# credential-free).
+projects:
+  - key: SAFE
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: SAFE
+routing_default: SAFE

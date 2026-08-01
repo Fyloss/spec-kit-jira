@@ -1,0 +1,8 @@
+{
+  "issueTypes": [
+    { "id": "10301", "name": "Épopée", "subtask": false, "hierarchyLevel": 1 },
+    { "id": "10302", "name": "Récit", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10303", "name": "Tâche", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10304", "name": "Sous-tâche", "subtask": true, "hierarchyLevel": -1 }
+  ]
+}

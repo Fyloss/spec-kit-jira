@@ -19,7 +19,6 @@ BeforeAll {
     # Relies on config.yml-based routing (folder prefix "001-" -> COMP); clear
     # any override an earlier suite in the same Pester process left behind.
     Remove-Item Env:\SPEC_KIT_JIRA_PROJECT_KEY -ErrorAction SilentlyContinue
-    Remove-Item Env:\SPEC_KIT_JIRA_EPIC_STRATEGY -ErrorAction SilentlyContinue
 
     function Invoke-Captured {
         param([string[]] $ArgList)
@@ -45,7 +44,7 @@ Describe 'Invoke-JiraReconcile — the duplicate-creation regression' {
         $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
 
         $first = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
-        $first.counts.created | Should -Be 3
+        $first.counts.created | Should -Be 4
 
         Clear-Content -LiteralPath $script:M.CallLog
         $second = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
@@ -62,12 +61,12 @@ Describe 'Invoke-JiraReconcile — the duplicate-creation regression' {
         @([regex]::Matches($content, 'speckit-jira story=[0-9a-f]{16} ticket=COMP-[1-9][0-9]* -->')).Count | Should -Be 3
     }
 
-    It 'the full call log shows exactly 3 creation POSTs across two runs, not 6' {
+    It 'the full call log shows exactly 4 creation POSTs across two runs, not 8' {
         $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
         $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
         $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
         $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'POST /rest/api/3/issue' }).Count | Should -Be 3
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'POST /rest/api/3/issue' }).Count | Should -Be 4
     }
 }
 
@@ -84,7 +83,7 @@ Describe 'Invoke-JiraReconcile — reordering and retitling never swap tickets (
 
     It 'reordering and retitling stories between runs never swaps tickets' {
         $first = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
-        $first.counts.created | Should -Be 3
+        $first.counts.created | Should -Be 4
 
         # Reorder (move story 3 above story 1) and retitle story 2, keeping
         # each marker line with its story.
@@ -101,7 +100,7 @@ Describe 'Invoke-JiraReconcile — reordering and retitling never swap tickets (
 
         # Each ticket still holds the content of the story whose marker
         # names it — not the story that now sits in its old POSITION.
-        $ticket = Invoke-RestMethod -Uri "$($script:M.BaseUrl)/rest/api/3/issue/COMP-2"
+        $ticket = Invoke-RestMethod -Uri "$($script:M.BaseUrl)/rest/api/3/issue/COMP-3"
         $ticket.fields.summary | Should -Be 'Export a date range (renamed)'
     }
 }

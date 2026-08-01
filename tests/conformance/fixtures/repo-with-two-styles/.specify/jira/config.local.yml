@@ -1,11 +1,40 @@
 # Machine-owned resolved identifiers for both bound projects — each project's
 # ids scoped under its own key so neither is ever mirrored with the other's
-# identifiers (004 FR-027, FR-031, SC-013).
+# identifiers (004 FR-027, FR-031, SC-013). New list shape (data-model.md §3,
+# tasks.md T014a). T014b decision: TEAM's pre-migration binding declared only
+# a base-level type (Story) — a genuinely flat project is not what this
+# fixture exists to exercise (its purpose is proving COMP/TEAM never share a
+# namespace under ordinary successful reconcile), so it gains an Epic parent
+# type at level 1, matching the shape a default team-managed project has.
 resolved_ids:
   COMP:
     style: company_managed
     issue_types:
-      Story: "10004"
+      - logical_name: "Epic"
+        id: "10001"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "10004"
+        hierarchy_level: "0"
+        subtask: false
+    child_type:
+      logical_name: "Story"
+      id: "10004"
+      source: derived
+    parent_type:
+      logical_name: "Epic"
+      id: "10001"
+      source: derived
+    required_fields:
+      "10001":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "10004":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "10004": true
     priorities:
       Highest: "1"
       Medium: "3"
@@ -13,4 +42,28 @@ resolved_ids:
   TEAM:
     style: team_managed
     issue_types:
-      Story: "20002"
+      - logical_name: "Epic"
+        id: "20001"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "20002"
+        hierarchy_level: "0"
+        subtask: false
+    child_type:
+      logical_name: "Story"
+      id: "20002"
+      source: derived
+    parent_type:
+      logical_name: "Epic"
+      id: "20001"
+      source: derived
+    required_fields:
+      "20001":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "20002":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "20002": true

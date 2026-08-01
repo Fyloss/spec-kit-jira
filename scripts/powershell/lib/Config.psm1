@@ -715,12 +715,14 @@ function Test-JiraTeamConfig {
                 $style = Get-CfgProp $p 'style'
                 if (@('company_managed', 'team_managed') -cnotcontains $style) { $errs.Add("projects[$i].style is invalid") }
             }
-            $es = Get-CfgProp $p 'epic_strategy'
-            if (@('per_repo', 'per_feature') -cnotcontains $es) { $errs.Add("projects[$i].epic_strategy is invalid") }
-            $ts = Get-CfgProp $p 'task_strategy'
-            if (@('subtask', 'linked_story') -cnotcontains $ts) { $errs.Add("projects[$i].task_strategy is invalid") }
-            $lt = Get-CfgProp $p 'link_type'
-            if ($ts -eq 'linked_story' -and [string]::IsNullOrEmpty([string]$lt)) { $errs.Add("projects[$i].link_type is required when task_strategy=linked_story") }
+            # epic_strategy, task_strategy and link_type are retired (008
+            # T029/T032a, FR-030/FR-031) and the link-type requirement they
+            # carried retires with them.
+            foreach ($retired in @('epic_strategy', 'task_strategy', 'link_type')) {
+                if (($p -is [System.Collections.IDictionary]) -and $p.Contains($retired)) {
+                    $errs.Add("projects[$i] declares ``$retired``, which this version of spec-kit-jira no longer uses. Delete the line")
+                }
+            }
             if (($p -is [System.Collections.IDictionary]) -and $p.Contains('phase_status_map')) {
                 $psm = Get-CfgProp $p 'phase_status_map'
                 $psmValid = $psm -is [System.Collections.IDictionary]

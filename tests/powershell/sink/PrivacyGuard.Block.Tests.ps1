@@ -76,3 +76,29 @@ Describe 'Privacy guard as the mandatory pre-write gate' {
         (Get-JiraMockCallLog -Mock $M) -join "`n" | Should -Match 'POST /rest/api/3/issue'
     }
 }
+
+Describe 'T058 [Phase 5, US2] — the parent payload passes the SAME pre-write gate' {
+    BeforeEach {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $M.BaseUrl
+    }
+    AfterEach { Stop-JiraMock -Mock $M }
+
+    It 'a blocked parent payload yields ZERO writes for the whole specification, including its stories' {
+        $plan = '{"parent":{"method":"POST","url":"' + $M.BaseUrl + '/rest/api/3/issue","body":{"fields":{"summary":"leak acme-corp.atlassian.net"}},"local_id":"aaaaaaaaaaaaaaaa","role":"parent"},"stories":[{"method":"POST","url":"' + $M.BaseUrl + '/rest/api/3/issue","body":{"fields":{"summary":"Add the billing feature"}},"local_id":"1111111111111111","role":"story"}]}'
+        $specRef = '{"repo":"acme/app","spec_slug":"001-x","folder":"specs/001-x"}'
+        $specFile = Join-Path $TestDrive 'spec.md'
+        Set-Content -LiteralPath $specFile -Value '# Title' -NoNewline
+        Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $specRef -SpecFile $specFile | Should -Be 9
+        @(Get-JiraMockCallLog -Mock $M).Count | Should -Be 0
+    }
+
+    It 'a clean parent and clean stories are written through (no gap for legitimate writes)' {
+        $plan = '{"parent":{"method":"POST","url":"' + $M.BaseUrl + '/rest/api/3/issue","body":{"fields":{"summary":"The Epic"}},"local_id":"aaaaaaaaaaaaaaaa","role":"parent"},"stories":[{"method":"POST","url":"' + $M.BaseUrl + '/rest/api/3/issue","body":{"fields":{"summary":"Add the billing feature","parent":{"key":"<resolved at apply time>"}}},"local_id":"1111111111111111","role":"story"}]}'
+        $specRef = '{"repo":"acme/app","spec_slug":"001-x","folder":"specs/001-x"}'
+        $specFile = Join-Path $TestDrive 'spec2.md'
+        Set-Content -LiteralPath $specFile -Value '# Title' -NoNewline
+        Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $specRef -SpecFile $specFile | Should -Be 0
+        @([regex]::Matches((Get-JiraMockCallLog -Mock $M) -join "`n", 'POST /rest/api/3/issue')).Count | Should -Be 2
+    }
+}

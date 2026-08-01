@@ -7,6 +7,10 @@
 # string and the ticket key it is ever paired with is opaque text handed in by
 # the caller — exactly as managed_section.sh takes its markers as parameters
 # without knowing about READMEs (Constitution VIII).
+#
+# The byte-offset, line-ending, atomic-write and line-replacement primitives
+# live in marker_splice.sh (T064) — spec_marker.sh reuses the same routines
+# rather than duplicating a splice.
 
 [[ -n ${_JIRA_ENGINE_STORY_MARKER:-} ]] && return 0
 _JIRA_ENGINE_STORY_MARKER=1
@@ -15,7 +19,7 @@ _smk_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${_smk_dir}/../lib/output.sh"
 # shellcheck source=/dev/null
-source "${_smk_dir}/managed_section.sh" # managed_section_line_ending
+source "${_smk_dir}/marker_splice.sh"
 
 # _smk_id_index_file — where the SPEC_KIT_JIRA_ID_SOURCE seam's cursor is kept.
 # A bash function invoked through command substitution (the normal way every
@@ -69,6 +73,10 @@ story_marker_format() {
 #   {"kind":"valid","id":"..","state":"creating"}                 — story=<id> creating
 #   {"kind":"valid","id":"..","state":"bound","ticket":".."}      — story=<id> ticket=<ticket>
 #   {"kind":"malformed","id":".."}                                — a valid identifier with an unrecognisable tail
+#
+# A "spec=" body is a DIFFERENT marker (contracts/parent-marker.md
+# "Non-collision with the story marker") and MUST fall through to "none"
+# here, by construction: the body is matched against `^story=...`.
 story_marker_parse_line() {
   local raw="$1" line t
   line="${raw%$'\r'}"
@@ -113,27 +121,6 @@ story_marker_parse_line() {
   jq -cn --arg id "${idval}" '{kind:"malformed", id:$id}' | json_canonical
 }
 
-# --- Byte-offset primitives (mirrors managed_section.sh's discipline) -------
-
-# _smk_offset_after_line <content> <n> — byte offset immediately after the
-# terminating newline of 1-based line <n> (the start of line n+1); or the
-# length of <content> when the file has fewer than <n> newlines (line n is the
-# file's last, unterminated, line — or n is 0, handled by the caller).
-_smk_offset_after_line() {
-  local content="$1" n="$2" rest="$1" consumed=0 count=0 chunk
-  while ((count < n)) && [[ "${rest}" == *$'\n'* ]]; do
-    chunk="${rest%%$'\n'*}"
-    consumed=$((consumed + ${#chunk} + 1))
-    rest="${rest#*$'\n'}"
-    count=$((count + 1))
-  done
-  if ((count < n)); then
-    printf '%s' "${#content}"
-  else
-    printf '%s' "${consumed}"
-  fi
-}
-
 # _smk_scan_anchors <content> — the anchor line numbers (1-based), one per
 # story section, IN DOCUMENT ORDER (contract "Placement"): every
 # `^#{2,4}\s+User Story` heading; else the document's first H1; else "0" (the
@@ -163,7 +150,9 @@ _smk_scan_anchors() {
 # _smk_section_has_marker <content> <span_start> <span_end> — 0 (true) when
 # any line in the 1-based inclusive range carries a marker attempt (kind !=
 # "none"; a malformed attempt still counts — assignment must never add a
-# second marker beside one that is merely broken).
+# second marker beside one that is merely broken). A `spec=` line never
+# counts (contracts/parent-marker.md "Non-collision"): story_marker_parse_line
+# returns "none" for it.
 _smk_section_has_marker() {
   local content="$1" start="$2" end="$3" lineno=0 line kind
   while IFS= read -r line || [[ -n "${line}" ]]; do
@@ -217,16 +206,6 @@ story_marker_section_info() {
   fi
 }
 
-# _smk_line_count <content> — the total number of lines (an unterminated
-# final line still counts), consistent with every read-loop above.
-_smk_line_count() {
-  local content="$1" lineno=0 line
-  while IFS= read -r line || [[ -n "${line}" ]]; do
-    lineno=$((lineno + 1))
-  done <<< "${content}"
-  printf '%s' "${lineno}"
-}
-
 # _smk_find_line_for_id <content> <id> — the 1-based line number of the marker
 # line naming <id> (any state), or 0 when absent.
 _smk_find_line_for_id() {
@@ -245,45 +224,6 @@ _smk_find_line_for_id() {
   printf '0'
 }
 
-# _smk_insert_after_line <content> <n> <text> <nl> — insert <text> as a new
-# line immediately after 1-based line <n> (n=0: before line 1).
-_smk_insert_after_line() {
-  local content="$1" n="$2" text="$3" nl="$4" off
-  if ((n == 0)); then
-    printf '%s%s%s%s' "" "${text}" "${nl}" "${content}"
-    return 0
-  fi
-  off=$(_smk_offset_after_line "${content}" "${n}")
-  if ((off == ${#content})) && [[ -n "${content}" && "${content}" != *$'\n' ]]; then
-    printf '%s%s%s' "${content}" "${nl}" "${text}"
-    return 0
-  fi
-  printf '%s%s%s%s' "${content:0:off}" "${text}" "${nl}" "${content:off}"
-}
-
-# _smk_replace_line <content> <n> <text> <nl> — replace the WHOLE of 1-based
-# line <n> (its text and terminator) with <text><nl>, preserving every other
-# byte exactly (contract "Byte preservation").
-_smk_replace_line() {
-  local content="$1" n="$2" text="$3" nl="$4" start_off end_off before after
-  start_off=$(_smk_offset_after_line "${content}" "$((n - 1))")
-  end_off=$(_smk_offset_after_line "${content}" "${n}")
-  before="${content:0:start_off}"
-  after="${content:end_off}"
-  printf '%s%s%s%s' "${before}" "${text}" "${nl}" "${after}"
-}
-
-# _smk_dominant_nl <content-var-name> — set the caller's NAMEREF-free local
-# `nl` to the literal newline to use for a written/rewritten marker line
-# (contract "Line endings"). NOT implemented as a value returned through
-# command substitution: `$(...)` strips ALL trailing newlines from captured
-# output, which would silently turn a literal "\n" result into an empty
-# string — the bug this comment replaces. Call sites assign the caller-local
-# `nl` directly instead.
-_smk_dominant_nl_token() {
-  printf '%s' "$1" | managed_section_line_ending
-}
-
 # story_marker_assign — read a specification on stdin; assign a fresh
 # identifier to every story section that carries no marker at all, inserting
 # one bare `story=<id>` line right after its anchor (Placement). Prints the
@@ -291,7 +231,7 @@ _smk_dominant_nl_token() {
 # attempt, the output is byte-identical to the input (contract "Idempotence").
 story_marker_assign() {
   local content; content="$(cat; printf x)"; content="${content%x}"
-  local nl_token nl; nl_token="$(_smk_dominant_nl_token "${content}")"
+  local nl_token nl; nl_token="$(marker_splice_dominant_nl_token "${content}")"
   if [[ "${nl_token}" == "CRLF" ]]; then nl=$'\r\n'; else nl=$'\n'; fi
 
   local -a anchors=()
@@ -306,7 +246,7 @@ story_marker_assign() {
     if ((i + 1 < n)); then
       span_end=$((anchors[i + 1] - 1))
     else
-      span_end="$(_smk_line_count "${content}")"
+      span_end="$(marker_splice_line_count "${content}")"
     fi
     if ! _smk_section_has_marker "${content}" "${span_start}" "${span_end}"; then
       need+=("${a}")
@@ -334,7 +274,7 @@ story_marker_assign() {
     anchor="${pair%%:*}"
     id="${pair#*:}"
     line_text="$(story_marker_format "${id}")"
-    content="$(_smk_insert_after_line "${content}" "${anchor}" "${line_text}" "${nl}"; printf x)"; content="${content%x}"
+    content="$(marker_splice_insert_after_line "${content}" "${anchor}" "${line_text}" "${nl}"; printf x)"; content="${content%x}"
   done
   printf '%s' "${content}"
 }
@@ -345,7 +285,7 @@ story_marker_assign() {
 # (idempotent no-op for that id). Prints the new text on stdout.
 story_marker_mark_creating() {
   local ids="$1" content; content="$(cat; printf x)"; content="${content%x}"
-  local nl_token nl; nl_token="$(_smk_dominant_nl_token "${content}")"
+  local nl_token nl; nl_token="$(marker_splice_dominant_nl_token "${content}")"
   if [[ "${nl_token}" == "CRLF" ]]; then nl=$'\r\n'; else nl=$'\n'; fi
 
   local id lineno
@@ -353,7 +293,7 @@ story_marker_mark_creating() {
     [[ -z "${id}" ]] && continue
     lineno="$(_smk_find_line_for_id "${content}" "${id}")"
     ((lineno == 0)) && continue
-    content="$(_smk_replace_line "${content}" "${lineno}" "$(story_marker_format "${id}" creating)" "${nl}"; printf x)"; content="${content%x}"
+    content="$(marker_splice_replace_line "${content}" "${lineno}" "$(story_marker_format "${id}" creating)" "${nl}"; printf x)"; content="${content%x}"
   done < <(jq -r '.[]' <<< "${ids}")
   printf '%s' "${content}"
 }
@@ -364,30 +304,10 @@ story_marker_mark_creating() {
 # returned unchanged) when <id> has no marker line at all.
 story_marker_record_ticket() {
   local id="$1" key="$2" content; content="$(cat; printf x)"; content="${content%x}"
-  local nl_token nl; nl_token="$(_smk_dominant_nl_token "${content}")"
+  local nl_token nl; nl_token="$(marker_splice_dominant_nl_token "${content}")"
   if [[ "${nl_token}" == "CRLF" ]]; then nl=$'\r\n'; else nl=$'\n'; fi
   local lineno; lineno="$(_smk_find_line_for_id "${content}" "${id}")"
   ((lineno == 0)) && { printf '%s' "${content}"; return 0; }
-  content="$(_smk_replace_line "${content}" "${lineno}" "$(story_marker_format "${id}" bound "${key}")" "${nl}"; printf x)"; content="${content%x}"
+  content="$(marker_splice_replace_line "${content}" "${lineno}" "$(story_marker_format "${id}" bound "${key}")" "${nl}"; printf x)"; content="${content%x}"
   printf '%s' "${content}"
-}
-
-# story_marker_write_file <path> <new-content> — write <new-content> to
-# <path> ONLY IF it differs from the file's current bytes, atomically (a
-# temporary file in the SAME directory, renamed over the original — contract
-# "Atomicity"). Prints "written" or "unchanged"; the file's mtime and
-# `git status` stay untouched on "unchanged" (contract "Idempotence").
-story_marker_write_file() {
-  local path="$1" new="$2" current tmp dir
-  current="$(cat "${path}" 2> /dev/null; printf x)"; current="${current%x}"
-  if [[ "${current}" == "${new}" ]]; then
-    printf 'unchanged'
-    return 0
-  fi
-  dir="$(cd "$(dirname "${path}")" && pwd)"
-  tmp="$(mktemp "${dir}/.speckit-jira-marker.XXXXXX")"
-  printf '%s' "${new}" > "${tmp}"
-  mv "${tmp}" "${path}"
-  printf 'written'
-  return 0
 }

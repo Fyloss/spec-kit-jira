@@ -12,7 +12,7 @@ BeforeAll {
 
     function Write-TestConfig {
         param([string]$Key)
-        $lines = @('projects:', "  - key: $Key", '    epic_strategy: per_repo', '    task_strategy: subtask', "routing_default: $Key")
+        $lines = @('projects:', "  - key: $Key", "routing_default: $Key")
         [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines -join "`n") + "`n"))
     }
 

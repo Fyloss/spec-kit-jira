@@ -101,6 +101,45 @@ teardown() {
   [[ "$output" == *"POST /rest/api/3/issue"* ]]
 }
 
+# --- T058 [Phase 5, US2]: the parent's payload passes the SAME pre-write ---
+# gate, before any write for the whole specification (research R8, FR-036) --
+
+@test "T058: a blocked parent payload yields ZERO writes for the whole specification, including its stories" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local plan='{
+    "parent": {"method":"POST","url":"'"${MOCK_BASE_URL}"'/rest/api/3/issue",
+               "body":{"fields":{"summary":"leak acme-corp.atlassian.net"}}, "local_id":"aaaaaaaaaaaaaaaa", "role":"parent"},
+    "stories": [{"method":"POST","url":"'"${MOCK_BASE_URL}"'/rest/api/3/issue",
+                 "body":{"fields":{"summary":"Add the billing feature"}}, "local_id":"1111111111111111", "role":"story"}]
+  }'
+  local spec_ref='{"repo":"acme/app","spec_slug":"001-x","folder":"specs/001-x"}'
+  local spec_file="${BATS_TEST_TMPDIR}/spec.md"
+  printf '# Title\n' > "${spec_file}"
+  run apply_writes_with_recognition "${plan}" "${spec_ref}" "${spec_file}"
+  [ "$status" -eq 9 ]
+  run mock_calls
+  [ -z "$output" ]
+}
+
+@test "T058: a clean parent and clean stories are written through (no gap for legitimate writes)" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local plan='{
+    "parent": {"method":"POST","url":"'"${MOCK_BASE_URL}"'/rest/api/3/issue",
+               "body":{"fields":{"summary":"The Epic"}}, "local_id":"aaaaaaaaaaaaaaaa", "role":"parent"},
+    "stories": [{"method":"POST","url":"'"${MOCK_BASE_URL}"'/rest/api/3/issue",
+                 "body":{"fields":{"summary":"Add the billing feature","parent":{"key":"<resolved at apply time>"}}}, "local_id":"1111111111111111", "role":"story"}]
+  }'
+  local spec_ref='{"repo":"acme/app","spec_slug":"001-x","folder":"specs/001-x"}'
+  local spec_file="${BATS_TEST_TMPDIR}/spec2.md"
+  printf '# Title\n' > "${spec_file}"
+  run apply_writes_with_recognition "${plan}" "${spec_ref}" "${spec_file}"
+  [ "$status" -eq 0 ]
+  run mock_calls
+  [ "$(grep -c '^POST /rest/api/3/issue$' <<< "$output")" -eq 2 ]
+}
+
 # --- Cross-port parity ------------------------------------------------------
 
 @test "the PowerShell port blocks the same three shapes identically (NFR-1)" {

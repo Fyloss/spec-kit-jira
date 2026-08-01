@@ -9,7 +9,7 @@ BeforeAll {
         param([string]$TeamsBlock = '')
         $d = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
         New-Item -ItemType Directory -Path $d -Force | Out-Null
-        $lines = @('projects:', '  - key: IJT', '    epic_strategy: per_repo', '    task_strategy: subtask', 'routing_default: IJT')
+        $lines = @('projects:', '  - key: IJT', 'routing_default: IJT')
         if ($TeamsBlock) { $lines += $TeamsBlock -split "`n" }
         [System.IO.File]::WriteAllText((Join-Path $d 'config.yml'), (($lines -join "`n") + "`n"))
         return $d

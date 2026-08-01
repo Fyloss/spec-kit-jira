@@ -19,6 +19,7 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/Hierarchy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Credentials.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../hooks/ReadmeBlock.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force
@@ -60,48 +61,56 @@ function Test-JiraMappingValidity {
 function New-JiraProjectMapping {
     <#
     .SYNOPSIS
-      Build the canonical project mapping entry by logical name. linked_story
-      requires a LinkType (FR-009); its absence returns exit 4. Returns
+      Build the canonical project mapping entry by logical name. Returns
       { ExitCode; Json } — the same asymmetric-shape convention as the client.
+      Three keys and their linked-story requirement are retired (008 T028).
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string] $Key,
-        [Parameter(Mandatory)] [string] $Style,
-        [Parameter(Mandatory)] [string] $EpicStrategy,
-        [Parameter(Mandatory)] [string] $TaskStrategy,
-        [string] $LinkType = ''
+        [Parameter(Mandatory)] [string] $Style
     )
-    if ($TaskStrategy -eq 'linked_story' -and [string]::IsNullOrEmpty($LinkType)) {
-        [Console]::Error.WriteLine('mapping: task_strategy=linked_story requires a link_type (FR-009)')
-        return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = '' }
-    }
-
-    $entry = [ordered]@{
-        key           = $Key
-        style         = $Style
-        epic_strategy = $EpicStrategy
-        task_strategy = $TaskStrategy
-    }
-    if (-not [string]::IsNullOrEmpty($LinkType)) { $entry['link_type'] = $LinkType }
-
+    $entry = [ordered]@{ key = $Key; style = $Style }
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue $entry) }
 }
 
 function Get-JiraResolvedIdMap {
     <#
     .SYNOPSIS
-      Reshape a discovered project binding into the resolved-id lookup table:
-      logical name -> id for issue types, priorities, and statuses. Returns the
-      canonical JSON object. Mirror of config_resolved_ids_for.
+      Reshape a discovered project binding into the resolved-id table the
+      reconcile path consumes. Issue types keep hierarchy_level and subtask
+      as a LIST, in discovered order (data-model.md §3, R5) — a name-to-id map
+      discarded both the moment they became durable. Priorities and statuses
+      are unaffected. hierarchy_level is carried as a string like every other
+      identifier here — the YAML writer has no number type. Mirror of
+      config_resolved_ids_for.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $BindingJson)
     $b = $BindingJson | ConvertFrom-Json -Depth 100
-    $issue = [ordered]@{}; foreach ($t in @($b.issue_types)) { $issue[[string]$t.logical_name] = [string]$t.id }
+    $issue = [System.Collections.Generic.List[object]]::new()
+    foreach ($t in @($b.issue_types)) {
+        $issue.Add([ordered]@{
+            logical_name    = [string]$t.logical_name
+            id              = [string]$t.id
+            hierarchy_level = [string]$t.hierarchy_level
+            subtask         = [bool]$t.subtask
+        })
+    }
     $prio = [ordered]@{}; foreach ($p in @($b.priorities)) { $prio[[string]$p.logical_name] = [string]$p.id }
     $stat = [ordered]@{}; foreach ($s in @($b.statuses)) { $stat[[string]$s.name] = [string]$s.id }
-    return (ConvertTo-JiraJsonValue ([ordered]@{ issue_types = $issue; priorities = $prio; statuses = $stat }))
+    $result = [ordered]@{ issue_types = $issue.ToArray(); priorities = $prio; statuses = $stat }
+    # required_fields and parent_link_available (T017-T020) carry straight
+    # through — discovery already shapes them keyed by issue-type id — and
+    # are omitted rather than emitted empty when discovery resolved neither
+    # type (the ambiguous-child case).
+    if ($b.PSObject.Properties.Match('required_fields').Count -and @($b.required_fields.PSObject.Properties).Count -gt 0) {
+        $result['required_fields'] = $b.required_fields
+    }
+    if ($b.PSObject.Properties.Match('parent_link_available').Count -and @($b.parent_link_available.PSObject.Properties).Count -gt 0) {
+        $result['parent_link_available'] = $b.parent_link_available
+    }
+    return (ConvertTo-JiraJsonValue $result)
 }
 
 function Invoke-JiraConfigDegraded {
@@ -226,6 +235,56 @@ function Resolve-JiraProjectStyle {
     else { 'no unambiguous style signal in the discovery payload' }
     [Console]::Error.WriteLine("config: project ${ProjectKey}: style is ambiguous ($reason); pass --style $ProjectKey=company_managed or --style $ProjectKey=team_managed")
     return [pscustomobject]@{ ExitCode = $script:ExitConfig; Style = ''; Source = '' }
+}
+
+function Get-JiraChildTypeFlagFor {
+    # The operator's --child-type answer for one project (last occurrence
+    # wins), or '' when none was given. Mirror of _config_child_type_flag_for.
+    param([string] $ProjectKey, [string] $ChildTypes)
+    $out = ''
+    foreach ($tok in ($ChildTypes -split ' ')) {
+        if ($tok -clike "$ProjectKey=*") { $out = $tok.Substring($tok.IndexOf('=') + 1) }
+    }
+    return $out
+}
+
+function Resolve-JiraChildType {
+    <#
+    .SYNOPSIS
+      The child TYPE (research R1/R2, contract §2): derived when the child
+      hierarchy level holds exactly one non-sub-task candidate; otherwise the
+      operator's --child-type answer; otherwise exit 4 naming the level and
+      every candidate. Mirror of _config_resolve_child_type. Returns
+      { ExitCode; Entry } where Entry is [ordered]@{logical_name;id;source}.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ProjectKey,
+        [Parameter(Mandatory)] $IssueTypes,
+        [string] $Flag = ''
+    )
+    $childLevel = Get-JiraHierarchyChildLevel -IssueTypes $IssueTypes
+    if ($null -eq $childLevel) {
+        [Console]::Error.WriteLine("config: project ${ProjectKey}: the discovered project declares no issue types at all")
+        return [pscustomobject]@{ ExitCode = $script:ExitConfig; Entry = $null }
+    }
+    $candidates = @($IssueTypes | Where-Object { (-not [bool]$_.subtask) -and ([int]$_.hierarchy_level -eq $childLevel) })
+    if ($candidates.Count -eq 1) {
+        $entry = [ordered]@{ logical_name = $candidates[0].logical_name; id = $candidates[0].id; source = 'derived' }
+        return [pscustomobject]@{ ExitCode = 0; Entry = $entry }
+    }
+    if ($Flag) {
+        $match = $candidates | Where-Object { $_.logical_name -eq $Flag } | Select-Object -First 1
+        if ($match) {
+            $entry = [ordered]@{ logical_name = $match.logical_name; id = $match.id; source = 'operator' }
+            return [pscustomobject]@{ ExitCode = 0; Entry = $entry }
+        }
+        [Console]::Error.WriteLine("config: project ${ProjectKey}: --child-type $Flag names no candidate at the child level")
+        return [pscustomobject]@{ ExitCode = $script:ExitConfig; Entry = $null }
+    }
+    $list = ($candidates | ForEach-Object { $_.logical_name }) -join ', '
+    [Console]::Error.WriteLine("config: project ${ProjectKey}: the child level holds more than one issue type ($list); pass --child-type $ProjectKey=<one of them>")
+    return [pscustomobject]@{ ExitCode = $script:ExitConfig; Entry = $null }
 }
 
 function Set-JiraConfigGitignore {
@@ -375,6 +434,7 @@ function Invoke-JiraConfig {
     $json = $state['json'] -eq 'true'
     $dryRun = $state['dry_run'] -eq 'true'
     $styles = if ($state.ContainsKey('styles')) { $state['styles'] } else { '' }
+    $childTypes = if ($state.ContainsKey('child_types')) { $state['child_types'] } else { '' }
     $enableHooks = if ($state.ContainsKey('enable_hooks')) { $state['enable_hooks'] } else { '' }
 
     $configdir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
@@ -485,6 +545,24 @@ function Invoke-JiraConfig {
         }
         $rids['style'] = $sr.Style
         $rids['style_source'] = $sr.Source
+
+        # Hierarchy derivation (008 T042/T044/T045, research R1/R2, contract
+        # §2/§3): the parent TYPE is derived; the child TYPE is a recorded
+        # operator/derived answer, resolved here and persisted with its
+        # provenance beside style/style_source.
+        $itypesRaw = Get-CmdProp $bindingObj 'issue_types'
+        $itypes = if ($null -ne $itypesRaw) { @($itypesRaw) } else { @() }
+        $derivation = Get-JiraHierarchyDerivation -ProjectKey $pkey -IssueTypes $itypes
+        if ($derivation.Status -ne 'ok') {
+            [Console]::Error.WriteLine($derivation.Message)
+            return $script:ExitConfig
+        }
+        $childFlag = Get-JiraChildTypeFlagFor -ProjectKey $pkey -ChildTypes $childTypes
+        $childResolved = Resolve-JiraChildType -ProjectKey $pkey -IssueTypes $itypes -Flag $childFlag
+        if ($childResolved.ExitCode -ne 0) { return [int] $childResolved.ExitCode }
+        $rids['child_type'] = $childResolved.Entry
+        $rids['parent_type'] = [ordered]@{ logical_name = $derivation.Parent.logical_name; id = $derivation.Parent.id; source = 'derived' }
+
         $resolved[$pkey] = $rids
         $projStyles[$pkey] = [ordered]@{ style = $sr.Style; style_source = $sr.Source }
         $nproj++

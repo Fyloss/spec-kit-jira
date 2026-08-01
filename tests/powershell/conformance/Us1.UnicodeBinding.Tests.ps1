@@ -41,8 +41,12 @@ Describe 'The unicode binding survives an unrelated config run (conformance)' {
         $localf = Join-Path $outDir 'workdir/.specify/jira/config.local.yml'
         $localj = ConvertFrom-JiraConfigYaml -Path $localf | ConvertFrom-Json -Depth 100
 
-        $localj.resolved_ids.JET.issue_types.'Récit' | Should -Be '10004'
-        $localj.resolved_ids.JET.issue_types.Story | Should -Be '10005'
+        # New list shape (008 T014a): issue_types is a list of
+        # {logical_name, id, hierarchy_level, subtask}, not a name-to-id map.
+        (@($localj.resolved_ids.JET.issue_types) | Where-Object { $_.logical_name -eq 'Récit' }).id | Should -Be '10004'
+        (@($localj.resolved_ids.JET.issue_types) | Where-Object { $_.logical_name -eq 'Story' }).id | Should -Be '10005'
+        $localj.resolved_ids.JET.child_type.logical_name | Should -Be 'Récit'
+        $localj.resolved_ids.JET.parent_type.logical_name | Should -Be 'Chantier'
         $localj.resolved_ids.JET.priorities.Faible | Should -Be '4'
         $localj.resolved_ids.JET.priorities.'Élevée' | Should -Be '1'
         $localj.resolved_ids.JET.priorities.'Приоритет' | Should -Be '2'

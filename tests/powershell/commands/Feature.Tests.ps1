@@ -12,7 +12,7 @@ BeforeAll {
 
     function Write-TeamsConfig {
         $lines = @(
-            'projects:', '  - key: IJT', '    epic_strategy: per_repo', '    task_strategy: subtask',
+            'projects:', '  - key: IJT',
             'routing_default: IJT', 'teams:',
             '  - id: ijt', '    project: IJT', '    folder_prefix: "ijt-"', '    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"',
             '  - id: wex', '    project: WEX', '    folder_prefix: "wex-"', '    branch_pattern: "wex-<ID>/<FEATURE_NAME>"'

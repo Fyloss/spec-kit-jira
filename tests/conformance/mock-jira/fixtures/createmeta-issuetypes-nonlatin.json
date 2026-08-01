@@ -1,0 +1,8 @@
+{
+  "issueTypes": [
+    { "id": "10501", "name": "エピック", "subtask": false, "hierarchyLevel": 1 },
+    { "id": "10502", "name": "ストーリー", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10503", "name": "Задача (QA)", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10504", "name": "サブタスク", "subtask": true, "hierarchyLevel": -1 }
+  ]
+}

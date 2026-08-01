@@ -149,6 +149,42 @@ discovery_priorities_for_project() {
   # kcov-excl-stop
 }
 
+# _disc_hierarchy_candidates <issueTypes-array-json> — the SOLE-candidate
+# child and parent type ids, when the level is unambiguous (research R1/R2).
+# No refusal here: an ambiguous level simply yields no candidate for that
+# tier. The full derivation and its refusals (no-parent-level, parent-level-
+# ambiguous) live in sink/jira/hierarchy.sh (Phase 4, US1); this is only
+# enough to know which types' create metadata discovery can usefully fetch
+# before the child type has been resolved by the ceremony (or needs no
+# resolving because the level held one candidate all along).
+_disc_hierarchy_candidates() {
+  local itypes="$1"
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -cn --argjson t "${itypes}" '
+    ($t | map(select(.subtask | not))) as $cand
+    | (if ($cand|length) > 0 then ($cand | map(.hierarchyLevel) | min) else null end) as $childLevel
+    | ($cand | map(select(.hierarchyLevel == $childLevel))) as $childCands
+    | ($cand | map(select(.hierarchyLevel > $childLevel))) as $above
+    | (if ($above|length) > 0 then ($above | map(.hierarchyLevel) | min) else null end) as $parentLevel
+    | ($above | map(select(.hierarchyLevel == $parentLevel))) as $parentCands
+    | {
+        child:  (if ($childCands|length)  == 1 then $childCands[0].id  else null end),
+        parent: (if ($parentCands|length) == 1 then $parentCands[0].id else null end)
+      }
+  '
+  # kcov-excl-stop
+}
+
+# _disc_required_fields <createmeta-fields-array-json> — every field this
+# type's create metadata marks required, by its Jira NAME (never a
+# customfield_NNNNN id), for the mandatory-field gate of contracts/
+# hierarchy-resolution.md §5 (Phase 6, US3). Prints the canonical array.
+_disc_required_fields() {
+  local fields="${1:-[]}"
+  jq -cn --argjson f "${fields}" \
+    '[ $f[] | select(.required == true) | {logical_name: .name, field_id: .fieldId} ]' | json_canonical
+}
+
 # discover_binding <project_key> — see the file header.
 discover_binding() {
   local key="$1"
@@ -171,9 +207,46 @@ discover_binding() {
   local first_type
   first_type="$(jq -r '.issueTypes[0].id // ""' <<< "${itypes}")"
 
+  # (2b) The child/parent candidates this call can resolve without asking
+  # (research R1/R2) — used only to pick which type(s) get a per-type
+  # createmeta fetch (T017/T018, contract §4). An ambiguous level here is not
+  # an error: the ceremony resolves it later and fetches that type's
+  # metadata itself once chosen.
+  local hier child_id parent_id
+  hier="$(_disc_hierarchy_candidates "$(jq -c '.issueTypes' <<< "${itypes}")")"
+  child_id="$(jq -r '.child // empty' <<< "${hier}")"
+  parent_id="$(jq -r '.parent // empty' <<< "${hier}")"
+
   # (3) Project field schema (estimation candidates + flagged field source).
+  # Sourced from the CHILD type when it is resolvable — the type this bridge
+  # actually writes — falling back to the old arbitrary-first-type fetch only
+  # when the child level is itself ambiguous (research §3 / plan.md).
+  local meta_type_id="${child_id:-${first_type}}"
   local meta
-  meta="$(jira_request GET "${api}/issue/createmeta/${key}/issuetypes/${first_type}")" || return $?
+  meta="$(jira_request GET "${api}/issue/createmeta/${key}/issuetypes/${meta_type_id}")" || return $?
+
+  # (3b) required_fields and parent-link availability, per written type
+  # actually resolvable at this point (T017–T020, contract §4) — at most two
+  # requests, reusing the (3) fetch when a type coincides with it rather than
+  # re-requesting the same metadata. Parent-link availability is READ from
+  # the type's own metadata, never assumed from project style (R4) —
+  # `parent-link-unavailable` (Phase 6, US3) depends on this being an honest
+  # per-type fact rather than a guess.
+  local required_fields='{}' parent_link_available='{}' tid tmeta
+  for tid in "${child_id}" "${parent_id}"; do
+    [[ -z "${tid}" ]] && continue
+    [[ "$(jq -r --arg t "${tid}" 'has($t)' <<< "${required_fields}")" == "true" ]] && continue
+    if [[ "${tid}" == "${meta_type_id}" ]]; then
+      tmeta="${meta}"
+    else
+      tmeta="$(jira_request GET "${api}/issue/createmeta/${key}/issuetypes/${tid}")" || return $?
+    fi
+    required_fields="$(jq -c --arg t "${tid}" \
+      --argjson rf "$(_disc_required_fields "$(jq -c '.fields // []' <<< "${tmeta}")")" \
+      '. + {($t): $rf}' <<< "${required_fields}")"
+    parent_link_available="$(jq -c --arg t "${tid}" --argjson has "$(jq -c 'any(.fields[]?; .fieldId == "parent")' <<< "${tmeta}")" \
+      '. + {($t): $has}' <<< "${parent_link_available}")"
+  done
 
   # (4) Statuses + statusCategory (seeds the four-category classification).
   local statuses
@@ -206,7 +279,9 @@ discover_binding() {
     --argjson statuses "${statuses}" \
     --argjson priorities "${proj_priorities}" \
     --argjson fields "${fields}" \
-    --argjson flagged "${flagged}" '
+    --argjson flagged "${flagged}" \
+    --argjson rf "${required_fields}" \
+    --argjson pla "${parent_link_available}" '
     {
       style: (if $style == "" then null else $style end),
       issue_types: [ $itypes.issueTypes[]
@@ -223,7 +298,9 @@ discover_binding() {
                   + (if ((.schema.custom // "") | test("float|gh-sprint|story-point"; "i")) then 2 else 0 end)
                   + (if (.name | test("estimat|point|effort|story"; "i")) then 1 else 0 end) ) } ]
         | sort_by([(-.score), .id]) ),
-      flagged_field: $flagged
+      flagged_field: $flagged,
+      required_fields: $rf,
+      parent_link_available: $pla
     }' | json_canonical
   # kcov-excl-stop
 }

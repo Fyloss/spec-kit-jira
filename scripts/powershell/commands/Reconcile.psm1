@@ -14,11 +14,14 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../engine/Parse.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../engine/Interchange.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot '../engine/StoryMarker.psm1') -Force # R5 step 1 — assign identifiers
+Import-Module (Join-Path $PSScriptRoot '../engine/MarkerSplice.psm1') -Force # Write-JiraMarkerSpliceFile — a nested import inside StoryMarker.psm1 is not enough (module-scope, not session)
+Import-Module (Join-Path $PSScriptRoot '../engine/SpecMarker.psm1') -Force # the parent marker's same splice (Phase 5, US2) — a nested import inside PlanApply.psm1 is not enough
+Import-Module (Join-Path $PSScriptRoot '../engine/StoryMarker.psm1') -Force -Global # R5 step 1 — assign identifiers
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Recognition.psm1') -Force # R5 step 2 — recognise recorded tickets
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/PlanApply.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force # hook health — READ ONLY (003 FR-022)
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force          # the operator disable record
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/Hierarchy.psm1') -Force -Global # the mandatory-field gate — a nested import inside lib/Config.psm1 is not enough
 Import-Module (Join-Path $PSScriptRoot '../lib/Prereq.psm1') -Force          # the bridge-unavailable cause
 
 $script:ReconcileExitConfig = 4
@@ -106,28 +109,6 @@ function Resolve-JiraReconcileRouting {
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Folder, [Parameter(Mandatory)] [string] $ConfigJson)
     return (Resolve-JiraRouting -FolderName (Split-Path -Leaf $Folder) -LabelsJson '[]' -RoutingConfigJson $ConfigJson)
-}
-
-function Get-JiraReconcileEpicStrategy {
-    <#
-    .SYNOPSIS
-      This run's epic strategy (FR-006): the resolved project's own
-      declaration in the team config. Mirror of _reconcile_epic_strategy.
-      Falls back to the legacy per_repo default only when that project
-      carries no declaration at all.
-    #>
-    [CmdletBinding()]
-    param([Parameter(Mandatory)] [string] $ProjectKey, [Parameter(Mandatory)] [string] $ConfigJson)
-    $cfg = $ConfigJson | ConvertFrom-Json -Depth 100
-    $projectsVal = Get-JiraPlanPropSafe $cfg 'projects'
-    $projects = if ($null -ne $projectsVal) { @($projectsVal) } else { @() }
-    foreach ($p in $projects) {
-        if ([string](Get-JiraPlanPropSafe $p 'key') -eq $ProjectKey) {
-            $v = [string](Get-JiraPlanPropSafe $p 'epic_strategy')
-            if (-not [string]::IsNullOrEmpty($v)) { return $v }
-        }
-    }
-    return 'per_repo'
 }
 
 function Get-JiraReconcilePhaseStatusMap {
@@ -242,6 +223,15 @@ function Get-JiraReconcileLocalBindingFor {
         }
     }
     if ($null -eq $entry) { return [pscustomobject]@{ ExitCode = 3; Json = '' } }
+    # binding-shape-stale (008 T016, research R5): a binding written before
+    # this feature stores issue_types as a name-to-id MAP, not the hierarchy-
+    # carrying list (data-model.md §3). Detected here, before any type
+    # resolution is attempted, so an old binding never falls through to
+    # plan_writes with an empty issue type — it refuses with its OWN message
+    # instead, never the "not bound yet" text.
+    if ($entry -is [System.Collections.IDictionary] -and $entry.Contains('issue_types') -and $entry['issue_types'] -is [System.Collections.IDictionary]) {
+        return [pscustomobject]@{ ExitCode = 6; Json = '' }
+    }
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-Json -InputObject $entry -Compress -Depth 20) }
 }
 
@@ -273,7 +263,19 @@ function Get-JiraReconcilePlanContextFromBinding {
     if ($bindingResult.ExitCode -ne 0) { return [pscustomobject]@{ ExitCode = $bindingResult.ExitCode; Json = '' } }
     $binding = $bindingResult.Json | ConvertFrom-Json -Depth 100
 
-    $storyType = [string](Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $binding 'issue_types') 'Story')
+    # child_type.id, not the literal .issue_types.Story (008 T046/R5): the
+    # binding's issue_types is a hierarchy-carrying LIST now, and the child
+    # type is whatever the persisted binding recorded — derived or an
+    # operator answer (contracts/hierarchy-resolution.md §2). A binding with
+    # no child_type (old shape, or not yet configured) yields empty.
+    $storyType = [string](Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $binding 'child_type') 'id')
+    # child-type-unresolved (contract §6): a binding in the new shape but
+    # with no recorded child_type refuses by name — never a silent empty
+    # story type reaching plan_writes far later (research R5).
+    if ([string]::IsNullOrEmpty($storyType)) { return [pscustomobject]@{ ExitCode = 7; Json = '' } }
+    $parentTypeId = [string](Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $binding 'parent_type') 'id')
+    $parentLinkAvail = Get-JiraPlanPropSafe $binding 'parent_link_available'
+    $parentSupportsLink = [bool](Get-JiraPlanPropSafe $parentLinkAvail $storyType)
     $cfg = $ConfigJson | ConvertFrom-Json -Depth 100
     $priorityMap = $null
     $projectsVal = Get-JiraPlanPropSafe $cfg 'projects'
@@ -320,6 +322,8 @@ function Get-JiraReconcilePlanContextFromBinding {
 
     $result = [ordered]@{ base_url = $BaseUrl }
     if (-not [string]::IsNullOrEmpty($storyType)) { $result['story_type_id'] = $storyType }
+    if (-not [string]::IsNullOrEmpty($parentTypeId)) { $result['parent_type_id'] = $parentTypeId }
+    $result['parent_supports_link'] = $parentSupportsLink
     if ($priorityIds.Count -gt 0) { $result['priority_ids'] = $priorityIds }
     if (-not [string]::IsNullOrEmpty($estField)) { $result['estimation_field_id'] = $estField }
     if ($tickets.Count -gt 0) { $result['tickets'] = $tickets }
@@ -427,10 +431,9 @@ function Invoke-JiraReconcile {
     # present-but-invalid config.yml surfaces through Import-JiraConfig's own
     # EXIT_CONFIG path.
     $overrideProject = $env:SPEC_KIT_JIRA_PROJECT_KEY
-    $overrideEpic = $env:SPEC_KIT_JIRA_EPIC_STRATEGY
     $cfgDir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
     $cfg = '{}'
-    if ([string]::IsNullOrEmpty($overrideProject) -or [string]::IsNullOrEmpty($overrideEpic) -or [string]::IsNullOrEmpty($env:SPEC_KIT_JIRA_PLAN_CONTEXT)) {
+    if ([string]::IsNullOrEmpty($overrideProject) -or [string]::IsNullOrEmpty($env:SPEC_KIT_JIRA_PLAN_CONTEXT)) {
         if (-not (Test-Path -LiteralPath (Join-Path $cfgDir 'config.yml'))) {
             Write-JiraReconcileNotice -Lines @(
                 'Jira mirror skipped: this repository is not bound to a Jira project yet.',
@@ -483,8 +486,6 @@ function Invoke-JiraReconcile {
         }
     }
 
-    $epicStrategy = if (-not [string]::IsNullOrEmpty($overrideEpic)) { $overrideEpic } else { Get-JiraReconcileEpicStrategy -ProjectKey $projectKey -ConfigJson $cfg }
-
     $specRef = [ordered]@{ repo = $repo; spec_slug = $slug; folder = $folder }
     $specRefJson = ConvertTo-JiraJsonValue $specRef
 
@@ -514,14 +515,27 @@ function Invoke-JiraReconcile {
             $st -eq 'absent'
         }).Count
 
+    $preEpicMarker = Get-JiraPlanPropSafe $preParseObj 'epic'
+    $preEpicMarkerState = if ($preEpicMarker) { [string](Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $preEpicMarker 'marker') 'state') } else { 'absent' }
+    if ([string]::IsNullOrEmpty($preEpicMarkerState)) { $preEpicMarkerState = 'absent' }
+    $parentNeedsAssign = $preEpicMarkerState -eq 'absent'
+
+    # Ordering within one run, step 1/2 (contracts/parent-marker.md): stories
+    # first, the parent second — same pass, same file, ONE splice.
     $assignedSpec = $rawSpec
+    $needWrite = $false
     if ($assignedCount -gt 0) {
-        $assignedSpec = Set-JiraStoryMarkerAssign -Text $rawSpec
-        if (-not $dryRun) {
-            try { Write-JiraStoryMarkerFile -Path $specFile -NewContent $assignedSpec | Out-Null }
-            catch {
-                return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: $specFile could not be written — no ticket may be created before its identifier is recorded (zero writes)")
-            }
+        $assignedSpec = Set-JiraStoryMarkerAssign -Text $assignedSpec
+        $needWrite = $true
+    }
+    if ($parentNeedsAssign) {
+        $assignedSpec = Set-JiraSpecMarkerAssign -Text $assignedSpec
+        $needWrite = $true
+    }
+    if ($needWrite -and -not $dryRun) {
+        try { Write-JiraMarkerSpliceFile -Path $specFile -NewContent $assignedSpec | Out-Null }
+        catch {
+            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: $specFile could not be written — no ticket may be created before its identifier is recorded (zero writes)")
         }
     }
 
@@ -533,17 +547,71 @@ function Invoke-JiraReconcile {
     catch {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the specification could not be parsed (zero writes)')
     }
-    $ctx = ConvertTo-JiraJsonValue ([ordered]@{ spec_ref = $specRef; project_key = $projectKey; epic_strategy = $epicStrategy })
+    $ctx = ConvertTo-JiraJsonValue ([ordered]@{ spec_ref = $specRef; project_key = $projectKey })
     $built = Build-JiraNeutralDocument -ParseJson $parse -ContextJson $ctx
     if (-not $built.Valid) {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the specification could not be assembled into a valid neutral document (zero writes)')
     }
 
-    # R5 step 2 — RECOGNISE (Phase 3, US1; contracts/recognition-contract.md):
-    # one read per recorded ticket, verified against the SAME identity
-    # marker the read returns. A read failure is NEVER downgraded to "no
-    # ticket exists" (FR-004) — it fails the WHOLE specification closed here.
     $docObj = $built.Document | ConvertFrom-Json -Depth 100
+
+    # The implementation plan (Phase 7, US5; data-model.md §7; spec FR-026/
+    # FR-027/FR-028): plan.md sits alongside spec.md in the same feature
+    # folder. A missing file, or a file with no `## Summary` section, yields
+    # no blocks and no warning (FR-028) — Get-JiraParsedPlanSummary already
+    # handles both.
+    $specDir = Split-Path -Parent $specFile
+    if ([string]::IsNullOrEmpty($specDir)) { $specDir = '.' }
+    $planFile = Join-Path $specDir 'plan.md'
+    $planBlocksJson = if (Test-Path -LiteralPath $planFile) {
+        Get-JiraParsedPlanSummary -Text (Get-Content -Raw -LiteralPath $planFile)
+    }
+    else { '[]' }
+    $planBlocks = @($planBlocksJson | ConvertFrom-Json -Depth 100)
+    if ($planBlocks.Count -gt 0) {
+        $docObj.epic.description.blocks = @($docObj.epic.description.blocks) + $planBlocks
+    }
+
+    # Mandatory-field gate (Phase 6, US3, T086/T087/T088; contracts/
+    # hierarchy-resolution.md §4/§5): runs after derivation and before
+    # recognition, so no read and no write has happened yet. Reads the SAME
+    # persisted binding the plan context reads later; a binding that cannot
+    # be read yet, or resolves to no bound project, is reported exactly as
+    # the plan-context path already reports it — that error surfaces at its
+    # usual point below rather than being duplicated here.
+    $gateBindingResult = Get-JiraReconcileLocalBindingFor -ProjectKey $projectKey -ConfigDir $cfgDir
+    if ($gateBindingResult.ExitCode -eq 0) {
+        $gateBinding = $gateBindingResult.Json | ConvertFrom-Json -Depth 100
+        $gateChildType = [string](Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $gateBinding 'child_type') 'id')
+        if (-not [string]::IsNullOrEmpty($gateChildType)) {
+            $gateResult = Get-JiraHierarchyMandatoryGate -Binding $gateBinding -ProjectKey $projectKey
+            if ($gateResult.status -ne 'ok') {
+                return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message $gateResult.message)
+            }
+        }
+    }
+
+    # R5 step 2a — RECOGNISE THE PARENT (Phase 5, US2, T070/T077;
+    # contracts/parent-marker.md "Ordering within one run" step 5). One read
+    # by the recorded key, before any story is recognised. A blocked parent
+    # blocks the WHOLE specification — no story is planned (FR-012).
+    $epicObj = Get-JiraPlanPropSafe $docObj 'epic'
+    $epicMarkerJson = ConvertTo-JiraJsonValue (Get-JiraPlanPropSafe $epicObj 'marker')
+    $recogParentResult = Invoke-JiraRecognitionParentRun -MarkerInfoJson $epicMarkerJson -SpecRefJson $specRefJson -ProjectKey $projectKey -SpecPath $specFile
+    if ($recogParentResult.ExitCode -ne 0) {
+        return (Get-JiraReconcileFaultCode -Code $recogParentResult.ExitCode -Message 'reconcile: the parent could not be recognised (zero writes)')
+    }
+    $recogParent = $recogParentResult.Json | ConvertFrom-Json -Depth 100
+    $parentState = [string]$recogParent.state
+    if ($parentState -eq 'blocked') {
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: $($recogParent.detail)")
+    }
+
+    # R5 step 2b — RECOGNISE the stories (Phase 3, US1;
+    # contracts/recognition-contract.md): one read per recorded ticket,
+    # verified against the SAME identity marker the read returns. A read
+    # failure is NEVER downgraded to "no ticket exists" (FR-004) — it fails
+    # the WHOLE specification closed here.
     $storiesSlim = [System.Collections.Generic.List[object]]::new()
     foreach ($s in @($docObj.stories)) { $storiesSlim.Add([ordered]@{ local_id = $s.local_id; marker = (Get-JiraPlanPropSafe $s 'marker') }) }
     $storiesSlimJson = ConvertTo-JiraJsonValue $storiesSlim
@@ -579,14 +647,39 @@ function Invoke-JiraReconcile {
     elseif ($planCtxResult.ExitCode -eq 3) {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: the project `"$projectKey`" has not been bound yet — run /speckit.jira.config to discover its issue types and priorities (zero writes)")
     }
+    elseif ($planCtxResult.ExitCode -eq 6) {
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: the local binding for $projectKey predates parent support and does not record issue-type hierarchy. The project is bound — its binding is simply a version behind. Run /speckit.jira.config to refresh it (zero writes)")
+    }
+    elseif ($planCtxResult.ExitCode -eq 7) {
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: project $projectKey has no recorded issue type for user stories. Run /speckit.jira.config to record it (zero writes)")
+    }
     elseif ($planCtxResult.ExitCode -eq $script:ReconcileExitConfig) {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the local Jira binding could not be read (zero writes)')
     }
     $planCtx = $planCtxResult.Json
-    try { $actionsJson = Get-JiraPlanWriteSet -NeutralDocJson $docForWriteJson -PlanContextJson $planCtx }
+
+    # Merge the parent's recognition facts into the plan context (T077): a
+    # bound parent carries its key, current content (for zero churn) and
+    # origin; a new/absent parent contributes nothing extra.
+    if ($parentState -eq 'bound') {
+        $planCtxObj = $planCtx | ConvertFrom-Json -Depth 100
+        $planCtxMap = [ordered]@{}
+        foreach ($p in $planCtxObj.PSObject.Properties) { $planCtxMap[$p.Name] = $p.Value }
+        $planCtxMap['parent_key'] = [string]$recogParent.key
+        $planCtxMap['parent_current'] = $recogParent.current
+        $parentOriginKnown = [string]$recogParent.origin
+        if ([string]::IsNullOrEmpty($parentOriginKnown)) { $parentOriginKnown = 'bridge' }
+        $planCtxMap['parent_origin'] = $parentOriginKnown
+        $planCtx = ConvertTo-JiraJsonValue $planCtxMap
+    }
+
+    try { $planJson = Get-JiraPlanWriteSet -NeutralDocJson $docForWriteJson -PlanContextJson $planCtx }
     catch {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the write plan could not be assembled (zero writes)')
     }
+    $planObj = $planJson | ConvertFrom-Json -Depth 100
+    $parentAction = Get-JiraPlanPropSafe $planObj 'parent'
+    $actionsJson = ConvertTo-JiraJsonValue @(Get-JiraPlanPropSafe $planObj 'stories')
 
     # US6 lifecycle safety: when the current-Jira facts are supplied (the seam the
     # config/discovery integration fills from a fail-closed read), fold in
@@ -697,6 +790,11 @@ function Invoke-JiraReconcile {
     # as no-op: every recognised ticket whose write would have been a no-op.
     $created = @($actions | Where-Object { $_.method -eq 'POST' -and ([string]$_.url).EndsWith('/issue') }).Count
     $updated = @($actions | Where-Object { $_.method -eq 'PUT' }).Count
+    # The parent's own creation/update counts toward the same tallies (T079).
+    if ($null -ne $parentAction) {
+        if ($parentAction.method -eq 'POST') { $created++ }
+        elseif ($parentAction.method -eq 'PUT') { $updated++ }
+    }
     $warnCount = @($warnsJson | ConvertFrom-Json -Depth 100).Count
     $recognisedCount = @($recog.bound.PSObject.Properties).Count
     $skippedCount = $recognisedCount - $updated
@@ -706,10 +804,32 @@ function Invoke-JiraReconcile {
 
     $rc = 0
     if (-not $dryRun) {
-        # R5 steps 4/6: Invoke-JiraApplyWriteSetWithRecognition marks every
-        # planned creation `creating` before the first create, and stamps +
-        # records each created ticket's key IMMEDIATELY, per ticket.
-        $rc = Invoke-JiraApplyWriteSetWithRecognition -ActionsJson $actionsJson -SpecRefJson $specRefJson -SpecFile $specFile
+        # R5 steps 4/6, contract steps 8-11: Invoke-JiraApplyWriteSetWithRecognition
+        # performs the parent first, marks every planned creation `creating`
+        # before the first create, and stamps + records each created
+        # ticket's key IMMEDIATELY, per ticket.
+        $applyPlanJson = ConvertTo-JiraJsonValue ([ordered]@{ parent = $parentAction; stories = @($actionsJson | ConvertFrom-Json -Depth 100) })
+        $knownParentKey = if ($parentState -eq 'bound') { [string]$recogParent.key } else { '' }
+        $rc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $applyPlanJson -SpecRefJson $specRefJson -SpecFile $specFile -KnownParentKey $knownParentKey
+    }
+
+    # T079/parent-marker.md `parent-recreated`: a summary note, not a
+    # refusal — the recorded parent no longer existed, so a new one was
+    # created and the record was updated. The new key is only known after
+    # the create response, so re-read the just-written spec file for it.
+    if (-not $dryRun -and $parentState -eq 'new' -and $recogParent.PSObject.Properties.Name -contains 'recreated_from') {
+        $formerParentKey = [string]$recogParent.recreated_from.key
+        $postEpicRaw = Get-Content -Raw -LiteralPath $specFile
+        if ($null -eq $postEpicRaw) { $postEpicRaw = '' }
+        $postEpicInfo = Get-JiraSpecMarkerDocumentInfo -Content $postEpicRaw | ConvertFrom-Json -Depth 100
+        $newParentKey = [string](Get-JiraPlanPropSafe $postEpicInfo 'ticket')
+        if (-not [string]::IsNullOrEmpty($newParentKey)) {
+            $notesList2 = [System.Collections.Generic.List[string]]::new()
+            foreach ($n in @($notesJson | ConvertFrom-Json -Depth 100)) { $notesList2.Add([string]$n) }
+            $notesList2.Add("$formerParentKey, recorded as the parent of $specFile, no longer exists in Jira; a new parent was created and the record updated (now $newParentKey).")
+            $notesJson = ConvertTo-JiraJsonValue $notesList2
+            $hasLifecycle = $true
+        }
     }
 
     # T071: the catalogued `re-routed` notice, once the new key is recorded.
@@ -779,7 +899,17 @@ function Invoke-JiraReconcile {
     # (Constitution IV), and it keeps the summary stable across the mock port.
     # `local_id` is internal bookkeeping (which story a creation stamps) and
     # is never part of the published action shape.
+    # The reported action list stays FLAT (T080a): the parent — when
+    # present — is reported first, exactly like any other action,
+    # host-relative and stripped of its internal local_id bookkeeping.
     $disp = [System.Collections.Generic.List[object]]::new()
+    if ($null -ne $parentAction) {
+        $u = [string]$parentAction.url
+        if ($u.StartsWith($base)) { $parentAction.url = $u.Substring($base.Length) }
+        $copy = [ordered]@{}
+        foreach ($p in $parentAction.PSObject.Properties) { if ($p.Name -ne 'local_id') { $copy[$p.Name] = $p.Value } }
+        $disp.Add($copy)
+    }
     foreach ($x in $actions) {
         $u = [string]$x.url
         if ($u.StartsWith($base)) { $x.url = $u.Substring($base.Length) }
@@ -815,5 +945,5 @@ function Invoke-JiraReconcile {
     return $rc
 }
 
-Export-ModuleMember -Function Invoke-JiraReconcile, Resolve-JiraReconcileRouting, Get-JiraReconcileEpicStrategy, `
+Export-ModuleMember -Function Invoke-JiraReconcile, Resolve-JiraReconcileRouting, `
     Get-JiraReconcileLocalBindingFor, Get-JiraReconcilePlanContextFromBinding

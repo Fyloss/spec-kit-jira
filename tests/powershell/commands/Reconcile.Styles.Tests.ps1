@@ -9,7 +9,6 @@ BeforeAll {
     $env:SPEC_KIT_JIRA_BASE_URL = 'https://mock'
     $env:SPEC_KIT_JIRA_REPO = 'acme/app'
     $env:SPEC_KIT_JIRA_PROJECT_KEY = $null
-    $env:SPEC_KIT_JIRA_EPIC_STRATEGY = $null
     $env:SPEC_KIT_JIRA_PLAN_CONTEXT = $null
 
     function Invoke-Captured {
@@ -35,26 +34,26 @@ Describe 'Dual-style support (US4)' {
     It 'both styles declare the project, unconditionally (FR-026)' {
         $b = Invoke-Billing
         $script:code | Should -Be 0
-        $b.actions[0].body.fields.project.key | Should -Be 'COMP'
+        $b.actions[1].body.fields.project.key | Should -Be 'COMP'
 
         $i = Invoke-Infra
         $script:code | Should -Be 0
-        $i.actions[0].body.fields.project.key | Should -Be 'TEAM'
+        $i.actions[1].body.fields.project.key | Should -Be 'TEAM'
     }
 
     It "each payload declares an issue type belonging to that project, never the other's (FR-027, SC-013)" {
-        (Invoke-Billing).actions[0].body.fields.issuetype.id | Should -Be '10004'
-        (Invoke-Infra).actions[0].body.fields.issuetype.id | Should -Be '20002'
+        (Invoke-Billing).actions[1].body.fields.issuetype.id | Should -Be '10004'
+        (Invoke-Infra).actions[1].body.fields.issuetype.id | Should -Be '20002'
     }
 
     It 'the team-managed payload declares no priority, and the run still succeeds (FR-029, SC-012)' {
         $i = Invoke-Infra
         $script:code | Should -Be 0
-        ($i.actions[0].body.fields.PSObject.Properties.Name -contains 'priority') | Should -BeFalse
+        ($i.actions[1].body.fields.PSObject.Properties.Name -contains 'priority') | Should -BeFalse
     }
 
     It 'the company-managed payload declares a priority (contrast case)' {
         $b = Invoke-Billing
-        ($b.actions[0].body.fields.PSObject.Properties.Name -contains 'priority') | Should -BeTrue
+        ($b.actions[1].body.fields.PSObject.Properties.Name -contains 'priority') | Should -BeTrue
     }
 }

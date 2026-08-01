@@ -69,6 +69,120 @@ function Get-JiraRecognitionSafe {
     return $m.Value
 }
 
+function Get-JiraRecognitionReadParent {
+    <#
+    .SYNOPSIS
+      One GET folding the identity property into the issue fetch, fields
+      limited to summary,description (contract hierarchy-resolution.md §7).
+      Mirror of _recognition_read_parent. Returns a pscustomobject
+      { ExitCode; Gone; Marker; Fields }.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $Key)
+    $base = if ($env:SPEC_KIT_JIRA_BASE_URL) { $env:SPEC_KIT_JIRA_BASE_URL } else { '' }
+    $idKey = Get-JiraRecognitionIdentityKey
+    $url = "$base/rest/api/3/issue/$Key`?properties=$idKey&fields=summary,description"
+    $r = Invoke-JiraRequest -Method GET -Url $url
+    if ([int]$r.ExitCode -eq 0) {
+        $body = $r.Body | ConvertFrom-Json -Depth 100
+        $marker = $null
+        if ($body.PSObject.Properties.Name -contains 'properties') {
+            $props = $body.properties
+            if ($props -and ($props.PSObject.Properties.Name -contains $idKey)) { $marker = $props.$idKey }
+        }
+        $fields = if ($body.PSObject.Properties.Name -contains 'fields') { $body.fields } else { [pscustomobject]@{} }
+        return [pscustomobject]@{ ExitCode = 0; Gone = $false; Marker = $marker; Fields = $fields }
+    }
+    if ([string]$r.Status -eq '404') {
+        return [pscustomobject]@{ ExitCode = 0; Gone = $true; Marker = $null; Fields = $null }
+    }
+    return [pscustomobject]@{ ExitCode = [int]$r.ExitCode; Gone = $false; Marker = $null; Fields = $null }
+}
+
+function Invoke-JiraRecognitionParentRun {
+    <#
+    .SYNOPSIS
+      Mirror of recognition_parent_run (contract hierarchy-resolution.md §7,
+      data-model.md §1 "epic.marker"). Returns { ExitCode; Json }: ExitCode 0
+      with the parent recognition result JSON on success, or the transport's
+      mapped exit code (>= 2) with Json = '' when the bound read is
+      inconclusive — never downgraded to "no parent exists".
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $MarkerInfoJson,
+        [Parameter(Mandatory)] [string] $SpecRefJson,
+        [Parameter(Mandatory)] [string] $ProjectKey,
+        [Parameter(Mandatory)] [string] $SpecPath
+    )
+    $minfo = $MarkerInfoJson | ConvertFrom-Json -Depth 100
+    $state = [string](Get-JiraRecognitionSafe $minfo 'state')
+
+    switch ($state) {
+        { $_ -in @('absent', 'assigned') } {
+            return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue ([ordered]@{ state = 'new' })) }
+        }
+        'creating' {
+            $id = [string](Get-JiraRecognitionSafe $minfo 'id')
+            $detail = "$SpecPath marks its parent ``creating``: a previous run was interrupted after creating the parent and before recording its key, so whether it exists cannot be determined. Find the issue carrying identifier $id in project $ProjectKey and record it as ``<!-- speckit-jira spec=$id ticket=<KEY> -->``, or delete ``creating`` to mirror a new parent."
+            return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue ([ordered]@{ state = 'blocked'; reason = 'parent-key-unrecorded'; detail = $detail })) }
+        }
+        'malformed' {
+            $lines = @(Get-JiraRecognitionSafe $minfo 'lines')
+            $line = if ($lines.Count -gt 0) { $lines[0] } else { 0 }
+            $detail = "$SpecPath line ${line}: malformed speckit-jira parent marker; nothing was written for this specification. Expected ``<!-- speckit-jira spec=<16 hex> ticket=<KEY> -->``."
+            return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue ([ordered]@{ state = 'blocked'; reason = 'parent-marker-malformed'; detail = $detail })) }
+        }
+        'duplicate' {
+            $lines = @(Get-JiraRecognitionSafe $minfo 'lines')
+            $linesCsv = ($lines -join ', ')
+            $detail = "$SpecPath carries $($lines.Count) speckit-jira parent markers (lines $linesCsv); a specification has exactly one parent. Keep the line naming the parent that exists in Jira and delete the others."
+            return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue ([ordered]@{ state = 'blocked'; reason = 'parent-marker-duplicate'; detail = $detail })) }
+        }
+        'bound' {
+            $key = [string](Get-JiraRecognitionSafe $minfo 'ticket')
+            $result = Get-JiraRecognitionReadParent -Key $key
+            if ([int]$result.ExitCode -ne 0) {
+                return [pscustomobject]@{ ExitCode = [int]$result.ExitCode; Json = '' }
+            }
+            if ($result.Gone) {
+                return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue ([ordered]@{ state = 'new'; recreated_from = [ordered]@{ key = $key } })) }
+            }
+
+            $marker = $result.Marker
+            $unverifiableDetail = "$key is recorded as the parent of $SpecPath but carries no spec-kit-jira parent identity; nothing was written. The bridge never adopts a ticket it did not create — clear the ticket= value to create a new parent, or restore the identity by hand."
+            if ($null -eq $marker) {
+                return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue ([ordered]@{ state = 'blocked'; reason = 'parent-identity-unverifiable'; detail = $unverifiableDetail })) }
+            }
+
+            $role = [string](Get-JiraRecognitionSafe $marker 'role')
+            if ($role -ne 'parent') {
+                return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue ([ordered]@{ state = 'blocked'; reason = 'parent-identity-unverifiable'; detail = $unverifiableDetail })) }
+            }
+
+            $specRef = $SpecRefJson | ConvertFrom-Json -Depth 100
+            $repo = [string](Get-JiraRecognitionSafe $specRef 'repo')
+            $slug = [string](Get-JiraRecognitionSafe $specRef 'spec_slug')
+            $mRepo = [string](Get-JiraRecognitionSafe $marker 'repo')
+            $mSlug = [string](Get-JiraRecognitionSafe $marker 'spec_slug')
+            if ($mRepo -ne $repo -or $mSlug -ne $slug) {
+                $detail = "$key is recorded as the parent of $SpecPath but its identity names specification $mSlug; nothing was written. Correct the ticket= value, or clear it to create a new parent."
+                return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue ([ordered]@{ state = 'blocked'; reason = 'parent-claimed-by-other'; detail = $detail })) }
+            }
+
+            $fields = $result.Fields
+            $descVal = Get-JiraRecognitionSafe $fields 'description'
+            $current = [ordered]@{
+                summary     = [string](Get-JiraRecognitionSafe $fields 'summary')
+                description = if ($null -eq $descVal) { [ordered]@{} } else { $descVal }
+            }
+            $origin = [string](Get-JiraRecognitionSafe $marker 'origin')
+            if ([string]::IsNullOrEmpty($origin)) { $origin = 'bridge' }
+            return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue ([ordered]@{ state = 'bound'; key = $key; current = $current; origin = $origin })) }
+        }
+    }
+}
+
 function Invoke-JiraRecognitionRun {
     <#
     .SYNOPSIS
@@ -241,4 +355,5 @@ function Invoke-JiraRecognitionRun {
     return [pscustomobject]@{ ExitCode = 0; Json = $json }
 }
 
-Export-ModuleMember -Function Invoke-JiraRecognitionRun, Get-JiraRecognitionRead, Get-JiraRecognitionProjectOf
+Export-ModuleMember -Function Invoke-JiraRecognitionRun, Get-JiraRecognitionRead, Get-JiraRecognitionProjectOf, `
+    Invoke-JiraRecognitionParentRun, Get-JiraRecognitionReadParent

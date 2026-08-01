@@ -59,6 +59,20 @@ boot() {
   [ "$(jq -r '.summary' <<< "$output")" = "invoice export" ]
 }
 
+@test "jira_create_fields_base tolerates an empty issue-type id — validation is the CALLER's job (regression, Phase 5 US2)" {
+  # The parent's own creation path (scripts/bash/sink/jira/plan_apply.sh,
+  # _plan_writes_parent) calls this builder before any mandatory-field gate
+  # exists (that gate is Phase 6, US3) — an empty parent_type_id must not
+  # make the shared builder itself fail, exactly as it already tolerates an
+  # empty project or summary. The PowerShell port must not throw either
+  # (NFR-1): a prior defect had its parameters reject an empty string at
+  # the binding level, a stricter behaviour bash's jq-based builder does
+  # not share.
+  run jira_create_fields_base "TEST" "The Epic" ""
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.issuetype.id' <<< "$output")" = "" ]
+}
+
 @test "_ticket_create_body is built from jira_create_fields_base, unchanged (FR-025)" {
   local base
   base="$(jira_create_fields_base "IJT" "invoice export" "10201")"

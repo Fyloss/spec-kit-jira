@@ -21,19 +21,6 @@ projects:
     # overridden.
     # style: team_managed
 
-    # Where the Epic for this repo's work lives.
-    #   per_repo    — one Epic for the whole repository.
-    #   per_feature — one Epic per feature folder.
-    epic_strategy: per_repo
-
-    # How a spec's tasks relate to its Story.
-    #   subtask      — tasks become Jira sub-tasks under the Story.
-    #   linked_story — tasks become their own Stories, joined by a link type.
-    task_strategy: subtask
-
-    # Required only when task_strategy = linked_story: the logical link-type name.
-    # link_type: relates to
-
     # Spec priority (P1/P2/P3) -> your project's priority name.
     priority_map:
       P1: Highest

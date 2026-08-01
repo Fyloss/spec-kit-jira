@@ -1,0 +1,57 @@
+# Machine-owned resolved identifiers (gitignored in a real repository;
+# committed here only as a fixture). Reuses the company-managed hierarchy;
+# the parent type (Deliverable, 10101) declares two required custom fields
+# the bridge cannot supply — the gate of contracts/hierarchy-resolution.md §5.
+resolved_ids:
+  PM:
+    style: company_managed
+    style_source: api
+    issue_types:
+      - logical_name: "Initiative"
+        id: "10100"
+        hierarchy_level: "2"
+        subtask: false
+      - logical_name: "Deliverable"
+        id: "10101"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "10102"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "Defect"
+        id: "10103"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "Sub-task"
+        id: "10104"
+        hierarchy_level: "-1"
+        subtask: true
+    child_type:
+      logical_name: "Story"
+      id: "10102"
+      source: operator
+    parent_type:
+      logical_name: "Deliverable"
+      id: "10101"
+      source: derived
+    required_fields:
+      "10101":
+        - logical_name: "Summary"
+          field_id: "summary"
+        - logical_name: "Business Owner"
+          field_id: "customfield_40011"
+        - logical_name: "Program Increment"
+          field_id: "customfield_40012"
+      "10102":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "10102": true
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"
+    estimation_field_id: null

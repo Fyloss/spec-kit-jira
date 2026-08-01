@@ -126,13 +126,15 @@ From here every `/speckit.specify`, `/speckit.plan`, `/speckit.tasks`, and the
 other lifecycle steps reconcile into Jira on their own. A mirroring failure
 never fails the spec-kit command that triggered it.
 
-Reconcile recognises the tickets it already created: each user story gets a
-durable identifier, recorded in one HTML comment line beside its heading in
-`spec.md` and stamped on the ticket itself. A second run reads that identifier
-back, recognises the same ticket, and updates it instead of creating a
-duplicate — an unchanged re-run writes nothing to Jira at all. The identifier
-survives a retitle, a reorder, and a specification-folder rename; leave the
-comment line where reconcile put it.
+Reconcile mirrors the whole specification as one parent issue plus one child
+per user story, the parent created first and every child carrying its key.
+Each carries a durable identifier, recorded in its own HTML comment line —
+one beside the document's title for the parent, one beside each story's
+heading — and stamped on the ticket itself. A second run reads those
+identifiers back, recognises the same tickets, and updates them instead of
+creating duplicates — an unchanged re-run writes nothing to Jira at all. Every
+identifier survives a retitle, a reorder, and a specification-folder rename;
+leave the comment lines where reconcile put them.
 
 ## Step-by-step setup on Linux
 

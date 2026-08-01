@@ -65,6 +65,21 @@ CONTENT='{
   [ "$(jq '[.content[] | select(.type=="panel")] | length' <<< "$output")" -eq 0 ]
 }
 
+@test "a single content node still renders content as a JSON array, not a bare object, on both ports (regression, Phase 5 US2)" {
+  # A specification with one overview paragraph and no acceptance criteria or
+  # design — the parent's minimal case — renders exactly one content node.
+  # A prior PowerShell defect returned the sole node as a scalar rather than
+  # a one-element array (PowerShell's pipeline auto-unwrapping), producing
+  # `"content":{...}` instead of `"content":[{...}]`.
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local c='{"description":{"blocks":[{"type":"paragraph","text":"Overview."}]}}'
+  local b p
+  b="$(adf_render_description "${c}")"
+  [ "$(jq -r '.content | type' <<< "${b}")" = "array" ]
+  p="$(pwsh -NoProfile -Command "Import-Module '${PS_SINK}/Adf.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraAdfDocument -ContentJson '${c}'))")"
+  [ "${b}" = "${p}" ]
+}
+
 @test "the PowerShell port renders byte-identical ADF (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local b p

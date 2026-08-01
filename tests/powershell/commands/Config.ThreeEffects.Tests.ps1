@@ -35,7 +35,7 @@ Describe 'Config three-effect reporting' {
         $sw = [System.IO.StringWriter]::new()
         $orig = [Console]::Out
         [Console]::SetOut($sw)
-        try { [void](Invoke-JiraConfig -Arguments @('config', '--json')) }
+        try { [void](Invoke-JiraConfig -Arguments @('config', '--child-type', 'COMP=Story', '--json')) }
         finally { [Console]::SetOut($orig) }
         $obj = $sw.ToString().Trim() | ConvertFrom-Json
         # All effects are present as distinct, named sections (002 adds gitignore).
@@ -50,7 +50,7 @@ Describe 'Config three-effect reporting' {
         $sw = [System.IO.StringWriter]::new()
         $orig = [Console]::Out
         [Console]::SetOut($sw)
-        try { [void](Invoke-JiraConfig -Arguments @('config')) }
+        try { [void](Invoke-JiraConfig -Arguments @('config', '--child-type', 'COMP=Story')) }
         finally { [Console]::SetOut($orig) }
         $text = $sw.ToString()
         $text | Should -Match 'discovery'
@@ -127,7 +127,7 @@ Describe 'The ceremony records the disable decision (T026, 003 US2)' {
     }
 
     It 'records an observed enabled:false into the disable record (R5 step 1)' {
-        $obj = Invoke-ConfigSummary @('config', '--json')
+        $obj = Invoke-ConfigSummary @('config', '--child-type', 'COMP=Story', '--json')
         (Get-JiraHooksDisabled -ConfigDir $env:JIRA_CONFIG_DIR) | Should -BeExactly '["after_implement"]'
         @($obj.hook_health.held_disabled) | Should -Contain 'after_implement'
     }
@@ -140,13 +140,13 @@ Describe 'The ceremony records the disable decision (T026, 003 US2)' {
     }
 
     It 'predicts the record write under --dry-run without performing it (Constitution XI)' {
-        $obj = Invoke-ConfigSummary @('config', '--dry-run', '--json')
+        $obj = Invoke-ConfigSummary @('config', '--dry-run', '--child-type', 'COMP=Story', '--json')
         $obj.effects.hooks.detail | Should -Match 'after_implement'
         (Get-JiraHooksDisabled -ConfigDir $env:JIRA_CONFIG_DIR) | Should -BeExactly '[]'
     }
 
     It 'reports the hook effect with the read-only vocabulary (FR-021)' {
-        $obj = Invoke-ConfigSummary @('config', '--json')
+        $obj = Invoke-ConfigSummary @('config', '--child-type', 'COMP=Story', '--json')
         # `held_disabled` — not a write outcome, because nothing was written.
         $obj.effects.hooks.status | Should -BeExactly 'held_disabled'
         $obj.effects.hooks.detail | Should -Match ([regex]::Escape('--enable-hook'))
@@ -154,7 +154,7 @@ Describe 'The ceremony records the disable decision (T026, 003 US2)' {
 
     It 'leaves the registry byte-identical while recording (FR-022, FR-023)' {
         $before = (Get-FileHash -LiteralPath $env:SPEC_KIT_JIRA_EXTENSIONS_YML -Algorithm SHA256).Hash
-        $null = Invoke-ConfigSummary @('config', '--json')
+        $null = Invoke-ConfigSummary @('config', '--child-type', 'COMP=Story', '--json')
         (Get-FileHash -LiteralPath $env:SPEC_KIT_JIRA_EXTENSIONS_YML -Algorithm SHA256).Hash | Should -BeExactly $before
     }
 }

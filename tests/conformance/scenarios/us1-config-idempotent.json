@@ -1,14 +1,1 @@
-{
-  "name": "us1-config-idempotent",
-  "description": "The deterministic config ceremony (US1). Running `config --json` against an unchanged company-managed project must produce a byte-identical run summary on stdout, a byte-identical written config.local.yml (the resolved-id table filled by discovery), an identical Jira read-only call sequence, and the same exit code on both ports (FR-003, SC-004, NFR-1). The committed config.yml is never rewritten, so it survives byte-for-byte.",
-  "mock": {
-    "projects": { "COMP": "company" }
-  },
-  "fixture": "tests/conformance/fixtures/repo-with-config",
-  "argv": ["config", "--json"],
-  "env": {
-    "JIRA_EMAIL": "user@example.com",
-    "JIRA_API_TOKEN": "RAWSECRETXYZ",
-    "JIRA_NO_SLEEP": "1"
-  }
-}
+{"name":"us1-config-idempotent","description":"The deterministic config ceremony (US1). Running `config --json` against an unchanged company-managed project must produce a byte-identical run summary on stdout, a byte-identical written config.local.yml (the resolved-id table filled by discovery), an identical Jira read-only call sequence, and the same exit code on both ports (FR-003, SC-004, NFR-1). The committed config.yml is never rewritten, so it survives byte-for-byte.","mock":{"projects":{"COMP":"company"}},"fixture":"tests/conformance/fixtures/repo-with-config","argv":["config","--child-type","COMP=Story","--json"],"env":{"JIRA_EMAIL":"user@example.com","JIRA_API_TOKEN":"RAWSECRETXYZ","JIRA_NO_SLEEP":"1"}}

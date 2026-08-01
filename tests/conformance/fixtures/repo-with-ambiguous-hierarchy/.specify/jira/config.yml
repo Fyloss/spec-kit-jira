@@ -1,0 +1,7 @@
+# Team config for the parent-level-ambiguous conformance fixture (US1, T040)
+# — a project offering two issue types at the level above the child tier
+# (Capability, Feature), so the bridge cannot choose one for the parent.
+projects:
+  - key: AMBIG
+    style: company_managed
+routing_default: AMBIG

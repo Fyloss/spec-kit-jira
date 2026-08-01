@@ -21,17 +21,21 @@ _parse_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_parse_dir}/../lib/output.sh" # json_canonical only — lib/, never sink/
 # shellcheck source=/dev/null
 source "${_parse_dir}/story_marker.sh" # the durable identifier's grammar (Phase 2, contracts/story-marker.md)
+# shellcheck source=/dev/null
+source "${_parse_dir}/spec_marker.sh" # the parent identifier's grammar (Phase 5, US2, contracts/parent-marker.md)
 
 # _parse_strip_marker_lines — remove every speckit-jira marker attempt line
-# (valid or malformed — contract "Reading rules" #2) from the document on
-# stdin, so it never lands in a title, description, acceptance criterion, or
-# design item. Preserves every other line, including blank ones.
+# (story= or spec=, valid or malformed — contract "Reading rules" #2) from
+# the document on stdin, so it never lands in a title, description,
+# acceptance criterion, or design item. Preserves every other line,
+# including blank ones.
 _parse_strip_marker_lines() {
-  local doc line kind first=1 out=""
+  local doc line story_kind spec_kind first=1 out=""
   doc="$(cat)"
   while IFS= read -r line || [[ -n "${line}" ]]; do
-    kind="$(story_marker_parse_line "${line}" | jq -r '.kind')"
-    [[ "${kind}" != "none" ]] && continue
+    story_kind="$(story_marker_parse_line "${line}" | jq -r '.kind')"
+    spec_kind="$(spec_marker_parse_line "${line}" | jq -r '.kind')"
+    [[ "${story_kind}" != "none" || "${spec_kind}" != "none" ]] && continue
     if ((first)); then out="${line}"; first=0; else out="${out}"$'\n'"${line}"; fi
   done <<< "${doc}"
   printf '%s' "${out}"
@@ -362,6 +366,137 @@ _parse_local_id_for_marker() {
   esac
 }
 
+# _parse_strip_sc_label <string> — strip a leading "SC-NNN:" label
+# (optionally wrapped in markdown bold) from a Success Criteria bullet item
+# (data-model.md §7: "each item a complete sentence with its SC-00N label
+# stripped").
+_parse_strip_sc_label() {
+  local s="$1" bare
+  bare="${s//\*\*/}"
+  if [[ "${bare}" =~ ^SC-[0-9]+:[[:space:]]*(.*)$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  else
+    printf '%s' "${bare}"
+  fi
+}
+
+# _parse_epic_extra_blocks <doc> — the Success Criteria and Out of Scope
+# sections as neutral content blocks (data-model.md §7, Phase 5 US2): a
+# named heading plus a bullet list for each section that is present in the
+# document. Prints `[]` when the document carries neither. Never reads a
+# list of user stories or functional requirements (spec FR-011) — only the
+# `### Measurable Outcomes` list under `## Success Criteria` and the list
+# under `## Out of Scope`.
+_parse_epic_extra_blocks() {
+  local doc="$1" line
+  local sc_items="[]" oos_items="[]" mode="" cur="" section=""
+
+  _parse_epic_flush() {
+    [[ -z "${cur}" ]] && return 0
+    local trimmed; trimmed="$(_parse_trim "${cur}")"
+    if [[ "${mode}" == "sc" ]]; then
+      trimmed="$(_parse_strip_sc_label "${trimmed}")"
+      sc_items="$(jq -c --arg v "${trimmed}" '. + [$v]' <<< "${sc_items}")"
+    elif [[ "${mode}" == "oos" ]]; then
+      oos_items="$(jq -c --arg v "${trimmed}" '. + [$v]' <<< "${oos_items}")"
+    fi
+    cur=""
+  }
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    local t; t="$(_parse_trim "${line}")"
+    if [[ "${t}" =~ ^(#{1,6})[[:space:]]+(.*)$ ]]; then
+      local hl="${#BASH_REMATCH[1]}" htext="${BASH_REMATCH[2]}"
+      _parse_epic_flush; mode=""
+      if ((hl == 2)) && [[ "${htext}" =~ ^Success[[:space:]]Criteria ]]; then
+        section="sc-outer"
+      elif ((hl == 3)) && [[ "${section}" == "sc-outer" ]] && [[ "${htext}" =~ ^Measurable[[:space:]]Outcomes ]]; then
+        section="sc-outcomes"
+      elif ((hl == 2)) && [[ "${htext}" =~ ^Out[[:space:]]of[[:space:]]Scope ]]; then
+        section="oos"
+      else
+        section=""
+      fi
+      continue
+    fi
+    if [[ "${section}" == "sc-outcomes" ]]; then
+      if [[ "${t}" =~ ^([-*]|[0-9]+\.)[[:space:]]+(.*)$ ]]; then
+        _parse_epic_flush; mode="sc"; cur="${BASH_REMATCH[2]}"
+      elif [[ -n "${t}" && -n "${cur}" ]]; then
+        cur="${cur} ${t}"
+      fi
+    elif [[ "${section}" == "oos" ]]; then
+      if [[ "${t}" =~ ^([-*]|[0-9]+\.)[[:space:]]+(.*)$ ]]; then
+        _parse_epic_flush; mode="oos"; cur="${BASH_REMATCH[2]}"
+      elif [[ -n "${t}" && -n "${cur}" ]]; then
+        cur="${cur} ${t}"
+      fi
+    fi
+  done <<< "${doc}"
+  _parse_epic_flush
+
+  local blocks="[]"
+  if [[ "$(jq 'length' <<< "${sc_items}")" -gt 0 ]]; then
+    blocks="$(jq -c --argjson items "${sc_items}" \
+      '. + [{type:"heading", level:3, text:"Success Criteria"}, {type:"bullet_list", items:$items}]' <<< "${blocks}")"
+  fi
+  if [[ "$(jq 'length' <<< "${oos_items}")" -gt 0 ]]; then
+    blocks="$(jq -c --argjson items "${oos_items}" \
+      '. + [{type:"heading", level:3, text:"Out of Scope"}, {type:"bullet_list", items:$items}]' <<< "${blocks}")"
+  fi
+  printf '%s' "${blocks}"
+}
+
+# parse_plan_summary — the feature folder's plan.md (stdin), as neutral
+# content blocks (data-model.md §7, US5, spec FR-026/FR-027/FR-028): a named
+# "Implementation Plan" heading plus one paragraph block per paragraph under
+# `## Summary`, stopping at the next heading. Prints `[]` when the input is
+# empty or carries no `## Summary` section — a feature folder with no
+# implementation plan, or a plan with no summary, reconciles normally with
+# no plan section and no warning (FR-028).
+parse_plan_summary() {
+  local doc line
+  doc="$(cat)"
+
+  local -a paras=()
+  local para="" in_summary=0
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    local t; t="$(_parse_trim "${line}")"
+    if [[ "${t}" =~ ^(#{1,6})[[:space:]]+(.*)$ ]]; then
+      local hl="${#BASH_REMATCH[1]}" htext="${BASH_REMATCH[2]}"
+      [[ -n "${para}" ]] && { paras+=("${para}"); para=""; }
+      if ((hl == 2)) && [[ "${htext}" =~ ^Summary ]]; then
+        in_summary=1
+      else
+        in_summary=0
+      fi
+      continue
+    fi
+    ((! in_summary)) && continue
+    if [[ -z "${t}" ]]; then
+      [[ -n "${para}" ]] && { paras+=("${para}"); para=""; }
+      continue
+    fi
+    t="$(_parse_trim "$(_parse_strip_marker "${t}")")"
+    if [[ -n "${para}" ]]; then para="${para} ${t}"; else para="${t}"; fi
+  done <<< "${doc}"
+  [[ -n "${para}" ]] && paras+=("${para}")
+
+  if ((${#paras[@]} == 0)); then
+    printf '[]'
+    return 0
+  fi
+
+  local blocks p
+  blocks="$(jq -cn '[{type:"heading", level:3, text:"Implementation Plan"}]')"
+  for p in "${paras[@]}"; do
+    blocks="$(jq -c --arg t "${p}" '. + [{type:"paragraph", text:$t}]' <<< "${blocks}")"
+  done
+  json_canonical <<< "${blocks}"
+}
+
 # parse_spec <folder-slug> — parse a whole specification (stdin) into neutral
 # content: one epic (title + description) plus one story per `User Story`
 # section (or a single story when the spec has none). Every story's
@@ -376,6 +511,13 @@ parse_spec() {
   local etitle edesc
   etitle="$(printf '%s' "${clean_doc}" | parse_title "${slug}")"
   edesc="$(printf '%s' "${clean_doc}" | parse_description_blocks)"
+  # Phase 5, US2, T059/T067: the parent's description also carries a named
+  # Success Criteria section and a named Out of Scope section, as prose
+  # (data-model.md §7) — never a list of user stories (FR-011).
+  local epic_extra; epic_extra="$(_parse_epic_extra_blocks "${clean_doc}")"
+  if [[ "$(jq 'length' <<< "${epic_extra}")" -gt 0 ]]; then
+    edesc="$(jq -c --argjson extra "${epic_extra}" '.blocks += $extra' <<< "${edesc}")"
+  fi
 
   # Split into user-story sections, tracking each heading's ABSOLUTE 1-based
   # line number (the "anchor", exactly as story_marker.sh's assignment scan
@@ -396,7 +538,7 @@ parse_spec() {
   done <<< "${doc}"
   ((in_story)) && sections+=("${cur}")
 
-  local total_lines; total_lines="$(_smk_line_count "${doc}")"
+  local total_lines; total_lines="$(marker_splice_line_count "${doc}")"
   local stories="[]" i n s story minfo local_id marker_json
 
   if ((${#sections[@]} == 0)); then
@@ -428,6 +570,15 @@ parse_spec() {
     done
   fi
 
+  # epic.local_id / epic.marker (data-model.md §2, Phase 5 US2, T066): the
+  # SAME slim marker view a story carries, read from the whole document —
+  # the parent marker has no section of its own to scope a search to.
+  local epic_minfo epic_local_id epic_marker_json
+  epic_minfo="$(spec_marker_document_info "${doc}")"
+  epic_local_id="$(_parse_local_id_for_marker "${epic_minfo}")"
+  epic_marker_json="$(json_canonical <<< "${epic_minfo}")"
+
   jq -cn --arg et "${etitle}" --argjson ed "${edesc}" --argjson st "${stories}" \
-    '{epic:{title:$et, description:$ed}, stories:$st}' | json_canonical
+    --arg eid "${epic_local_id}" --argjson em "${epic_marker_json}" \
+    '{epic:{title:$et, description:$ed, local_id:$eid, marker:$em}, stories:$st}' | json_canonical
 }

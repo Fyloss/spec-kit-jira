@@ -98,9 +98,6 @@ and never trigger the degraded mode — do not retry into it.
 1. **Config read** — read `.specify/jira/config.yml`. If absent, create it from
    `.specify/extensions/jira/templates/config.yml.template` and ask the operator
    the closed questions it documents (each key is an enumeration):
-   - `epic_strategy`: **{ per_repo | per_feature }**.
-   - `task_strategy`: **{ subtask | linked_story }**; if `linked_story`, ask
-     `link_type` from the **discovered** link-type list (step 4) — never invented.
    - `priority_map`: for each of **P1 / P2 / P3**, pick a priority **from the
      discovered priority list** (step 4).
    - `style` is **not** pre-filled: it is detected at step 4 or answered via the
@@ -149,16 +146,25 @@ and never trigger the degraded mode — do not retry into it.
    the operator maps phases → statuses from the **discovered** status list. There
    is **no built-in "ideal" status/phase table** — the operator's workflow is
    authoritative (FR-012).
-8. **Capability check (mapping validity, FR-007 of 001)** — a team-managed
-   project supports only an Epic parent and Sub-task children. A configured level
-   **above the discovered Epic tier** is refused at config time with exit `4`,
-   naming the offending level and the project style. The Epic tier is the top
-   non-subtask hierarchy level **from the binding**, never a compiled-in name.
+8. **Hierarchy derivation (008, US1)** — the child issue type is whichever type
+   the project's binding records (an operator answer where the level below the
+   parent holds more than one candidate, otherwise derived). The parent type is
+   derived: the level immediately above the child's, when exactly one type
+   occupies it. No Atlassian default name (`Epic`, `Story`, …) is ever assumed —
+   every name comes from the project's own metadata. A project with no level
+   above the child's (`no-parent-level`), or two or more candidates at that
+   level (`parent-level-ambiguous`), refuses at config time with exit `4`,
+   naming every candidate by its Jira name.
 9. **Persist (deterministic write)** — the resolved-id table (logical name → id
-   for issue types, priorities, statuses, plus `style`/`style_source`) is written
+   for issue types — with hierarchy level and sub-task flag — priorities,
+   statuses, `style`/`style_source`, the derived `child_type`/`parent_type`,
+   `required_fields` and `parent_link_available` per written type) is written
    into the machine-owned `.specify/jira/config.local.yml` via the canonical
    serialiser, preserving the operator's `site_alias` / `overrides`.
    `config.yml` is **not** rewritten.
+
+Three retired keys from an earlier, never-built mechanism (`epic_strategy`, `task_strategy`, `link_type`) are refused wherever they appear in `config.yml`, exit `4`, naming the project and the retired key. The hierarchy above replaces
+what they were meant to configure; delete the line.
 
 ## The effects (reported separately — FR-054)
 

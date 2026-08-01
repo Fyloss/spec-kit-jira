@@ -5,6 +5,7 @@
 BeforeAll {
     $EngineDir = Join-Path $PSScriptRoot '../../../scripts/powershell/engine'
     $StoryMarkerModule = Join-Path $EngineDir 'StoryMarker.psm1'
+    $MarkerSpliceModule = Join-Path $EngineDir 'MarkerSplice.psm1'
 }
 
 # Bats gives every @test a fresh process; Pester runs all Its in one. The
@@ -167,22 +168,22 @@ Describe 'State transitions' {
     }
 }
 
-Describe 'Write-JiraStoryMarkerFile — idempotence and atomicity' {
-    BeforeEach { Import-Module $StoryMarkerModule -Force }
+Describe 'Write-JiraMarkerSpliceFile — idempotence and atomicity' {
+    BeforeEach { Import-Module $MarkerSpliceModule -Force }
 
     It 'does not touch the file when content is unchanged' {
         $f = Join-Path $TestDrive 'spec.md'
         [System.IO.File]::WriteAllText($f, 'unchanged content', [System.Text.UTF8Encoding]::new($false))
         $before = (Get-Item $f).LastWriteTimeUtc
         Start-Sleep -Milliseconds 1100
-        (Write-JiraStoryMarkerFile -Path $f -NewContent 'unchanged content') | Should -Be 'unchanged'
+        (Write-JiraMarkerSpliceFile -Path $f -NewContent 'unchanged content') | Should -Be 'unchanged'
         (Get-Item $f).LastWriteTimeUtc | Should -Be $before
     }
 
     It 'writes changed content' {
         $f = Join-Path $TestDrive 'spec2.md'
         [System.IO.File]::WriteAllText($f, 'old', [System.Text.UTF8Encoding]::new($false))
-        (Write-JiraStoryMarkerFile -Path $f -NewContent 'new') | Should -Be 'written'
+        (Write-JiraMarkerSpliceFile -Path $f -NewContent 'new') | Should -Be 'written'
         (Get-Content -Raw -LiteralPath $f) | Should -Be 'new'
     }
 }

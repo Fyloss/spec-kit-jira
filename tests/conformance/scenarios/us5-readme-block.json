@@ -1,12 +1,1 @@
-{
-  "name": "us5-readme-block",
-  "description": "The config ceremony splices the version-marked managed README block into the consuming repository's README. The stale block is regenerated and every byte outside the markers is preserved; both ports produce a byte-identical README and run summary (FR-024, FR-025, SC-005, NFR-1).",
-  "mock": { "projects": { "COMP": "company" } },
-  "fixture": "tests/conformance/fixtures/repo-with-readme",
-  "argv": ["config", "--json"],
-  "env": {
-    "JIRA_EMAIL": "user@example.com",
-    "JIRA_API_TOKEN": "RAWSECRETXYZ",
-    "JIRA_NO_SLEEP": "1"
-  }
-}
+{"name":"us5-readme-block","description":"The config ceremony splices the version-marked managed README block into the consuming repository's README. The stale block is regenerated and every byte outside the markers is preserved; both ports produce a byte-identical README and run summary (FR-024, FR-025, SC-005, NFR-1).","mock":{"projects":{"COMP":"company"}},"fixture":"tests/conformance/fixtures/repo-with-readme","argv":["config","--child-type","COMP=Story","--json"],"env":{"JIRA_EMAIL":"user@example.com","JIRA_API_TOKEN":"RAWSECRETXYZ","JIRA_NO_SLEEP":"1"}}
