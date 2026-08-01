@@ -1,0 +1,83 @@
+# .github/workflows/windows-conformance.yml — the Windows conformance probe.
+#
+# A divergence that only windows-latest exposes (line endings, a text-mode jq,
+# path separators, shell quoting) cannot be reproduced on a POSIX host. Emulating
+# it was tried — a stub jq on PATH that appends CR the way jq.exe's text-mode
+# stdout does — and the emulation passed the whole corpus while the real runner
+# failed fifteen scenarios. A model of Windows is not Windows.
+#
+# So this workflow exists to make the REAL host reachable BEFORE a commit lands
+# on a feature branch. It is `workflow_dispatch` only: nothing about pushing a
+# branch starts it, and no pull request is needed to reach a Windows runner —
+# which is what ci.yml's `push: [main] / pull_request` triggers would otherwise
+# force. Drive it from a throwaway branch:
+#
+#   git push --force origin HEAD:ci/windows-probe
+#   gh workflow run windows-conformance.yml --ref ci/windows-probe
+#   gh run watch
+#
+# It runs the conformance corpus and nothing else — no bats, no Pester, no
+# coverage — so a round trip is minutes rather than the full three-OS matrix.
+name: Windows conformance (manual probe)
+
+# The `push` trigger is the one that actually works from a feature branch, and
+# the branch name is pinned so no other push can start a Windows job. GitHub
+# only registers a `workflow_dispatch` workflow once it exists on the DEFAULT
+# branch — until this file reaches main, `gh workflow run` answers 404 whatever
+# `--ref` it is given. A push-triggered workflow has no such rule: it runs the
+# definition carried by the pushed ref itself. `workflow_dispatch` stays for
+# after this lands on main, when re-dispatching without a push becomes useful.
+on:
+  push:
+    branches: [ci/windows-probe]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    name: Conformance corpus ${{ matrix.shard }}/4 (windows-latest)
+    runs-on: windows-latest
+    strategy:
+      # Every shard reports: a probe exists to enumerate divergences, and
+      # cancelling its siblings on the first failure would hide most of them.
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      SPEC_KIT_JIRA_SHARD_TOTAL: 4
+      SPEC_KIT_JIRA_SHARD_INDEX: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Emitted as a NOTICE, not just printed: workflow-command annotations are
+      # readable through the check-runs API by anyone with push rights, while
+      # the raw job log requires admin. On a repository where the log is out of
+      # reach, an annotation is the only channel that carries a fact home — and
+      # the facts below are exactly the ones a POSIX host cannot answer about
+      # this runner.
+      - name: Report the toolchain this host actually provides
+        if: matrix.shard == 0
+        shell: bash
+        run: |
+          crlf=no
+          [[ "$(jq -rn '"a\nb"' 2> /dev/null)" == *$'\r'* ]] && crlf=yes
+          cs=no
+          [[ "$(printf 'x\r\n' | cat)" == *$'\r'* ]] && cs=yes
+          {
+            printf 'uname: %s%%0A' "$(uname -a)"
+            printf 'bash: %s%%0A' "${BASH_VERSION}"
+            printf 'jq: %s (emits CRLF: %s)%%0A' "$(jq --version)" "${crlf}"
+            printf 'sed: %s%%0A' "$(sed --version 2> /dev/null | head -n1 || echo unknown)"
+            printf 'curl: %s%%0A' "$(curl --version | head -n1)"
+            # shellcheck disable=SC2016  # $PSVersionTable is a PowerShell
+            # variable read by pwsh, not a shell expansion.
+            printf 'pwsh: %s%%0A' "$(pwsh -NoProfile -c '$PSVersionTable.PSVersion.ToString()')"
+            printf 'cores: %s%%0A' "${NUMBER_OF_PROCESSORS:-unknown}"
+            printf 'CR survives a capture: %s' "${cs}"
+          } | { printf '::notice title=Host toolchain::'; cat; printf '\n'; }
+
+      - name: Run the conformance corpus against both ports and diff the captures
+        shell: bash
+        run: bash tests/conformance/ci-conformance.sh
