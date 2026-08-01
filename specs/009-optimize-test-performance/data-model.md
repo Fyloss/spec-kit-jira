@@ -60,6 +60,17 @@ Set by `mock_start`, consumed by tests and `mock_stop`:
 instance that created it; nothing is discovered by name pattern or machine-wide
 scan.
 
+### Public driver surface (widened by 008)
+
+`tests/conformance/mock-jira/lib.sh` exposes **six** functions, not the four this
+plan was originally written against. Any shim backend must honour all of them:
+
+| Function | Since | Shim impact |
+| --- | --- | --- |
+| `mock_start` / `mock_stop` / `mock_calls` / `mock_died` | pre-008 | Covered by Decisions 1–2. |
+| `mock_write_config <json>` | 008 | Writes an ad hoc config to a temp file and prints the path. **0 call sites in `tests/bash`** (driven from `Mock.psm1`), so no shim work is required today. |
+| `mock_issue_field <key> <jq-path>` | 008 | `curl -sf "${MOCK_BASE_URL}/rest/api/3/issue/${key}" \| jq -r`. **9 call sites** in `tests/bash/sink/test_hierarchy.bats` and `tests/bash/commands/test_reconcile_hierarchy.bats`. Reads back a field of an issue created by an earlier POST **in the same session** — see research.md **OQ-1**. |
+
 ## Entity: Test-runner invocation (NEW)
 
 `tests/run-bash.sh` — inputs and outputs:
@@ -67,8 +78,9 @@ scan.
 | Aspect | Value |
 | --- | --- |
 | Input (optional) | A path/glob of test files or dirs (default: `tests/bash`). |
+| Input (optional) | `--since <ref>` — change-scoped local mode (FR-017): run only the files affected by the diff. Local only; fail-open to the full suite when the affected set is undeterminable. |
 | Concurrency | `xargs -P <cores>` sharding, one `bats` per file; serial fallback if concurrency unavailable. |
-| Never | Depends on GNU `parallel`; reports success while executing 0 tests. |
+| Never | Depends on GNU `parallel`; reports success while executing 0 tests; is invoked with `--since` from any CI workflow. |
 | Exit code | 0 iff every shard passed and the executed-file count > 0; non-zero otherwise with a named message. |
 | Output | Aggregated pass/fail summary + executed-test count. |
 
@@ -82,8 +94,31 @@ scan.
 **Invariant**: a cache hit can never serve content that changes a gate verdict;
 any doubt → fresh install (still correct, slower).
 
+## Entity: Shim issue store (NEW — run-scoped, mutable)
+
+Settled by research.md **Decision 6**. This section previously claimed the shim
+was stateless; 008's `mock_issue_field` made that false, because it asserts on a
+field of an issue a *previous* POST created in the same session, which no static
+fixture holds.
+
+| Aspect | Value |
+| --- | --- |
+| Location | A JSON file under the recorded `MOCK_TMPDIR` (never a fixed path). |
+| Shape | `{ "<ISSUE-KEY>": { "fields": { … , "parent": {"key": "…"} }, "properties": {…} } }` — mirroring the pwsh mock's `$script:Issues`. |
+| Seeded | From the existing `fixtures/*.json` at `mock_start`. |
+| Mutated | `POST /rest/api/3/issue` inserts the created key + fields; `PUT` updates them. |
+| Read | `GET /rest/api/3/issue/{key}` — the path `mock_issue_field` drives. |
+| Destroyed | By `mock_stop`, with the rest of `MOCK_TMPDIR`. |
+
+**Isolation**: per-instance by construction, so concurrent tests never share a
+store — the identity-by-recorded-value rule (Constitution XIII) and
+green-under-parallel (FR-007/SC-009) both hold.
+
+**Parity**: the pwsh mock holds equivalent state; the conformance diff
+cross-checks the two backends on every run.
+
 ## State transitions
 
-None. All components are stateless per run except the run-scoped call log and
-scratch dir, both created and destroyed within a single `mock_start`/`mock_stop`
-lifecycle.
+Only the shim issue store above is mutable within a run. Everything else — the
+call log and the scratch dir — is append-only or inert, and all three are created
+by `mock_start` and destroyed by `mock_stop` within a single lifecycle.

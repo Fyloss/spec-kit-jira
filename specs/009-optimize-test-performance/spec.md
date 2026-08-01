@@ -218,17 +218,47 @@ byte-identical comparison.
 - **FR-015**: Per Constitution XIII (TDD) and X (regression tests), the silent
   "zero tests executed when GNU `parallel` is missing" behavior MUST be covered by
   a regression test written before its fix.
+- **FR-016**: The Bash coverage gate MUST complete within a declared wall-clock
+  budget enforced by CI (`timeout-minutes`), and that budget MUST leave headroom
+  above the gate's measured duration rather than sitting at or below it. Exceeding
+  the budget MUST fail the job loudly; it MUST NOT be absorbed by the traceability
+  fallback, which exists for *unmeasurable* kcov runs, not for slow ones.
+- **FR-017**: The Bash test runner MUST offer a **change-scoped local mode** that
+  runs only the test files affected by a given diff, for the developer/agent inner
+  loop. This mode is a local convenience only: it MUST NOT be reachable from any
+  CI gate, and CI MUST always run the full suite. Selecting nothing MUST run
+  everything (fail-open), never zero.
+- **FR-018**: Where a suite is parallelised by sharding, the shards MUST be
+  distributed **within a single operating system**, never across operating
+  systems. Every OS in the matrix MUST still execute the **complete** corpus. A
+  sharding scheme that gives one OS only a subset of the scenarios is forbidden:
+  it silently converts a full per-OS guarantee into a partial one.
+- **FR-019**: The PowerShell port MUST keep a full, blocking test suite on
+  **Windows**: the Pester suite and the complete conformance corpus MUST continue
+  to run on `windows-latest` on every pull request, at unchanged scope. No
+  optimization may reduce, sample, shard-across-OS, or move to a non-blocking
+  trigger any Windows-side verification. Removing PowerShell as a *dependency of
+  the Bash unit run* (FR-001) MUST NOT reduce what the PowerShell port itself is
+  tested on.
+- **FR-020**: The three-OS `unit` job MUST keep executing, on each of its three
+  hosts, the same three bodies of work it does today: the port's own unit suite,
+  the Pester suite, and the full conformance corpus against both ports.
 
 ### Key Entities
 
 - **Bash test suite**: the `bats` test corpus for the macOS/Linux implementation
-  (~96 files, ~775 assertions today); the primary optimization target.
+  (115 files, 955 assertions as of the 008 merge); the primary optimization
+  target.
 - **Mock Jira double**: the loopback HTTP server both ports drive over a base URL;
   today a per-test PowerShell process. Its startup cost and cross-runtime
-  dependency are central to the local-speed problem.
-- **Conformance corpus**: the ~39 language-agnostic scenarios run against both
+  dependency are central to the local-speed problem. Its Bash driver (`lib.sh`)
+  exposes six public functions since 008 — `mock_start`, `mock_stop`,
+  `mock_calls`, `mock_died`, `mock_write_config`, and `mock_issue_field`; the
+  last reads a field back out of an issue the mock already holds.
+- **Conformance corpus**: the 51 language-agnostic scenarios run against both
   ports and diffed for byte-equivalence; a quality gate whose behavior must be
-  preserved.
+  preserved. Since 008 it runs on **all three OSes** (a step of the `unit` job),
+  not on Linux alone.
 - **Coverage gate**: the ≥80% statement-coverage measurement for each port; a
   quality gate whose floor and honesty must be preserved.
 - **CI pipeline**: the GitHub Actions workflows (unit matrix, static checks,
@@ -244,13 +274,13 @@ byte-identical comparison.
 | III | Fail-Closed on Writes, Non-Blocking on Hooks | Unaffected — no write or hook code path changes. The CI "fail-open on uncertainty" rule (FR-009) applies to *skipping test work*, not to production writes, and never hides a regression. |
 | IV | Credential Security — Zero Tokens in the Tree | Preserved — no fixtures or logs gain credentials; the coverage tracer's secret-suspension behavior (Constitution XIII / NFR-3) MUST be retained by any harness change. |
 | V | Separation of Team Config / Local Binding / Secrets | Unaffected — no configuration layering changes. |
-| VI | macOS / Linux / Windows Portability | Preserved and strengthened: FR-006/FR-011 keep the three-OS matrix and byte-identical conformance a merge gate; FR-013 forbids regressing the PowerShell port or parity. |
+| VI | macOS / Linux / Windows Portability | Preserved and strengthened: FR-006/FR-011 keep the three-OS matrix and byte-identical conformance a merge gate; FR-013 forbids regressing the PowerShell port or parity; **FR-018 forbids sharding across OSes, FR-019/FR-020 hold the Windows leg at full scope, and SC-011 verifies the per-OS scenario count mechanically**. |
 | VII | No Hard-Coded Assumptions About the Jira Workflow | Preserved — non-default workflow fixtures remain in the corpus (FR-004/FR-006); no engine assumptions change. |
 | VIII | Neutral Engine / Jira Sink | Unaffected — the engine/sink separation and its CI grep checks are untouched; FR-010 keeps every static gate. |
 | IX | Two-Tier Privacy Guard, With an Allowlist | Preserved — privacy-tier fixtures/tests remain (FR-004); no guard behavior changes. |
 | X | Self-Healing Automatic Mirror | Unaffected functionally; FR-015 honors the "every fixed bug ships with a regression test" rule for the zero-tests defect. |
 | XI | Universal Dry-Run and Auditability | Unaffected — dry-run behavior and run summaries are unchanged; their tests keep running (FR-004). |
-| XII | Quality and Catalog Publication | Preserved: FR-005/FR-010/FR-011 keep the mocked suite, lint, and coverage blocking on all three OSes; the live suite's non-blocking-on-forks rule is untouched. |
+| XII | Quality and Catalog Publication | Preserved: FR-005/FR-010/FR-011 keep the mocked suite, lint (a blocking job since 008), and coverage blocking on all three OSes; the live suite's non-blocking-on-forks rule is untouched. Suspending the test layer "until later" was considered and is explicitly Out of Scope as a XII/XIII conflict. |
 | XIII | TDD With a Minimum 80% Coverage | Central: FR-005 holds the 80% floor honestly; FR-007 enforces identity-based isolation and green-under-parallel; FR-015 requires a failing test first for the parallel defect. |
 | XIV | KISS | The chosen approach removes complexity (a cross-runtime dependency, a fragile parallel path) rather than adding it; any new abstraction must be justified in the plan's Complexity Tracking. |
 | XV | YAGNI | Only the optimizations required to hit the speed/resource goals are in scope; no speculative test infrastructure. Test-tiering that changes gating was explicitly excluded (see Out of Scope). |
@@ -260,33 +290,61 @@ byte-identical comparison.
 
 ### Measurable Outcomes
 
-- **SC-001**: The full Bash test suite completes locally in **at most half** of its
-  current wall-clock time on the same macOS or Linux machine. "Current wall-clock
-  time" is the suite run in parallel (`bats --jobs`), so the optimized parallel
-  runner is compared like-for-like and the improvement reflects the harness
-  refactor, not concurrency alone.
-- **SC-002**: A developer or agent can run the complete Bash suite with **only
-  `bats` and `jq` installed** — zero PowerShell, zero GNU `parallel` — and every
-  test executes (0 tests skipped or failed for missing tooling).
+- **SC-001**: The full Bash test suite completes locally in **≤ 5 minutes**
+  wall-clock on a developer machine (macOS or Linux, `tests/run-bash.sh` in its
+  default parallel mode).
+  *Absolute, not relative, and deliberately so*: the pre-change baseline is
+  unmeasurable on macOS (without PowerShell the 35 mock files fail instantly;
+  without GNU `parallel`, `bats --jobs` executes 0 tests), so "half of current" has
+  no denominator. An absolute budget is also robust to suite growth — feature 008
+  grew the suite 23% while this spec was being written, which would have silently
+  moved any percentage target.
+- **SC-001b**: The change-scoped local mode (FR-017) completes in **≤ 60 seconds**
+  for a diff touching a single Bash module — the figure that governs the
+  developer/agent inner loop.
+- **SC-002**: A developer or agent can run the complete Bash suite **of the Bash
+  port** with **only `bats` and `jq` installed** — zero PowerShell, zero GNU
+  `parallel` — and every test executes (0 tests skipped or failed for missing
+  tooling). *Scope*: this criterion governs the Bash port's own tests. Assertions
+  that exercise the **PowerShell** side of a shared harness (e.g. the pwsh branch
+  of `run-scenario.sh`) legitimately require PowerShell and are out of SC-002's
+  scope — they are covered by FR-019 and run on CI's Windows and Linux hosts.
 - **SC-003**: Running the parallel path without GNU `parallel` executes **100% of
   the tests** (never zero) or exits non-zero with an actionable message; it never
   reports a false green.
-- **SC-004**: Total CI runner-minutes for a representative pull request drop by at
-  least **40%** compared with the current pipeline, measured on an equivalent
-  commit.
-- **SC-005**: CI wall-clock time to a merge decision on a representative pull
-  request is reduced by at least **30%**.
+- **SC-004**: The `coverage-bash` job completes in **≤ 15 minutes**, enforced by
+  its `timeout-minutes` (FR-016). Today it is documented at 20–35 minutes under a
+  30-minute ceiling — i.e. over budget by construction, which is the timeout this
+  feature exists to stop.
+- **SC-005**: CI wall-clock from push to a complete merge decision (all 9 blocking
+  jobs reported) is **≤ 20 minutes** on a pull request touching Bash code.
+- **SC-005b**: Total CI runner-minutes for such a pull request are **lower than
+  before this change**, measured on a green run of the 008 merge commit
+  (`21068d6`) versus a green run of this feature's head.
+  *Note*: SC-004/SC-005 are absolute budgets for the same reason as SC-001 — the
+  pre-change figures were never measured (the "20–35 min" came from a code
+  comment), and 008 moved the workload underneath them. SC-005b keeps a
+  directional check on cost without depending on a contested baseline.
 - **SC-006**: **100%** of the quality gates that block a merge today still block a
   merge after the change, with identical verdicts on identical input (no gate
   dropped or weakened).
 - **SC-007**: **Zero** test assertions are removed or disabled to achieve the
-  speed-up (the executed-assertion count is ≥ the pre-change count).
+  speed-up (the executed-assertion count is ≥ the pre-change count, i.e.
+  **≥ 955 `@test`s across ≥ 115 `.bats` files**, the count on the 008 merge
+  commit this feature branches from).
 - **SC-008**: Statement coverage remains **≥80%** for both ports on the mocked
   unit suites, with an unchanged (or larger) measured denominator.
-- **SC-009**: The suite stays **green across 20 consecutive runs** under maximum
-  parallelism (no new flakiness introduced).
+- **SC-009**: The suite stays green under maximum parallelism, verified at two
+  cadences so the evidence is strong without taxing the inner loop:
+  **5 consecutive green runs locally** before merge, and **20 consecutive green
+  runs in a scheduled CI job**. (A 20-run local gate costs ~7 hours of developer
+  time — self-defeating in a feature whose purpose is a faster loop.)
 - **SC-010**: A deliberately injected cross-port divergence is still caught by the
   conformance corpus (parity detection unimpaired).
+- **SC-011**: On `windows-latest`, the Pester suite and **all 51** conformance
+  scenarios still run and still block the merge, at unchanged scope. Verified by
+  asserting the per-OS scenario count equals the full corpus count on every host —
+  the mechanical guard against a shard-across-OS regression (FR-018/FR-019).
 
 ## Assumptions
 
@@ -309,17 +367,35 @@ byte-identical comparison.
   on any doubt the run falls back to a fresh install.
 - GitHub Actions remains the CI provider; the three-OS matrix stays
   ubuntu/macos/windows.
-- Baseline timings for SC-001/SC-004/SC-005 are the measured durations of the
-  current suite/pipeline on the commit immediately preceding this feature's
-  changes.
+- SC-001/SC-004/SC-005 are stated as **absolute budgets**, not as reductions from
+  a baseline. Two reasons, both established rather than assumed: the pre-change
+  local baseline is unmeasurable on macOS (0 tests without GNU `parallel`; mock
+  files fail without PowerShell), and the workload moved by ~23% when feature 008
+  merged mid-spec — a percentage target would have silently drifted with it. The
+  budgets are set with headroom over the current measured behaviour, and SC-005b
+  keeps a directional cost check.
+- Feature 008 (`specs/008-jira-parent-hierarchy`) is merged into `main` at
+  `21068d6`; this feature branches from it. All counts and the gate inventory in
+  `baseline.md` are stated against that commit.
 
 ## Out of Scope
 
 - Test-tiering that changes which gates block a pull request (running a reduced
   subset on PRs and the full corpus only on push/nightly). Explicitly excluded per
-  the requester's decision.
+  the requester's decision, and **unnecessary**: sharding within an OS (FR-018)
+  captures the parallelism gain that tiering was reaching for, without moving a
+  single gate off the pull request.
+- **Temporarily suspending or lightening the test layer with the intent of
+  restoring it later in the project.** Considered and rejected: it conflicts with
+  Constitution XII (lint/coverage/matrix blocking) and XIII (TDD ≥80%), and the
+  speed it was meant to buy is delivered instead by FR-016 (coverage budget),
+  FR-017 (change-scoped local runs), FR-018 (in-OS sharding), and the shim itself.
 - Deleting, merging, or sampling tests to reduce count.
 - Lowering the 80% coverage floor or narrowing the coverage denominator.
+- **Reducing PowerShell or Windows verification in any form** — fewer Pester
+  tests, a partial conformance corpus on `windows-latest`, splitting scenarios
+  across OSes, or moving a Windows check to a non-blocking trigger. The Windows
+  leg is a merge gate at full scope (FR-019/FR-020/SC-011).
 - Rewriting the PowerShell port's test strategy beyond what is needed to keep it
   green and at parity.
 - Changing the live (real-Jira) integration suite's triggers or scope.

@@ -6,15 +6,18 @@
 
 ## Summary
 
-The Bash test suite (macOS/Linux) is slow because 29 test files each spawn a
+The Bash test suite (macOS/Linux) is slow because 35 test files each spawn a
 fresh PowerShell mock server per test, and the parallel path needs GNU `parallel`
 (silently running zero tests without it). CI compounds this by reinstalling
-toolchains on every job across three OSes and running a 20–35 min kcov gate.
+toolchains on every job across three OSes, running the 51-scenario conformance
+corpus on **all three** of them (008 promoted it from a Linux-only job to a step
+of the `unit` matrix job), and running a 20–35 min kcov gate against a
+`timeout-minutes: 30` ceiling.
 
 The plan removes the per-test PowerShell cost by replacing the mock's *backend*
 for the Bash port with a scripted `curl` shim (pure `bash`+`jq`, no socket, no
 process) reached through the existing `mock_start`/`mock_stop`/`mock_calls`
-contract — so one file change migrates all 29 test files. It adds a
+contract — so one file change migrates all 35 test files. It adds a
 dependency-free parallel runner (`xargs -P`, never GNU `parallel`, never a false
 green). It cuts CI cost through caching and targeted installs. Every test still
 runs, the 80% coverage floor and its denominator are untouched, and the
@@ -41,16 +44,23 @@ language-agnostic conformance corpus diffed across ports, kcov (Bash coverage).
 
 **Project Type**: CLI / script-native tooling (Bash + PowerShell twin ports).
 
-**Performance Goals**: Bash suite ≥ 50% faster locally (SC-001); CI runner-minutes
-−40% (SC-004); CI wall-clock to merge decision −30% (SC-005).
+**Performance Goals** (absolute budgets — see research.md Decision 9): full Bash
+suite ≤ 5 min locally (SC-001); change-scoped run ≤ 60 s (SC-001b);
+`coverage-bash` ≤ 15 min (SC-004); push → merge decision ≤ 20 min (SC-005);
+runner-minutes below the `21068d6` reference (SC-005b).
 
-**Constraints**: Full Bash suite runs with only `bats`+`jq` (SC-002); never a
-false green (SC-003); every gate/verdict preserved (SC-006); zero tests removed
-(SC-007); coverage ≥ 80% both ports, denominator not shrunk (SC-008); green over
-20 parallel runs (SC-009); parity detection unimpaired (SC-010).
+**Constraints**: Full Bash suite runs with only `bats`+`jq` (SC-002, Bash port
+scope); never a false green (SC-003); every gate/verdict preserved (SC-006); zero
+tests removed — ≥ 955 `@test`s (SC-007); coverage ≥ 80% both ports, denominator
+not shrunk (SC-008); green over 5 local / 20 nightly parallel runs (SC-009);
+parity detection unimpaired (SC-010); **Windows keeps Pester + all 51 conformance
+scenarios, blocking (SC-011)**; **shards stay within one OS — never across
+(FR-018)**.
 
-**Scale/Scope**: ~775 Bash `@test`s / 96 files (29 mock-dependent); 39 conformance
-scenarios; 26 PowerShell mock-driving files (parity, unchanged behavior).
+**Scale/Scope** (measured on the 008 merge commit `21068d6`): **955** Bash
+`@test`s / **115** files (**35** mock-dependent); **51** conformance scenarios,
+now exercised on all three OSes; **96** PowerShell `.Tests.ps1` files (parity,
+unchanged behavior).
 
 ## Constitution Check
 
@@ -103,9 +113,13 @@ specs/009-optimize-test-performance/
 tests/
 ├── run-bash.sh                         # NEW — dependency-free parallel runner (Decision 3)
 ├── conformance/
+│   ├── ci-conformance.sh               # READ — CI entry point since 008; already shards via
+│   │                                   #        SPEC_KIT_JIRA_SHARD_TOTAL / _INDEX
 │   ├── run-scenario.sh                 # EDIT — bash port → shim; pwsh port → real server (Decision 2)
 │   └── mock-jira/
-│       ├── lib.sh                      # EDIT — mock_start/stop/calls backed by the curl shim for the bash port
+│       ├── lib.sh                      # EDIT — the six public mock_* functions backed by the curl
+│       │                               #        shim for the bash port (incl. mock_issue_field,
+│       │                               #        which requires session state — see Open Question 1)
 │       ├── curl-shim.sh                # NEW — scripted curl replacement + router over existing fixtures (Decision 1)
 │       ├── mock-server.ps1             # UNCHANGED — real server for the PowerShell port
 │       ├── Mock.psm1                   # UNCHANGED — pwsh driver
@@ -113,15 +127,20 @@ tests/
 │       └── fixtures/*.json             # UNCHANGED — reused by both backends
 ├── coverage/
 │   └── bash-coverage.sh                # EDIT (minimal) — exercise uses the shim path; denominator/threshold unchanged
-├── bash/                               # 29 mock-driving files UNCHANGED (reach the mock only via lib.sh)
+├── bash/                               # 35 mock-driving files UNCHANGED (reach the mock only via lib.sh),
+│   │                                   # incl. 008's sink/test_hierarchy.bats and
+│   │                                   # commands/test_reconcile_hierarchy.bats (9 mock_issue_field calls)
 │   └── ci/
 │       ├── test_run_bash_runner.bats   # NEW — FR-003/FR-015 regression: runner without GNU parallel runs all tests, never 0
 │       └── test_mock_shim_contract.bats# NEW — shim honors the mock-driver contract (routing, faults, call log)
-└── powershell/                         # UNCHANGED (parity path)
+└── powershell/                         # UNCHANGED (parity path, 96 .Tests.ps1 files)
 
 .github/workflows/
 ├── ci.yml                              # EDIT — call run-bash.sh; cache Pester + specify-cli; targeted install; drop parallel/pwsh from bash run
-└── gates.yml                           # EDIT — coverage job inherits shim speedup; caching; keep all gates/thresholds
+├── gates.yml                           # EDIT — coverage job inherits shim speedup; caching; keep all gates/thresholds
+├── boundary.yml                        # REVIEW — same avoidable reinstalls (T018)
+├── windows-conformance.yml             # UNTOUCHED — manual probe (push: ci/windows-probe + workflow_dispatch), not a merge gate
+└── live.yml                            # UNTOUCHED — real-Jira suite, never a fork-PR gate (Out of Scope)
 ```
 
 **Structure Decision**: Script-native test infrastructure. All changes are

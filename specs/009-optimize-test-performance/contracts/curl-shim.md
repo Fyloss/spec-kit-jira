@@ -8,7 +8,7 @@ CLI that `jira_request()` (`scripts/bash/sink/jira/client.sh`) uses — no more.
 
 ## Invocation shape it must accept
 
-`jira_request` calls (line 96 of client.sh):
+`jira_request` calls (line 139 of client.sh, post-008):
 
 ```
 printf '%s\n' "${cfg}" | curl --silent --config - \
@@ -47,6 +47,22 @@ Path → fixture, driven by the active `configs/*.json` and the existing
 `GET project/{key}`, `.../statuses`, `.../issue/createmeta/{key}/issuetypes[/{id}]`,
 `.../priority`, `.../field`, `POST /issue`. Style (`company`/`team`) and fault
 selection come from the config keyed by the project/issue key in the path.
+
+## Session state (research.md Decision 6)
+
+The shim is **not** a purely static router: 008's `mock_issue_field` reads back
+fields of issues created earlier in the same session. The shim therefore keeps an
+**issue store**.
+
+| Aspect | Requirement |
+| --- | --- |
+| Location | A JSON file under the recorded `MOCK_TMPDIR` — never a fixed path, never outside it. |
+| Seeding | Populated from the existing `fixtures/*.json` at `mock_start`. |
+| Mutation | `POST /rest/api/3/issue` records the created key and its `fields` (including `parent`); `PUT` updates them. |
+| Read | `GET /rest/api/3/issue/{key}` serves the stored issue, so `mock_issue_field <key> .fields.parent.key` returns what the preceding POST actually set. |
+| Lifecycle | Created by `mock_start`, destroyed with `MOCK_TMPDIR` by `mock_stop`. |
+| Isolation | Per-instance by construction; two concurrent tests can never observe each other's issues (Constitution XIII, FR-007/SC-009). |
+| Parity | The pwsh mock holds the same state in `$script:Issues`; the conformance diff cross-checks the two on every run. |
 
 ## Security (Constitution IV / NFR-3)
 
