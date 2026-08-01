@@ -31,6 +31,19 @@ Describe 'Credential leak guard (SC-007)' {
     AfterEach {
         if ($script:Mock) { Stop-JiraMock -Mock $script:Mock }
         Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
+        # Every variable the BeforeEach set, cleared. Pester shares ONE process
+        # across the whole suite, so anything left here is inherited by every
+        # later file and by every child process those files spawn. This block
+        # once leaked SPEC_KIT_JIRA_PROJECT_KEY=PROJ — the shipped placeholder
+        # — into tests/powershell/conformance, where four scenarios then
+        # refused with the placeholder-key message instead of mirroring. It was
+        # invisible on hosts that discover commands/ (whose Reconcile.* files
+        # scrub that variable) after lib/, and red on the ones that do not.
+        foreach ($name in @(
+                'JIRA_EMAIL', 'JIRA_API_TOKEN', 'JIRA_NO_SLEEP', 'JIRA_MAX_ATTEMPTS',
+                'SPEC_KIT_JIRA_SPEC_SLUG', 'SPEC_KIT_JIRA_PROJECT_KEY', 'SPEC_KIT_JIRA_BASE_URL')) {
+            Remove-Item -LiteralPath "Env:\$name" -ErrorAction SilentlyContinue
+        }
     }
 
     It 'never surfaces the token in a full reconcile at max verbosity (SC-007)' {

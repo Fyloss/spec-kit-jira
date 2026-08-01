@@ -26,11 +26,15 @@ Describe 'The retired-key refusal (conformance)' {
 
     It 'under a hook: exactly one WARNING and exit 0' {
         $outDir = Join-Path $script:Tmp 'out-ps-hook'
-        $env:SPEC_KIT_JIRA_HOOK_CONTEXT = 'after_specify'
+        # Through the harness's named channel, not the ambient environment: the
+        # harness scrubs every ambient SPEC_KIT_JIRA_* so that a variable a
+        # previous test file forgot to clear can never decide this run's
+        # outcome.
+        $env:SPEC_KIT_JIRA_HARNESS_ENV = 'SPEC_KIT_JIRA_HOOK_CONTEXT=after_specify'
         try {
             & bash $script:Harness $script:Scenario 'powershell' $outDir | Out-Null
         } finally {
-            Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue
+            Remove-Item Env:\SPEC_KIT_JIRA_HARNESS_ENV -ErrorAction SilentlyContinue
         }
         (Get-Content -LiteralPath (Join-Path $outDir 'exit') -Raw).Trim() | Should -Be '0'
         $stderr = Get-Content -LiteralPath (Join-Path $outDir 'stderr') -Raw

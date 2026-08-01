@@ -16,6 +16,12 @@
 #   argv    (array,  opt)    arguments passed to the entry point
 #   env     (object, opt)    extra environment variables for the run
 #
+# The run's environment is the scenario's, never the caller's: every ambient
+# SPEC_KIT_JIRA_* / JIRA_* variable is scrubbed before the scenario's own `env`
+# is applied. A caller that deliberately needs one more variable for a single
+# run declares it in SPEC_KIT_JIRA_HARNESS_ENV as newline-separated KEY=VALUE
+# pairs; see the "Environment" section below.
+#
 # The entry point defaults to the canonical port path but can be overridden with
 # SPEC_KIT_JIRA_ENTRY_BASH / SPEC_KIT_JIRA_ENTRY_PWSH (used to pin paths in CI
 # and to exercise this harness before the real dispatcher lands, T024).
@@ -119,12 +125,59 @@ if [ -n "${GIT_BRANCH}" ]; then
 fi
 
 # --- Environment -------------------------------------------------------------
+# A scenario's environment is the one the SCENARIO declares, never the one the
+# caller happened to be holding. Both ports read a broad SPEC_KIT_JIRA_* /
+# JIRA_* override surface — project key, plan context, hook context, config
+# dir, credentials — and any of those left ambient silently rewrites the run.
+# A scenario's `env` block can only ADD variables, so without this scrub there
+# is no way for a scenario to say "and nothing else".
+#
+# Not hypothetical: tests/powershell/lib/TokenLeak.Tests.ps1 exports
+# SPEC_KIT_JIRA_PROJECT_KEY=PROJ (the shipped placeholder) and never clears it.
+# Pester discovers lib/ immediately before conformance/ on the Linux CI host,
+# but after commands/ — whose Reconcile.* files scrub that same variable — on
+# the author's macOS host. Every reconcile scenario therefore refused with the
+# placeholder-key message (exit 4, zero writes) instead of mirroring: four red
+# conformance tests in CI, green locally, and nothing in either log naming the
+# cause. The leak is fixed at its source too; this is the guard that stops the
+# next one costing another CI-only debugging round.
+#
+# Scrubbing by PREFIX rather than by an enumerated list is deliberate: that
+# list grows with every new override the ports read, and a list somebody has to
+# remember to extend is one that will be a variable behind the day it matters.
+# The exemptions are the variables the HARNESS itself is configured with.
+for _ambient in ${!SPEC_KIT_JIRA_@} ${!JIRA_@}; do
+  case "${_ambient}" in
+    SPEC_KIT_JIRA_ENTRY_BASH | SPEC_KIT_JIRA_ENTRY_PWSH | SPEC_KIT_JIRA_COVERAGE_INPROCESS | SPEC_KIT_JIRA_HARNESS_*) continue ;;
+  esac
+  unset "${_ambient}"
+done
+unset _ambient
+
 # The mock base URL is set FIRST so a scenario's env can override it (e.g. to
 # the empty string, which the ports treat as unset — the degraded-mode trigger).
 export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 while IFS=$'\t' read -r key value; do
   [ -n "${key}" ] && export "${key}=${value}"
 done < <(jq_lines -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv' "${SCENARIO}")
+
+# The one way a CALLER may set a port variable for a single run: newline-
+# separated KEY=VALUE pairs in SPEC_KIT_JIRA_HARNESS_ENV, applied last so they
+# win over the scenario's own env. This exists so that a test running the SAME
+# scenario twice — once plain, once under a hook — does not need a second
+# scenario file for the one variable that differs (the retired-key refusal,
+# T025). Routing it through a named channel is the point: after the scrub
+# above, an override that reaches the port is one somebody wrote down, and
+# anything else in the ambient environment is a leak by definition.
+if [ -n "${SPEC_KIT_JIRA_HARNESS_ENV:-}" ]; then
+  while IFS= read -r pair; do
+    [ -n "${pair}" ] || continue
+    case "${pair}" in
+      *=*) export "${pair%%=*}=${pair#*=}" ;;
+      *) echo "SPEC_KIT_JIRA_HARNESS_ENV entry is not KEY=VALUE: ${pair}" >&2; exit 1 ;;
+    esac
+  done <<< "${SPEC_KIT_JIRA_HARNESS_ENV}"
+fi
 
 # --- Runs ----------------------------------------------------------------
 # A scenario is either a single implicit run (top-level `argv`, unchanged

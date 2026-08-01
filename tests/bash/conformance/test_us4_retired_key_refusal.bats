@@ -24,7 +24,10 @@ teardown() {
 }
 
 @test "under a hook: exactly one WARNING and exit 0" {
-  SPEC_KIT_JIRA_HOOK_CONTEXT="after_specify" \
+  # Through the harness's named channel, not the ambient environment: the
+  # harness scrubs every ambient SPEC_KIT_JIRA_* so that a variable a previous
+  # test forgot to clear can never decide this run's outcome.
+  SPEC_KIT_JIRA_HARNESS_ENV="SPEC_KIT_JIRA_HOOK_CONTEXT=after_specify" \
     bash "${HARNESS}" "${SCENARIO}" bash "${TMP}/out-hook" > /dev/null
   [ "$(cat "${TMP}/out-hook/exit")" = "0" ]
   [ "$(grep -c '^WARNING: ' "${TMP}/out-hook/stderr")" -eq 1 ]
