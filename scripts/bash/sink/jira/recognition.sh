@@ -33,7 +33,7 @@ source "${_recognition_dir}/client.sh"
 _recognition_read() {
   local key="$1" extra="${2:-}" base url fields_param resp rc tmp
   base="${SPEC_KIT_JIRA_BASE_URL:-}"
-  fields_param="summary,description,priority,status,issuelinks"
+  fields_param="summary,description,priority,status,issuelinks,parent"
   [[ -n "${extra}" ]] && fields_param="${fields_param},${extra}"
   url="${base}/rest/api/3/issue/${key}?properties=${SPEC_KIT_JIRA_IDENTITY_KEY}&fields=${fields_param}"
   tmp="$(mktemp)"
@@ -352,7 +352,12 @@ recognition_run() {
     local fields origin current status status_category flagged blockers
     fields="$(jq -c '.fields' <<< "${read_result}")"
     origin="$(jq -r '.origin // "bridge"' <<< "${marker}")"
-    current="$(jq -c '{summary:(.summary // ""), description:(.description // {}), priority:(.priority // null)}' <<< "${fields}")"
+    # parent (T109): the child's CURRENT parent key, or null when it carries
+    # none at all — a flat mirror from before this feature, which the "no
+    # migration" boundary (plan.md "Scope boundaries worth stating") leaves
+    # untouched. A non-null value that disagrees with the resolved parent is
+    # a different case, and IS in scope: plan_writes corrects it (T109).
+    current="$(jq -c '{summary:(.summary // ""), description:(.description // {}), priority:(.priority // null), parent:(.parent.key // null)}' <<< "${fields}")"
     status="$(jq -r '.status.name // ""' <<< "${fields}")"
     status_category="$(jq -r '.status.statusCategory.key // ""' <<< "${fields}")"
     flagged="$(jq -r 'if (.["Flagged"]? // [] | length) > 0 then true else false end' <<< "${fields}")"

@@ -109,8 +109,7 @@ function Get-JiraPlanWriteSet {
         }
         else {
             # UPDATE: content + priority; no project or issuetype is required
-            # (an update targets an existing item by key), and the parent link
-            # is never re-touched (it was set at creation). On a human-origin
+            # (an update targets an existing item by key). On a human-origin
             # ticket the description is spliced into the managed panel so the
             # human prose above survives (FR-038).
             $fields = [ordered]@{ summary = $title; description = $adf }
@@ -124,6 +123,27 @@ function Get-JiraPlanWriteSet {
                 $fields['description'] = $adf
             }
             if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
+
+            # Parent-link correction (T109): a child ALREADY linked to a
+            # parent (never a flat mirror carrying none — that is Out of
+            # Scope, "no migration") whose current parent disagrees with the
+            # resolved one is re-linked. The resolved key is either already
+            # known (a recognised parent) or, when the parent is being
+            # created this same run, filled in later by the same
+            # "<resolved at apply time>" placeholder every story creation
+            # already uses (Invoke-JiraApplyWritesWithRecognition step 11).
+            $ticketParents = Get-JiraPlanProp $ctx 'ticket_parents'
+            $curParent = [string](Get-JiraPlanProp $ticketParents $sid)
+            if ($curParent -ne '') {
+                $targetParent = [string](Get-JiraPlanProp $ctx 'parent_key')
+                if ($targetParent -ne '') {
+                    if ($curParent -ne $targetParent) { $fields['parent'] = [ordered]@{ key = $targetParent } }
+                }
+                else {
+                    $fields['parent'] = [ordered]@{ key = '<resolved at apply time>' }
+                }
+            }
+
             $actions.Add([ordered]@{ method = 'PUT'; url = "$base/rest/api/3/issue/$ticket"; body = [ordered]@{ fields = $fields }; role = 'story' })
         }
     }
@@ -489,7 +509,9 @@ function Invoke-JiraApplyWriteSetWithRecognition {
         if ([int]$r.ExitCode -ge 2) { return $worst }
         if ($parent.method -eq 'POST') {
             $respObj = $null
-            try { $respObj = $r.Body | ConvertFrom-Json -Depth 100 } catch { }
+            # A body that fails to parse is not fatal: $respObj stays $null
+            # and the caller below treats a missing key as "not recorded".
+            try { $respObj = $r.Body | ConvertFrom-Json -Depth 100 } catch { $null = $_ }
             $parentKey = if ($respObj) { [string](Get-JiraPlanProp $respObj 'key') } else { '' }
             if ($parentKey -ne '' -and $parentLocalId -ne '') {
                 Set-JiraIdentity -IssueKey $parentKey -SpecRefJson $SpecRefJson -Origin 'bridge' -Role 'parent' | Out-Null
@@ -526,7 +548,9 @@ function Invoke-JiraApplyWriteSetWithRecognition {
 
         if ($action.method -eq 'POST' -and ([string]$action.url).EndsWith('/issue')) {
             $respObj = $null
-            try { $respObj = $r.Body | ConvertFrom-Json -Depth 100 } catch { }
+            # A body that fails to parse is not fatal: $respObj stays $null
+            # and the caller below treats a missing key as "not recorded".
+            try { $respObj = $r.Body | ConvertFrom-Json -Depth 100 } catch { $null = $_ }
             $key = if ($respObj) { [string](Get-JiraPlanProp $respObj 'key') } else { '' }
             $localId = [string](Get-JiraPlanProp $action 'local_id')
             if ($key -ne '' -and $localId -ne '') {

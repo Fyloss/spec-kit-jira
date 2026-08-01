@@ -266,14 +266,20 @@ _reconcile_plan_context() {
   # behaviour, unchanged) — the same meaning an absent map entry has always
   # had. Including "bridge" here would wrongly route a bridge-created
   # ticket through the human-origin managed-panel splice.
-  local tickets ticket_origins ticket_descriptions
+  local tickets ticket_origins ticket_descriptions ticket_parents
   tickets="$(jq -c '(.bound // {}) | with_entries(.value |= .key)' <<< "${recog}")"
   ticket_origins="$(jq -c '(.bound // {}) | with_entries(select(.value.origin != "bridge")) | with_entries(.value |= .origin)' <<< "${recog}")"
   ticket_descriptions="$(jq -c '(.bound // {}) | with_entries(.value |= .current.description)' <<< "${recog}")"
+  # ticket_parents (T109): only the entries whose CURRENT parent is non-null —
+  # a flat mirror with no parent at all is left alone (plan.md "No
+  # migration"); a child linked to the wrong parent is what plan_writes
+  # corrects.
+  ticket_parents="$(jq -c '(.bound // {}) | with_entries(select(.value.current.parent != null)) | with_entries(.value |= .current.parent)' <<< "${recog}")"
 
   jq -cn --arg b "${base}" --arg st "${story_type}" --argjson pids "${priority_ids}" --arg ef "${est_field}" \
     --arg pt "${parent_type_id}" --argjson psl "${parent_supports_link}" \
-    --argjson tk "${tickets}" --argjson to "${ticket_origins}" --argjson td "${ticket_descriptions}" '
+    --argjson tk "${tickets}" --argjson to "${ticket_origins}" --argjson td "${ticket_descriptions}" \
+    --argjson tp "${ticket_parents}" '
     {base_url:$b}
     + (if $st == "" then {} else {story_type_id:$st} end)
     + (if $pt == "" then {} else {parent_type_id:$pt} end)
@@ -282,7 +288,8 @@ _reconcile_plan_context() {
     + (if $ef == "" then {} else {estimation_field_id:$ef} end)
     + (if ($tk|length) == 0 then {} else {tickets:$tk} end)
     + (if ($to|length) == 0 then {} else {ticket_origins:$to} end)
-    + (if ($td|length) == 0 then {} else {ticket_descriptions:$td} end)'
+    + (if ($td|length) == 0 then {} else {ticket_descriptions:$td} end)
+    + (if ($tp|length) == 0 then {} else {ticket_parents:$tp} end)'
 }
 
 # cmd_reconcile <argv...> — reconcile one specification into its Jira project.

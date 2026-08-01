@@ -179,8 +179,13 @@ the specific cause. Then confirm the other half of Constitution III:
 
 ```bash
 SPEC_KIT_JIRA_HOOK_CONTEXT=after_specify \
-  tests/conformance/run-scenario.sh tests/conformance/scenarios/us1-hierarchy-ambiguous.json
+  tests/conformance/run-scenario.sh tests/conformance/scenarios/us3-mandatory-field-refusal.json
 ```
+
+(`us1-hierarchy-ambiguous.json` and `us1-hierarchy-no-parent-level.json` both invoke `config`, not
+`reconcile` — the hook-context downgrade is `_reconcile_fault`'s, reconcile-only, since `config` is
+never itself invoked as a lifecycle hook. `us3-mandatory-field-refusal.json` invokes `reconcile`, so
+it is the one of the three that actually exercises the downgrade.)
 
 **Expect**: exit **0**, one `WARNING: … (exit 4). This spec-kit command completed normally.` line,
 still zero writes.

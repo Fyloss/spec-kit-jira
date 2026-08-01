@@ -61,6 +61,28 @@ teardown() {
   [ "$(mock_issue_field COMP-4 '.fields.parent.key')" = "COMP-1" ]
 }
 
+@test "T113: a specification with no User Story headings mirrors as one parent and one child" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  cat > "${SPEC}" << 'MD'
+# Feature Specification: Billing Invoices
+
+We need to let customers export invoices.
+MD
+
+  run cmd_reconcile reconcile "${SPEC}" --json
+  [ "$status" -eq 0 ]
+
+  run mock_calls
+  posts="$(grep -c '^POST /rest/api/3/issue$' <<< "$output")"
+  [ "$posts" -eq 2 ]
+
+  # One parent (COMP-1) and its one implicit child (COMP-2), not a parent alone.
+  [ "$(mock_issue_field COMP-1 '.fields.parent')" = "null" ]
+  [ "$(mock_issue_field COMP-2 '.fields.parent.key')" = "COMP-1" ]
+}
+
 @test "the specification carries one spec= marker naming the parent, after the H1" {
   mock_start "${MOCK}/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"

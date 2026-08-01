@@ -138,6 +138,7 @@ function Get-JiraReconcileHaltedStatuses {
       The resolved project's declared operator stop-states (Phase 6, US4),
       or [] when none. Mirror of _reconcile_halted_statuses.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Names the set of halted statuses it derives; a singular name would misdescribe the value.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $ProjectKey, [Parameter(Mandatory)] [string] $ConfigJson)
     $cfg = $ConfigJson | ConvertFrom-Json -Depth 100
@@ -171,9 +172,9 @@ function Get-JiraReconcilePhaseOrder {
     $pm = $PhaseStatusMapJson | ConvertFrom-Json -Depth 100
     $canonicalOrder = @('before_specify', 'after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')
     $distinct = [System.Collections.Generic.List[string]]::new()
-    foreach ($event in $canonicalOrder) {
+    foreach ($phaseEvent in $canonicalOrder) {
         if ($pm -isnot [System.Management.Automation.PSCustomObject]) { continue }
-        $member = $pm.PSObject.Properties[$event]
+        $member = $pm.PSObject.Properties[$phaseEvent]
         if ($null -eq $member) { continue }
         $v = [string]$member.Value
         if ([string]::IsNullOrEmpty($v)) { continue }
@@ -306,6 +307,11 @@ function Get-JiraReconcilePlanContextFromBinding {
     $tickets = [ordered]@{}
     $ticketOrigins = [ordered]@{}
     $ticketDescriptions = [ordered]@{}
+    # ticket_parents (T109): only the entries whose CURRENT parent is
+    # non-null — a flat mirror with no parent at all is left alone (plan.md
+    # "No migration"); a child linked to the wrong parent is what
+    # Get-JiraPlanWriteSet corrects.
+    $ticketParents = [ordered]@{}
     if ($boundVal) {
         foreach ($p in $boundVal.PSObject.Properties) {
             $tickets[$p.Name] = [string](Get-JiraPlanPropSafe $p.Value 'key')
@@ -317,6 +323,8 @@ function Get-JiraReconcilePlanContextFromBinding {
             if ($originVal -ne 'bridge') { $ticketOrigins[$p.Name] = $originVal }
             $current = Get-JiraPlanPropSafe $p.Value 'current'
             $ticketDescriptions[$p.Name] = Get-JiraPlanPropSafe $current 'description'
+            $currentParent = Get-JiraPlanPropSafe $current 'parent'
+            if ($null -ne $currentParent) { $ticketParents[$p.Name] = [string]$currentParent }
         }
     }
 
@@ -329,6 +337,7 @@ function Get-JiraReconcilePlanContextFromBinding {
     if ($tickets.Count -gt 0) { $result['tickets'] = $tickets }
     if ($ticketOrigins.Count -gt 0) { $result['ticket_origins'] = $ticketOrigins }
     if ($ticketDescriptions.Count -gt 0) { $result['ticket_descriptions'] = $ticketDescriptions }
+    if ($ticketParents.Count -gt 0) { $result['ticket_parents'] = $ticketParents }
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-Json -InputObject $result -Compress -Depth 20) }
 }
 
@@ -864,7 +873,12 @@ function Invoke-JiraReconcile {
             }
             $notesJson = ConvertTo-JiraJsonValue $notesList
         }
-        catch {}
+        catch {
+            # Best-effort re-read of the just-written spec file; a parse
+            # failure here only skips the re-routed notice this run, it does
+            # not undo the writes already applied above.
+            $null = $_
+        }
     }
 
     # Hook health is READ and reported on every run (FR-047). Nothing here writes

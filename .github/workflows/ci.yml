@@ -86,6 +86,36 @@ jobs:
         shell: bash
         run: bash tests/conformance/ci-conformance.sh
 
+  lint:
+    # T105 (008) — Constitution XII names lint as a blocking merge gate on both
+    # ports. `.shellcheckrc` and PSScriptAnalyzerSettings.psd1 already encode
+    # the two ports' rule sets; until this job existed neither file was
+    # enforced by anything — shellcheck was installed on the unit job above
+    # and never invoked, and PSScriptAnalyzer was installed nowhere.
+    name: Lint (shellcheck, PSScriptAnalyzer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: shellcheck scripts/bash
+        run: shellcheck -x -P scripts/bash $(find scripts/bash -name '*.sh')
+
+      - name: Invoke-ScriptAnalyzer scripts/powershell
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+          if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+              Install-Module PSScriptAnalyzer -Force -SkipPublisherCheck -Scope CurrentUser
+          }
+          $results = Invoke-ScriptAnalyzer -Path scripts/powershell -Recurse -Settings PSScriptAnalyzerSettings.psd1
+          if ($results) {
+              $results | Format-Table -AutoSize | Out-String | Write-Host
+              exit 1
+          }
+
   static-checks:
     # T003 — the three static guarantees of feature 003, named as their own job
     # so a regression reports which guarantee broke rather than "a bats test

@@ -33,7 +33,7 @@ function Get-JiraRecognitionRead {
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Key, [string] $Extra = '')
     $base = if ($env:SPEC_KIT_JIRA_BASE_URL) { $env:SPEC_KIT_JIRA_BASE_URL } else { '' }
-    $fieldsParam = 'summary,description,priority,status,issuelinks'
+    $fieldsParam = 'summary,description,priority,status,issuelinks,parent'
     if (-not [string]::IsNullOrEmpty($Extra)) { $fieldsParam = "$fieldsParam,$Extra" }
     $idKey = Get-JiraRecognitionIdentityKey
     $url = "$base/rest/api/3/issue/$Key`?properties=$idKey&fields=$fieldsParam"
@@ -202,7 +202,6 @@ function Invoke-JiraRecognitionRun {
     $stories = @($StoriesJson | ConvertFrom-Json -Depth 100)
     $specRef = $SpecRefJson | ConvertFrom-Json -Depth 100
     $repo = [string](Get-JiraRecognitionSafe $specRef 'repo')
-    $specSlug = [string](Get-JiraRecognitionSafe $specRef 'spec_slug')
 
     $bound = [ordered]@{}
     $new = [System.Collections.Generic.List[string]]::new()
@@ -319,10 +318,19 @@ function Invoke-JiraRecognitionRun {
         $origin = [string](Get-JiraRecognitionSafe $rmarker 'origin')
         if ([string]::IsNullOrEmpty($origin)) { $origin = 'bridge' }
         $descVal = Get-JiraRecognitionSafe $fields 'description'
+        # parent (T109): the child's CURRENT parent key, or $null when it
+        # carries none at all — a flat mirror from before this feature, which
+        # the "no migration" boundary (plan.md "Scope boundaries worth
+        # stating") leaves untouched. A non-null value that disagrees with
+        # the resolved parent is a different case, and IS in scope:
+        # plan_writes corrects it (T109).
+        $parentObj = Get-JiraRecognitionSafe $fields 'parent'
+        $parentKey = if ($parentObj) { [string](Get-JiraRecognitionSafe $parentObj 'key') } else { $null }
         $current = [ordered]@{
             summary     = [string](Get-JiraRecognitionSafe $fields 'summary')
             description = if ($null -eq $descVal) { [ordered]@{} } else { $descVal }
             priority    = (Get-JiraRecognitionSafe $fields 'priority')
+            parent      = $parentKey
         }
         $statusObj = Get-JiraRecognitionSafe $fields 'status'
         $status = if ($statusObj) { [string](Get-JiraRecognitionSafe $statusObj 'name') } else { '' }

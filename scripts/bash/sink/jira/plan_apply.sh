@@ -55,6 +55,9 @@ source "${_plan_apply_dir}/identity.sh" # stamp the identity marker on each crea
 #     tickets:{<local_id>: <existing-issue-key>},   (a local_id absent => create)
 #     ticket_origins:{<local_id>: "bridge-created"|"human"},  (optional, US7)
 #     ticket_descriptions:{<local_id>: <existing-adf-doc>},   (optional, US7)
+#     ticket_parents:{<local_id>: <existing-parent-key>},   (optional, T109;
+#       only entries whose child ALREADY carries a parent — a flat mirror
+#       with none is Out of Scope, "no migration")
 #     parent_type_id, parent_key|absent (a recognised parent's key),
 #     parent_local_id (the parent marker's id, for a creation),
 #     parent_current|absent ({summary, description}, for the zero-churn
@@ -71,7 +74,10 @@ source "${_plan_apply_dir}/identity.sh" # stamp the identity marker on each crea
 # placeholder `fields.parent.key = "<resolved at apply time>"`, resolved by
 # apply_writes_with_recognition once the parent's real key is known (the
 # parent is always performed first — contracts/parent-marker.md "Ordering
-# within one run"). An update never re-touches the parent link.
+# within one run"). An update re-touches the parent link only when the
+# child already carries a DIFFERENT one (T109); a child carrying none at
+# all (a flat mirror from before this feature) is left alone — Out of
+# Scope, "no migration".
 plan_writes() {
   local doc="$1" ctx="$2"
   local base story_type estid project
@@ -117,10 +123,12 @@ plan_writes() {
       action="$(jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" --arg sid "${sid}" \
         '{method:"POST", url:$u, body:{fields:$f}, local_id:$sid, role:"story"}')"
     else
-      # UPDATE: content + priority; the estimation is NEVER re-sent (FR-018),
-      # and the parent link is never re-touched (it was set at creation). On a
-      # human-origin ticket the description is spliced into the managed panel so the
-      # human prose above it survives (FR-038).
+      # UPDATE: content + priority; the estimation is NEVER re-sent (FR-018).
+      # The parent link is corrected only when the child already names a
+      # DIFFERENT parent (T109, below) — never when it names none at all
+      # (Out of Scope, "no migration"). On a human-origin ticket the
+      # description is spliced into the managed panel so the human prose
+      # above it survives (FR-038).
       local origin existing
       origin="$(jq -r --arg s "${sid}" '.ticket_origins[$s] // ""' <<< "${ctx}")"
       if [[ -n "${origin}" && "${origin}" != "bridge-created" ]]; then
@@ -129,6 +137,25 @@ plan_writes() {
       fi
       fields="$(jq -cn --arg t "${title}" --argjson d "${adf}" '{summary:$t, description:$d}')"
       [[ -n "${priority_id}" ]] && fields="$(jq -c --arg pid "${priority_id}" '. + {priority:{id:$pid}}' <<< "${fields}")"
+
+      # Parent-link correction (T109): a child ALREADY linked to a parent
+      # (never a flat mirror carrying none — that is Out of Scope, "no
+      # migration") whose current parent disagrees with the resolved one is
+      # re-linked. The resolved key is either already known (a recognised
+      # parent) or, when the parent is being created this same run, filled
+      # in later by the same "<resolved at apply time>" placeholder every
+      # story creation already uses (apply_writes_with_recognition step 11).
+      local cur_parent target_parent
+      cur_parent="$(jq -r --arg s "${sid}" '.ticket_parents[$s] // ""' <<< "${ctx}")"
+      if [[ -n "${cur_parent}" ]]; then
+        target_parent="$(jq -r '.parent_key // ""' <<< "${ctx}")"
+        if [[ -n "${target_parent}" ]]; then
+          [[ "${cur_parent}" != "${target_parent}" ]] && fields="$(jq -c --arg k "${target_parent}" '. + {parent:{key:$k}}' <<< "${fields}")"
+        else
+          fields="$(jq -c '. + {parent:{key:"<resolved at apply time>"}}' <<< "${fields}")"
+        fi
+      fi
+
       action="$(jq -cn --arg u "${base}/rest/api/3/issue/${ticket}" --argjson f "${fields}" \
         '{method:"PUT", url:$u, body:{fields:$f}, role:"story"}')"
     fi

@@ -73,6 +73,76 @@ CTX_UPDATE='{
   [ "$(jq -r '.stories[0].body.fields.priority.id' <<< "$output")" = "1" ]
 }
 
+@test "T109: an update re-links a child whose current parent disagrees with the resolved one" {
+  local ctx='{
+    "base_url":"https://mock",
+    "story_type_id":"10002",
+    "priority_ids":{"P1":"1","P2":"2","P3":"3"},
+    "tickets":{"s1":"ABC-1"},
+    "ticket_parents":{"s1":"OLD-9"},
+    "parent_key":"NEW-1"
+  }'
+  run plan_writes "${DOC}" "${ctx}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.stories[0].method' <<< "$output")" = "PUT" ]
+  [ "$(jq -r '.stories[0].body.fields.parent.key' <<< "$output")" = "NEW-1" ]
+}
+
+@test "T109: an update leaves a child carrying NO parent untouched (Out of Scope, no migration)" {
+  local ctx='{
+    "base_url":"https://mock",
+    "story_type_id":"10002",
+    "priority_ids":{"P1":"1","P2":"2","P3":"3"},
+    "tickets":{"s1":"ABC-1"},
+    "parent_key":"NEW-1"
+  }'
+  run plan_writes "${DOC}" "${ctx}"
+  [ "$(jq -r '.stories[0].body.fields | has("parent")' <<< "$output")" = "false" ]
+}
+
+@test "T109: an update whose current parent already matches the resolved one adds no parent field" {
+  local ctx='{
+    "base_url":"https://mock",
+    "story_type_id":"10002",
+    "priority_ids":{"P1":"1","P2":"2","P3":"3"},
+    "tickets":{"s1":"ABC-1"},
+    "ticket_parents":{"s1":"NEW-1"},
+    "parent_key":"NEW-1"
+  }'
+  run plan_writes "${DOC}" "${ctx}"
+  [ "$(jq -r '.stories[0].body.fields | has("parent")' <<< "$output")" = "false" ]
+}
+
+@test "T109: an update whose target parent is not yet known (created this run) uses the apply-time placeholder" {
+  local ctx='{
+    "base_url":"https://mock",
+    "story_type_id":"10002",
+    "priority_ids":{"P1":"1","P2":"2","P3":"3"},
+    "tickets":{"s1":"ABC-1"},
+    "ticket_parents":{"s1":"OLD-9"}
+  }'
+  run plan_writes "${DOC}" "${ctx}"
+  [ "$(jq -r '.stories[0].body.fields.parent.key' <<< "$output")" = "<resolved at apply time>" ]
+}
+
+@test "T109: the PowerShell port produces an identical re-link update action (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local ctx b p
+  ctx='{
+    "base_url":"https://mock",
+    "story_type_id":"10002",
+    "priority_ids":{"P1":"1","P2":"2","P3":"3"},
+    "tickets":{"s1":"ABC-1"},
+    "ticket_parents":{"s1":"OLD-9"},
+    "parent_key":"NEW-1"
+  }'
+  b="$(plan_writes "${DOC}" "${ctx}")"
+  p="$(pwsh -NoProfile -Command "
+    Import-Module '${PS_SINK}/PlanApply.psm1' -Force
+    [Console]::Out.Write((Get-JiraPlanWriteSet -NeutralDocJson '$(printf '%s' "${DOC}" | jq -c .)' -PlanContextJson '$(printf '%s' "${ctx}" | jq -c .)'))")"
+  [ "${b}" = "${p}" ]
+}
+
 @test "the PowerShell port produces an identical create action set (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local b p

@@ -1,4 +1,4 @@
-# T039/T040/T041 [Phase 4, US1] — mirror of tests/bash/conformance/test_us1_hierarchy.bats.
+# T039/T040/T041/T108 [Phase 4, US1] — mirror of tests/bash/conformance/test_us1_hierarchy.bats.
 
 BeforeAll {
     $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
@@ -63,6 +63,15 @@ Describe 'Hierarchy resolution (conformance)' {
         (Get-Content -LiteralPath (Join-Path $out 'exit') -Raw).Trim() | Should -Be '0' -Because "harness artefacts:`n$diag"
         $stdout = Get-Content -LiteralPath (Join-Path $out 'stdout') -Raw | ConvertFrom-Json -Depth 100
         (@($stdout.actions) | Where-Object { $_.role -eq 'story' } | ForEach-Object { $_.body.fields.issuetype.id } | Select-Object -Unique) -join ',' | Should -Be '10403' -Because "harness artefacts:`n$diag"
+    }
+
+    It 'T108 — non-Latin-script project: children carry the resolved child type id' {
+        $out = Join-Path $script:Tmp 'out'
+        & bash $script:Harness (Join-Path $script:Conf 'scenarios/us1-hierarchy-nonlatin.json') 'powershell' $out | Out-Null
+        $diag = Get-HarnessDiagnostics -OutDir $out
+        (Get-Content -LiteralPath (Join-Path $out 'exit') -Raw).Trim() | Should -Be '0' -Because "harness artefacts:`n$diag"
+        $stdout = Get-Content -LiteralPath (Join-Path $out 'stdout') -Raw | ConvertFrom-Json -Depth 100
+        (@($stdout.actions) | Where-Object { $_.role -eq 'story' } | ForEach-Object { $_.body.fields.issuetype.id } | Select-Object -Unique) -join ',' | Should -Be '10502' -Because "harness artefacts:`n$diag"
     }
 
     It 'T040 — no-parent-level: exit 4, zero writes, candidates named' {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# T039/T040/T041 [Phase 4, US1] — Conformance: hierarchy resolution on
-# non-default Jira instances, its two refusals, and the stale-binding
-# refusal, driven through the real dispatcher.
+# T039/T040/T041/T108 [Phase 4, US1] — Conformance: hierarchy resolution on
+# non-default Jira instances (French, SAFe, non-Latin-script), its two
+# refusals, and the stale-binding refusal, driven through the real dispatcher.
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
@@ -27,6 +27,12 @@ teardown() {
   bash "${HARNESS}" "${CONF}/scenarios/us1-hierarchy-safe.json" bash "${TMP}/out" > /dev/null
   [ "$(cat "${TMP}/out/exit")" = "0" ]
   [ "$(jq -r '[.actions[] | select(.role=="story") | .body.fields.issuetype.id] | unique | join(",")' "${TMP}/out/stdout")" = "10403" ]
+}
+
+@test "T108 — non-Latin-script project: children carry the resolved child type id" {
+  bash "${HARNESS}" "${CONF}/scenarios/us1-hierarchy-nonlatin.json" bash "${TMP}/out" > /dev/null
+  [ "$(cat "${TMP}/out/exit")" = "0" ]
+  [ "$(jq -r '[.actions[] | select(.role=="story") | .body.fields.issuetype.id] | unique | join(",")' "${TMP}/out/stdout")" = "10502" ]
 }
 
 @test "T040 — no-parent-level: exit 4, zero writes, candidates named" {

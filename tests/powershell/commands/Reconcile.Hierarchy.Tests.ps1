@@ -64,6 +64,21 @@ Describe 'Invoke-JiraReconcile — the parent hierarchy regression' {
         (Get-JiraMockIssueField -Mock $script:M -Key 'COMP-4' -Path 'fields.parent.key') | Should -Be 'COMP-1'
     }
 
+    It 'T113: a specification with no User Story headings mirrors as one parent and one child' {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+
+        Set-Content -LiteralPath $script:Spec -Value "# Feature Specification: Billing Invoices`n`nWe need to let customers export invoices.`n"
+
+        $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
+
+        $calls = Get-JiraMockCallLog -Mock $script:M
+        @($calls | Where-Object { $_ -eq 'POST /rest/api/3/issue' }).Count | Should -Be 2
+
+        (Get-JiraMockIssueField -Mock $script:M -Key 'COMP-1' -Path 'fields.parent') | Should -BeNullOrEmpty
+        (Get-JiraMockIssueField -Mock $script:M -Key 'COMP-2' -Path 'fields.parent.key') | Should -Be 'COMP-1'
+    }
+
     It 'the specification carries one spec= marker naming the parent, after the H1' {
         $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
         $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl

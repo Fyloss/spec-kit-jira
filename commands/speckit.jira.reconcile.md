@@ -75,6 +75,7 @@ At most **one** message per host command run, naming the **true** cause:
 | Cause | Distinguishing signal | What to say |
 | --- | --- | --- |
 | Not yet configured | The bridge exits `0` and reports no binding | At most three lines: this repository is not yet bound to a Jira project; run `/speckit.jira.config` |
+| Binding predates this release | Exit `4`, message says the binding "predates parent support" | The project is already bound; its local binding is a version behind. Run `/speckit.jira.config` to refresh it (see INSTALL.md, "Upgrading to the parent-hierarchy release") |
 | Credentials absent | Exit `4`, no token on any of the three resolution rungs | The token resolved through none of env, OS secret manager, or `.specify/jira/.env` |
 | Credentials rejected | Exit `3` | Jira rejected the credentials — they exist but are not accepted |
 | Prerequisite missing | Exit `5` | The named prerequisite is missing; relay the entry point's own message |

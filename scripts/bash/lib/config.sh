@@ -229,7 +229,8 @@ _cfg_raise_duplicate_key() {
 _CFG_KEY=""
 _CFG_REST=""
 _cfg_map_entry_key() {
-  local content="$1" n=${#content}
+  local content="$1"
+  local n=${#content}
   _CFG_KEY=""
   _CFG_REST=""
   ((n == 0)) && return 1
@@ -241,7 +242,7 @@ _cfg_map_entry_key() {
     # followed by whitespace or end of line.
     local q="${first}" i close=-1
     for ((i = 1; i < n; i++)); do
-      if [[ "${content:i:1}" == "${q}" ]]; then close=$i; break; fi
+      if [[ "${content:i:1}" == "${q}" ]]; then close=${i}; break; fi
     done
     ((close < 0)) && return 1
     local colon_idx=$((close + 1))

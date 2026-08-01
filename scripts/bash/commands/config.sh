@@ -24,7 +24,7 @@
 # Mapping validation (US2) refuses an impossible mapping at config time (FR-007):
 # a team-managed project supports only an Epic parent and Sub-task children
 # (research §3), so a hierarchy level ABOVE Epic is rejected with EXIT_CONFIG (4).
-# The "Epic" tier is identified from the DISCOVERED binding — the top non-subtask
+# The Epic tier is identified from the DISCOVERED binding — the top non-subtask
 # hierarchy level — never a name compiled into the script (Constitution VII).
 
 [[ -n ${_JIRA_CMD_CONFIG:-} ]] && return 0

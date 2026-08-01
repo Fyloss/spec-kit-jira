@@ -37,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   affected type in one message. Both refusals are reported as their own
   named cause, never a transport or rejected-request error, and `--dry-run`
   predicts them exactly as a real run would.
+- A child ticket that already carries a parent link, but the WRONG one, is
+  re-linked to the correct parent on a later run, counted as a write; an
+  already-correct link is left untouched, and a child carrying no parent
+  link at all (a flat mirror from before this release) is never touched —
+  see the Migration note below.
+- CI now runs `shellcheck` over the Bash port and `Invoke-ScriptAnalyzer`
+  over the PowerShell port as a blocking lint gate, per the repository's own
+  `.shellcheckrc` and `PSScriptAnalyzerSettings.psd1`.
 
 ### Removed
 
@@ -47,12 +55,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Migration note
 
 Mirrors created before this release carry no parent. Reconciling one of them
-again does not retroactively attach its existing children to a newly created
-parent — a story's parent link is set only at the moment of its own creation,
-never on a later update — so a full hierarchy for an existing specification
-is only available by re-mirroring it from a clean state, or by creating the
-parent by hand in Jira and recording its key in `spec.md` under the same
-marker grammar reconcile uses for its own writes.
+again does not retroactively attach a child that carries no parent link at
+all to a newly created parent — that flat-mirror case is never touched — so a
+full hierarchy for an existing specification is only available by
+re-mirroring it from a clean state, or by creating the parent by hand in
+Jira and recording its key in `spec.md` under the same marker grammar
+reconcile uses for its own writes. A child that already carries A parent
+link, just the wrong one, is a different case and IS corrected on a later
+run (see Added, above).
+
+Every repository already bound to a Jira project (every installation that
+ran `/speckit.jira.config` before this release) will see its first
+`reconcile` after upgrading refuse once, before any read, naming the
+project and saying its local binding "predates parent support". This is
+expected — the project is already bound, its binding is simply a version
+behind — and it costs nothing: zero writes, and running
+`/speckit.jira.config` once resolves it permanently. See INSTALL.md,
+"Upgrading to the parent-hierarchy release".
 
 ## [0.7.0] - 2026-07-31
 

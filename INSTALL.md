@@ -122,6 +122,27 @@ it is a one-time manual edit: open `.specify/extensions.yml` and delete, under
 each named event, the entry that has **no** `extension: jira` line. The remaining
 entry is the canonical one the install wrote.
 
+### Upgrading to the parent-hierarchy release
+
+Every installation that ran `/speckit.jira.config` on a release before the
+parent hierarchy shipped is bound, but its `.specify/jira/config.local.yml`
+records issue types as a plain name-to-id map with no hierarchy level and no
+sub-task flag — the shape this release replaces. The first `reconcile` after
+upgrading refuses with:
+
+> `reconcile: the local binding for <PROJECT> predates parent support and does
+> not record issue-type hierarchy. The project is bound — its binding is
+> simply a version behind. Run /speckit.jira.config to refresh it (zero
+> writes)`
+
+This is expected, and it happens before the first read, so nothing is written
+and nothing is lost. Run `/speckit.jira.config` once — the ceremony
+rediscovers the project's issue types in the new shape, may ask which type
+mirrors a user story when the base hierarchy level holds more than one
+candidate, and then `reconcile` proceeds normally. Tickets already mirrored
+flat (no parent, created before this release) are left exactly as they are —
+they are not migrated; see the CHANGELOG's Migration note.
+
 ## Verifying the install
 
 - Inspect `.specify/extensions.yml` straight after installing: seven events, one

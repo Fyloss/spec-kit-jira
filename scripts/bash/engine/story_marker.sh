@@ -284,7 +284,7 @@ story_marker_assign() {
 # `story=<id> creating`. IDs with no matching bare line are left untouched
 # (idempotent no-op for that id). Prints the new text on stdout.
 story_marker_mark_creating() {
-  local ids="$1" content; content="$(cat; printf x)"; content="${content%x}"
+  local ids_json="$1" content; content="$(cat; printf x)"; content="${content%x}"
   local nl_token nl; nl_token="$(marker_splice_dominant_nl_token "${content}")"
   if [[ "${nl_token}" == "CRLF" ]]; then nl=$'\r\n'; else nl=$'\n'; fi
 
@@ -294,7 +294,7 @@ story_marker_mark_creating() {
     lineno="$(_smk_find_line_for_id "${content}" "${id}")"
     ((lineno == 0)) && continue
     content="$(marker_splice_replace_line "${content}" "${lineno}" "$(story_marker_format "${id}" creating)" "${nl}"; printf x)"; content="${content%x}"
-  done < <(jq -r '.[]' <<< "${ids}")
+  done < <(jq -r '.[]' <<< "${ids_json}")
   printf '%s' "${content}"
 }
 

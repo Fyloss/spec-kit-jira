@@ -1,0 +1,56 @@
+# T110 (008) — the opt-in LIVE suite (tests/live/test_live_zero_churn.bats)
+# proves Constitution II's zero-write double-run against a REAL Jira Cloud
+# instance, per SC-001/SC-003/SC-008 — a claim a mock can never verify on its
+# own (Constitution XII). T098/T099 extended the suite to cover the parent
+# and the parent link; until this workflow existed nothing in CI invoked
+# tests/live/ at all.
+#
+# Never a blocking gate on a fork pull request: forks carry none of the
+# secrets below, so `require_live` in the suite itself skips every test
+# cleanly (exit 0) rather than failing — and the `pull_request` trigger below
+# is scoped to same-repository PRs only, as defense in depth against that
+# ever mattering.
+name: Live
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 04:17 UTC daily — an off-the-hour time, so this run does not compete
+    # with every other repository's on-the-hour cron for shared runner
+    # capacity.
+    - cron: '17 4 * * *'
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live-zero-churn:
+    name: Live zero-churn double-run (real Jira)
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'pull_request' &&
+       github.event.label.name == 'run-live-tests' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bash toolchain
+        run: sudo apt-get update && sudo apt-get install -y bats jq curl
+
+      - name: Run the live suite against the scratch project
+        env:
+          SPEC_KIT_JIRA_LIVE: '1'
+          SPEC_KIT_JIRA_BASE_URL: ${{ secrets.SPEC_KIT_JIRA_LIVE_BASE_URL }}
+          JIRA_EMAIL: ${{ secrets.SPEC_KIT_JIRA_LIVE_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.SPEC_KIT_JIRA_LIVE_API_TOKEN }}
+          SPEC_KIT_JIRA_PROJECT_KEY: ${{ secrets.SPEC_KIT_JIRA_LIVE_PROJECT_KEY }}
+        run: bats tests/live/test_live_zero_churn.bats

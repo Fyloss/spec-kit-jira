@@ -23,9 +23,6 @@ BeforeAll {
 projects:
   - key: COMP
     style: company_managed
-    issue_types:
-      Epic: "10001"
-      Story: "10002"
     priority_map:
       P1: Highest
       P2: Medium

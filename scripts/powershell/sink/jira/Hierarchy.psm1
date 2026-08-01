@@ -102,6 +102,7 @@ function Get-JiraHierarchyUnsatisfiableFields {
       single type's list [{logical_name; field_id}]. Mirror of
       hierarchy_unsatisfiable_fields.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Names the set of unsatisfiable fields it derives; a singular name would misdescribe the value.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Fields, [bool] $HasParentLink = $false)
     $satisfiable = @('summary', 'description', 'issuetype', 'project', 'priority', 'reporter')

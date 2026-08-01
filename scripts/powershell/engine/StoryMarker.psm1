@@ -120,6 +120,7 @@ function Get-JiraStoryMarkerAnchors {
       H1; else 0 (the sole element), meaning "before line 1". Mirror of
       _smk_scan_anchors.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Names the set of anchor line numbers it derives; a singular name would misdescribe the value.')]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Content)
     $lines = $Content -split "`n"
     $story = [System.Collections.Generic.List[int]]::new()

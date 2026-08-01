@@ -160,6 +160,7 @@ function Get-JiraDiscoveryHierarchyCandidates {
       child type has been resolved by the ceremony. Mirror of
       _disc_hierarchy_candidates.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Names the set of hierarchy candidates it derives; a singular name would misdescribe the value.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $IssueTypes)
     $cand = @($IssueTypes | Where-Object { -not [bool]$_.subtask })
@@ -186,6 +187,7 @@ function Get-JiraDiscoveryRequiredFields {
       contracts/hierarchy-resolution.md §5 (Phase 6, US3). Mirror of
       _disc_required_fields.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Names the set of required fields it derives; a singular name would misdescribe the value.')]
     [CmdletBinding()]
     param($Fields)
     $out = [System.Collections.Generic.List[object]]::new()

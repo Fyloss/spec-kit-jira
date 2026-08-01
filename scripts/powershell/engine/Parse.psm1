@@ -23,6 +23,7 @@ function Remove-JiraParseMarkerLines {
       or malformed — contract "Reading rules" #2) from $Text, so it never
       lands in a title, description, acceptance criterion, or design item.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Removes every matching line from the text; a singular name would misdescribe the operation.')]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
     $lines = Split-JiraParseLine $Text
     $out = [System.Collections.Generic.List[string]]::new()
@@ -366,6 +367,7 @@ function Get-JiraParsedEpicExtraBlocks {
       list for each section present. Empty when the document carries
       neither. Mirror of _parse_epic_extra_blocks.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Names the set of content blocks it derives; a singular name would misdescribe the value.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
     $lines = Split-JiraParseLine $Text

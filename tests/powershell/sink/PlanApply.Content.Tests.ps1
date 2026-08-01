@@ -31,4 +31,25 @@ Describe 'Get-JiraPlanWriteSet' {
         $r.stories[0].body.fields.PSObject.Properties.Name | Should -Not -Contain 'customfield_30044'
         $r.stories[0].body.fields.priority.id | Should -Be '1'
     }
+    It 'T109: an update re-links a child whose current parent disagrees with the resolved one' {
+        $ctx = '{"base_url":"https://mock","story_type_id":"10002","priority_ids":{"P1":"1","P2":"2","P3":"3"},"tickets":{"s1":"ABC-1"},"ticket_parents":{"s1":"OLD-9"},"parent_key":"NEW-1"}'
+        $r = Get-JiraPlanWriteSet -NeutralDocJson $script:Doc -PlanContextJson $ctx | ConvertFrom-Json
+        $r.stories[0].method | Should -Be 'PUT'
+        $r.stories[0].body.fields.parent.key | Should -Be 'NEW-1'
+    }
+    It 'T109: an update leaves a child carrying NO parent untouched (Out of Scope, no migration)' {
+        $ctx = '{"base_url":"https://mock","story_type_id":"10002","priority_ids":{"P1":"1","P2":"2","P3":"3"},"tickets":{"s1":"ABC-1"},"parent_key":"NEW-1"}'
+        $r = Get-JiraPlanWriteSet -NeutralDocJson $script:Doc -PlanContextJson $ctx | ConvertFrom-Json
+        $r.stories[0].body.fields.PSObject.Properties.Name | Should -Not -Contain 'parent'
+    }
+    It 'T109: an update whose current parent already matches the resolved one adds no parent field' {
+        $ctx = '{"base_url":"https://mock","story_type_id":"10002","priority_ids":{"P1":"1","P2":"2","P3":"3"},"tickets":{"s1":"ABC-1"},"ticket_parents":{"s1":"NEW-1"},"parent_key":"NEW-1"}'
+        $r = Get-JiraPlanWriteSet -NeutralDocJson $script:Doc -PlanContextJson $ctx | ConvertFrom-Json
+        $r.stories[0].body.fields.PSObject.Properties.Name | Should -Not -Contain 'parent'
+    }
+    It 'T109: an update whose target parent is not yet known (created this run) uses the apply-time placeholder' {
+        $ctx = '{"base_url":"https://mock","story_type_id":"10002","priority_ids":{"P1":"1","P2":"2","P3":"3"},"tickets":{"s1":"ABC-1"},"ticket_parents":{"s1":"OLD-9"}}'
+        $r = Get-JiraPlanWriteSet -NeutralDocJson $script:Doc -PlanContextJson $ctx | ConvertFrom-Json
+        $r.stories[0].body.fields.parent.key | Should -Be '<resolved at apply time>'
+    }
 }
