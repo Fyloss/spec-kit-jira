@@ -160,7 +160,7 @@ if [[ "${TOTAL_FILES}" -eq 0 ]]; then
   exit 1
 fi
 
-printf 'run-bash.sh: mode: %s\n' "${RUN_LABEL}"
+printf 'run-bash.sh: mode: %s (%s)\n' "${RUN_LABEL}" "$(bats --version 2> /dev/null || printf 'bats not found')"
 if [[ "${RUN_LABEL}" == "PARTIAL RUN" ]]; then
   printf 'run-bash.sh: selected %d file(s) (this is a PARTIAL RUN, not a full-suite verdict):\n' "${TOTAL_FILES}"
   printf '  %s\n' "${FILES[@]}"
@@ -207,7 +207,9 @@ for f in "${FILES[@]}"; do
   if [[ "${rc}" != "0" ]]; then
     FAILED_FILES=$((FAILED_FILES + 1))
     printf 'run-bash.sh: FAIL %s\n' "${f}"
-    grep -E '^not ok' "${log}" | sed 's/^/  /'
+    # The `#` diagnostic lines too, not just the verdicts: a failure that
+    # only reproduces on a CI host is undebuggable from `not ok` alone.
+    grep -E '^(not ok|# )' "${log}" | sed 's/^/  /'
   fi
 done
 

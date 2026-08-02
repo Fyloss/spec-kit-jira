@@ -55,7 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the file, and their "GNU-parallel-free PATH" dropped `/usr/bin` wholesale on
   images where the bats package pulls GNU `parallel` in as a Recommends.
   Fixtures are now assembled at run time and `parallel`-carrying directories
-  are shadowed rather than removed.
+  are shadowed rather than removed. The shadow cleanup also failed the whole
+  file on hosts with no GNU `parallel` anywhere on PATH (the GitHub macOS
+  runner): an `[ -n ] && rm` last line in `teardown` exits 1 on the empty
+  case and a non-zero teardown fails every test in the file.
+- `tests/run-bash.sh` now reprints a failing file's `#` diagnostic lines (not
+  just its `not ok` verdicts) and names the `bats` version in its banner — a
+  failure that only reproduces on a CI host was undebuggable from the summary
+  alone.
 - The `coverage-bash` gate's traced suite and its suite-green rescue check now
   run through the parallel `tests/run-bash.sh` instead of a serial `bats -r`,
   which had outgrown every wall clock the job owns (the gate had been red on

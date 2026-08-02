@@ -54,9 +54,13 @@ setup() {
 
 teardown() {
   rm -rf "${FIXDIR}"
+  # `|| :`, never `&&`: on a host with no GNU parallel anywhere on PATH
+  # (the GitHub macOS runner), SHADOW_DIRS is empty and `${SHADOW_DIRS[@]:-}`
+  # expands to one empty string — an `[ -n ] && rm` last line then exits 1,
+  # and a non-zero teardown fails every test in the file.
   local s
   for s in "${SHADOW_DIRS[@]:-}"; do
-    [ -n "${s}" ] && rm -rf "${s}"
+    [ -z "${s}" ] || rm -rf "${s}"
   done
 }
 
