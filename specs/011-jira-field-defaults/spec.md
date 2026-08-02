@@ -1,6 +1,6 @@
 # Feature Specification: Recorded Field Defaults So a Mandatory Field Never Blocks a Mirror
 
-**Feature Branch**: `feat/jira-field-defaults`
+**Feature Branch**: `feat/handle-mandatory-fields`
 
 **Created**: 2026-08-02
 

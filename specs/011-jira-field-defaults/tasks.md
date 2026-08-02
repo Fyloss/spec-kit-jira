@@ -46,8 +46,9 @@ conformance corpus (Principle VI). A task that lands in one port only is not don
 - [ ] T003 Create the conformance fixture `tests/conformance/fixtures/repo-with-field-defaults/` — a
       company-managed project whose specification type requires one free-text and one enumerated
       custom field, with `.specify/jira/config.yml` and `.specify/jira/config.local.yml`
-- [ ] T004 [P] Add the mock configuration entry for that fixture's project in
-      `tests/conformance/mock-jira/configs/`
+- [ ] T004 Add the mock configuration entry for that fixture's project in
+      `tests/conformance/mock-jira/configs/`. Not `[P]`: a different file from T003, but it needs the
+      project key T003 chooses.
 
 **Checkpoint**: the corpus can describe a project with mandatory custom fields on both ports.
 
@@ -139,8 +140,10 @@ team recorded, resolving one to the other, and letting a recorded value satisfy 
 - [ ] T028 Write the PowerShell twin in `tests/powershell/sink/PlanApply.Defaults.Tests.ps1`. Observe
       it FAIL. Not `[P]`: same file as T026.
 - [ ] T029 [P] Write the failing test for the payload merge in `tests/bash/sink/test_ticket.bats`:
-      `jira_create_fields_base` merges the defaults for the type being created, and merges nothing when
-      the map is empty (FR-028). Observe it FAIL.
+      `jira_create_fields_base` merges the defaults for the type being created, merges nothing when
+      the map is empty (FR-028), and — the negative FR-018 turns on — merges nothing recorded against
+      a **different** issue type: a default recorded for the specification type is absent from a story
+      payload, which is the edge case "mandatory on one type, absent from another". Observe it FAIL.
 - [ ] T030 [P] Write the PowerShell twin in `tests/powershell/sink/Ticket.Tests.ps1`. Observe it FAIL.
 - [ ] T029a Write the failing privacy-guard test in `tests/bash/sink/test_ticket.bats` (FR-024,
       Principle IX, research R7): the body handed to `privacy_guard_scan` **contains** the defaulted
@@ -440,6 +443,19 @@ own cure.
 - [ ] T089 [P] Document `field_defaults`, the `ask` switch, and the managed region in
       `templates/config.yml.template`, self-documenting enough that a tech lead needs no other page
       (Principle XVI).
+- [ ] T089a [P] Write the failing agent-doc test for the ceremony in
+      `tests/bash/commands/test_agent_doc_config.bats` (Principle XIII — T090 adds *normative*
+      wording, and this repo tests normative wording by grep): assert
+      `commands/speckit.jira.config.md` states that the entry point never prompts, that only fields
+      Jira marks required produce a question, and that an optional field's default is stated through
+      `--field-default` or written into `config.yml` by hand (FR-002, FR-004). Observe it FAIL.
+- [ ] T089b [P] Write the failing agent-doc test for the reconcile in
+      `tests/bash/commands/test_agent_doc_reconcile.bats`: assert
+      `commands/speckit.jira.reconcile.md` states the re-invocation with `--accept-defaults` /
+      `--field-value`, that a decline is resumed with `--accept-defaults` and no decline flag exists,
+      and §3.10's unreachable-operator contract — the caller declares it on its first invocation, the
+      entry point never sniffs a TTY, and a hook-fired run is not such a caller (FR-015, research R4).
+      Observe it FAIL. No PowerShell twin: both ports read the same command document.
 - [ ] T090 [P] Add the new closed questions and the `--field-default` flag, normatively, to
       `commands/speckit.jira.config.md` — including that the entry point never prompts, that only
       required fields are asked about, and that an optional field's default is stated through the flag
@@ -497,12 +513,15 @@ own cure.
 - Bash and PowerShell implementations of one behaviour are siblings, not sequential: either may go
   first, but the phase is not complete until both exist and the conformance scenario is green.
 - Discovery (T005–T008) precedes persistence (T009–T012), which precedes resolution (T025–T028).
+- The config read (T013–T016) also precedes resolution (T025–T028, T033–T034): the resolution joins
+  the labels `config.yml` holds to the ids the binding holds, so it needs both readers. The parallel
+  tracks below put these on different tracks — that is the one hand-off between them.
 - The satisfiability change (T021–T024) is independent of the payload merge (T029–T032); they can
   proceed in parallel.
 
 ### Parallel Opportunities
 
-- T001, T002, T004 — different files.
+- T001, T002 — different files. T004 waits on T003 for the fixture's project key.
 - Every `[P]`-marked test pair (Bash + PowerShell) — always different files. Two test tasks writing
   the **same** file are never both `[P]`, however different their assertions:
   `test_config_field_defaults.bats` is written by T038 then extended by T040, T041a, T041c;
