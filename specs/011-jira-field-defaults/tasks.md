@@ -198,21 +198,49 @@ no byte, and confirm the reconcile that used to refuse now mirrors.
       reported as not yet consumed (FR-026/FR-027); an unknown type lists the discovered types; a
       value outside
       `allowed_values` lists the accepted values (FR-003); an empty value is refused (FR-008); an
-      orphaned entry is reported (FR-008); degraded mode asks nothing and writes nothing (FR-009).
-      Observe them FAIL.
+      orphaned entry is reported (FR-008); degraded mode asks nothing and writes nothing (FR-009);
+      and a field that already carries a recorded value is presented with that value as the current
+      answer, so an operator who keeps it supplies no input and the resulting file is byte-identical
+      (FR-007, US1 acceptance scenario 3, contract §2.6). Observe them FAIL.
 - [ ] T039 [P] [US1] Write the PowerShell twin in
       `tests/powershell/commands/Config.FieldDefaults.Tests.ps1`. Observe it FAIL.
-- [ ] T040 [P] [US1] Write the failing test for the managed region write in
+- [ ] T040 [US1] Write the failing test for the managed region write in
       `tests/bash/commands/test_config_field_defaults.bats`: comments and keys outside the region are
       byte-preserved; the host's dominant line ending is respected; malformed markers refuse with exit
-      `4` and zero writes; the region is appended once when absent. Observe it FAIL.
-- [ ] T041 [P] [US1] Write the PowerShell twin in
-      `tests/powershell/commands/Config.FieldDefaults.Tests.ps1`. Observe it FAIL.
+      `4` and zero writes; the region is appended once when absent. Observe it FAIL. Not `[P]`: same
+      file as T038.
+- [ ] T041 [US1] Write the PowerShell twin in
+      `tests/powershell/commands/Config.FieldDefaults.Tests.ps1`. Observe it FAIL. Not `[P]`: same
+      file as T039.
+- [ ] T041a [US1] Write the failing test for the record-time credential refusal in
+      `tests/bash/commands/test_config_field_defaults.bats` (FR-024, Principle IV, contract §2.4
+      row 5): a `--field-default` whose value carries an Atlassian token prefix, a vendor host, or an
+      email address is refused **before** any splice — `config.yml` is byte-for-byte unchanged, the
+      message names the path and the shape and never the value, and the existing credential exit code
+      is returned. The test fails if the value reaches the file and is caught only on the next read.
+      Observe it FAIL. Not `[P]`: same file as T038.
+- [ ] T041b [US1] Write the PowerShell twin in
+      `tests/powershell/commands/Config.FieldDefaults.Tests.ps1`. Observe it FAIL. Not `[P]`: same
+      file as T039.
+- [ ] T041c [US1] Write the failing carry-forward test in
+      `tests/bash/commands/test_config_field_defaults.bats` (FR-004, contract §2.6): hand-write an
+      entry for an **optional** field and an entry for an opted-in type inside the managed region, run
+      the ceremony answering only the required fields of the written types, and assert both
+      hand-written entries survive byte-for-byte; assert an entry written **outside** the region is
+      refused as a duplicate top-level key with zero writes. Observe it FAIL. Not `[P]`: same file as
+      T038.
+- [ ] T041d [US1] Write the PowerShell twin in
+      `tests/powershell/commands/Config.FieldDefaults.Tests.ps1`. Observe it FAIL. Not `[P]`: same
+      file as T039.
 
 ### Implementation for User Story 1
 
-- [ ] T042 [US1] Emit the canonical `field_defaults` YAML block from the recorded answers in
-      `scripts/bash/lib/config.sh`, including its explanatory comment header (Principle XVI).
+- [ ] T042 [US1] Emit the canonical `field_defaults` YAML block in `scripts/bash/lib/config.sh` from
+      the **union** of the entries already present in the managed region and the answers given on this
+      run, the run's answers winning per project/type/label (contract §2.6). An entry the ceremony
+      never asked about — an optional field, an opted-in type not named this run, a hand-written line —
+      is carried forward unchanged. Include the explanatory comment header, which states that the
+      region is machine-written and that a hand-written entry belongs inside it (Principle XVI).
 - [ ] T043 [US1] Implement the twin in `scripts/powershell/lib/Config.psm1`, byte-identical output.
 - [ ] T044 [US1] Splice that block into `.specify/jira/config.yml` through the existing
       `managed_section_splice` in `scripts/bash/commands/config.sh`. Reuse `engine/managed_section.sh`
@@ -223,12 +251,18 @@ no byte, and confirm the reconcile that used to refuse now mirrors.
       in the fixed order of contract §2.2, over the specification and story types plus any type named
       by `--field-default`. Only a field discovery marked `required: true` produces a question
       (contract §2.1); an optional defaultable field is recorded through the flag or by hand and asked
-      about never. Each question is a closed question when `allowed_values` is non-empty.
+      about never. Each question is a closed question when `allowed_values` is non-empty. A field with
+      an entry already in the managed region carries that entry as its current answer, and an empty
+      response keeps it — the one case where §2.4's empty-value refusal does not fire, because nothing
+      is being recorded (FR-007).
 - [ ] T047 [US1] Implement the twin in `scripts/powershell/commands/Config.psm1`.
 - [ ] T048 [US1] Implement the recording-time refusals of contract §2.4 in
       `scripts/bash/commands/config.sh` — empty value, value outside the allowed list, unknown type,
-      unknown label — each naming the offending item and producing zero file writes.
-- [ ] T049 [US1] Implement the twin in `scripts/powershell/commands/Config.psm1`.
+      unknown label, **and credential- or identity-shaped value** — each naming the offending item and
+      producing zero file writes. The credential check runs on the candidate value before
+      `managed_section_splice` is called, reusing the shapes `_cfg_credential_errors` already
+      recognises: a value refused on read must never have been written. Turns T041a green.
+- [ ] T049 [US1] Implement the twin in `scripts/powershell/commands/Config.psm1`. Turns T041b green.
 - [ ] T050 [US1] Report orphaned entries and not-yet-consumed entries in the ceremony's run summary
       (FR-008, FR-027) in `scripts/bash/commands/config.sh`, as reports rather than errors.
 - [ ] T051 [US1] Implement the twin in `scripts/powershell/commands/Config.psm1`.
@@ -278,23 +312,26 @@ command's outcome moving.
       acceptance and the summary gives that one reason (FR-015). Observe them FAIL.
 - [ ] T058 [P] [US2] Write the PowerShell twin in
       `tests/powershell/commands/Reconcile.FieldDefaults.Tests.ps1`. Observe it FAIL.
-- [ ] T059 [P] [US2] Write the failing test for summary provenance in
+- [ ] T059 [US2] Write the failing test for summary provenance in
       `tests/bash/commands/test_reconcile_field_defaults.bats`: every filled field is named with its
       source — `team-config`, `operator-answer`, or bridge — and the raw payload is never printed
-      (FR-022). Observe it FAIL.
-- [ ] T060 [P] [US2] Write the PowerShell twin in
-      `tests/powershell/commands/Reconcile.FieldDefaults.Tests.ps1`. Observe it FAIL.
+      (FR-022). Observe it FAIL. Not `[P]`: same file as T057.
+- [ ] T060 [US2] Write the PowerShell twin in
+      `tests/powershell/commands/Reconcile.FieldDefaults.Tests.ps1`. Observe it FAIL. Not `[P]`: same
+      file as T058.
 - [ ] T061 [P] [US2] Write the failing dry-run agreement test in
       `tests/bash/commands/test_reconcile_dry_run.bats`: the preview predicts every defaulted value and
       its source, asks no question, and writes nothing (FR-023). Observe it FAIL.
 - [ ] T062 [P] [US2] Write the PowerShell twin in `tests/powershell/commands/Reconcile.DryRun.Tests.ps1`.
       Observe it FAIL.
-- [ ] T063 [P] [US2] Write the failing non-blocking test in
+- [ ] T063 [US2] Write the failing non-blocking test in
       `tests/bash/commands/test_reconcile_field_defaults.bats`: a hook-fired run that stops for the
       question, and one that fails while applying a default, both leave the host command's outcome
-      unchanged and emit at most one warning line (FR-020). Observe it FAIL.
-- [ ] T064 [P] [US2] Write the PowerShell twin in
-      `tests/powershell/commands/Reconcile.FieldDefaults.Tests.ps1`. Observe it FAIL.
+      unchanged and emit at most one warning line (FR-020). Observe it FAIL. Not `[P]`: same file as
+      T057.
+- [ ] T064 [US2] Write the PowerShell twin in
+      `tests/powershell/commands/Reconcile.FieldDefaults.Tests.ps1`. Observe it FAIL. Not `[P]`: same
+      file as T058.
 
 ### Implementation for User Story 2
 
@@ -335,29 +372,40 @@ command, when run, makes the Phase 3 scenario pass.
 
 ### Tests for User Story 3 ⚠️ write first, observe FAIL
 
-- [ ] T075 [P] [US3] Write the failing Bash tests in
+- [ ] T075 [US3] Write the failing Bash tests in
       `tests/bash/commands/test_reconcile_field_defaults.bats`: with no default and no answer, the run
       refuses for that specification with zero writes and the pre-existing exit code, and the message
       names each field by its Jira label and carries a copy-pasteable
-      `config --field-default …` line (FR-016). Observe them FAIL.
-- [ ] T076 [P] [US3] Write the PowerShell twin in
-      `tests/powershell/commands/Reconcile.FieldDefaults.Tests.ps1`. Observe it FAIL.
+      `config --field-default …` line (FR-016). Observe them FAIL. Not `[P]`: same file as T057,
+      which Phase 4 created.
+- [ ] T076 [US3] Write the PowerShell twin in
+      `tests/powershell/commands/Reconcile.FieldDefaults.Tests.ps1`. Observe it FAIL. Not `[P]`: same
+      file as T058.
 - [ ] T077 [P] [US3] Write the failing test for a non-defaultable field in
       `tests/bash/sink/test_hierarchy.bats`: it is reported with its reason, by label, and the
       pre-existing refusal path is unchanged (FR-010). Observe it FAIL.
 - [ ] T078 [P] [US3] Write the PowerShell twin in `tests/powershell/sink/Hierarchy.Tests.ps1`.
       Observe it FAIL.
-- [ ] T079 [P] [US3] Write the failing test for a rejected value in
+- [ ] T079 [US3] Write the failing test for a rejected value in
       `tests/bash/commands/test_reconcile_field_defaults.bats`: when Jira rejects a creation over a
       defaulted value, the run names the field by label and the value it sent, explains the rejection
       in human terms rather than relaying the API body, substitutes nothing, and does not retry
-      (FR-019). Observe it FAIL.
-- [ ] T080 [P] [US3] Write the PowerShell twin in
-      `tests/powershell/commands/Reconcile.FieldDefaults.Tests.ps1`. Observe it FAIL.
+      (FR-019). Observe it FAIL. Not `[P]`: same file as T057.
+- [ ] T080 [US3] Write the PowerShell twin in
+      `tests/powershell/commands/Reconcile.FieldDefaults.Tests.ps1`. Observe it FAIL. Not `[P]`: same
+      file as T058.
 - [ ] T081 [P] [US3] Write the failing scenario
       `tests/conformance/scenarios/us3-field-defaults-remedy.json` — the mandatory-field fixture with
       nothing recorded and `--accept-defaults`, expecting the refusal and the remedy line. Observe it
       FAIL.
+- [ ] T081a [US3] Reconcile the shipped `tests/conformance/scenarios/us3-mandatory-field-refusal.json`
+      with §3.3's second trigger. Run 1 (`--dry-run`) is unchanged — §4.3 keeps the preview on the
+      refusal path. Run 2 currently invokes `reconcile --json` with no flag and will now emit
+      `confirmation-pending` with exit `0`. Give run 2 that expectation and add a third run —
+      `["reconcile", "--json", "--accept-defaults", "specs/001-reporting/spec.md"]` — carrying the
+      refusal assertion the scenario was named for, so both halves of the changed behaviour are
+      covered on the very fixture the defect came from. Not `[P]`: it edits a shipped scenario the
+      other US3 scenarios are validated alongside.
 
 ### Implementation for User Story 3
 
@@ -386,7 +434,9 @@ own cure.
       the pre-feature release (FR-028, SC-010). The fixture's written types MUST carry at least one
       **optional** defaultable custom field and MUST have creations pending, so the scenario actually
       proves the §3.3 trigger is keyed on what the run would send rather than on what the type offers
-      — without that, the scenario passes vacuously.
+      — without that, the scenario passes vacuously. Every **required** field of those types MUST
+      already be satisfiable by the bridge, or §3.3's second trigger fires and the scenario asserts
+      the opposite of what it claims.
 - [ ] T089 [P] Document `field_defaults`, the `ask` switch, and the managed region in
       `templates/config.yml.template`, self-documenting enough that a tech lead needs no other page
       (Principle XVI).
@@ -434,8 +484,10 @@ own cure.
 - **Phase 3 (US1)**: depends on Phase 2. Independently shippable — this is the MVP.
 - **Phase 4 (US2)**: depends on Phase 2. Does **not** depend on Phase 3 in code, but is far easier to
   demonstrate once US1 can record a default, so schedule it after unless staffing says otherwise.
-- **Phase 5 (US3)**: depends on Phase 2 only. Genuinely independent of US1 and US2 — it is about what
-  happens when nothing was recorded.
+- **Phase 5 (US3)**: depends on Phase 2 only for its code. Genuinely independent of US1 and US2 — it
+  is about what happens when nothing was recorded. One file-level caveat: T075 and T079 append to the
+  test file T057 creates in Phase 4. Taking US3 before US2 means that file does not exist yet — create
+  it in T075 and let T057 extend it instead.
 - **Phase 6 (Polish)**: depends on every story that is being shipped.
 
 ### Within Each Phase
@@ -451,7 +503,10 @@ own cure.
 ### Parallel Opportunities
 
 - T001, T002, T004 — different files.
-- Every `[P]`-marked test pair (Bash + PowerShell) — always different files.
+- Every `[P]`-marked test pair (Bash + PowerShell) — always different files. Two test tasks writing
+  the **same** file are never both `[P]`, however different their assertions:
+  `test_config_field_defaults.bats` is written by T038 then extended by T040, T041a, T041c;
+  `test_reconcile_field_defaults.bats` is written by T057 then extended by T059, T063, T075, T079.
 - Within Phase 2: the discovery track (T005–T008), the CLI track (T017–T020), and the satisfiability
   track (T021–T024) touch disjoint files and can run concurrently.
 - Within Phase 3: T035, T036, T037 are three independent scenario files.

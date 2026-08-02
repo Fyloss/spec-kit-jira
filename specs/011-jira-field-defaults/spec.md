@@ -215,7 +215,9 @@ command).
   not-yet-consumed rather than silently following the role onto a type they were never reviewed for.
 - **A team records nothing at all.** The overwhelmingly common case, and the one a solo developer on
   a three-type project lands in: the ceremony asks nothing it did not already ask, and every output
-  of every command is unchanged. The feature has to be invisible to the teams that do not need it.
+  of every command is unchanged. The feature has to be invisible to the teams that do not need it. A
+  team the bridge refuses to serve today is the one exception, and it is not a team the feature is
+  invisible to — it is the team the feature exists for.
 - **A team removes a default it had recorded.** Future creations stop carrying that field
   immediately. If the field is mandatory, the pre-existing refusal returns — which is the correct
   outcome, and the reason removal is the off switch rather than a separate one.
@@ -239,9 +241,9 @@ command).
   refusal.
 - **FR-004**: The operator MUST be able to record a default for a field Jira does not require, for
   any issue type in scope, and the ceremony MUST NOT ask a question about such a field. The two ways
-  to state one are the recording flag of FR-006 and a hand-written entry in the team configuration
-  file; both produce the same entry, are validated identically (FR-003, FR-008), and are carried
-  forward unchanged by every later ceremony run.
+  to state one are the recording flag of FR-006 and a hand-written entry inside the team configuration
+  file's managed region; both produce the same entry, are validated identically (FR-003, FR-008), and
+  are carried forward unchanged by every later ceremony run.
 - **FR-005**: Recorded defaults MUST be persisted in the committable team configuration file, scoped
   by project and by issue type, keyed by the field's human label, in the same business-language style
   as the existing configuration keys, with an explanatory comment.
@@ -326,9 +328,15 @@ command).
 
 **Inertness — the mechanism is off until a team turns it on**
 
-- **FR-028**: The whole mechanism MUST be inert in the absence of a recorded default. A repository
-  that records nothing MUST behave exactly as it does today, byte for byte, on every surface: no new
-  question, no new summary line, no field the bridge did not already send.
+- **FR-028**: The whole mechanism MUST be inert for every repository the pre-existing behaviour
+  already served. A repository that records no default and whose written issue types require nothing
+  the bridge cannot supply MUST behave exactly as it does today, byte for byte, on every surface: no
+  new question, no new summary line, no field the bridge did not already send. The single admitted
+  change is to a repository the bridge refuses to mirror today: there, and only there, a run may stop
+  to ask for a value nobody has recorded (FR-011), because a repository that produces zero tickets has
+  no working behaviour to preserve. A written type carrying optional fields the bridge cannot supply
+  is NOT such a repository and MUST stay silent — the question follows what the run would send, never
+  what the type offers.
 - **FR-029**: Removing a recorded default from the team configuration MUST be the way to stop the
   bridge sending that field on future creations, and MUST take effect with no other action. No
   default is ever supplied on a team's behalf, and no field is ever written because the bridge
@@ -366,7 +374,7 @@ command).
 | XII | Quality and Catalog Publication | Ships as a MINOR version bump with a CHANGELOG entry, green three-OS matrix, clean lint, and a dogfood run against a real Jira project whose written types carry mandatory custom fields — the exact instance shape that produced the defect. |
 | XIII | TDD With a Minimum 80% Coverage | Every requirement here is a failing test first: the existing mandatory-field conformance fixture gains the green counterpart it never had, plus scenarios for the closed allowed-values question, the override, the non-interactive path, the invalid-value rejection, and the surviving refusal. The original blocking defect ships with its regression test written before the fix. Tests identify their own state by recorded identity and stay green in parallel. |
 | XIV | KISS — The Simplest Solution That Satisfies the Spec | One config section, one ceremony question per field, one consolidated question per run, one flag to record answers non-interactively, one switch to stop asking. A recorded default is a literal value: no template syntax, no expression language, no computed or conditional defaults. No new dependency. |
-| XV | YAGNI — Nothing Is Built Before a Spec Requires It | Every key and flag traces to a requirement above: the defaults map (FR-005), the record-non-interactively flag (FR-006), the stop-asking switch (FR-014), the other-types opt-in (FR-026). FR-028 and FR-029 make the whole mechanism inert until a team records something and dead again the moment they remove it, so nothing here is a capability a team carries without asking for it. The opt-in cannot decay into orphaned configuration: FR-026 validates the type against discovery so no entry can name something that does not exist, and FR-027 makes the ceremony report any not-yet-consumed entry by name — the same "recorded, not yet mirrored" contract the `task` hierarchy role already ships under. Deliberately excluded as unrequired: retro-fill, wildcard issue types, per-developer default overrides, defaults on update-only writes, and any default the bridge computes for itself. |
+| XV | YAGNI — Nothing Is Built Before a Spec Requires It | Every key and flag traces to a requirement above: the defaults map (FR-005), the record-non-interactively flag (FR-006), the stop-asking switch (FR-014), the other-types opt-in (FR-026). FR-028 and FR-029 make the whole mechanism inert until a team records something — for every repository the bridge serves today — and dead again the moment they remove it, so nothing here is a capability a team carries without asking for it. The opt-in cannot decay into orphaned configuration: FR-026 validates the type against discovery so no entry can name something that does not exist, and FR-027 makes the ceremony report any not-yet-consumed entry by name — the same "recorded, not yet mirrored" contract the `task` hierarchy role already ships under. Deliberately excluded as unrequired: retro-fill, wildcard issue types, per-developer default overrides, defaults on update-only writes, and any default the bridge computes for itself. |
 | XVI | Human Readable — Readable by a Human Above All | Every field is named by the label a human sees in Jira, never by an internal identifier (FR-002, FR-016, FR-019, FR-022). The config section is self-documenting with a comment explaining its role. The consolidated question is one readable list, the summary is prose naming field and source, and a rejected value is explained in human terms rather than relayed as a raw API error. |
 
 ## Success Criteria *(mandatory)*
@@ -395,8 +403,10 @@ command).
   two issue types the mirror writes — a project offering a dozen issue types is asked about two of
   them, and a written type carrying twenty optional fields adds no question at all — and no hook run
   modifies any tracked file.
-- **SC-010**: A repository that records no default sees no change whatsoever: every command's output
-  is byte-identical to the release before this feature, and the conformance corpus proves it.
+- **SC-010**: A repository that records no default and is mirroring successfully today sees no change
+  whatsoever: every command's output is byte-identical to the release before this feature, and the
+  conformance corpus proves it — including for a repository whose written types carry optional custom
+  fields the bridge cannot supply.
 
 ## Assumptions
 

@@ -60,7 +60,9 @@ and listing every attachment field of every type would bury the one report that 
 An entry recorded by hand for an optional field is validated exactly as an answered one: §2.4's
 refusals apply to it in full, and §2.6 carries it forward unchanged.
 
-**§2.4 Refusals at recording time.** Each produces zero writes to any file:
+**§2.4 Refusals at recording time.** Each produces zero writes to any file. Every check below runs
+**before** the managed-region splice, on the candidate value as given — a value that would be refused
+on the next read must never be written on this one (Principle IV):
 
 | Input | Refusal |
 | --- | --- |
@@ -68,15 +70,26 @@ refusals apply to it in full, and §2.6 carries it forward unchanged.
 | value outside `allowed_values` | names the field and lists the accepted values (FR-003) |
 | unknown issue-type name | names it and lists the types the project offers (FR-026) |
 | unknown field label for that type | names it and lists the defaultable fields of that type |
-| credential- or identity-shaped value | the existing `config.yml` credential scan, unchanged, naming the path and the shape but never the value (Principle IV) |
+| credential- or identity-shaped value | the shapes `_cfg_credential_errors` already recognises, applied to the candidate **before** it is written, naming the path and the shape but never the value (Principle IV, FR-024) |
 
 **§2.5 Where it is written.** Into the managed region of `config.yml`, spliced by the shared managed
 section machinery. Bytes outside the region are preserved verbatim; the host's dominant line ending is
 respected; malformed markers refuse with exit `4` and zero writes rather than being guessed at.
 
-**§2.6 Idempotence.** A ceremony run whose answers match the recorded ones rewrites the region to the
-same bytes, so the file is byte-for-byte unchanged (FR-007). An already-recorded value is presented as
-the current answer and keeping it requires no input.
+**§2.6 Idempotence and carry-forward.** The ceremony reads the existing managed region before it
+writes, and re-emits **every** entry it finds there — including entries for optional fields it never
+asks about (FR-004), entries for opted-in types not named on this run, and entries the operator wrote
+by hand. It rewrites, it does not replace: an answer given on this run overwrites the entry for that
+project, type, and label; every other entry is carried forward unchanged. A run whose answers match
+the recorded ones therefore rewrites the region to the same bytes and leaves the file byte-for-byte
+unchanged (FR-007).
+
+A hand-written entry belongs **inside** the managed region. `field_defaults` is a single top-level
+key: an entry written outside the markers is a duplicate top-level key and the config read refuses it
+with the existing schema error. The region's comment header states this, and §2.4's refusals apply to
+a hand-written entry exactly as to an answered one.
+
+An already-recorded value is presented as the current answer and keeping it requires no input.
 
 **§2.7 Degraded mode.** With no credentials the ceremony performs no `createmeta` read, therefore
 knows no required-field set, therefore asks nothing and records nothing (FR-009).
@@ -170,12 +183,19 @@ question exactly as an ordinary run does, and §3.9 keeps the host command green
 report and the subsequent run cannot disagree about any value (FR-023). The preview emits no question
 and writes nothing.
 
+A `--dry-run` over a plan containing an unsatisfiable required field reports §3.6's refusal, not
+§3.3's question: the preview never asks, and a preview that no answer can follow is a preview of the
+refusal that will happen. The exit code and the message are the ones §3.6 specifies.
+
 ---
 
 ## §5 Inertness
 
 **§5.1** With no recorded default anywhere, every command's output is byte-identical to the release
-preceding this feature: no question, no summary line, no payload field (FR-028).
+preceding this feature — for every repository whose written types require nothing outside §1's
+bridge-supplied list. No question, no summary line, no payload field (FR-028). A repository with an
+unsatisfiable required field is outside this clause by construction: it produced a refusal and zero
+tickets before this feature, and §3.3's second trigger is the whole point of the change.
 
 **§5.2** Removing a recorded default stops the bridge sending that field on the next creation, with no
 other action required. If the field is required, §3.6's refusal returns — the correct outcome, and the
