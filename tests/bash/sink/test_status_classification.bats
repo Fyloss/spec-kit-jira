@@ -55,6 +55,7 @@ setup() {
 }
 
 @test "the PowerShell port classifies byte-identically (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   # A quote-free dataset keeps the cross-port pwsh invocation free of shell
   # escaping noise; apostrophe handling is proven by the serializer parity tests.
   local statuses='[{"name":"To Do","status_category":"new"},{"name":"Done","status_category":"done"},{"name":"Canceled","status_category":"done"}]'

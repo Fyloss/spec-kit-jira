@@ -27,7 +27,12 @@ setup() {
 }
 
 teardown() {
+  # `&&` as the last statement makes teardown's own exit status the [[ ]]
+  # test's — bats treats that as a teardown failure whenever REPO was never
+  # set (e.g. an early `skip`), even though there is genuinely nothing to
+  # clean up.
   [[ -n "${REPO:-}" ]] && harness_cleanup "${REPO}"
+  return 0
 }
 
 # assert_invariant <step> — at most one jira entry per event, none ever lost, and

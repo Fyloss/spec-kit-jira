@@ -76,7 +76,9 @@ teardown() {
 
 @test "the PowerShell port: a second run against its own mock instance creates nothing" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
-  mock_start "${MOCK}/configs/default.json"
+  # A native pwsh HTTP client cannot reach the curl shim's sentinel
+  # MOCK_BASE_URL, so this cross-port test uses the real pwsh server.
+  mock_start "${MOCK}/configs/default.json" powershell
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 
   local pwork="${BATS_TEST_TMPDIR}/repo-ps2"

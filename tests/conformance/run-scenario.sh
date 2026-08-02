@@ -98,13 +98,18 @@ if [ -n "${FIXTURE}" ]; then
 fi
 
 # --- Mock double -------------------------------------------------------------
+# Backend follows PORT (Decision 2, contracts/mock-driver.md): the Bash port
+# is exercised through the curl shim (no process); the PowerShell port needs
+# the real socket server, since its native HTTP client cannot reach the
+# shim's sentinel MOCK_BASE_URL.
 MOCK_CFG="$(mktemp)"
 jq '.mock // {}' "${SCENARIO}" > "${MOCK_CFG}"
-mock_start "${MOCK_CFG}"
+mock_start "${MOCK_CFG}" "${PORT}"
 # Recorded so a caller can identify THIS run's mock precisely — a name-pattern
 # scan (pgrep -f mock-server.ps1) also matches every other scenario's mock
-# running concurrently under a parallel test suite.
-echo "${MOCK_PID}" > "${OUTDIR}/mock.pid"
+# running concurrently under a parallel test suite. Only the real-server
+# backend (PowerShell port) has a PID to record.
+[ -n "${MOCK_PID:-}" ] && echo "${MOCK_PID}" > "${OUTDIR}/mock.pid"
 # From here on every exit path reaps the mock, including the ones `set -e` takes
 # on our behalf. An orphan holds each descriptor it inherited, and whoever reads
 # the other end then blocks forever rather than failing.
@@ -246,8 +251,11 @@ cp "${OUTDIR}/stdout.${RUN_COUNT}" "${OUTDIR}/stdout"
 cp "${OUTDIR}/stderr.${RUN_COUNT}" "${OUTDIR}/stderr"
 cp "${OUTDIR}/exit.${RUN_COUNT}" "${OUTDIR}/exit"
 
-mock_stop
+# The call log must be captured BEFORE mock_stop: mock_stop now removes the
+# recorded MOCK_TMPDIR it lives under (contracts/mock-driver.md), so copying
+# it after would silently produce an empty capture.
 cp "${MOCK_CALLLOG}" "${OUTDIR}/calls.log" 2> /dev/null || : > "${OUTDIR}/calls.log"
+mock_stop
 
 # --- Snapshot the post-run repository tree (written files) -------------------
 rm -rf "${OUTDIR}/workdir"

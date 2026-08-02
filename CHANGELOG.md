@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tests/conformance/mock-jira/curl-shim.sh` — a scripted `curl` replacement
+  (pure `bash` + `jq`, no process, no port) that backs the Bash port's mock
+  Jira double, reached through the unchanged `mock_start`/`mock_stop`/
+  `mock_calls` contract. Replaces spawning a fresh PowerShell mock server per
+  test across all 35 mock-dependent Bash test files. The PowerShell port's
+  conformance runs still use the real `mock-server.ps1`, and the two are
+  continuously cross-checked by the conformance corpus.
+- `tests/run-bash.sh` — a dependency-free parallel Bash test runner. Shards
+  across cores via `xargs -P` (POSIX, always present) instead of `bats --jobs`
+  (which needs GNU `parallel` and silently runs 0 tests without it). Never
+  reports success while executing 0 tests or 0 files. Supports `--since <ref>`
+  for a change-scoped local inner loop (fail-open to the full suite on any
+  doubt; never used in CI).
+- CI caching for the Pester module and the `uv`-installed `specify-cli`
+  (`.github/workflows/ci.yml`), and a 15-minute budget on the `coverage-bash`
+  gate (`.github/workflows/gates.yml`).
+
+### Changed
+
+- The Bash test suite no longer requires PowerShell or GNU `parallel` to run
+  locally — only `bats` and `jq`.
+- `tests/conformance/run-scenario.sh` selects the mock backend by port: the
+  curl shim for `bash`, the real PowerShell server for `powershell`.
+
 ## [0.8.0] - 2026-08-01
 
 ### Added

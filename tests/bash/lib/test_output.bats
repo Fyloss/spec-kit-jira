@@ -46,12 +46,14 @@ setup() {
 }
 
 @test "summary JSON is byte-identical across ports" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   bash_out="$(summary_build_json reconcile true 2 1 0 1 0 2)"
   ps_out="$(pwsh -NoProfile -Command "Import-Module '${PS_LIB}/Output.psm1' -Force; [Console]::Out.Write((New-JiraSummaryJson -Command reconcile -DryRun \$true -Created 2 -Updated 1 -Skipped 0 -Warnings 1 -Errors 0 -ExitCode 2))")"
   [ "$bash_out" = "$ps_out" ]
 }
 
 @test "prose is byte-identical across ports" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   json="$(summary_build_json config false 0 0 0 0 0 0)"
   bash_out="$(printf '%s' "$json" | summary_render_prose)"
   ps_out="$(pwsh -NoProfile -Command "Import-Module '${PS_LIB}/Output.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraSummaryProse '$json'))")"
@@ -101,6 +103,7 @@ line_of() {
 }
 
 @test "the style-audit prose is byte-identical across ports (T098)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   json="$(style_audit_json)"
   bash_out="$(printf '%s' "$json" | summary_render_prose)"
   ps_out="$(pwsh -NoProfile -Command "Import-Module '${PS_LIB}/Output.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraSummaryProse '$json'))")"

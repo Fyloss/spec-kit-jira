@@ -181,7 +181,9 @@ EOF
 @test "the PowerShell port decides the same outcome for every row (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local cfg; cfg="$(_seed_config '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","role":"parent"}')"
-  mock_start "${cfg}"
+  # A native pwsh HTTP client cannot reach the curl shim's sentinel
+  # MOCK_BASE_URL, so this cross-port test uses the real pwsh server.
+  mock_start "${cfg}" powershell
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   local minfo='{"state":"bound","id":"3f2a91c04b7e6d18","ticket":"COMP-412","lines":[2]}'
   local b; b="$(recognition_parent_run "${minfo}" "${SPEC_REF}" "COMP" "${SPEC_PATH}")"

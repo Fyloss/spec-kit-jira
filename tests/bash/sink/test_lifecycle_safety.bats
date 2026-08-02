@@ -67,6 +67,7 @@ setup() {
 }
 
 @test "the PowerShell port folds the lifecycle rules byte-identically (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local ps_abs; ps_abs="$(cd "${ROOT}/scripts/powershell/sink/jira" && pwd)"
   local lc
   lc="$(jq -cn '{order:["To Do","In Progress","Done"], base_url:"http://h",

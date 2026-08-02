@@ -70,11 +70,23 @@ teardown() {
   [ "$(jq -r .style "${OUT}/workdir/project.json")" = "classic" ]
 }
 
+@test "the bash port's shim backend records no mock.pid (no process to leak)" {
+  bash "${HARNESS}" "${SCENARIO}" bash "${OUT}"
+  [ ! -f "${OUT}/mock.pid" ]
+}
+
 @test "harness stops the mock when the run aborts after the mock started" {
   # A surviving mock holds every fd it inherited, which under kcov is the
   # tracer's own pipe — the coverage run then never sees EOF and burns the CI
   # step's whole budget. An invalid branch name aborts the harness after
   # mock_start, which is where the leak used to happen.
+  #
+  # This is a real-process test by construction: the Bash port's mock backend
+  # is the curl shim (no process, contracts/mock-driver.md), so only the
+  # "powershell" port backend has a PID that could leak. The git_branch abort
+  # happens before the harness ever reaches the entry point, so pinning
+  # SPEC_KIT_JIRA_ENTRY_BASH (a bash stub) has no bearing on this run.
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   cat > "${TMP}/abort.json" << 'EOF'
 {
   "name": "abort-after-mock",
@@ -88,7 +100,7 @@ EOF
   # test; a surviving mock holds either of them open, so the assertions below
   # would never be reached — the test would hang instead of failing.
   status=0
-  bash "${HARNESS}" "${TMP}/abort.json" bash "${OUT}" \
+  bash "${HARNESS}" "${TMP}/abort.json" powershell "${OUT}" \
     < /dev/null > "${TMP}/abort.out" 2>&1 3>&- || status=$?
   [ "${status}" -ne 0 ]
   grep -q 'not a valid branch name' "${TMP}/abort.out"
@@ -100,7 +112,10 @@ EOF
   [ -n "${mock_pid}" ]
 
   # Termination is asynchronous; poll rather than assume the kill has landed.
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
+  # A generous bound: under tests/run-bash.sh's full-suite parallel fan-out,
+  # dozens of pwsh processes can be exiting concurrently, and OS-level reaping
+  # of THIS one can take longer than a lightly-loaded host's 3s would suggest.
+  for _ in $(seq 1 50); do
     kill -0 "${mock_pid}" 2> /dev/null || break
     sleep 0.3
   done

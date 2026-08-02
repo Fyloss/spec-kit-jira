@@ -352,13 +352,20 @@ coverage, single-sourced version) blocking on the three-OS matrix.
 Run the suites locally with:
 
 ```bash
-bats -r tests/bash --jobs "$(getconf _NPROCESSORS_ONLN)"   # requires: brew/apt install parallel
+tests/run-bash.sh                                             # Bash port — needs only bats + jq
 pwsh -NoProfile -Command "Invoke-Pester -Path tests/powershell -PassThru"
 ```
 
-`--jobs` runs independent `@test` cases across cores via GNU parallel; each
-test isolates its own tmpdir and the mock Jira server binds an OS-assigned
-ephemeral port, so concurrent runs cannot collide.
+`tests/run-bash.sh` needs only `bats` and `jq` — no PowerShell, no GNU
+`parallel`. It shards across cores via `xargs -P` (no dependency, never a
+silent zero-tests run) and drives the mocked Jira double through a pure
+`bash`+`jq` `curl` shim, so the 35 mock-dependent test files run without
+spawning any process. Each test isolates its own tmpdir, so concurrent runs
+cannot collide.
+
+For the fast inner loop, `tests/run-bash.sh --since <ref>` runs only the test
+files affected by the diff against `<ref>` (fail-open to the full suite on any
+doubt) — local only, never used in CI.
 
 ## License
 

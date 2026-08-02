@@ -83,8 +83,11 @@ jobs:
         id: kcov
         # continue-on-error lets the traceability fallback rescue the JOB when
         # kcov could not measure; the fallback step re-fails on genuine failures.
+        # A timeout is NOT "could not measure" — `rescue` is only set on the
+        # explicit rc=2 path below, so a kill-by-timeout reaches the fallback
+        # with `rescue` unset and that step fails the job genuinely (FR-016).
         continue-on-error: true
-        timeout-minutes: 30
+        timeout-minutes: 15
         env:
           SPEC_KIT_JIRA_COVERAGE_TIMEOUT: 600
           SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT: 1200

@@ -93,6 +93,7 @@ setup() {
 }
 
 @test "the PowerShell port classifies byte-identically (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local cases=(
     '{"current_status":"Blocked","current_category":"halted","target_status":"Done","order":["To Do","Done"],"on_drift":"abort"}'
     '{"current_status":"Done","current_category":"post-scope","target_status":"To Do","order":["To Do","In Progress","Done"],"on_drift":"proceed"}'

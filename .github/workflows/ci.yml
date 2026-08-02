@@ -31,16 +31,16 @@ jobs:
 
       - name: Install Bash toolchain (Linux)
         if: runner.os == 'Linux'
-        # GNU parallel drives bats' --jobs flag below, splitting the suite
-        # across cores instead of running every @test on a single one.
-        run: sudo apt-get update && sudo apt-get install -y bats jq shellcheck curl parallel
+        # No GNU parallel: tests/run-bash.sh shards via `xargs -P`, which is
+        # always present, and never silently runs 0 tests without it (FR-003).
+        run: sudo apt-get update && sudo apt-get install -y bats jq shellcheck curl
 
       - name: Install Bash toolchain (macOS)
         if: runner.os == 'macOS'
         # The runner image only ships Apple's Bash 3.2, which the port refuses
         # by design (prereq_check requires Bash >= 4); brew's bash lands in
         # /opt/homebrew/bin, ahead of /bin in the image PATH.
-        run: brew install bats-core jq shellcheck bash parallel
+        run: brew install bats-core jq shellcheck bash
 
       # T003 — the install harness (tests/conformance/install-harness.sh and its
       # PowerShell twin) drives the REAL `specify extension add`. Without the CLI
@@ -51,16 +51,32 @@ jobs:
       - name: Install the Spec Kit CLI (install-harness dependency)
         uses: astral-sh/setup-uv@v5
 
+      - name: Cache specify-cli (uv tool)
+        # A cache hit never changes a gate verdict (Decision 4): on a miss this
+        # falls through to a correct, slower install below.
+        id: cache-specify-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/uv/tools/specify-cli
+          key: specify-cli-${{ runner.os }}-github-spec-kit-main
+
       - name: Install specify-cli
+        if: steps.cache-specify-cli.outputs.cache-hit != 'true'
         run: uv tool install specify-cli --from git+https://github.com/github/spec-kit.git
 
-      - name: Run bats (Bash port — POSIX hosts only)
+      - name: Run the Bash suite (tests/run-bash.sh — POSIX hosts only)
         if: runner.os != 'Windows'
-        # --jobs runs @test cases (and, within a file, its own tests) across
-        # cores via GNU parallel. Each test already isolates its own tmpdir
-        # and the mock Jira server binds an OS-assigned ephemeral port, so
-        # concurrent runs cannot collide on shared state.
-        run: bats -r tests/bash --jobs "$(getconf _NPROCESSORS_ONLN)"
+        # Dependency-free parallel runner (Decision 3): shards via `xargs -P`,
+        # no GNU parallel, no PowerShell for this step. Every mock-driving test
+        # runs against the curl shim — zero pwsh processes.
+        run: tests/run-bash.sh
+
+      - name: Cache the Pester module
+        id: cache-pester
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/powershell/Modules/Pester
+          key: pester-${{ runner.os }}-5.0.0
 
       - name: Run Pester (PowerShell port — all hosts)
         shell: pwsh

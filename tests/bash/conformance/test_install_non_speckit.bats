@@ -24,7 +24,12 @@ setup() {
 }
 
 teardown() {
+  # `&&` as the last statement makes teardown's own exit status the [[ ]]
+  # test's — bats treats that as a teardown failure whenever BARE was never
+  # set (e.g. an early `skip`), even though there is genuinely nothing to
+  # clean up.
   [[ -n "${BARE:-}" ]] && rm -rf "${BARE}"
+  return 0
 }
 
 @test "installing into a non-spec-kit directory reports the missing structure" {
