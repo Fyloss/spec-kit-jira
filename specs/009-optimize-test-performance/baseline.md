@@ -165,7 +165,7 @@ was measured under.
 
 | Metric | Baseline | Achieved | Target |
 |--------|----------|----------|--------|
-| Local wall-clock, `tests/run-bash.sh`, **bats+jq-only PATH** (SC-002's target host shape: `bats`, `jq`, `git`, `curl`, `bash` only — no `pwsh`, no GNU `parallel`) | unmeasurable pre-shim (0 tests / instant `pwsh: command not found`, see below) | **190s (3m10s)**, 119/119 files green, 984/984 tests, 0 failures (985/985 after T028 added a regression test) | ≤ 5 min (SC-001) — **PASS**, 38% of budget |
+| Local wall-clock, `tests/run-bash.sh`, **bats+jq-only PATH** (SC-002's target host shape: `bats`, `jq`, `git`, `curl`, `bash` only — no `pwsh`, no GNU `parallel`) | unmeasurable pre-shim (0 tests / instant `pwsh: command not found`, see below) | **190s (3m10s)**, 119/119 files green, 984/984 tests, 0 failures (986/986 after T028's and T040's regression tests) | ≤ 5 min (SC-001) — **PASS**, 38% of budget |
 | Same run, this machine's full ambient PATH (`pwsh` + GNU `parallel` both present — NOT the SC-002 target shape) | n/a | 195–668s (3m15s–11m08s), high run-to-run variance | informational only; SC-001 is scoped to the bats+jq-only shape |
 | Mock test requires pwsh | YES (35 files spawn `mock-server.ps1` per test) | NO — curl shim (`tests/conformance/mock-jira/curl-shim.sh`), 0 processes | None |
 | Mock test requires GNU parallel | YES (`bats --jobs`, 0 tests silently on a host without it) | NO — `tests/run-bash.sh` shards via `xargs -P` | None |
@@ -173,11 +173,45 @@ was measured under.
 | CI wall-clock | TBD (needs a real Actions run) | — | ≥ 30% reduction |
 | Bash statement coverage | TBD (needs Linux + kcov; this dev machine's kcov cannot drive a non-Apple bash on macOS, per `tests/coverage/bash-coverage.sh`'s own `require_kcov` guard) | — | ≥ 80% |
 | Coverage denominator (lines) | TBD (same blocker) | — | ≥ baseline |
-| `@test` count | **955** | **989** (+34: +33 across 4 new CI-guard files, +1 from T028's regression test; every original test kept) | **≥ 955** — **PASS** |
+| `@test` count | **955** | **986** (measured 2026-08-02 with the T001 command, `grep -rhc '^@test' tests/bash --include='*.bats'`, after T028's and T040's regression tests landed; every original test kept — the growth is the 4 new CI-guard files plus the two regression tests) | **≥ 955** — **PASS** |
 | `.bats` file count | **115** | **119** (+4 new: `test_mock_shim_contract.bats`, `test_run_bash_runner.bats`, `test_workflow_bash_runner.bats`, `test_conformance_no_cross_os_shard.bats`) | ≥ 115 — **PASS** |
 | Conformance scenarios | **51** | **51**, byte-identical across ports on 2 separate full-corpus runs (`bash tests/conformance/ci-conformance.sh`) | = 51 — **PASS** |
 | Blocking CI jobs | **9** | **9** (unchanged; T017c's job-topology restructuring was deliberately NOT done — see note below) | = 9 (see T002) — **PASS** |
 | PowerShell/Pester suite | 96 `.Tests.ps1` files | **720/720 tests green** (`Invoke-Pester -Path tests/powershell`) | green, unregressed — **PASS** |
+
+### T036 interim evidence (2026-08-02, local measurements — CI figures still pending)
+
+Captured while fixing the first real PR CI run (`789885c`); these are **not**
+the CI numbers T036 requires, but they bound them from below (the containers
+ran on Apple Silicon, faster than a 4-vCPU GitHub runner):
+
+- **First real CI wall-clocks for `tests/run-bash.sh`** (run 30737632012):
+  **18m26s on `macos-latest`** (vs 190s locally — GitHub runners are fork-bound
+  and 4-core; never size a CI budget from a local wall clock). The
+  `windows-latest` leg passed in 35m05s; `unit` totals: macOS 24m03s.
+- **xtrace tracing overhead ≈ 5×**: the traced bats phase, scoped to the unit
+  dirs only (commands/engine/lib/sink, conformance + ci excluded) and run
+  through the parallel runner, took **13m09s wall / 125 CPU-minutes** locally
+  (10 cores saturated). On a 4-vCPU runner that is ≥ 31 minutes for the traced
+  phase alone.
+- **kcov corpus phase > its own 600s bound**: `--mode conformance` in an
+  ubuntu-22.04 container (kcov 38) reached scenario 46/51 when
+  `SPEC_KIT_JIRA_COVERAGE_TIMEOUT=600` expired; the full corpus needs ~12
+  minutes there, so ~15+ on the CI runner. The 008-era hierarchy/parent
+  scenarios cost 20–57s each under kcov instrumentation.
+- **Conclusion for SC-004**: kcov corpus (~15 min CI) + traced suite (~31 min
+  CI) cannot fit the 15-minute budget under the current two-collector
+  architecture — the budget needs either an architectural change to the
+  coverage measurement or a reviewed spec amendment. `coverage-bash` has been
+  red on `main` since `1044db9` (2026-07-28, first post-008 push; last green
+  `855e893` at 7m36s) for exactly this reason, killed at its then-30-minute
+  ceiling on every run — the failure predates this branch.
+- The traced phase also surfaces a measurement artifact: 3 files
+  (`test_config_reenable.bats`, `test_reconcile_routing.bats`,
+  `test_config.bats`) fail **only under `SHELLOPTS=xtrace` tracing** (8 tests;
+  green untraced, no fd-8 usage anywhere in `scripts/bash`). Per the runner's
+  own contract a red traced suite is reported, never fatal — noted here so a
+  future reader does not mistake it for a suite regression.
 
 ### Why the bats+jq-only number is the one that matters for SC-001
 
