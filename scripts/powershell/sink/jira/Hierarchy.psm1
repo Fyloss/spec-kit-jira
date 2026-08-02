@@ -13,6 +13,15 @@
 
 Set-StrictMode -Version Latest
 
+# Get-JiraRoleNameList — the closed role set has exactly one source (010,
+# contract §1). Deliberately WITHOUT -Force, unlike every other import in the
+# port: Hierarchy.psm1 is itself imported -Global and LAST by callers that
+# already hold lib/Config.psm1 in session scope, and -Force is a
+# Remove-Module + Import-Module pair that would tear that copy out of their
+# scope and re-attach it to this module's, taking ConvertFrom-JiraConfigYaml
+# and friends with it.
+Import-Module (Join-Path $PSScriptRoot '../../lib/Config.psm1')
+
 function Get-JiraHierarchyChildLevel {
     <#
     .SYNOPSIS
@@ -132,7 +141,9 @@ function Resolve-JiraRoleMapping {
         return $null
     }
 
-    foreach ($role in @('specification', 'story', 'task')) {
+    # The role set is read from Config.psm1, never respelled here — the Bash
+    # port binds the same list through `_cfg_role_names_json` (contract §1).
+    foreach ($role in (Get-JiraRoleNameList)) {
         $dname = Get-MapValue $Declared $role
         $oname = Get-MapValue $Operator $role
         $answerName = $null
