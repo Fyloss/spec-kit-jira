@@ -243,6 +243,21 @@ function ConvertTo-JiraSummaryProse {
                     if ([string]::IsNullOrEmpty($pstyle)) { continue }
                     $psource = if ($entry.PSObject.Properties.Name -contains 'style_source') { [string]$entry.style_source } else { '' }
                     $lines.Add("    ${pkey}: $pstyle ($psource)")
+                    # The per-role audit (010, contract §7.1) — `<role>:
+                    # <logical_name> (<source>)`, one line per role this
+                    # project resolved, in role order. `task` is omitted
+                    # entirely when unresolved-but-absent (§3.4).
+                    $roles = if ($entry.PSObject.Properties.Name -contains 'roles') { $entry.roles } else { $null }
+                    if ($null -ne $roles) {
+                        foreach ($rkey in @('specification', 'story', 'task')) {
+                            if ($roles.PSObject.Properties.Name -notcontains $rkey) { continue }
+                            $r = $roles.$rkey
+                            $rname = if ($r.PSObject.Properties.Name -contains 'logical_name') { [string]$r.logical_name } else { '' }
+                            if ([string]::IsNullOrEmpty($rname)) { continue }
+                            $rsource = if ($r.PSObject.Properties.Name -contains 'source') { [string]$r.source } else { '' }
+                            $lines.Add("      ${rkey}: $rname ($rsource)")
+                        }
+                    }
                 }
             }
         }

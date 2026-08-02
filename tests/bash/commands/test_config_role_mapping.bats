@@ -163,3 +163,15 @@ boot() {
   localj="$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")"
   [ "$(jq -r '.resolved_ids.CONSUMER.roles | has("task")' <<< "${localj}")" = "false" ]
 }
+
+@test "T089 — the unresolved-role refusal never reads stdin; it cannot hang the hook or --json paths" {
+  _write_config ""
+  boot
+
+  # A closed stdin: any attempted read fails immediately rather than blocking.
+  # If the ceremony ever tried to prompt, this run would fail or hang instead
+  # of completing with its ordinary exit code (FR-008, research R7).
+  run cmd_config config --json <&-
+  [ "$status" -eq 4 ]
+  [[ "$output" == *'"unresolved_roles"'* ]]
+}

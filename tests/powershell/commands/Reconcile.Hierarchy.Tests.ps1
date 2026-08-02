@@ -193,6 +193,32 @@ Describe 'Invoke-JiraReconcile — the parent hierarchy regression' {
         $r = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--json')
         $r.ExitCode | Should -Be 0
     }
+
+    It 'T080 [Phase 9] — reconcile mirrors into the DECLARED types: one parent (Epic), one child per story (Story), each naming the parent' {
+        $work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse (Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-declared-hierarchy') $work
+        $spec = Join-Path $work 'specs/001-consumer-onboarding/spec.md'
+        $env:JIRA_CONFIG_DIR = Join-Path $work '.specify/jira'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-consumer-onboarding'
+        $env:SPEC_KIT_JIRA_ID_SOURCE = 'aaaaaaaaaaaaaaaa 1111111111111111 2222222222222222'
+        $m = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/consumer-hierarchy.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $m.BaseUrl
+        try {
+            $r = Invoke-CapturedWithCode @('reconcile', $spec, '--json')
+            $r.ExitCode | Should -Be 0
+
+            (Get-JiraMockIssueField -Mock $m -Key 'CONSUMER-1' -Path 'fields.issuetype.id') | Should -Be '10701'
+            (Get-JiraMockIssueField -Mock $m -Key 'CONSUMER-1' -Path 'fields.parent') | Should -BeNullOrEmpty
+            (Get-JiraMockIssueField -Mock $m -Key 'CONSUMER-2' -Path 'fields.issuetype.id') | Should -Be '10704'
+            (Get-JiraMockIssueField -Mock $m -Key 'CONSUMER-2' -Path 'fields.parent.key') | Should -Be 'CONSUMER-1'
+            (Get-JiraMockIssueField -Mock $m -Key 'CONSUMER-3' -Path 'fields.issuetype.id') | Should -Be '10704'
+            (Get-JiraMockIssueField -Mock $m -Key 'CONSUMER-3' -Path 'fields.parent.key') | Should -Be 'CONSUMER-1'
+        }
+        finally {
+            Stop-JiraMock -Mock $m
+            Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 Describe 'Invoke-JiraReconcile — T095 dry-run parity for the mandatory-field refusal' {

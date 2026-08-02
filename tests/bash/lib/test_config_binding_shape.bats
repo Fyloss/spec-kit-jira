@@ -89,6 +89,38 @@ setup() {
   [ "$(jq -r 'has("parent_link_available")' <<< "$output")" = "false" ]
 }
 
+# --- T078 [Phase 9] — the `roles` shape (010, contract §5.1, §9.2) ---------
+
+@test "T078 — roles.<role> round-trips {logical_name, id, hierarchy_level, subtask, source} with hierarchy_level as a STRING" {
+  local json yaml tmpf roundtripped
+  json='{"resolved_ids":{"CONSUMER":{
+    "roles": {
+      "specification": {"logical_name":"Epic","id":"10701","hierarchy_level":"1","subtask":false,"source":"declared"},
+      "story":         {"logical_name":"Story","id":"10704","hierarchy_level":"0","subtask":false,"source":"declared"},
+      "task":          {"logical_name":"Sous-tâche","id":"10716","hierarchy_level":"-1","subtask":true,"source":"declared"}
+    },
+    "child_type":  {"logical_name":"Story","id":"10704","source":"declared"},
+    "parent_type": {"logical_name":"Epic","id":"10701","source":"declared"}
+  }}}'
+  yaml="$(printf '%s' "${json}" | config_to_yaml)"
+  tmpf="${BATS_TEST_TMPDIR}/roundtrip-roles.yml"
+  printf '%s' "${yaml}" > "${tmpf}"
+  roundtripped="$(config_yaml_to_json "${tmpf}")"
+  [ "$(jq -cS . <<< "${roundtripped}")" = "$(jq -cS . <<< "${json}")" ]
+  # hierarchy_level survives as a JSON string, never a number (the YAML
+  # round-trip has no number type — contract §5.1).
+  [ "$(jq -r '.resolved_ids.CONSUMER.roles.story.hierarchy_level | type' <<< "${roundtripped}")" = "string" ]
+}
+
+@test "T078 — roles.story ≡ child_type and roles.specification ≡ parent_type on the declared-hierarchy fixture" {
+  local fixture; fixture="${ROOT}/tests/conformance/fixtures/repo-with-declared-hierarchy/.specify/jira/config.local.yml"
+  local json; json="$(config_yaml_to_json "${fixture}")"
+  [ "$(jq -cS '.resolved_ids.CONSUMER.roles.story | {logical_name, id, source}' <<< "${json}")" = \
+    "$(jq -cS '.resolved_ids.CONSUMER.child_type' <<< "${json}")" ]
+  [ "$(jq -cS '.resolved_ids.CONSUMER.roles.specification | {logical_name, id, source}' <<< "${json}")" = \
+    "$(jq -cS '.resolved_ids.CONSUMER.parent_type' <<< "${json}")" ]
+}
+
 @test "a logical_name the reader cannot unescape refuses with a located, redacted message, even nested (T014c/FR-003b)" {
   local json
   json='{"resolved_ids":{"COMP":{"issue_types":[

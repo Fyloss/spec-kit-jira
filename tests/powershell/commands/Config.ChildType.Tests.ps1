@@ -77,6 +77,19 @@ Describe 'Config child-type resolution' {
         $local.resolved_ids.COMP.child_type.source | Should -Be 'operator'
     }
 
+    It 'T031 — --issue-type KEY=story=NAME resolves the story role identically to --child-type' {
+        Write-TestConfig 'COMP'
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $M.BaseUrl
+        $r = Invoke-ConfigCaptured @('config', '--issue-type', 'COMP=story=Defect', '--json')
+        $r.ExitCode | Should -Be 0
+        $local = Read-LocalBinding
+        $local.resolved_ids.COMP.roles.story.logical_name | Should -Be 'Defect'
+        $local.resolved_ids.COMP.roles.story.source | Should -Be 'operator'
+        $local.resolved_ids.COMP.child_type.logical_name | Should -Be 'Defect'
+        $local.resolved_ids.COMP.child_type.source | Should -Be 'operator'
+    }
+
     It 'an unrecognised --child-type answer refuses, naming the candidates' {
         Write-TestConfig 'COMP'
         $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')

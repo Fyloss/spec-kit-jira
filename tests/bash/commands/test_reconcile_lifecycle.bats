@@ -150,6 +150,46 @@ EOF
   unset SPEC_KIT_JIRA_HOOK_CONTEXT
 }
 
+# =============================================================================
+# T085 [Phase 9] — every §6 role-mapping refusal downgrades to one WARNING
+# with exit 0 under hook context (010, contract §6, FR-020, Constitution III)
+# =============================================================================
+
+@test "T085 — a §6 role-mapping refusal (inverted ordering) exits 4 directly, and downgrades to one WARNING under a hook" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${SPEC}" --json > /dev/null
+
+  # Inject an inverted `roles` block into the persisted binding — impossible
+  # to produce via the config ceremony, but representative of a hand-edited
+  # or pre-010 binding upgraded by hand (§8 re-validation).
+  local localf="${JIRA_CONFIG_DIR}/config.local.yml"
+  local injected
+  injected="$(jq -cS '.resolved_ids.COMP.roles = {
+      specification: {logical_name: "Story", id: "10004", hierarchy_level: "0", subtask: false, source: "declared"},
+      story: {logical_name: "Epic", id: "10001", hierarchy_level: "1", subtask: false, source: "declared"}
+    }' <<< "$(config_yaml_to_json "${localf}")")"
+  printf '%s' "${injected}" | config_to_yaml > "${localf}"
+
+  run cmd_reconcile reconcile "${SPEC}" --json
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"reconcile: project COMP: specification names"* ]]
+
+  : > "${MOCK_CALLLOG}"
+  export SPEC_KIT_JIRA_HOOK_CONTEXT=1
+  run cmd_reconcile reconcile "${SPEC}" --json
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^WARNING: ' <<< "$output")" -eq 1 ]
+  [[ "$output" == *"is not above story"* ]]
+  unset SPEC_KIT_JIRA_HOOK_CONTEXT
+
+  run mock_calls
+  while IFS= read -r line; do
+    [ -z "${line}" ] && continue
+    [[ "${line}" == GET\ * ]]
+  done <<< "$output"
+}
+
 @test "the PowerShell port also suppresses content for a halted ticket and names it (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   # A native pwsh HTTP client cannot reach the curl shim's sentinel

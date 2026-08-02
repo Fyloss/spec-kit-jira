@@ -52,3 +52,45 @@ teardown() {
   run grep -c "RAWSECRETXYZ0123456789" <<< "${out}"
   [ "$output" = "0" ]
 }
+
+# --- T076 [Phase 9] — the existing credential scan already covers the new
+# `hierarchy` key (010, contract §2.1/data-model.md §2, FR-003). The scan is
+# generic over every scalar path outside `privacy`; these assert it fires on
+# `projects[].hierarchy.<role>` specifically, rather than assuming it does.
+
+@test "T076 — a token-shaped value under projects[].hierarchy.story refuses, exit 4, never echoed" {
+  LIB_DIR="${ROOT}/scripts/bash/lib"
+  # shellcheck source=/dev/null
+  source "${LIB_DIR}/config.sh"
+  local dir; dir="$(mktemp -d)"
+  cat > "${dir}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    hierarchy:
+      story: ATATT3xFfGF0secrettoken
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${dir}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"credential"* ]]
+  [[ "$output" != *"ATATT3xFfGF0secrettoken"* ]]
+  rm -rf "${dir}"
+}
+
+@test "T076 — a host-shaped value under projects[].hierarchy.story refuses, exit 4" {
+  LIB_DIR="${ROOT}/scripts/bash/lib"
+  # shellcheck source=/dev/null
+  source "${LIB_DIR}/config.sh"
+  local dir; dir="$(mktemp -d)"
+  cat > "${dir}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    hierarchy:
+      story: acme.atlassian.net
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${dir}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"credential"* ]]
+  rm -rf "${dir}"
+}

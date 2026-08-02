@@ -71,6 +71,21 @@ _write_config() {
   [ "$(jq -r '.resolved_ids.COMP.child_type.source' <<< "${localj}")" = "operator" ]
 }
 
+@test "T031 — --issue-type KEY=story=NAME resolves the story role identically to --child-type" {
+  _write_config COMP
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_config config --issue-type COMP=story=Defect --json
+  [ "$status" -eq 0 ]
+  local localj
+  localj="$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")"
+  [ "$(jq -r '.resolved_ids.COMP.roles.story.logical_name' <<< "${localj}")" = "Defect" ]
+  [ "$(jq -r '.resolved_ids.COMP.roles.story.source' <<< "${localj}")" = "operator" ]
+  [ "$(jq -r '.resolved_ids.COMP.child_type.logical_name' <<< "${localj}")" = "Defect" ]
+  [ "$(jq -r '.resolved_ids.COMP.child_type.source' <<< "${localj}")" = "operator" ]
+}
+
 @test "an unrecognised --child-type answer refuses, naming the candidates" {
   _write_config COMP
   mock_start "${MOCK}/configs/default.json"

@@ -582,7 +582,7 @@ cmd_config() {
     local rf_map pla_map role_key role_id type_meta
     rf_map="$(jq -c '.required_fields // {}' <<< "${rids}")"
     pla_map="$(jq -c '.parent_link_available // {}' <<< "${rids}")"
-    for role_key in specification story task; do
+    for role_key in "${JIRA_ROLE_NAMES[@]}"; do
       role_id="$(jq -r --arg r "${role_key}" '.[$r].id // empty' <<< "${roles}")"
       [[ -z "${role_id}" ]] && continue
       [[ "$(jq -r --arg t "${role_id}" 'has($t)' <<< "${rf_map}")" == "true" ]] && continue
@@ -615,7 +615,7 @@ cmd_config() {
     # mirrored" status line.
     local prior_roles
     prior_roles="$(jq -c --arg k "${pkey}" '.resolved_ids[$k].roles // {}' <<< "${existing}")"
-    for role_key in specification story task; do
+    for role_key in "${JIRA_ROLE_NAMES[@]}"; do
       local new_source new_name prior_source prior_name
       new_source="$(jq -r --arg r "${role_key}" '.[$r].source // empty' <<< "${roles}")"
       [[ -z "${new_source}" ]] && continue

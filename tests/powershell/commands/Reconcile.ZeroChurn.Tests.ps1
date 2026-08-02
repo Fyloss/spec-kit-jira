@@ -120,4 +120,31 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
         $afterDesc = ($after.Body | ConvertFrom-Json -Depth 100).fields.description
         $afterDesc.content[0].content[0].text | Should -Be 'Human note above the panel.'
     }
+
+    It 'T080 [Phase 9] — a second reconcile over the declared-hierarchy fixture issues ZERO writes of every kind' {
+        $work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse (Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-declared-hierarchy') $work
+        $spec = Join-Path $work 'specs/001-consumer-onboarding/spec.md'
+        $env:JIRA_CONFIG_DIR = Join-Path $work '.specify/jira'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-consumer-onboarding'
+        $env:SPEC_KIT_JIRA_ID_SOURCE = 'aaaaaaaaaaaaaaaa 1111111111111111 2222222222222222'
+        $m = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/consumer-hierarchy.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $m.BaseUrl
+        try {
+            $null = Invoke-JiraReconcile -Arguments @('reconcile', $spec, '--json')
+            Clear-Content -LiteralPath $m.CallLog
+
+            $sw = [System.IO.StringWriter]::new(); $orig = [Console]::Out; [Console]::SetOut($sw)
+            try { $null = Invoke-JiraReconcile -Arguments @('reconcile', $spec, '--json') } finally { [Console]::SetOut($orig) }
+            $r = $sw.ToString() | ConvertFrom-Json
+            $r.counts.created | Should -Be 0
+            $r.counts.updated | Should -Be 0
+            $r.counts.skipped | Should -Be 2
+            @(Get-JiraMockCallLog -Mock $m | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 0
+        }
+        finally {
+            Stop-JiraMock -Mock $m
+            Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+        }
+    }
 }

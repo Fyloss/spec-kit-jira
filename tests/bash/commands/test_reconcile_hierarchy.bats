@@ -203,6 +203,40 @@ MD
   [ -z "$output" ]
 }
 
+# =============================================================================
+# T080 [Phase 9] — reconcile over the declared-hierarchy fixture (010,
+# contract §5, US1's independent test). This fixture existed since Phase 1
+# (T005) but was referenced by no test until now (FR-022, FR-025, SC-007).
+# =============================================================================
+
+@test "T080 — reconcile mirrors into the DECLARED types: one parent (Epic), one child per story (Story), each naming the parent" {
+  local work="${BATS_TEST_TMPDIR}/repo-declared-hierarchy"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-declared-hierarchy" "${work}"
+  local spec="${work}/specs/001-consumer-onboarding/spec.md"
+  export JIRA_CONFIG_DIR="${work}/.specify/jira"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-consumer-onboarding"
+  export JIRA_EMAIL="user@example.com"
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  export JIRA_NO_SLEEP=1
+  export SPEC_KIT_JIRA_ID_SOURCE="aaaaaaaaaaaaaaaa 1111111111111111 2222222222222222"
+  unset SPEC_KIT_JIRA_PLAN_CONTEXT SPEC_KIT_JIRA_LIFECYCLE
+  mock_start "${MOCK}/configs/consumer-hierarchy.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_reconcile reconcile "${spec}" --json
+  [ "$status" -eq 0 ]
+
+  # The parent is the declared specification type (Epic, id 10701).
+  [ "$(mock_issue_field CONSUMER-1 '.fields.issuetype.id')" = "10701" ]
+  [ "$(mock_issue_field CONSUMER-1 '.fields.parent')" = "null" ]
+  # Every child is the declared story type (Story, id 10704), naming the parent.
+  [ "$(mock_issue_field CONSUMER-2 '.fields.issuetype.id')" = "10704" ]
+  [ "$(mock_issue_field CONSUMER-2 '.fields.parent.key')" = "CONSUMER-1" ]
+  [ "$(mock_issue_field CONSUMER-3 '.fields.issuetype.id')" = "10704" ]
+  [ "$(mock_issue_field CONSUMER-3 '.fields.parent.key')" = "CONSUMER-1" ]
+}
+
 @test "T047 — a binding with roles but no task entry mirrors normally (§3.4, absent roles.task is not an error)" {
   mock_start "${MOCK}/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"

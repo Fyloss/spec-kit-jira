@@ -372,6 +372,85 @@ Describe 'Import-JiraConfig' {
         ($r.Errors -join "`n") | Should -Match 'halted_statuses'
         Remove-Item -Recurse -Force $d
     }
+
+    # --- T075/T088 [Phase 9] — the `hierarchy` schema (010, contracts/role-mapping.md §6.1, §2) ---
+
+    It 'T075 — rejects a projects[].hierarchy that is not an object (exit 4)' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    hierarchy: `"Epic`"`nrouting_default: PROJ`n" -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'projects\[0\]\.hierarchy must be a mapping of role to issue type name'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T075 — rejects an unknown role in projects[].hierarchy, naming the closed role set' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    hierarchy:`n      epic: Epic`nrouting_default: PROJ`n" -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'projects\[0\]\.hierarchy declares unknown role `epic`; the roles are specification, story, task'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T075 — rejects an empty projects[].hierarchy.<role> value' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    hierarchy:`n      specification: `"`"`nrouting_default: PROJ`n" -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'projects\[0\]\.hierarchy\.specification must be a non-empty issue type name'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T075 — accepts a valid projects[].hierarchy declaration' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    hierarchy:`n      specification: Epic`n      story: Story`n      task: `"Sous-tâche`"`nrouting_default: PROJ`n" -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 0
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T075 — rejects a non-object resolved_ids.<KEY>.roles (exit 4)' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value $script:ValidTeam -NoNewline
+        Set-Content -Path (Join-Path $d 'config.local.yml') -Value "resolved_ids:`n  PROJ:`n    roles: `"Epic`"`n" -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'resolved_ids\.PROJ\.roles must be a mapping'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T075 — rejects an unknown role in resolved_ids.<KEY>.roles (exit 4)' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value $script:ValidTeam -NoNewline
+        $local = "resolved_ids:`n  PROJ:`n    roles:`n      epic:`n        logical_name: `"Epic`"`n        id: `"10001`"`n        hierarchy_level: `"1`"`n        subtask: false`n        source: declared`n"
+        Set-Content -Path (Join-Path $d 'config.local.yml') -Value $local -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'resolved_ids\.PROJ\.roles declares unknown role `epic`'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T075 — rejects resolved_ids.<KEY>.roles.<role>.source outside declared|operator|derived (exit 4)' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value $script:ValidTeam -NoNewline
+        $local = "resolved_ids:`n  PROJ:`n    roles:`n      specification:`n        logical_name: `"Epic`"`n        id: `"10001`"`n        hierarchy_level: `"1`"`n        subtask: false`n        source: guessed`n"
+        Set-Content -Path (Join-Path $d 'config.local.yml') -Value $local -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'resolved_ids\.PROJ\.roles\.specification\.source is invalid'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T075 — accepts a valid resolved_ids.<KEY>.roles block' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value $script:ValidTeam -NoNewline
+        $local = "resolved_ids:`n  PROJ:`n    roles:`n      specification:`n        logical_name: `"Epic`"`n        id: `"10001`"`n        hierarchy_level: `"1`"`n        subtask: false`n        source: declared`n"
+        Set-Content -Path (Join-Path $d 'config.local.yml') -Value $local -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 0
+        Remove-Item -Recurse -Force $d
+    }
 }
 
 Describe 'The operator disable record (T009, FR-007, FR-029)' {

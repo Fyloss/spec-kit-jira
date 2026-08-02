@@ -141,7 +141,12 @@ function Resolve-JiraRoleMapping {
         elseif ($null -ne $oname) { $answerName = $oname; $answerSource = 'operator' }
 
         if ($null -ne $answerName) {
-            $typeMatches = @($IssueTypes | Where-Object { $_.logical_name -ceq $answerName })
+            # Byte-equal, ordinal comparison (contract §3.3) — NOT `-ceq`,
+            # which is case-sensitive but still CULTURE-AWARE and treats an
+            # NFD name (combining accent) as equal to its NFC form. jq's `==`
+            # on the Bash port is already ordinal; this keeps the two ports
+            # byte-identical (research/T072).
+            $typeMatches = @($IssueTypes | Where-Object { [string]::Equals([string]$_.logical_name, $answerName, [System.StringComparison]::Ordinal) })
             if ($typeMatches.Count -eq 0) {
                 $unknown.Add([pscustomobject]@{ role = $role; name = $answerName; candidates = (Get-JiraRoleCandidates -IssueTypes $IssueTypes -Role $role) })
             }

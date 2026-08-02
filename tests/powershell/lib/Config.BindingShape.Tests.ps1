@@ -95,4 +95,38 @@ Describe 'Get-JiraResolvedIdMap — binding shape' {
         $err | Should -Not -BeNullOrEmpty
         $err.Contains('resolved_ids.COMP.issue_types[0].logical_name') | Should -Be $true
     }
+
+    # --- T078 [Phase 9] — the `roles` shape (010, contract §5.1, §9.2) -----
+
+    It 'T078 — roles.<role> round-trips {logical_name, id, hierarchy_level, subtask, source} with hierarchy_level as a STRING' {
+        $json = @'
+{"resolved_ids":{"CONSUMER":{
+  "roles": {
+    "specification": {"logical_name":"Epic","id":"10701","hierarchy_level":"1","subtask":false,"source":"declared"},
+    "story":         {"logical_name":"Story","id":"10704","hierarchy_level":"0","subtask":false,"source":"declared"},
+    "task":          {"logical_name":"Sous-tâche","id":"10716","hierarchy_level":"-1","subtask":true,"source":"declared"}
+  },
+  "child_type":  {"logical_name":"Story","id":"10704","source":"declared"},
+  "parent_type": {"logical_name":"Epic","id":"10701","source":"declared"}
+}}}
+'@
+        $yaml = ConvertTo-JiraConfigYaml -Json $json
+        $tmpf = Join-Path $TestDrive 'roundtrip-roles.yml'
+        Set-Content -LiteralPath $tmpf -Value $yaml -NoNewline
+        $roundtripped = ConvertFrom-JiraConfigYaml -Path $tmpf
+        ($roundtripped | & jq -cS .) | Should -Be ($json | & jq -cS .)
+        ($roundtripped | & jq -r '.resolved_ids.CONSUMER.roles.story.hierarchy_level | type') | Should -Be 'string'
+    }
+
+    It 'T078 — roles.story ≡ child_type and roles.specification ≡ parent_type on the declared-hierarchy fixture' {
+        $fixture = Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-declared-hierarchy/.specify/jira/config.local.yml'
+        $json = ConvertFrom-JiraConfigYaml -Path $fixture
+        $story = ($json | & jq -cS '.resolved_ids.CONSUMER.roles.story | {logical_name, id, source}')
+        $childType = ($json | & jq -cS '.resolved_ids.CONSUMER.child_type')
+        $story | Should -Be $childType
+
+        $spec = ($json | & jq -cS '.resolved_ids.CONSUMER.roles.specification | {logical_name, id, source}')
+        $parentType = ($json | & jq -cS '.resolved_ids.CONSUMER.parent_type')
+        $spec | Should -Be $parentType
+    }
 }

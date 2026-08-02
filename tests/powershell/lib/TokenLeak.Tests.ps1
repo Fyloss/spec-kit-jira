@@ -54,3 +54,30 @@ Describe 'Credential leak guard (SC-007)' {
         $out | Should -Not -Match 'RAWSECRETXYZ0123456789'
     }
 }
+
+Describe 'T076 — the existing credential scan covers the new hierarchy key (010, FR-003)' {
+    BeforeAll {
+        Import-Module (Join-Path $Root 'scripts/powershell/lib/Config.psm1') -Force
+    }
+
+    It 'refuses a token-shaped value under projects[].hierarchy.story, exit 4, never echoed' {
+        $d = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+        New-Item -ItemType Directory -Path $d -Force | Out-Null
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    hierarchy:`n      story: ATATT3xFfGF0secrettoken`nrouting_default: PROJ`n" -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'credential'
+        ($r.Errors -join "`n") | Should -Not -Match 'ATATT3xFfGF0secrettoken'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'refuses a host-shaped value under projects[].hierarchy.story, exit 4' {
+        $d = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+        New-Item -ItemType Directory -Path $d -Force | Out-Null
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    hierarchy:`n      story: acme.atlassian.net`nrouting_default: PROJ`n" -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'credential'
+        Remove-Item -Recurse -Force $d
+    }
+}

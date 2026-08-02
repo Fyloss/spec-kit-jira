@@ -110,6 +110,28 @@ line_of() {
   [ "$bash_out" = "$ps_out" ]
 }
 
+# --- T083 [Phase 9] — the §7.1 per-role audit, in prose (010) --------------
+
+role_audit_json() {
+  printf '%s' '{"command":"config","counts":{"created":0,"errors":0,"skipped":0,"updated":0,"warnings":0},"dry_run":false,"effects":{"discovery":{"detail":"1 project(s) discovered","projects":{"CONSUMER":{"style":"company_managed","style_source":"api","roles":{"specification":{"logical_name":"Epic","source":"declared"},"story":{"logical_name":"Tâche","source":"derived"},"task":{"logical_name":"Sous-tâche","source":"operator"}}}},"status":"written"},"gitignore":{"detail":"personal.yml gitignore coverage","status":"unchanged"},"hooks":{"detail":"lifecycle hooks already registered","status":"unchanged"},"readme":{"detail":"block present","status":"unchanged"}},"exit_code":0,"schema_version":"1.0"}'
+}
+
+@test "prose renders one role-audit line per resolved role, under the project's style line (010, contract §7.1)" {
+  run bash -c "$(declare -f role_audit_json); role_audit_json | { source '${LIB_DIR}/output.sh'; summary_render_prose; }"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"specification: Epic (declared)"* ]]
+  [[ "$output" == *"story: Tâche (derived)"* ]]
+  [[ "$output" == *"task: Sous-tâche (operator)"* ]]
+}
+
+@test "the role-audit prose is byte-identical across ports, including non-ASCII names (010)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  json="$(role_audit_json)"
+  bash_out="$(printf '%s' "$json" | summary_render_prose)"
+  ps_out="$(pwsh -NoProfile -Command "Import-Module '${PS_LIB}/Output.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraSummaryProse '$json'))")"
+  [ "$bash_out" = "$ps_out" ]
+}
+
 # =============================================================================
 # T054/T055 [Phase 7] — the run summary reports recognised/assigned/skipped
 # (Phase 3/4/6), in both JSON and prose form.

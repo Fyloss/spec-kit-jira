@@ -1,0 +1,12 @@
+# Team config supersession conformance fixture (010, T086) — the consumer
+# instance, with a committed declaration for `specification` that names a
+# DIFFERENT type than the local binding's recorded operator answer below.
+# The declaration MUST outrank the recorded answer (contract §7.2, FR-007):
+# the binding converges onto "Service Category" and the run names both types.
+projects:
+  - key: CONSUMER
+    style: company_managed
+    hierarchy:
+      specification: Service Category
+      story: Story
+routing_default: CONSUMER

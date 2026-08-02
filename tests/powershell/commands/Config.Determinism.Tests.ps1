@@ -63,3 +63,71 @@ Describe 'Config ceremony determinism' {
         $obj.site_alias | Should -Be 'prod'
     }
 }
+
+Describe 'Role-mapping determinism (010, contract §5.2)' {
+    BeforeEach {
+        $script:RWork = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+        New-Item -ItemType Directory -Path (Join-Path $RWork '.specify/jira') -Force | Out-Null
+        $env:JIRA_CONFIG_DIR = Join-Path $RWork '.specify/jira'
+        $script:RM = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/consumer-hierarchy.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $RM.BaseUrl
+    }
+    AfterEach {
+        Stop-JiraMock -Mock $RM
+        Remove-Item -Recurse -Force $RWork -ErrorAction SilentlyContinue
+    }
+
+    It 'T020 — a second run over a declared, unchanged mapping writes byte-identical YAML and asks no question' {
+        $lines = "projects:`n  - key: CONSUMER`n    hierarchy:`n      specification: Epic`n      story: Story`nrouting_default: CONSUMER`n"
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), $lines)
+
+        [void](Invoke-JiraConfig -Arguments @('config', '--json'))
+        $first = Get-Content -Raw -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml')
+
+        $sw = [System.IO.StringWriter]::new()
+        $orig = [Console]::Out
+        $origErr = [Console]::Error
+        [Console]::SetOut($sw)
+        [Console]::SetError($sw)
+        try { [void](Invoke-JiraConfig -Arguments @('config', '--json')) }
+        finally { [Console]::SetOut($orig); [Console]::SetError($origErr) }
+        $sw.ToString() | Should -Not -Match 'unresolved_roles'
+
+        $second = Get-Content -Raw -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml')
+        $second | Should -BeExactly $first
+    }
+
+    It 'T039/T082 — a committed declaration supersedes a recorded operator answer, once, then converges' {
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), "projects:`n  - key: CONSUMER`nrouting_default: CONSUMER`n")
+
+        [void](Invoke-JiraConfig -Arguments @('config', '--issue-type', 'CONSUMER=specification=Epic', '--issue-type', 'CONSUMER=story=Story', '--json'))
+        $local1 = (ConvertFrom-JiraConfigYaml -Path (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml')) | ConvertFrom-Json
+        $local1.resolved_ids.CONSUMER.roles.specification.source | Should -Be 'operator'
+
+        $lines = "projects:`n  - key: CONSUMER`n    hierarchy:`n      specification: Service Category`n      story: Story`nrouting_default: CONSUMER`n"
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), $lines)
+
+        $sw = [System.IO.StringWriter]::new()
+        $orig = [Console]::Out
+        $origErr = [Console]::Error
+        [Console]::SetOut($sw)
+        [Console]::SetError($sw)
+        try { [void](Invoke-JiraConfig -Arguments @('config', '--json')) }
+        finally { [Console]::SetOut($orig); [Console]::SetError($origErr) }
+        $sw.ToString() | Should -Match 'specification is declared as "Service Category" in config.yml; the local answer "Epic" was superseded.'
+
+        $second = Get-Content -Raw -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml')
+        $local2obj = (ConvertFrom-JiraConfigYaml -Path (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml')) | ConvertFrom-Json
+        $local2obj.resolved_ids.CONSUMER.roles.specification.logical_name | Should -Be 'Service Category'
+        $local2obj.resolved_ids.CONSUMER.roles.specification.source | Should -Be 'declared'
+
+        $sw3 = [System.IO.StringWriter]::new()
+        [Console]::SetOut($sw3)
+        [Console]::SetError($sw3)
+        try { [void](Invoke-JiraConfig -Arguments @('config', '--json')) }
+        finally { [Console]::SetOut($orig); [Console]::SetError($origErr) }
+        $sw3.ToString() | Should -Not -Match 'was superseded'
+        $third = Get-Content -Raw -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml')
+        $third | Should -BeExactly $second
+    }
+}

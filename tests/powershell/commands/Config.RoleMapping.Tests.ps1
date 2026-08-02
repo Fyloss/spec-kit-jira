@@ -139,4 +139,20 @@ Describe 'Config role mapping (010)' {
         $local = Read-LocalBinding
         ($local.resolved_ids.CONSUMER.roles.PSObject.Properties.Name -contains 'task') | Should -Be $false
     }
+
+    It 'T089 — the unresolved-role refusal never reads stdin; it cannot hang the hook or --json paths' {
+        Write-RoleMappingConfig
+        # A closed console input: any attempted read throws immediately rather
+        # than blocking. If the ceremony ever tried to prompt, this run would
+        # throw instead of completing with its ordinary exit code (FR-008).
+        $origIn = [Console]::In
+        [Console]::SetIn([System.IO.StreamReader]::new([System.IO.Stream]::Null))
+        try {
+            $r = Invoke-ConfigCaptured @('config', '--json')
+        } finally {
+            [Console]::SetIn($origIn)
+        }
+        $r.ExitCode | Should -Be 4
+        $r.Out | Should -Match '"unresolved_roles"'
+    }
 }

@@ -21,6 +21,8 @@ _JIRA_SINK_HIERARCHY=1
 _hierarchy_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${_hierarchy_dir}/../../lib/output.sh"
+# shellcheck source=/dev/null
+source "${_hierarchy_dir}/../../lib/config.sh" # JIRA_ROLE_NAMES — the closed role set has exactly one source (010, contract §1)
 
 # hierarchy_child_level <issue_types_json> — the lowest hierarchy_level over
 # non-sub-task types (contract §2). Prints the level as a bare integer, or
@@ -117,7 +119,7 @@ role_resolve() {
   [[ -z "${declared}" ]] && declared='{}'
   [[ -z "${operator}" ]] && operator='{}'
   # kcov-excl-start — jq literal (string lines are not statements)
-  jq -cn --arg key "${key}" --argjson itypes "${itypes}" --argjson declared "${declared}" --argjson operator "${operator}" '
+  jq -cn --arg key "${key}" --argjson itypes "${itypes}" --argjson declared "${declared}" --argjson operator "${operator}" --argjson roles "$(_cfg_role_names_json)" '
     def nonSubtask: [ $itypes[] | select(.subtask | not) ];
     def subtaskTypes: [ $itypes[] | select(.subtask) ];
     def candidatesFor($role): if $role == "task" then subtaskTypes else nonSubtask end;
@@ -127,7 +129,7 @@ role_resolve() {
     | (if $childLevel == null then [] else [ $ns[] | select((.hierarchy_level|tonumber) > $childLevel) ] end) as $above
     | (if ($above|length) > 0 then ($above | map(.hierarchy_level|tonumber) | min) else null end) as $parentLevel
     | ($childCands | map(.logical_name) | join(", ")) as $childList
-    | reduce (["specification","story","task"][]) as $role
+    | reduce ($roles[]) as $role
         ( {roles:{}, unresolved:[], unknown:[], duplicate:[], subtask_misuse:[], task_misuse:[], no_parent_level:null}
         ; ($declared[$role] // null) as $dname
         | ($operator[$role] // null) as $oname

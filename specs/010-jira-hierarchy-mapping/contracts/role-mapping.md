@@ -167,6 +167,17 @@ persisted `hierarchy_level` is a string — the YAML round-trip has no number ty
 - **Whether Jira will accept the pairing.** Check 5 is the mechanism that
   surfaces a structurally-valid-but-rejected pairing. The bridge does not model
   Jira's own parent rules.
+- **The `task` type's mandatory fields, before Phase 8.** "every selected
+  type" in check 6 means `specification` and `story` only. Check 6 exists to
+  catch a structurally-valid pairing that would still be REJECTED BY A WRITE
+  — but until Phase 8 (§7) ships sub-task creation, the bridge never writes a
+  `task`-typed issue at all, so there is no write for an unsatisfiable field
+  on that type to protect. Gating it now would refuse a project whose task
+  tier the bridge will never touch this release, which is a *broader*
+  deviation from FR-024's "no behaviour change without a mapping" than
+  leaving it unchecked. When Phase 8 adds sub-task creation, that is the
+  natural point to extend check 6 to `task` — the same moment
+  `hierarchy_mandatory_gate` first reads `.task_type` from the binding.
 
 ---
 
