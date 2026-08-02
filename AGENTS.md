@@ -2,7 +2,13 @@
 
 Two native ports (Bash for macOS/Linux, PowerShell 7+ for Windows) proven
 equivalent by a shared conformance corpus. Architecture and module map:
-`docs/README.md`.
+`docs/README.md`. Where the project is heading — and which capabilities are
+shipped versus merely envisioned — `docs/VISION.md`.
+
+**The vision document authorises nothing.** It is the backlog Principle XV
+(YAGNI) refers to. An item listed there is not a licence to build it: it needs
+a spec, functional requirements, and a Constitution Check first. Read it to
+avoid re-proposing what already ships, never to justify writing code.
 
 ## Windows portability — non-negotiable
 

@@ -49,6 +49,12 @@ flowchart LR
 | 9 | [Twin ports and quality gates](09-ports-and-quality.md) | Why there are two implementations and how they stay identical |
 | 10 | [Windows portability](10-windows-portability.md) | The measured windows-latest quirks and the probe loop that established them |
 
+Documents 1 to 10 describe what the bridge **is**. [VISION.md](VISION.md)
+describes what it is meant to **become** — the whole feature surface once
+every planned capability has shipped, with each item marked shipped,
+specified, or merely envisioned. It is the backlog Principle XV points at, and
+it authorises nothing on its own.
+
 ## The five rules that explain most of the design
 
 Everything below is a consequence of these, taken from the project
