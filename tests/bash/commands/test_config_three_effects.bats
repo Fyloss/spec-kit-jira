@@ -34,7 +34,10 @@ teardown() {
 }
 
 boot() {
-  mock_start "${MOCK}/configs/default.json"
+  # backend defaults to the curl shim; the NFR-1 cross-port test below opts
+  # into the real pwsh server, since a native pwsh HTTP client cannot reach
+  # the shim's sentinel MOCK_BASE_URL (contracts/mock-driver.md).
+  mock_start "${MOCK}/configs/default.json" "${1:-bash}"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 }
 
@@ -66,7 +69,7 @@ boot() {
 
 @test "the PowerShell port reports the same three effects (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
-  boot
+  boot powershell
   run cmd_config config --child-type COMP=Story --json
   local bash_out="$output"
 

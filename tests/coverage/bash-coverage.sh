@@ -378,11 +378,32 @@ trace_bats() {
   # SHELLOPTS carries xtrace into execve'd children, which is how the dispatcher
   # runs get measured; it is passed through `env` because the variable is
   # readonly in a running shell and cannot be assigned as a command prefix.
+  # The suite goes through tests/run-bash.sh, not a serial `bats -r`: the
+  # serial run outgrew every wall clock this job has (the step died at its
+  # timeout on every run since the suite passed ~900 tests). The workers all
+  # inherit fd 8 and write trace lines concurrently; the extractor is
+  # line-oriented and `sort -u`-deduplicated, so interleaved frames merge
+  # exactly like sequential ones.
+  #
+  # Only the UNIT suites are traced. tests/bash/conformance drives the same
+  # scenarios kcov itself measures end-to-end (tracing them re-buys lines the
+  # denominator's owner already counted, at full xtrace cost), and
+  # tests/bash/ci inspects workflows and nests whole fixture-suite runs
+  # without executing a line of scripts/bash. Skipping both can only ever
+  # UNDERcount — a new module directory lands in the traced set automatically.
+  local -a traced_suites=()
+  local suite_dir
+  for suite_dir in "${REPO_ROOT}"/tests/bash/*/; do
+    case "$(basename "${suite_dir}")" in
+      ci | conformance) continue ;;
+    esac
+    traced_suites+=("${suite_dir}")
+  done
   run_bounded "${BATS_TIMEOUT}" env \
     PS4="${TRACE_PS4}" \
     BASH_XTRACEFD=8 \
     SHELLOPTS=xtrace \
-    bats -r "${REPO_ROOT}/tests/bash" > /dev/null < /dev/null
+    "${REPO_ROOT}/tests/run-bash.sh" "${traced_suites[@]}" > /dev/null < /dev/null
   bats_rc=$?
 
   exec 8>&-

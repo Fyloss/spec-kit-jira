@@ -123,6 +123,7 @@ setup() {
 }
 
 @test "both ports agree on validity for the same inputs" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   for mutation in '.' '.schema_version="2.0"' '.routing.project_key="bad-key"' '.stories=[]'; do
     doc="$(jq -c "${mutation}" "${VALID}")"
     if printf '%s' "${doc}" | interchange_validate 2> /dev/null; then bash_ok=0; else bash_ok=1; fi

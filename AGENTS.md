@@ -23,7 +23,11 @@ version:
 
 ## Running the suites
 
-- `bats -r tests/bash` — full bash suite (~15 min; the `-r` is load-bearing,
-  without it bats silently runs nothing).
+- `tests/run-bash.sh` — full bash suite (~190s / 3m10s, `bats`+`jq` only, no
+  PowerShell or GNU `parallel` required). Use `tests/run-bash.sh --since <ref>`
+  for a change-scoped inner loop (≤60s on a single-module diff).
+- `bats -r tests/bash` still works directly if you need raw `bats` output —
+  the `-r` is load-bearing, without it bats silently runs nothing — but it is
+  serial and ~15 min; prefer `tests/run-bash.sh` for everyday use.
 - `bash tests/conformance/ci-conformance.sh` — cross-port byte equivalence.
 - `shellcheck` and `actionlint` must stay clean.

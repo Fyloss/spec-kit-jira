@@ -66,6 +66,7 @@ setup() {
 }
 
 @test "the PowerShell port reports identical field status (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local ps_abs; ps_abs="$(cd "${PS_ENGINE}" && pwd)"
   local current='{"summary":"Title","priority":{"id":"2"}}'
   local desired='{"priority":{"id":"2"},"summary":"Title"}'

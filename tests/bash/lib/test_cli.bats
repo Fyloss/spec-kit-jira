@@ -77,6 +77,7 @@ setup() {
 }
 
 @test "parse output is byte-identical across ports" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   args="reconcile --dry-run --json --on-drift=proceed --verbose"
   bash_out="$(cli_parse $args)"
   # shellcheck disable=SC2086

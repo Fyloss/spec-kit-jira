@@ -26,10 +26,15 @@ source "${_smk_dir}/marker_splice.sh"
 # caller here consumes one) runs in a FORKED SUBSHELL, so a plain shell
 # variable cannot carry the cursor from one call to the next — only the
 # filesystem is shared across those forks within one process. Keyed by the
-# owning shell's PID ($$, stable across its own subshells, unlike $BASHPID) so
-# concurrent test processes never collide.
+# owning shell's PID ($$, stable across its own subshells, unlike $BASHPID)
+# PLUS that process's own start time: PID alone is not enough — under heavy
+# concurrency a PID can be reused by an unrelated process before a stale
+# cursor file from the previous owner is ever cleaned up, silently leaking
+# its cursor forward (T028). Start time is a cheap, portable (macOS/Linux)
+# way to make a reused PID address a different file.
 _smk_id_index_file() {
-  printf '%s/.speckit-jira-id-index.%s' "${TMPDIR:-/tmp}" "$$"
+  local start; start="$(ps -o lstart= -p "$$" 2>/dev/null | tr -d ' \t')"
+  printf '%s/.speckit-jira-id-index.%s.%s' "${TMPDIR:-/tmp}" "$$" "${start:-nostat}"
 }
 
 # story_marker_generate_id — a new 16-lowercase-hex-character identifier: 8

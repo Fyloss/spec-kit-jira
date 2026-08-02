@@ -44,6 +44,7 @@ setup() {
 }
 
 @test "the PowerShell port refuses the level-above-Epic identically (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   run config_validate_mapping team_managed '["Initiative","Epic","Story"]' "${TEAM_BINDING}"
   local bash_status="$status"
   local ps_status

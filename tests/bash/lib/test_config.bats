@@ -444,6 +444,7 @@ YAML
 # --- Cross-port parity -------------------------------------------------------
 
 @test "config_yaml_to_json is byte-identical across ports" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   write_valid_team
   bash_json="$(config_yaml_to_json "${DIR}/config.yml")"
   ps_json="$(pwsh -NoProfile -Command "
@@ -454,6 +455,7 @@ YAML
 }
 
 @test "config_extension_version is byte-identical across ports" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   bash_v="$(config_extension_version)"
   ps_v="$(pwsh -NoProfile -Command "
     Import-Module '${PS_LIB}/Config.psm1' -Force

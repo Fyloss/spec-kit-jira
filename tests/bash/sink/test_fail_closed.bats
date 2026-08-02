@@ -66,7 +66,10 @@ _put() { # _put <issue-key> — a clean PUT action targeting one issue key.
 }
 
 @test "the PowerShell port fails closed with identical codes (NFR-1)" {
-  mock_start "${MOCK}/configs/faults.json"
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  # A native pwsh HTTP client cannot reach the curl shim's sentinel
+  # MOCK_BASE_URL, so this cross-port test uses the real pwsh server.
+  mock_start "${MOCK}/configs/faults.json" powershell
   local ps_abs; ps_abs="$(cd "${PS_SINK}" && pwd)"
   local key code_bash code_ps
   for key in AUTH-1 MISSING-1 NET-1; do

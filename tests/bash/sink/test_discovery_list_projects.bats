@@ -25,11 +25,13 @@ teardown() {
 }
 
 boot() {
-  # boot <mock-config-json>
+  # boot <mock-config-json> [backend]  — backend defaults to the curl shim;
+  # the NFR-1 cross-port test opts into the real pwsh server, since a native
+  # pwsh HTTP client cannot reach the shim's sentinel MOCK_BASE_URL.
   local cfg
   cfg="$(mktemp)"
   printf '%s' "$1" > "${cfg}"
-  mock_start "${cfg}"
+  mock_start "${cfg}" "${2:-bash}"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 }
 
@@ -71,7 +73,7 @@ boot() {
 
 @test "the PowerShell port emits a byte-identical list (FR-020)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
-  boot '{"projects":{"AAA":"company","BBB":"team","CCC":"company"},"pageSize":2}'
+  boot '{"projects":{"AAA":"company","BBB":"team","CCC":"company"},"pageSize":2}' powershell
   run discovery_list_projects
   [ "$status" -eq 0 ]
   local bash_out="$output" ps_out

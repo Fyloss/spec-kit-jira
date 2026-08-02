@@ -45,6 +45,7 @@ ps_canonical() {
 }
 
 @test "canonical output is byte-identical across ports (nested)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   input='{"z":[3,2,1],"a":{"n":2.5,"m":"café \" \n"}}'
   bash_out="$(printf '%s' "$input" | json_canonical)"
   ps_out="$(printf '%s' "$input" | ps_canonical)"
@@ -52,6 +53,7 @@ ps_canonical() {
 }
 
 @test "uri_encode is byte-identical across ports" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   s="hello world/x?y=1&z=café"
   bash_out="$(uri_encode "$s")"
   ps_out="$(pwsh -NoProfile -Command "Import-Module '${PS_LIB}/Output.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraUriComponent '$s'))")"
