@@ -168,3 +168,53 @@ MD
   [ "$(grep -c '^WARNING: ' <<< "$output")" -eq 1 ]
   [[ "$output" == *"epic_strategy"* ]]
 }
+
+# =============================================================================
+# T047/T052 [Phase 6, US4] — §8 re-validation against the PERSISTED binding
+# =============================================================================
+#
+# Every reconcile run above already exercises the FR-004 case implicitly: the
+# fixture binding carries no `roles` key at all, and reconcile mirrors fine —
+# an absent `roles` key stays non-fatal. These two tests cover the case a
+# stale or hand-edited binding DOES carry `roles`, and check 4 (ordering) is
+# re-run against them with no re-read of the project's metadata.
+
+@test "T047/T052 — an inverted roles ordering in the persisted binding refuses at reconcile, reconcile: prefixed, zero writes" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  # Inject a `roles` block with specification BELOW story — impossible to
+  # produce via the config ceremony (role_validate would refuse it first),
+  # but representative of a hand-edited or pre-010 binding upgraded by hand.
+  local localf="${JIRA_CONFIG_DIR}/config.local.yml"
+  local injected
+  injected="$(jq -cS '.resolved_ids.COMP.roles = {
+      specification: {logical_name: "Story", id: "10004", hierarchy_level: "0", subtask: false, source: "declared"},
+      story: {logical_name: "Epic", id: "10001", hierarchy_level: "1", subtask: false, source: "declared"}
+    }' <<< "$(config_yaml_to_json "${localf}")")"
+  printf '%s' "${injected}" | config_to_yaml > "${localf}"
+
+  run cmd_reconcile reconcile "${SPEC}" --json
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"reconcile: project COMP: specification names"* ]]
+  [[ "$output" == *"is not above story"* ]]
+
+  run mock_calls
+  [ -z "$output" ]
+}
+
+@test "T047 — a binding with roles but no task entry mirrors normally (§3.4, absent roles.task is not an error)" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  local localf="${JIRA_CONFIG_DIR}/config.local.yml"
+  local injected
+  injected="$(jq -cS '.resolved_ids.COMP.roles = {
+      specification: {logical_name: "Epic", id: "10001", hierarchy_level: "1", subtask: false, source: "derived"},
+      story: {logical_name: "Story", id: "10004", hierarchy_level: "0", subtask: false, source: "derived"}
+    }' <<< "$(config_yaml_to_json "${localf}")")"
+  printf '%s' "${injected}" | config_to_yaml > "${localf}"
+
+  run cmd_reconcile reconcile "${SPEC}" --json
+  [ "$status" -eq 0 ]
+}

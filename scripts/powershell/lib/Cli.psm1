@@ -43,6 +43,7 @@ function Invoke-JiraCliParse {
     $positional = [System.Collections.Generic.List[string]]::new()
     $styles = [System.Collections.Generic.List[string]]::new()
     $childTypes = [System.Collections.Generic.List[string]]::new()
+    $issueTypes = [System.Collections.Generic.List[string]]::new()
     $enableHooks = [System.Collections.Generic.List[string]]::new()
 
     for ($idx = 0; $idx -lt $Arguments.Count; $idx++) {
@@ -73,15 +74,37 @@ function Invoke-JiraCliParse {
                 # Repeatable operator answer to the child-type closed
                 # question (008 T044, research R1/R2), asked only when the
                 # child hierarchy level holds several candidates. The
-                # logical name is opaque text (Constitution VII).
+                # logical name is opaque text (Constitution VII). Kept as
+                # the accepted alias for --issue-type KEY=story=<name> (010,
+                # contract §2.2, research R2).
                 if ($idx + 1 -ge $Arguments.Count) {
                     $parseError = '--child-type requires a value (--child-type KEY=<logical name>)'
                 }
                 else {
                     $idx++
                     $v = $Arguments[$idx]
-                    if ($v -cmatch '^[A-Z][A-Z0-9_]+=\S+$') { $childTypes.Add($v) }
+                    if ($v -cmatch '^[A-Z][A-Z0-9_]+=\S+$') {
+                        $childTypes.Add($v)
+                        $eq = $v.IndexOf('=')
+                        $issueTypes.Add("$($v.Substring(0, $eq))=story=$($v.Substring($eq + 1))")
+                    }
                     else { $parseError = "invalid --child-type value: $v (expected <PROJECT_KEY>=<logical name>, no whitespace)" }
+                }
+                break
+            }
+            '^--issue-type$' {
+                # Repeatable operator answer to the closed role question
+                # (010, contract §2.2): --issue-type KEY=role=<logical
+                # name>, last occurrence per (KEY, role) wins. <role> is the
+                # closed set specification|story|task.
+                if ($idx + 1 -ge $Arguments.Count) {
+                    $parseError = '--issue-type requires a value (--issue-type KEY=role=<logical name>)'
+                }
+                else {
+                    $idx++
+                    $v = $Arguments[$idx]
+                    if ($v -cmatch '^[A-Z][A-Z0-9_]+=(specification|story|task)=\S+$') { $issueTypes.Add($v) }
+                    else { $parseError = "invalid --issue-type value: $v (expected <PROJECT_KEY>=<specification|story|task>=<logical name>, no whitespace)" }
                 }
                 break
             }
@@ -141,6 +164,7 @@ function Invoke-JiraCliParse {
         $lines.Add("help=$help")
         $lines.Add("styles=$($styles -join ' ')")
         $lines.Add("child_types=$($childTypes -join ' ')")
+        $lines.Add("issue_types=$($issueTypes -join ' ')")
         $lines.Add("use_team=$useTeam")
         $lines.Add("enable_hooks=$($enableHooks -join ' ')")
         $lines.Add("args=$($positional -join ' ')")

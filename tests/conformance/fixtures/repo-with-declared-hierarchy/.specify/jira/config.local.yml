@@ -1,0 +1,56 @@
+# Machine-owned resolved identifiers (010, T005) — the consumer project
+# already bound to its declared specification/story roles, in the current
+# binding shape (contract §5): `roles` is authoritative, `child_type` /
+# `parent_type` are dual-written and remain what reconcile reads (§5.1).
+resolved_ids:
+  CONSUMER:
+    style: company_managed
+    issue_types:
+      - logical_name: "Epic"
+        id: "10701"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Service Category"
+        id: "10702"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "10704"
+        hierarchy_level: "0"
+        subtask: false
+    roles:
+      specification:
+        logical_name: "Epic"
+        id: "10701"
+        hierarchy_level: "1"
+        subtask: false
+        source: declared
+      story:
+        logical_name: "Story"
+        id: "10704"
+        hierarchy_level: "0"
+        subtask: false
+        source: declared
+    child_type:
+      logical_name: "Story"
+      id: "10704"
+      source: declared
+    parent_type:
+      logical_name: "Epic"
+      id: "10701"
+      source: declared
+    required_fields:
+      "10701":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "10704":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "10704": true
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"

@@ -205,53 +205,86 @@ _config_resolve_style() {
   return "${EXIT_CONFIG}"
 }
 
-# _config_child_type_flag_for <project-key> <child-types-string> — the
-# operator's --child-type answer for one project (last occurrence wins), or
-# empty when none was given. Mirror of _config_style_flag_for.
-_config_child_type_flag_for() {
-  local key="$1" child_types="$2" tok out=""
-  for tok in ${child_types}; do
-    [[ "${tok}" == "${key}="* ]] && out="${tok#*=}"
+# _config_declared_hierarchy_for <project-key> <cfg-json> — the committed
+# `projects[].hierarchy` mapping for one project (010, contract §2.1), or
+# `{}` when the project declares none.
+_config_declared_hierarchy_for() {
+  local key="$1" cfg="$2"
+  jq -c --arg k "${key}" '[.projects[]? | select(.key == $k)][0].hierarchy // {}' <<< "${cfg}"
+}
+
+# _config_operator_roles_for <project-key> <issue-types-string> — the
+# operator's --issue-type / --child-type answers for one project, reduced to
+# {role: name} (010, contract §2.2). `issue_types` is cli_parse's merged,
+# space-separated `KEY=role=name` stream (--child-type is already translated
+# to role=story by lib/cli.sh); last occurrence per (KEY, role) wins because
+# later tokens simply overwrite earlier ones in the fold below.
+_config_operator_roles_for() {
+  local key="$1" issue_types="$2" tok rest role name out='{}'
+  for tok in ${issue_types}; do
+    [[ "${tok}" == "${key}="* ]] || continue
+    rest="${tok#*=}"
+    role="${rest%%=*}"
+    name="${rest#*=}"
+    out="$(jq -c --arg r "${role}" --arg n "${name}" '. + {($r): $n}' <<< "${out}")"
   done
   printf '%s' "${out}"
 }
 
-# _config_resolve_child_type <project-key> <issue_types-json> <child-type-flag>
-# The child TYPE (research R1/R2, contract §2): derived when the child
-# hierarchy level holds exactly one non-sub-task candidate; otherwise the
-# operator's --child-type answer (matched by logical name against that
-# level's candidates); otherwise fail closed (EXIT_CONFIG), naming the level
-# and every candidate. Prints the canonical {logical_name,id,source} object.
-_config_resolve_child_type() {
-  local pkey="$1" itypes="$2" flag="$3"
-  local child_level child_candidates
-  child_level="$(hierarchy_child_level "${itypes}")"
-  if [[ -z "${child_level}" ]]; then
-    printf 'config: project %s: the discovered project declares no issue types at all\n' "${pkey}" >&2
-    return "${EXIT_CONFIG}"
+# _config_report_role_problems <project-key> <resolve-result-json> <json:true|false>
+# Render every problem role_resolve found (010, contract §6): one block per
+# unresolved role in role order, then unknown/duplicate/subtask-misuse/
+# task-misuse/no-parent-level — all to stderr — plus, in --json mode, the
+# structured `unresolved_roles` block on stdout (§6.2), through
+# json_canonical rather than a bare jq call (research R10).
+_config_report_role_problems() {
+  local key="$1" result="$2" json="$3"
+  local role level name lvl
+  while IFS=$'\t' read -r role level; do
+    [[ -z "${role}" ]] && continue
+    local cands
+    cands="$(jq -c --arg r "${role}" '[.unresolved[] | select(.role == $r)][0].candidates' <<< "${result}")"
+    role_unresolved_message "${key}" "${role}" "${level}" "${cands}" >&2
+    printf '\n' >&2
+  done <<< "$(jq -r '.unresolved[] | "\(.role)\t\(.level)"' <<< "${result}")"
+
+  while IFS=$'\t' read -r role name; do
+    [[ -z "${role}" ]] && continue
+    local cands
+    cands="$(jq -c --arg r "${role}" --arg n "${name}" '[.unknown[] | select(.role == $r and .name == $n)][0].candidates' <<< "${result}")"
+    role_unknown_type_message "${key}" "${role}" "${name}" "${cands}" >&2
+    printf '\n' >&2
+  done <<< "$(jq -r '.unknown[] | "\(.role)\t\(.name)"' <<< "${result}")"
+
+  while IFS=$'\t' read -r role name lvl; do
+    [[ -z "${role}" ]] && continue
+    role_duplicate_message "${key}" "${role}" "${name}" "${lvl}" >&2
+    printf '\n' >&2
+  done <<< "$(jq -r '.duplicate[] | "\(.role)\t\(.name)\t\(.level)"' <<< "${result}")"
+
+  while IFS=$'\t' read -r role name; do
+    [[ -z "${role}" ]] && continue
+    role_subtask_misuse_message "${key}" "${role}" "${name}" >&2
+    printf '\n' >&2
+  done <<< "$(jq -r '.subtask_misuse[] | "\(.role)\t\(.name)"' <<< "${result}")"
+
+  while IFS=$'\t' read -r name; do
+    [[ -z "${name}" ]] && continue
+    local cands
+    cands="$(jq -c --arg n "${name}" '[.task_misuse[] | select(.name == $n)][0].candidates' <<< "${result}")"
+    role_task_misuse_message "${key}" "${name}" "${cands}" >&2
+    printf '\n' >&2
+  done <<< "$(jq -r '.task_misuse[] | .name' <<< "${result}")"
+
+  local no_parent
+  no_parent="$(jq -r '.no_parent_level // empty' <<< "${result}")"
+  [[ -n "${no_parent}" ]] && printf '%s\n' "${no_parent}" >&2
+
+  if [[ "${json}" == "true" && "$(jq -r '.unresolved | length' <<< "${result}")" -gt 0 ]]; then
+    local block
+    block="$(role_unresolved_json "${result}" "${key}")"
+    printf '%s\n' "$(jq -cn --argjson u "${block}" '{unresolved_roles: $u}' | json_canonical)"
   fi
-  child_candidates="$(jq -c --argjson lvl "${child_level}" '[ .[] | select((.subtask | not) and .hierarchy_level == $lvl) ]' <<< "${itypes}")"
-  local n
-  n="$(jq -r 'length' <<< "${child_candidates}")"
-  if [[ "${n}" -eq 1 ]]; then
-    jq -c '.[0] | {logical_name, id, source: "derived"}' <<< "${child_candidates}"
-    return 0
-  fi
-  if [[ -n "${flag}" ]]; then
-    local match
-    match="$(jq -c --arg n "${flag}" '[ .[] | select(.logical_name == $n) ][0] // empty' <<< "${child_candidates}")"
-    if [[ -n "${match}" ]]; then
-      jq -c '{logical_name, id, source: "operator"}' <<< "${match}"
-      return 0
-    fi
-    printf 'config: project %s: --child-type %s names no candidate at the child level\n' "${pkey}" "${flag}" >&2
-    return "${EXIT_CONFIG}"
-  fi
-  local list
-  list="$(jq -r 'map(.logical_name) | join(", ")' <<< "${child_candidates}")"
-  printf 'config: project %s: the child level holds more than one issue type (%s); pass --child-type %s=<one of them>\n' \
-    "${pkey}" "${list}" "${pkey}" >&2
-  return "${EXIT_CONFIG}"
 }
 
 # _config_gitignore_effect <repo-root> <dry_run> — enforce gitignore coverage of
@@ -403,14 +436,14 @@ _config_hooks_effect() {
 cmd_config() {
   # Parse flags (config-read, no model judgement). The dispatcher already handled
   # --help; re-parse here so the command is runnable standalone.
-  local parsed json="false" dry_run="false" exit_code="0" error="" styles="" args="" enable_hooks="" child_types=""
+  local parsed json="false" dry_run="false" exit_code="0" error="" styles="" args="" enable_hooks="" issue_types=""
   parsed="$(cli_parse "$@")"
   while IFS='=' read -r key value; do
     case "${key}" in
       json) json="${value}" ;;
       dry_run) dry_run="${value}" ;;
       styles) styles="${value}" ;;
-      child_types) child_types="${value}" ;;
+      issue_types) issue_types="${value}" ;;
       enable_hooks) enable_hooks="${value}" ;;
       args) args="${value}" ;;
       exit) exit_code="${value}" ;;
@@ -502,6 +535,7 @@ cmd_config() {
   # bytes on every run (FR-003).
   local resolved nproj=0 pkey binding rids proj_styles='{}'
   local api_style committed style_flag style_resolved style style_source
+  local proj_roles='{}' role_notes=""
   resolved="$(jq -c '.resolved_ids // {}' <<< "${existing}")"
   while IFS= read -r pkey; do
     [[ -z "${pkey}" ]] && continue
@@ -518,21 +552,91 @@ cmd_config() {
     rids="$(jq -c --arg s "${style}" --arg src "${style_source}" \
       '. + {style: $s, style_source: $src}' <<< "${rids}")"
 
-    # Hierarchy derivation (008 T042/T044/T045, research R1/R2, contract §2/§3):
-    # the parent TYPE is derived; the child TYPE is a recorded operator/derived
-    # answer, resolved here at configuration time and persisted with its
-    # provenance beside style/style_source.
-    local itypes derivation child_type_flag child_type_resolved
+    # Role mapping (010, contracts/role-mapping.md): one resolver call per
+    # project, over all three roles — declared -> operator -> derived,
+    # evaluating every role before refusing (contract §3.2). Replaces the
+    # two separate 008 calls (hierarchy_derive then _config_resolve_child_type)
+    # that made the specification tier's refusal hide the story tier's
+    # (research R1).
+    local itypes declared_h operator_h resolve_result
     itypes="$(jq -c '.issue_types // []' <<< "${binding}")"
-    derivation="$(hierarchy_derive "${pkey}" "${itypes}")"
-    if [[ "$(jq -r '.status' <<< "${derivation}")" != "ok" ]]; then
-      jq -r '.message' <<< "${derivation}" >&2
+    declared_h="$(_config_declared_hierarchy_for "${pkey}" "${cfg}")"
+    operator_h="$(_config_operator_roles_for "${pkey}" "${issue_types}")"
+    resolve_result="$(role_resolve "${pkey}" "${itypes}" "${declared_h}" "${operator_h}")"
+    if [[ "$(role_has_problems "${resolve_result}")" == "true" ]]; then
+      _config_report_role_problems "${pkey}" "${resolve_result}" "${json}"
       return "${EXIT_CONFIG}"
     fi
-    child_type_flag="$(_config_child_type_flag_for "${pkey}" "${child_types}")"
-    child_type_resolved="$(_config_resolve_child_type "${pkey}" "${itypes}" "${child_type_flag}")" || return $?
-    rids="$(jq -c --argjson ct "${child_type_resolved}" --argjson pt "$(jq -c '.parent' <<< "${derivation}")" \
-      '. + {child_type: $ct, parent_type: ($pt + {source: "derived"})}' <<< "${rids}")"
+
+    local roles ordering_msg
+    roles="$(jq -c '.roles' <<< "${resolve_result}")"
+    if ! ordering_msg="$(role_validate "${pkey}" "${roles}")"; then
+      printf '%s\n' "${ordering_msg}" >&2
+      return "${EXIT_CONFIG}"
+    fi
+
+    # Fetch required_fields / parent_link_available for every role id the
+    # resolver selected that the initial discovery did not already cover
+    # (T050/T051) — the ordinary case once a mapping is declared or
+    # answered rather than derived from a single-candidate level.
+    local rf_map pla_map role_key role_id type_meta
+    rf_map="$(jq -c '.required_fields // {}' <<< "${rids}")"
+    pla_map="$(jq -c '.parent_link_available // {}' <<< "${rids}")"
+    for role_key in specification story task; do
+      role_id="$(jq -r --arg r "${role_key}" '.[$r].id // empty' <<< "${roles}")"
+      [[ -z "${role_id}" ]] && continue
+      [[ "$(jq -r --arg t "${role_id}" 'has($t)' <<< "${rf_map}")" == "true" ]] && continue
+      type_meta="$(discovery_type_metadata "${pkey}" "${role_id}")" || return $?
+      rf_map="$(jq -c --arg t "${role_id}" --argjson m "$(jq -c '.required_fields' <<< "${type_meta}")" '. + {($t): $m}' <<< "${rf_map}")"
+      pla_map="$(jq -c --arg t "${role_id}" --argjson h "$(jq -c '.parent_link_available' <<< "${type_meta}")" '. + {($t): $h}' <<< "${pla_map}")"
+    done
+
+    rids="$(jq -c --argjson roles "${roles}" --argjson rf "${rf_map}" --argjson pla "${pla_map}" \
+      '. + {roles: $roles, required_fields: $rf, parent_link_available: $pla}
+       + (if ($roles.story) then {child_type: ($roles.story | {logical_name, id, source})} else {} end)
+       + (if ($roles.specification) then {parent_type: ($roles.specification | {logical_name, id, source})} else {} end)' \
+      <<< "${rids}")"
+
+    # Mandatory-field / parent-link gate, pulled to configuration time
+    # (T050/T051, contract §4 checks 5/6): the same existing gate, run over
+    # the roles this mapping just selected — including one derivation would
+    # never have chosen.
+    local gate_result gate_status
+    gate_result="$(hierarchy_mandatory_gate "${rids}" "${pkey}")"
+    gate_status="$(jq -r '.status' <<< "${gate_result}")"
+    if [[ "${gate_status}" != "ok" ]]; then
+      jq -r '.message' <<< "${gate_result}" >&2
+      return "${EXIT_CONFIG}"
+    fi
+
+    # §7.2/§7.3/§7.4 notes: supersession (a committed declaration overriding
+    # a recorded operator answer), promotion (any role resolved from an
+    # operator answer this run) and the task role's "recorded, not yet
+    # mirrored" status line.
+    local prior_roles
+    prior_roles="$(jq -c --arg k "${pkey}" '.resolved_ids[$k].roles // {}' <<< "${existing}")"
+    for role_key in specification story task; do
+      local new_source new_name prior_source prior_name
+      new_source="$(jq -r --arg r "${role_key}" '.[$r].source // empty' <<< "${roles}")"
+      [[ -z "${new_source}" ]] && continue
+      new_name="$(jq -r --arg r "${role_key}" '.[$r].logical_name' <<< "${roles}")"
+      if [[ "${new_source}" == "declared" ]]; then
+        prior_source="$(jq -r --arg r "${role_key}" '.[$r].source // empty' <<< "${prior_roles}")"
+        if [[ "${prior_source}" == "operator" ]]; then
+          prior_name="$(jq -r --arg r "${role_key}" '.[$r].logical_name // empty' <<< "${prior_roles}")"
+          if [[ "${prior_name}" != "${new_name}" ]]; then
+            role_notes="${role_notes}${role_notes:+$'\n'}$(role_supersession_note "${pkey}" "${role_key}" "${new_name}" "${prior_name}")"
+          fi
+        fi
+      fi
+      if [[ "${new_source}" == "operator" ]]; then
+        role_notes="${role_notes}${role_notes:+$'\n'}$(role_promotion_note "${pkey}" "${role_key}" "${new_name}")"
+      fi
+      if [[ "${role_key}" == "task" ]]; then
+        role_notes="${role_notes}${role_notes:+$'\n'}$(role_task_recorded_note "${pkey}" "${new_name}")"
+      fi
+    done
+    proj_roles="$(jq -c --arg k "${pkey}" --argjson r "${roles}" '. + {($k): $r}' <<< "${proj_roles}")"
 
     resolved="$(jq -c --arg k "${pkey}" --argjson r "${rids}" '. + {($k): $r}' <<< "${resolved}")"
     proj_styles="$(jq -c --arg k "${pkey}" --arg s "${style}" --arg src "${style_source}" \
@@ -599,10 +703,19 @@ cmd_config() {
 
   # Build the three-effect summary (FR-054): discovery, hooks, and README are each
   # reported as a distinct section so the operator sees exactly what was written.
+  # The per-role provenance audit (010, contract §7.1) merges into each
+  # project's discovery entry — `<role>: <logical_name> (<source>)` in prose,
+  # `{"roles":{...}}` in --json.
+  local dp
+  dp="$(jq -cS --argjson roles "${proj_roles}" '
+    . as $styles
+    | reduce ($roles|keys[]) as $k ($styles;
+        .[$k] = (.[$k] // {}) + {roles: ($roles[$k] | with_entries(.value |= {logical_name, source}))})
+  ' <<< "${proj_styles}")"
   local effects
   effects="$(jq -cn \
     --arg ds "${disc_status}" --arg dd "${nproj} project(s) discovered" \
-    --argjson dp "${proj_styles}" \
+    --argjson dp "${dp}" \
     --arg hs "${hooks_status}" --arg hd "${hooks_detail}" \
     --arg rs "${readme_status}" --arg rd "${readme_detail}" \
     --arg gs "${gitignore_status}" '
@@ -612,6 +725,10 @@ cmd_config() {
       readme:    {status: $rs, detail: $rd},
       gitignore: {status: $gs, detail: "personal.yml gitignore coverage"}
     }')"
+
+  # §7.2/§7.3/§7.4 notes (supersession, promotion, task-recorded): never a
+  # warning, never a non-zero exit — the run succeeded.
+  [[ -n "${role_notes}" ]] && printf '%s\n' "${role_notes}" >&2
 
   local summary
   summary="$(jq -cn --argjson effects "${effects}" --argjson dry "${dry_run}" --argjson w "${run_warnings}" \

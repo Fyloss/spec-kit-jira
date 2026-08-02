@@ -185,6 +185,27 @@ _disc_required_fields() {
     '[ $f[] | select(.required == true) | {logical_name: .name, field_id: .fieldId} ]' | json_canonical
 }
 
+# discovery_type_metadata <project_key> <type_id> — one issue type's required
+# fields and parent-link availability (010, T050/T051), fetched on demand for
+# a role the resolver selected but discover_binding's own single-candidate
+# prefetch (research R1/R2, `_disc_hierarchy_candidates`) did not already
+# cover — the ordinary case once a mapping is declared or answered rather
+# than derived. Prints {required_fields:[...], parent_link_available:<bool>}.
+discovery_type_metadata() {
+  local key="$1" type_id="$2"
+  local base="${SPEC_KIT_JIRA_BASE_URL:-}"
+  if [[ -z "${base}" ]]; then
+    printf 'discovery: SPEC_KIT_JIRA_BASE_URL is not set\n' >&2
+    return "$(cli_exit_code fail_closed)"
+  fi
+  local api="${base}/rest/api/3"
+  local tmeta
+  tmeta="$(jira_request GET "${api}/issue/createmeta/${key}/issuetypes/${type_id}")" || return $?
+  jq -cn --argjson rf "$(_disc_required_fields "$(jq -c '.fields // []' <<< "${tmeta}")")" \
+    --argjson has "$(jq -c 'any(.fields[]?; .fieldId == "parent")' <<< "${tmeta}")" \
+    '{required_fields: $rf, parent_link_available: $has}'
+}
+
 # discover_binding <project_key> — see the file header.
 discover_binding() {
   local key="$1"

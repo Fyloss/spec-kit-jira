@@ -653,7 +653,17 @@ def branchpattern:
             (($p.phase_status_map|type) != "object" or ([$p.phase_status_map[]|type] | any(. != "string")))
          then "projects[\($i)].phase_status_map must be a mapping of lifecycle-event name to status name" else empty end),
         (if ($p | has("halted_statuses")) and (($p.halted_statuses|type) as $t | $t != "array" and $t != "string")
-         then "projects[\($i)].halted_statuses must be a list of status names" else empty end)
+         then "projects[\($i)].halted_statuses must be a list of status names" else empty end),
+        (if ($p | has("hierarchy")) then
+           (if ($p.hierarchy|type) != "object"
+            then "projects[\($i)].hierarchy must be a mapping of role to issue type name"
+            else
+              ( $p.hierarchy | keys_unsorted[] | select(IN("specification","story","task")|not)
+                | "projects[\($i)].hierarchy declares unknown role `\(.)`; the roles are specification, story, task" ),
+              ( $p.hierarchy | to_entries[] | select((.value|type) != "string" or .value == "")
+                | "projects[\($i)].hierarchy.\(.key) must be a non-empty issue type name" )
+            end)
+         else empty end)
       ][] ) )
 ] | flatten'
 # kcov-excl-stop
@@ -678,7 +688,18 @@ _CFG_LOCAL_ERRORS_JQ='
         then "resolved_ids.\($k).style is invalid" else empty end),
        (if (($v|type) == "object") and ($v | has("style_source"))
           and ($v.style_source | IN("api","operator") | not)
-        then "resolved_ids.\($k).style_source is invalid" else empty end) ))
+        then "resolved_ids.\($k).style_source is invalid" else empty end),
+       (if (($v|type) == "object") and ($v | has("roles")) then
+          (if ($v.roles|type) != "object"
+           then "resolved_ids.\($k).roles must be a mapping"
+           else
+             ( $v.roles | keys_unsorted[] | select(IN("specification","story","task")|not)
+               | "resolved_ids.\($k).roles declares unknown role `\(.)`" ),
+             ( $v.roles | to_entries[] | select((.value|type) == "object") | select(.value | has("source"))
+               | select((.value.source | IN("declared","operator","derived") | not))
+               | "resolved_ids.\($k).roles.\(.key).source is invalid" )
+           end)
+        else empty end) ))
 ] | flatten'
 # kcov-excl-stop
 

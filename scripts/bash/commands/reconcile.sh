@@ -528,6 +528,23 @@ cmd_reconcile() {
         return $?
       fi
     fi
+
+    # §8 re-validation (Phase 6, US4, T052; contract §8): check 4 (ordering)
+    # re-run against the PERSISTED binding's roles, `reconcile:` prefixed, no
+    # re-read of the project's metadata. Checks 5/6 are already re-validated
+    # above via hierarchy_mandatory_gate, which reads the same dual-written
+    # child_type/parent_type keys regardless of this feature. A binding with
+    # no `roles` key — written before 010, or a project whose mapping was
+    # never resolved past style — stays non-fatal.
+    local gate_roles
+    gate_roles="$(jq -c '.roles // empty' <<< "${gate_binding}")"
+    if [[ -n "${gate_roles}" ]]; then
+      local reconcile_ordering_msg
+      if ! reconcile_ordering_msg="$(role_validate_reconcile "${project_key}" "${gate_roles}")"; then
+        _reconcile_fault "${EXIT_CONFIG}" "${reconcile_ordering_msg}"
+        return $?
+      fi
+    fi
   fi
 
   # R5 step 2a — RECOGNISE THE PARENT (Phase 5, US2, T070/T077;

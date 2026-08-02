@@ -146,20 +146,48 @@ and never trigger the degraded mode — do not retry into it.
    the operator maps phases → statuses from the **discovered** status list. There
    is **no built-in "ideal" status/phase table** — the operator's workflow is
    authoritative (FR-012).
-8. **Hierarchy derivation (008, US1)** — the child issue type is whichever type
-   the project's binding records (an operator answer where the level below the
-   parent holds more than one candidate, otherwise derived). The parent type is
-   derived: the level immediately above the child's, when exactly one type
-   occupies it. No Atlassian default name (`Epic`, `Story`, …) is ever assumed —
-   every name comes from the project's own metadata. A project with no level
-   above the child's (`no-parent-level`), or two or more candidates at that
-   level (`parent-level-ambiguous`), refuses at config time with exit `4`,
-   naming every candidate by its Jira name.
+8. **Role mapping (010, US1–US4)** — for each of the three roles —
+   `specification`, `story`, `task` — the entry point resolves which issue type
+   plays it, with precedence **declared → operator → derived**, evaluating all
+   three roles in one pass before refusing on any of them:
+   - **declared**: the project's committed `projects[].hierarchy.<role>` in
+     `config.yml`, matched by exact name against the project's own issue
+     types;
+   - **operator**: a `--issue-type <PROJECT_KEY>=<role>=<name>` flag from this
+     invocation (or `--child-type <PROJECT_KEY>=<name>`, the accepted alias
+     for `--issue-type <PROJECT_KEY>=story=<name>`);
+   - **derived**: only for `specification` and `story`, and only when exactly
+     one non-sub-task type occupies the tier. `task` is **never** derived —
+     undeclared and unanswered, it is simply absent, not an error.
+
+   No Atlassian default name (`Epic`, `Story`, …) is ever assumed — every name
+   comes from the project's own metadata.
+
+   **When a role stays unresolved** (its level holds more than one candidate
+   and nothing declared or answered it), the entry point does **not** prompt.
+   It refuses with exit `4`, printing a closed question per unresolved role —
+   naming the level and every candidate by its Jira name — and, under
+   `--json`, an `unresolved_roles` array with the same information
+   structured. **Read that block; do not guess.** Ask the human which
+   candidate to use for each unresolved role, offering **only** the named
+   candidates, then re-invoke the ceremony once with one
+   `--issue-type <PROJECT_KEY>=<role>=<name>` per answer. Never invent a name
+   outside the candidate list, and never retry with a derived guess.
+
+   A declared type that names a type of the wrong kind (a sub-task type for
+   `specification`/`story`, a non-sub-task type for `task`), an unknown name,
+   a name matching more than one type, or a `specification` that does not sit
+   above its `story` in the hierarchy, each refuse at config time with exit
+   `4`, zero writes, naming the mistake precisely — never silently corrected.
+   Likewise a project with no level above the story tier (`no-parent-level`)
+   refuses, naming the candidates it does offer.
 9. **Persist (deterministic write)** — the resolved-id table (logical name → id
    for issue types — with hierarchy level and sub-task flag — priorities,
-   statuses, `style`/`style_source`, the derived `child_type`/`parent_type`,
-   `required_fields` and `parent_link_available` per written type) is written
-   into the machine-owned `.specify/jira/config.local.yml` via the canonical
+   statuses, `style`/`style_source`, the resolved `roles.<role>` map with each
+   role's provenance, the dual-written `child_type`/`parent_type` derived from
+   `roles.story`/`roles.specification`, `required_fields` and
+   `parent_link_available` per written type) is written into the
+   machine-owned `.specify/jira/config.local.yml` via the canonical
    serialiser, preserving the operator's `site_alias` / `overrides`.
    `config.yml` is **not** rewritten.
 
@@ -206,6 +234,11 @@ in your own words when the report already names it.
   first discovery read; fail-closed on an unknown key).
 - `--style <KEY>=<company_managed|team_managed>` — repeatable; the operator's
   answer to the closed style question.
+- `--issue-type <KEY>=<specification|story|task>=<name>` — repeatable; the
+  operator's answer to one unresolved role, last occurrence per `(KEY, role)`
+  wins (010).
+- `--child-type <KEY>=<name>` — repeatable; the accepted alias for
+  `--issue-type <KEY>=story=<name>`.
 - `--enable-hook <event>` — repeatable; release one lifecycle event the operator
   previously disabled. It clears the extension's own record and **does not touch
   the hook registry**.

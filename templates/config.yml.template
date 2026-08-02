@@ -32,6 +32,26 @@ projects:
     # global Story Points custom field). Stored by logical descriptor.
     # estimation_field: Story point estimate
 
+    # Which of your project's issue types plays each mirror role, by NAME
+    # (never a fixed Jira default — Constitution VII). OPTIONAL when your
+    # project offers exactly one non-sub-task issue type at each hierarchy
+    # level: the bridge derives specification and story on its own. Declare
+    # it here when a level holds several candidates (the config ceremony
+    # would otherwise ask, once, with --issue-type) — for example, a project
+    # with both Epic and Service Category at the level above Story:
+    #   hierarchy:
+    #     specification: Epic
+    #     story: Story
+    #     task: Sub-task
+    # `task` is never derived, even when unambiguous: declare it only once
+    # your team is ready for sub-task mirroring (a future release). The
+    # example above documents the shape only — it is NEVER a fallback; an
+    # undeclared, unresolved role refuses at configuration time (zero writes).
+    # hierarchy:
+    #   specification: Epic
+    #   story: Story
+    #   task: Sub-task
+
 # Route each spec folder to a project. First matching rule wins.
 routing:
   - match:

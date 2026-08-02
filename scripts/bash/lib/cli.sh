@@ -40,7 +40,7 @@ cli_exit_code() {
 cli_parse() {
   local command="" dry_run=false json=false on_drift=abort
   local verbose=false help=false error="" use_team=""
-  local -a positional=() styles=() enable_hooks=() child_types=()
+  local -a positional=() styles=() enable_hooks=() child_types=() issue_types=()
 
   while (($#)); do
     case "$1" in
@@ -70,15 +70,35 @@ cli_parse() {
         # T044, research R1/R2): --child-type KEY=<logical name>, asked only
         # when the child hierarchy level holds several candidates. The
         # logical name is opaque text (Constitution VII) — no shape beyond
-        # "non-empty" is enforced here.
+        # "non-empty" is enforced here. Kept as the accepted alias for
+        # --issue-type KEY=story=<name> (010, contract §2.2, research R2) so
+        # no existing invocation, script or runbook breaks.
         if [[ $# -lt 2 ]]; then
           error="--child-type requires a value (--child-type KEY=<logical name>)"
         else
           shift
           if [[ "$1" =~ ^[A-Z][A-Z0-9_]+=[^[:space:]]+$ ]]; then
             child_types+=("$1")
+            issue_types+=("${1%%=*}=story=${1#*=}")
           else
             error="invalid --child-type value: $1 (expected <PROJECT_KEY>=<logical name>, no whitespace)"
+          fi
+        fi
+        ;;
+      --issue-type)
+        # Repeatable operator answer to the closed role question (010,
+        # contract §2.2): --issue-type KEY=role=<logical name>, last
+        # occurrence per (KEY, role) wins. <role> is the closed set
+        # specification|story|task; the name itself is opaque text
+        # (Constitution VII) — no shape beyond "non-empty" is enforced here.
+        if [[ $# -lt 2 ]]; then
+          error="--issue-type requires a value (--issue-type KEY=role=<logical name>)"
+        else
+          shift
+          if [[ "$1" =~ ^[A-Z][A-Z0-9_]+=(specification|story|task)=[^[:space:]]+$ ]]; then
+            issue_types+=("$1")
+          else
+            error="invalid --issue-type value: $1 (expected <PROJECT_KEY>=<specification|story|task>=<logical name>, no whitespace)"
           fi
         fi
         ;;
@@ -125,7 +145,7 @@ cli_parse() {
     return 0
   fi
 
-  local args_joined styles_joined enable_hooks_joined child_types_joined
+  local args_joined styles_joined enable_hooks_joined child_types_joined issue_types_joined
   args_joined="$(
     IFS=' '
     printf '%s' "${positional[*]}"
@@ -142,6 +162,10 @@ cli_parse() {
     IFS=' '
     printf '%s' "${child_types[*]-}"
   )"
+  issue_types_joined="$(
+    IFS=' '
+    printf '%s' "${issue_types[*]-}"
+  )"
 
   printf 'command=%s\n' "${command}"
   printf 'dry_run=%s\n' "${dry_run}"
@@ -151,6 +175,7 @@ cli_parse() {
   printf 'help=%s\n' "${help}"
   printf 'styles=%s\n' "${styles_joined}"
   printf 'child_types=%s\n' "${child_types_joined}"
+  printf 'issue_types=%s\n' "${issue_types_joined}"
   printf 'use_team=%s\n' "${use_team}"
   printf 'enable_hooks=%s\n' "${enable_hooks_joined}"
   printf 'args=%s\n' "${args_joined}"

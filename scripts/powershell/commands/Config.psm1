@@ -237,54 +237,95 @@ function Resolve-JiraProjectStyle {
     return [pscustomobject]@{ ExitCode = $script:ExitConfig; Style = ''; Source = '' }
 }
 
-function Get-JiraChildTypeFlagFor {
-    # The operator's --child-type answer for one project (last occurrence
-    # wins), or '' when none was given. Mirror of _config_child_type_flag_for.
-    param([string] $ProjectKey, [string] $ChildTypes)
-    $out = ''
-    foreach ($tok in ($ChildTypes -split ' ')) {
-        if ($tok -clike "$ProjectKey=*") { $out = $tok.Substring($tok.IndexOf('=') + 1) }
+function Get-JiraDeclaredHierarchyFor {
+    <#
+    .SYNOPSIS
+      The committed projects[].hierarchy mapping for one project (010,
+      contract §2.1), or an empty map when the project declares none.
+      Mirror of _config_declared_hierarchy_for.
+    #>
+    [CmdletBinding()]
+    param($ProjectEntry)
+    $h = Get-CmdProp $ProjectEntry 'hierarchy'
+    $out = @{}
+    if ($null -eq $h) { return $out }
+    if ($h -is [System.Management.Automation.PSCustomObject]) {
+        foreach ($p in $h.PSObject.Properties) { $out[$p.Name] = [string]$p.Value }
+    }
+    elseif ($h -is [System.Collections.IDictionary]) {
+        foreach ($k in $h.Keys) { $out[[string]$k] = [string]$h[$k] }
     }
     return $out
 }
 
-function Resolve-JiraChildType {
+function Get-JiraOperatorRolesFor {
     <#
     .SYNOPSIS
-      The child TYPE (research R1/R2, contract §2): derived when the child
-      hierarchy level holds exactly one non-sub-task candidate; otherwise the
-      operator's --child-type answer; otherwise exit 4 naming the level and
-      every candidate. Mirror of _config_resolve_child_type. Returns
-      { ExitCode; Entry } where Entry is [ordered]@{logical_name;id;source}.
+      The operator's --issue-type / --child-type answers for one project,
+      reduced to {role: name} (010, contract §2.2). IssueTypes is
+      Invoke-JiraCliParse's merged, space-separated `KEY=role=name` stream
+      (--child-type is already translated to role=story by lib/Cli.psm1);
+      last occurrence per (KEY, role) wins. Mirror of
+      _config_operator_roles_for.
+    #>
+    [CmdletBinding()]
+    param([string] $ProjectKey, [string] $IssueTypes)
+    $out = @{}
+    foreach ($tok in ($IssueTypes -split ' ')) {
+        if ([string]::IsNullOrEmpty($tok)) { continue }
+        if (-not ($tok -clike "$ProjectKey=*")) { continue }
+        $rest = $tok.Substring($tok.IndexOf('=') + 1)
+        $eq = $rest.IndexOf('=')
+        $role = $rest.Substring(0, $eq)
+        $name = $rest.Substring($eq + 1)
+        $out[$role] = $name
+    }
+    return $out
+}
+
+function Write-JiraRoleProblemsReport {
+    <#
+    .SYNOPSIS
+      Render every problem Resolve-JiraRoleMapping found (010, contract §6):
+      one block per unresolved role in role order, then unknown/duplicate/
+      subtask-misuse/task-misuse/no-parent-level — all to stderr — plus, in
+      --json mode, the structured `unresolved_roles` block on stdout (§6.2).
+      Mirror of _config_report_role_problems.
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)] [string] $ProjectKey,
-        [Parameter(Mandatory)] $IssueTypes,
-        [string] $Flag = ''
+        [Parameter(Mandatory)][string] $ProjectKey,
+        [Parameter(Mandatory)] $Result,
+        [bool] $Json = $false
     )
-    $childLevel = Get-JiraHierarchyChildLevel -IssueTypes $IssueTypes
-    if ($null -eq $childLevel) {
-        [Console]::Error.WriteLine("config: project ${ProjectKey}: the discovered project declares no issue types at all")
-        return [pscustomobject]@{ ExitCode = $script:ExitConfig; Entry = $null }
+    foreach ($u in @($Result.Unresolved)) {
+        [Console]::Error.WriteLine((Get-JiraRoleUnresolvedMessage -ProjectKey $ProjectKey -Role $u.role -Level $u.level -Candidates $u.candidates))
+        [Console]::Error.WriteLine('')
     }
-    $candidates = @($IssueTypes | Where-Object { (-not [bool]$_.subtask) -and ([int]$_.hierarchy_level -eq $childLevel) })
-    if ($candidates.Count -eq 1) {
-        $entry = [ordered]@{ logical_name = $candidates[0].logical_name; id = $candidates[0].id; source = 'derived' }
-        return [pscustomobject]@{ ExitCode = 0; Entry = $entry }
+    foreach ($u in @($Result.Unknown)) {
+        [Console]::Error.WriteLine((Get-JiraRoleUnknownTypeMessage -ProjectKey $ProjectKey -Role $u.role -Name $u.name -Candidates $u.candidates))
+        [Console]::Error.WriteLine('')
     }
-    if ($Flag) {
-        $match = $candidates | Where-Object { $_.logical_name -eq $Flag } | Select-Object -First 1
-        if ($match) {
-            $entry = [ordered]@{ logical_name = $match.logical_name; id = $match.id; source = 'operator' }
-            return [pscustomobject]@{ ExitCode = 0; Entry = $entry }
-        }
-        [Console]::Error.WriteLine("config: project ${ProjectKey}: --child-type $Flag names no candidate at the child level")
-        return [pscustomobject]@{ ExitCode = $script:ExitConfig; Entry = $null }
+    foreach ($d in @($Result.Duplicate)) {
+        [Console]::Error.WriteLine((Get-JiraRoleDuplicateMessage -ProjectKey $ProjectKey -Role $d.role -Name $d.name -Level $d.level))
+        [Console]::Error.WriteLine('')
     }
-    $list = ($candidates | ForEach-Object { $_.logical_name }) -join ', '
-    [Console]::Error.WriteLine("config: project ${ProjectKey}: the child level holds more than one issue type ($list); pass --child-type $ProjectKey=<one of them>")
-    return [pscustomobject]@{ ExitCode = $script:ExitConfig; Entry = $null }
+    foreach ($s in @($Result.SubtaskMisuse)) {
+        [Console]::Error.WriteLine((Get-JiraRoleSubtaskMisuseMessage -ProjectKey $ProjectKey -Role $s.role -Name $s.name))
+        [Console]::Error.WriteLine('')
+    }
+    foreach ($t in @($Result.TaskMisuse)) {
+        [Console]::Error.WriteLine((Get-JiraRoleTaskMisuseMessage -ProjectKey $ProjectKey -Name $t.name -Candidates $t.candidates))
+        [Console]::Error.WriteLine('')
+    }
+    if ($Result.NoParentLevel) {
+        [Console]::Error.WriteLine($Result.NoParentLevel)
+    }
+
+    if ($Json -and @($Result.Unresolved).Count -gt 0) {
+        $block = ConvertTo-JiraRoleUnresolvedJson -Result $Result -ProjectKey $ProjectKey
+        [Console]::Out.Write((ConvertTo-JiraJsonValue ([ordered]@{ unresolved_roles = $block })) + "`n")
+    }
 }
 
 function Set-JiraConfigGitignore {
@@ -434,7 +475,7 @@ function Invoke-JiraConfig {
     $json = $state['json'] -eq 'true'
     $dryRun = $state['dry_run'] -eq 'true'
     $styles = if ($state.ContainsKey('styles')) { $state['styles'] } else { '' }
-    $childTypes = if ($state.ContainsKey('child_types')) { $state['child_types'] } else { '' }
+    $issueTypes = if ($state.ContainsKey('issue_types')) { $state['issue_types'] } else { '' }
     $enableHooks = if ($state.ContainsKey('enable_hooks')) { $state['enable_hooks'] } else { '' }
 
     $configdir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
@@ -524,6 +565,8 @@ function Invoke-JiraConfig {
     }
 
     $projStyles = [ordered]@{}
+    $projRoles = [ordered]@{}
+    $roleNotes = [System.Collections.Generic.List[string]]::new()
     foreach ($pkey in $keys) {
         $p = $null
         foreach ($cand in $projects) {
@@ -546,22 +589,108 @@ function Invoke-JiraConfig {
         $rids['style'] = $sr.Style
         $rids['style_source'] = $sr.Source
 
-        # Hierarchy derivation (008 T042/T044/T045, research R1/R2, contract
-        # §2/§3): the parent TYPE is derived; the child TYPE is a recorded
-        # operator/derived answer, resolved here and persisted with its
-        # provenance beside style/style_source.
+        # Role mapping (010, contracts/role-mapping.md): one resolver call
+        # per project, over all three roles — declared -> operator ->
+        # derived, evaluating every role before refusing (contract §3.2).
+        # Replaces the two separate 008 calls (Get-JiraHierarchyDerivation
+        # then Resolve-JiraChildType) that made the specification tier's
+        # refusal hide the story tier's (research R1).
         $itypesRaw = Get-CmdProp $bindingObj 'issue_types'
         $itypes = if ($null -ne $itypesRaw) { @($itypesRaw) } else { @() }
-        $derivation = Get-JiraHierarchyDerivation -ProjectKey $pkey -IssueTypes $itypes
-        if ($derivation.Status -ne 'ok') {
-            [Console]::Error.WriteLine($derivation.Message)
+        $declaredH = Get-JiraDeclaredHierarchyFor -ProjectEntry $p
+        $operatorH = Get-JiraOperatorRolesFor -ProjectKey $pkey -IssueTypes $issueTypes
+        $result = Resolve-JiraRoleMapping -ProjectKey $pkey -IssueTypes $itypes -Declared $declaredH -Operator $operatorH
+        if (Test-JiraRoleMappingHasProblems -Result $result) {
+            Write-JiraRoleProblemsReport -ProjectKey $pkey -Result $result -Json $json
             return $script:ExitConfig
         }
-        $childFlag = Get-JiraChildTypeFlagFor -ProjectKey $pkey -ChildTypes $childTypes
-        $childResolved = Resolve-JiraChildType -ProjectKey $pkey -IssueTypes $itypes -Flag $childFlag
-        if ($childResolved.ExitCode -ne 0) { return [int] $childResolved.ExitCode }
-        $rids['child_type'] = $childResolved.Entry
-        $rids['parent_type'] = [ordered]@{ logical_name = $derivation.Parent.logical_name; id = $derivation.Parent.id; source = 'derived' }
+
+        $orderingMessage = $null
+        if (-not (Test-JiraRoleMapping -ProjectKey $pkey -Roles $result.Roles -Message ([ref]$orderingMessage))) {
+            [Console]::Error.WriteLine($orderingMessage)
+            return $script:ExitConfig
+        }
+
+        # Fetch required_fields / parent_link_available for every role id the
+        # resolver selected that the initial discovery did not already cover
+        # (T050/T051) — the ordinary case once a mapping is declared or
+        # answered rather than derived from a single-candidate level.
+        $rfMap = [ordered]@{}
+        if ($rids.Contains('required_fields') -and $null -ne $rids['required_fields']) {
+            foreach ($prop in $rids['required_fields'].PSObject.Properties) { $rfMap[$prop.Name] = $prop.Value }
+        }
+        $plaMap = [ordered]@{}
+        if ($rids.Contains('parent_link_available') -and $null -ne $rids['parent_link_available']) {
+            foreach ($prop in $rids['parent_link_available'].PSObject.Properties) { $plaMap[$prop.Name] = $prop.Value }
+        }
+        foreach ($roleKey in @('specification', 'story', 'task')) {
+            if (-not $result.Roles.Contains($roleKey)) { continue }
+            $roleId = [string]$result.Roles[$roleKey].id
+            if ([string]::IsNullOrEmpty($roleId)) { continue }
+            if ($rfMap.Contains($roleId)) { continue }
+            $tm = Get-JiraDiscoveryTypeMetadataResult -ProjectKey $pkey -TypeId $roleId
+            if ($tm.ExitCode -ne 0) { return [int] $tm.ExitCode }
+            $rfMap[$roleId] = $tm.RequiredFields
+            $plaMap[$roleId] = $tm.ParentLinkAvailable
+        }
+        $rids['required_fields'] = $rfMap
+        $rids['parent_link_available'] = $plaMap
+        $rids['roles'] = $result.Roles
+        if ($result.Roles.Contains('story')) {
+            $storyRole = $result.Roles['story']
+            $rids['child_type'] = [ordered]@{ logical_name = $storyRole.logical_name; id = $storyRole.id; source = $storyRole.source }
+        }
+        if ($result.Roles.Contains('specification')) {
+            $specRole = $result.Roles['specification']
+            $rids['parent_type'] = [ordered]@{ logical_name = $specRole.logical_name; id = $specRole.id; source = $specRole.source }
+        }
+
+        # Mandatory-field / parent-link gate, pulled to configuration time
+        # (T050/T051, contract §4 checks 5/6): the same existing gate, run
+        # over the roles this mapping just selected — including one
+        # derivation would never have chosen.
+        $gateBinding = (ConvertTo-JiraJsonValue $rids) | ConvertFrom-Json -Depth 100
+        $gateResult = Get-JiraHierarchyMandatoryGate -Binding $gateBinding -ProjectKey $pkey
+        if ($gateResult.status -ne 'ok') {
+            [Console]::Error.WriteLine($gateResult.message)
+            return $script:ExitConfig
+        }
+
+        # §7.2/§7.3/§7.4 notes: supersession (a committed declaration
+        # overriding a recorded operator answer), promotion (any role
+        # resolved from an operator answer this run) and the task role's
+        # "recorded, not yet mirrored" status line.
+        $priorRoles = $null
+        if ($existing -is [System.Management.Automation.PSCustomObject]) {
+            $existingResolvedIds = Get-CmdProp $existing 'resolved_ids'
+            if ($null -ne $existingResolvedIds) {
+                $priorProj = Get-CmdProp $existingResolvedIds $pkey
+                if ($null -ne $priorProj) { $priorRoles = Get-CmdProp $priorProj 'roles' }
+            }
+        }
+        foreach ($roleKey in @('specification', 'story', 'task')) {
+            if (-not $result.Roles.Contains($roleKey)) { continue }
+            $newEntry = $result.Roles[$roleKey]
+            $newSource = [string]$newEntry.source
+            $newName = [string]$newEntry.logical_name
+            if ($newSource -eq 'declared') {
+                $priorEntry = Get-CmdProp $priorRoles $roleKey
+                $priorSource = [string](Get-CmdProp $priorEntry 'source')
+                if ($priorSource -eq 'operator') {
+                    $priorName = [string](Get-CmdProp $priorEntry 'logical_name')
+                    if ($priorName -ne $newName) {
+                        $roleNotes.Add((Get-JiraRoleSupersessionNote -ProjectKey $pkey -Role $roleKey -DeclaredName $newName -LocalName $priorName))
+                    }
+                }
+            }
+            if ($newSource -eq 'operator') {
+                $roleNotes.Add((Get-JiraRolePromotionNote -ProjectKey $pkey -Role $roleKey -Name $newName))
+            }
+            if ($roleKey -eq 'task') {
+                $roleNotes.Add((Get-JiraRoleTaskRecordedNote -ProjectKey $pkey -Name $newName))
+            }
+        }
+        $projRoles[$pkey] = $result.Roles
 
         $resolved[$pkey] = $rids
         $projStyles[$pkey] = [ordered]@{ style = $sr.Style; style_source = $sr.Source }
@@ -638,6 +767,19 @@ function Invoke-JiraConfig {
         default { $readmeStatus }
     }
 
+    # The per-role provenance audit (010, contract §7.1) merges into each
+    # project's discovery entry — `roles: {role: {logical_name, source}}` —
+    # alongside style/style_source.
+    foreach ($pk in $projRoles.Keys) {
+        $rolesForProj = [ordered]@{}
+        foreach ($rk in $projRoles[$pk].Keys) {
+            $entry = $projRoles[$pk][$rk]
+            $rolesForProj[$rk] = [ordered]@{ logical_name = $entry.logical_name; source = $entry.source }
+        }
+        if (-not $projStyles.Contains($pk)) { $projStyles[$pk] = [ordered]@{} }
+        $projStyles[$pk]['roles'] = $rolesForProj
+    }
+
     # Build the effects summary (FR-054), byte-identical to the Bash port:
     # discovery, hooks, README and gitignore each reported as a distinct section.
     # The hooks effect was computed up front and is a READ-ONLY verification —
@@ -648,6 +790,11 @@ function Invoke-JiraConfig {
         readme    = [ordered]@{ status = $readmeStatus; detail = $readmeDetail }
         gitignore = [ordered]@{ status = $gitignoreStatus; detail = 'personal.yml gitignore coverage' }
     }
+
+    # §7.2/§7.3/§7.4 notes (supersession, promotion, task-recorded): never a
+    # warning, never a non-zero exit — the run succeeded.
+    foreach ($note in $roleNotes) { [Console]::Error.WriteLine($note) }
+
     $summaryObj = [ordered]@{
         schema_version = '1.0'
         command        = 'config'
@@ -669,4 +816,5 @@ function Invoke-JiraConfig {
 }
 
 Export-ModuleMember -Function Test-JiraMappingValidity, New-JiraProjectMapping, `
-    Get-JiraResolvedIdMap, Invoke-JiraConfig
+    Get-JiraResolvedIdMap, Get-JiraDeclaredHierarchyFor, Get-JiraOperatorRolesFor, `
+    Write-JiraRoleProblemsReport, Invoke-JiraConfig

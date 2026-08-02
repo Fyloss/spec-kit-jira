@@ -740,6 +740,28 @@ function Test-JiraTeamConfig {
                 $hsValid = ($hs -is [string]) -or (($hs -is [System.Collections.IEnumerable]) -and ($hs -isnot [System.Collections.IDictionary]))
                 if (-not $hsValid) { $errs.Add("projects[$i].halted_statuses must be a list of status names") }
             }
+            # hierarchy (010, data-model.md §2): the committed declaration —
+            # role -> issue type NAME. Mirror of the Bash port's
+            # _CFG_TEAM_ERRORS_JQ hierarchy clause.
+            if (($p -is [System.Collections.IDictionary]) -and $p.Contains('hierarchy')) {
+                $h = Get-CfgProp $p 'hierarchy'
+                if ($h -isnot [System.Collections.IDictionary]) {
+                    $errs.Add("projects[$i].hierarchy must be a mapping of role to issue type name")
+                }
+                else {
+                    foreach ($role in (Get-JiraOrdinalSorted $h.Keys)) {
+                        if ($script:JiraRoleNames -cnotcontains [string]$role) {
+                            $errs.Add("projects[$i].hierarchy declares unknown role ``$role``; the roles are specification, story, task")
+                        }
+                    }
+                    foreach ($role in (Get-JiraOrdinalSorted $h.Keys)) {
+                        $v = $h[[string]$role]
+                        if (($v -isnot [string]) -or ($v -ceq '')) {
+                            $errs.Add("projects[$i].hierarchy.$role must be a non-empty issue type name")
+                        }
+                    }
+                }
+            }
             $i++
         }
     }
@@ -788,6 +810,27 @@ function Test-JiraLocalConfig {
             }
             if ($v.Contains('style_source') -and (@('api', 'operator') -cnotcontains $v['style_source'])) {
                 $errs.Add("resolved_ids.$k.style_source is invalid")
+            }
+            # roles (010, data-model.md §3): the resolved role binding.
+            # Mirror of the Bash port's _CFG_LOCAL_ERRORS_JQ roles clause.
+            if ($v.Contains('roles')) {
+                $roles = $v['roles']
+                if ($roles -isnot [System.Collections.IDictionary]) {
+                    $errs.Add("resolved_ids.$k.roles must be a mapping")
+                }
+                else {
+                    foreach ($role in (Get-JiraOrdinalSorted $roles.Keys)) {
+                        if ($script:JiraRoleNames -cnotcontains [string]$role) {
+                            $errs.Add("resolved_ids.$k.roles declares unknown role ``$role``")
+                        }
+                        $rv = $roles[[string]$role]
+                        if (($rv -is [System.Collections.IDictionary]) -and $rv.Contains('source')) {
+                            if (@('declared', 'operator', 'derived') -cnotcontains $rv['source']) {
+                                $errs.Add("resolved_ids.$k.roles.$role.source is invalid")
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1092,8 +1135,22 @@ $script:JiraHookEventNames = @(
     'after_tasks', 'after_implement', 'after_analyze'
 )
 
+# =============================================================================
+# The role set (010, data-model.md §1) — closed, three, engine-side
+# =============================================================================
+#
+# The repository's own artifact vocabulary — specification, story, task —
+# never Jira's. Declared once per port, following the JiraHookEventNames
+# precedent, so the closed set has exactly one source; sink/jira/
+# Hierarchy.psm1 consumes it rather than redeclaring it.
+$script:JiraRoleNames = @('specification', 'story', 'task')
+
 function Get-JiraHookEventNameList {
     return $script:JiraHookEventNames
+}
+
+function Get-JiraRoleNameList {
+    return $script:JiraRoleNames
 }
 
 function Get-CfgLocalPath {
@@ -1234,4 +1291,4 @@ Export-ModuleMember -Function Get-JiraExtensionVersion, Assert-JiraSingleVersion
     Get-JiraStatusClassification, Get-JiraPhaseStatusTargetSet, `
     Test-JiraPlaceholderKey, Get-JiraPlaceholderKey, `
     Get-JiraHookEventNameList, Get-JiraHooksDisabled, Add-JiraHooksDisabled, Remove-JiraHooksDisabled, `
-    Get-CfgLocalPath, Get-CfgLocalObject
+    Get-CfgLocalPath, Get-CfgLocalObject, Get-JiraRoleNameList

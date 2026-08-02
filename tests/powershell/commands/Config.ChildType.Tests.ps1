@@ -67,7 +67,8 @@ Describe 'Config child-type resolution' {
         $env:SPEC_KIT_JIRA_BASE_URL = $M.BaseUrl
         $r = Invoke-ConfigCaptured @('config', '--json')
         $r.ExitCode | Should -Be 4
-        $r.Out | Should -Match 'child level holds more than one issue type'
+        $r.Out | Should -Match 'the story level'
+        $r.Out | Should -Match 'holds more than one issue type'
 
         $r2 = Invoke-ConfigCaptured @('config', '--child-type', 'COMP=Defect', '--json')
         $r2.ExitCode | Should -Be 0
@@ -82,6 +83,6 @@ Describe 'Config child-type resolution' {
         $env:SPEC_KIT_JIRA_BASE_URL = $M.BaseUrl
         $r = Invoke-ConfigCaptured @('config', '--child-type', 'COMP=Epic', '--json')
         $r.ExitCode | Should -Be 4
-        $r.Out | Should -Match 'names no candidate at the child level'
+        $r.Out | Should -Match 'which this project does not offer at that tier'
     }
 }

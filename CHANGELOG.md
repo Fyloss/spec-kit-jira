@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A committed `hierarchy` mapping under `projects[]` in `config.yml`
+  (`specification` / `story` / `task` → issue type name), and a repeatable
+  `--issue-type <PROJECT_KEY>=<specification|story|task>=<name>` config flag,
+  for an instance whose hierarchy is ambiguous at more than one tier — e.g. a
+  project offering both `Epic` and `Service Category` at the level above
+  `Story`. The resolver evaluates all three roles in one pass (declared →
+  operator → derived) and reports every unresolved tier together, instead of
+  refusing on the first one and hiding the rest. `--child-type KEY=<name>`
+  is kept as the accepted alias for `--issue-type KEY=story=<name>`. A
+  repository that declares no `hierarchy` key and offers exactly one
+  candidate at each tier is unaffected — same derivation, same output, byte
+  for byte.
 - `tests/conformance/mock-jira/curl-shim.sh` — a scripted `curl` replacement
   (pure `bash` + `jq`, no process, no port) that backs the Bash port's mock
   Jira double, reached through the unchanged `mock_start`/`mock_stop`/

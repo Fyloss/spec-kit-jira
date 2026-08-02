@@ -8,6 +8,8 @@ BeforeAll {
     $Fixture = Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-mirrored-spec'
     Import-Module (Join-Path $Mock 'Mock.psm1') -Force
     Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '../../../scripts/powershell/lib/Config.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '../../../scripts/powershell/lib/Output.psm1') -Force
 
     $env:SPEC_KIT_JIRA_REPO = 'acme/app'
     $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-billing-invoices'
@@ -141,6 +143,55 @@ Describe 'Invoke-JiraReconcile — the parent hierarchy regression' {
         @([regex]::Matches($sw2.ToString(), '(?m)^WARNING: ')).Count | Should -Be 1
         $sw2.ToString() | Should -Match 'epic_strategy'
         Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue
+    }
+
+    # =========================================================================
+    # T047/T052 [Phase 6, US4] — §8 re-validation against the PERSISTED binding
+    # =========================================================================
+    #
+    # Every reconcile run above already exercises the FR-004 case implicitly:
+    # the fixture binding carries no `roles` key at all, and reconcile mirrors
+    # fine — an absent `roles` key stays non-fatal. These two tests cover the
+    # case a stale or hand-edited binding DOES carry `roles`, and check 4
+    # (ordering) is re-run against them with no re-read of the project's
+    # metadata.
+
+    It 'T047/T052 — an inverted roles ordering in the persisted binding refuses at reconcile, reconcile: prefixed, zero writes' {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+
+        $localf = Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml'
+        $obj = (ConvertFrom-JiraConfigYaml -Path $localf) | ConvertFrom-Json -Depth 100
+        $obj.resolved_ids.COMP | Add-Member -NotePropertyName 'roles' -NotePropertyValue ([ordered]@{
+                specification = [ordered]@{ logical_name = 'Story'; id = '10004'; hierarchy_level = '0'; subtask = $false; source = 'declared' }
+                story         = [ordered]@{ logical_name = 'Epic'; id = '10001'; hierarchy_level = '1'; subtask = $false; source = 'declared' }
+            }) -Force
+        $yaml = ConvertTo-JiraConfigYaml -Json (ConvertTo-JiraJsonValue $obj)
+        [System.IO.File]::WriteAllText($localf, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
+
+        $r = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--json')
+        $r.ExitCode | Should -Be 4
+        $r.Out | Should -Match 'reconcile: project COMP: specification names'
+        $r.Out | Should -Match 'is not above story'
+
+        (Get-JiraMockCallLog -Mock $script:M).Count | Should -Be 0
+    }
+
+    It 'T047 — a binding with roles but no task entry mirrors normally (§3.4, absent roles.task is not an error)' {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+
+        $localf = Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml'
+        $obj = (ConvertFrom-JiraConfigYaml -Path $localf) | ConvertFrom-Json -Depth 100
+        $obj.resolved_ids.COMP | Add-Member -NotePropertyName 'roles' -NotePropertyValue ([ordered]@{
+                specification = [ordered]@{ logical_name = 'Epic'; id = '10001'; hierarchy_level = '1'; subtask = $false; source = 'derived' }
+                story         = [ordered]@{ logical_name = 'Story'; id = '10004'; hierarchy_level = '0'; subtask = $false; source = 'derived' }
+            }) -Force
+        $yaml = ConvertTo-JiraConfigYaml -Json (ConvertTo-JiraJsonValue $obj)
+        [System.IO.File]::WriteAllText($localf, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
+
+        $r = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--json')
+        $r.ExitCode | Should -Be 0
     }
 }
 

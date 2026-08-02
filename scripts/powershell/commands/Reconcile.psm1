@@ -598,6 +598,23 @@ function Invoke-JiraReconcile {
                 return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message $gateResult.message)
             }
         }
+
+        # §8 re-validation (Phase 6, US4, T052; contract §8): check 4
+        # (ordering) re-run against the PERSISTED binding's roles,
+        # `reconcile:` prefixed, no re-read of the project's metadata.
+        # Checks 5/6 are already re-validated above via
+        # Get-JiraHierarchyMandatoryGate, which reads the same
+        # dual-written child_type/parent_type keys regardless of this
+        # feature. A binding with no `roles` property — written before
+        # 010, or a project whose mapping was never resolved past style —
+        # stays non-fatal.
+        $gateRoles = Get-JiraPlanPropSafe $gateBinding 'roles'
+        if ($null -ne $gateRoles) {
+            $reconcileOrderingMessage = $null
+            if (-not (Test-JiraRoleMappingReconcile -ProjectKey $projectKey -Roles $gateRoles -Message ([ref]$reconcileOrderingMessage))) {
+                return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message $reconcileOrderingMessage)
+            }
+        }
     }
 
     # R5 step 2a — RECOGNISE THE PARENT (Phase 5, US2, T070/T077;

@@ -1,0 +1,12 @@
+# Team config for the role-ordering-refusal conformance fixture (010, T053) —
+# a declared hierarchy that inverts the two tiers: specification names the
+# STORY-level type (Story, level 0), story names the level-above type
+# (Deliverable, level 1). Check 4 (contract §4) must refuse this before any
+# write, on both ports.
+projects:
+  - key: COMP
+    style: company_managed
+    hierarchy:
+      specification: Story
+      story: Deliverable
+routing_default: COMP

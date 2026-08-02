@@ -41,7 +41,7 @@ boot() {
 
 @test "config --json emits a valid machine-readable run summary (FR-002)" {
   boot
-  run cmd_config config --child-type COMP=Story --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
   [ "$status" -eq 0 ]
   [ "$(jq -r '.schema_version' <<< "$output")" = "1.0" ]
   [ "$(jq -r '.command' <<< "$output")" = "config" ]

@@ -43,7 +43,7 @@ boot() {
 
 @test "the --json summary reports discovery, hooks, and readme effects separately" {
   boot
-  run cmd_config config --child-type COMP=Story --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
   [ "$status" -eq 0 ]
   # All effects are present as distinct, named sections (002 adds gitignore).
   [ "$(jq -r '.effects | keys | sort | join(",")' <<< "$output")" = "discovery,gitignore,hooks,readme" ]
@@ -70,7 +70,7 @@ boot() {
 @test "the PowerShell port reports the same three effects (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   boot powershell
-  run cmd_config config --child-type COMP=Story --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
   local bash_out="$output"
 
   local pswork
@@ -130,7 +130,7 @@ seed_disabled_registry() {
   source "${ROOT}/scripts/bash/lib/config.sh"
   seed_disabled_registry
   boot '{"projects":{"COMP":"company"}}'
-  run cmd_config config --child-type COMP=Story --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
   [ "$status" -eq 0 ]
   [ "$(config_hooks_disabled_read "${JIRA_CONFIG_DIR}")" = '["after_implement"]' ]
   # And it is surfaced in the health object the summary carries.
@@ -154,7 +154,7 @@ seed_disabled_registry() {
   source "${ROOT}/scripts/bash/lib/config.sh"
   seed_disabled_registry
   boot '{"projects":{"COMP":"company"}}'
-  run cmd_config config --child-type COMP=Story --dry-run --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --dry-run --json
   [ "$status" -eq 0 ]
   # The report names the held event...
   [[ "$(jq -r '.effects.hooks.detail' <<< "$output")" == *"after_implement"* ]]
@@ -165,7 +165,7 @@ seed_disabled_registry() {
 @test "the ceremony reports the hook effect with the read-only vocabulary (FR-021)" {
   seed_disabled_registry
   boot '{"projects":{"COMP":"company"}}'
-  run cmd_config config --child-type COMP=Story --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
   # `held_disabled` — not a write outcome, because nothing was written.
   [ "$(jq -r '.effects.hooks.status' <<< "$output")" = "held_disabled" ]
   [[ "$(jq -r '.effects.hooks.detail' <<< "$output")" == *"--enable-hook"* ]]
@@ -186,7 +186,7 @@ seed_disabled_registry() {
   } > "${WORK}/.specify/extensions.yml"
   export SPEC_KIT_JIRA_EXTENSIONS_YML="${WORK}/.specify/extensions.yml"
   boot '{"projects":{"COMP":"company"}}'
-  run cmd_config config --child-type COMP=Story --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
   [ "$(jq -r '.effects.hooks.status' <<< "$output")" = "healthy" ]
   [[ "$(jq -r '.effects.hooks.detail' <<< "$output")" == *"registry was not modified"* ]]
 }

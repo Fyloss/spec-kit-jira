@@ -57,7 +57,8 @@ _write_config() {
 
   run cmd_config config --json
   [ "$status" -eq 4 ]
-  [[ "$output" == *"child level holds more than one issue type"* ]]
+  [[ "$output" == *"the story level"* ]]
+  [[ "$output" == *"holds more than one issue type"* ]]
   [[ "$output" == *"Story"* ]]
   [[ "$output" == *"Defect"* ]]
   [ ! -f "${JIRA_CONFIG_DIR}/config.local.yml" ]
@@ -77,7 +78,7 @@ _write_config() {
 
   run cmd_config config --child-type COMP=Epic --json
   [ "$status" -eq 4 ]
-  [[ "$output" == *"names no candidate at the child level"* ]]
+  [[ "$output" == *"which this project does not offer at that tier"* ]]
   [ ! -f "${JIRA_CONFIG_DIR}/config.local.yml" ]
 }
 

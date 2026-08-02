@@ -68,6 +68,260 @@ hierarchy_derive() {
   # kcov-excl-stop
 }
 
+# =============================================================================
+# Role mapping (010, contracts/role-mapping.md) — the operator declares which
+# issue types carry the mirror. One resolver, invoked once per project, over
+# all three roles — specification, story, task — with precedence
+# declared -> operator -> derived, evaluating every role before refusing
+# (contract §3.2, research R1). Derivation (§3.1) is unchanged from 008 where
+# it applies: `hierarchy_child_level`/`hierarchy_derive` above remain the
+# level arithmetic this module reuses.
+# =============================================================================
+
+# role_candidates <issue_types_json> <role> — the candidate set for one role
+# (contract §3.3): the project's non-sub-task types for specification/story,
+# its sub-task types for task, in discovered order. Prints the canonical
+# array of {logical_name,id,hierarchy_level,subtask}.
+role_candidates() {
+  local itypes="$1" role="$2"
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -c --arg role "${role}" '
+    if $role == "task" then [ .[] | select(.subtask) ]
+    else [ .[] | select(.subtask | not) ] end
+  ' <<< "${itypes}"
+  # kcov-excl-stop
+}
+
+# role_resolve <project_key> <issue_types_json> <declared_json> <operator_json>
+# The resolver (contract §3): declared_json and operator_json are each
+# {specification?, story?, task?} -> issue type name, scoped to ONE project.
+# Matching (§3.3) searches the project's WHOLE issue-type list by exact name
+# — never pre-scoped to the role's candidate set — so a name that exists but
+# names the wrong KIND of type (e.g. a sub-task type declared for `story`)
+# is caught by the subtask check below and reported as §6.5/§6.6, not as an
+# unrelated §6.3 "unknown type" (this is what lets a sub-task type reported
+# at level 0 be caught by the `subtask` flag rather than by its level).
+# `task` is never derived (§3.1) — undeclared and unanswered, it is ABSENT,
+# not unresolved (§3.4): no entry, no problem.
+#
+# Prints one canonical JSON object:
+#   {"roles": {<role>: {logical_name,id,hierarchy_level,subtask,source}, ...},
+#    "unresolved": [{role,level,candidates}, ...],       (§6.2)
+#    "unknown":    [{role,name,candidates}, ...],         (§6.3)
+#    "duplicate":  [{role,name,level}, ...],               (§6.4)
+#    "subtask_misuse": [{role,name}, ...],                 (§6.5)
+#    "task_misuse":    [{name,candidates}, ...],           (§6.6)
+#    "no_parent_level": <message-string-or-null>}
+role_resolve() {
+  local key="$1" itypes="$2" declared="${3:-{\}}" operator="${4:-{\}}"
+  [[ -z "${declared}" ]] && declared='{}'
+  [[ -z "${operator}" ]] && operator='{}'
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -cn --arg key "${key}" --argjson itypes "${itypes}" --argjson declared "${declared}" --argjson operator "${operator}" '
+    def nonSubtask: [ $itypes[] | select(.subtask | not) ];
+    def subtaskTypes: [ $itypes[] | select(.subtask) ];
+    def candidatesFor($role): if $role == "task" then subtaskTypes else nonSubtask end;
+    (nonSubtask) as $ns
+    | (if ($ns|length) > 0 then ($ns | map(.hierarchy_level|tonumber) | min) else null end) as $childLevel
+    | (if $childLevel == null then [] else [ $ns[] | select((.hierarchy_level|tonumber) == $childLevel) ] end) as $childCands
+    | (if $childLevel == null then [] else [ $ns[] | select((.hierarchy_level|tonumber) > $childLevel) ] end) as $above
+    | (if ($above|length) > 0 then ($above | map(.hierarchy_level|tonumber) | min) else null end) as $parentLevel
+    | ($childCands | map(.logical_name) | join(", ")) as $childList
+    | reduce (["specification","story","task"][]) as $role
+        ( {roles:{}, unresolved:[], unknown:[], duplicate:[], subtask_misuse:[], task_misuse:[], no_parent_level:null}
+        ; ($declared[$role] // null) as $dname
+        | ($operator[$role] // null) as $oname
+        | (if $dname != null then {name:$dname, source:"declared"}
+           elif $oname != null then {name:$oname, source:"operator"}
+           else null end) as $answer
+        | if $answer != null then
+            ([ $itypes[] | select(.logical_name == $answer.name) ]) as $matches
+            | if ($matches|length) == 0 then
+                . + {unknown: (.unknown + [{role:$role, name:$answer.name, candidates: candidatesFor($role)}])}
+              elif ($matches|length) > 1 then
+                . + {duplicate: (.duplicate + [{role:$role, name:$answer.name, level: ($matches[0].hierarchy_level|tostring)}])}
+              else
+                ($matches[0]) as $m
+                | if ($role != "task") and ($m.subtask) then
+                    . + {subtask_misuse: (.subtask_misuse + [{role:$role, name:$m.logical_name}])}
+                  elif ($role == "task") and ($m.subtask | not) then
+                    . + {task_misuse: (.task_misuse + [{name:$m.logical_name, candidates: subtaskTypes}])}
+                  else
+                    . + {roles: (.roles + {($role): ($m + {hierarchy_level: ($m.hierarchy_level|tostring), source: $answer.source})})}
+                  end
+              end
+          elif $role == "task" then
+            .
+          elif $role == "story" then
+            if $childLevel == null then . else
+              ([ $ns[] | select((.hierarchy_level|tonumber) == $childLevel) ]) as $lc
+              | if ($lc|length) == 1 then
+                  . + {roles: (.roles + {story: ($lc[0] + {hierarchy_level: ($lc[0].hierarchy_level|tostring), source:"derived"})})}
+                else
+                  . + {unresolved: (.unresolved + [{role:"story", level: ($childLevel|tostring), candidates: $lc}])}
+                end
+            end
+          else
+            if $childLevel == null then .
+            elif $parentLevel == null then
+              . + {no_parent_level: "reconcile: project \($key) offers no issue type above its \($childList) level, so a specification has nowhere to hang. Its non-sub-task types are: \($childList). A parent level must exist in the project before it can be mirrored (zero writes)."}
+            else
+              ([ $above[] | select((.hierarchy_level|tonumber) == $parentLevel) ]) as $pc
+              | if ($pc|length) == 1 then
+                  . + {roles: (.roles + {specification: ($pc[0] + {hierarchy_level: ($pc[0].hierarchy_level|tostring), source:"derived"})})}
+                else
+                  . + {unresolved: (.unresolved + [{role:"specification", level: ($parentLevel|tostring), candidates: $pc}])}
+                end
+            end
+          end
+        )
+  '
+  # kcov-excl-stop
+}
+
+# role_has_problems <resolve-result-json> — true when role_resolve found
+# anything that must refuse the run before any write.
+role_has_problems() {
+  jq -r '
+    (.unresolved|length) + (.unknown|length) + (.duplicate|length)
+    + (.subtask_misuse|length) + (.task_misuse|length) + (if .no_parent_level then 1 else 0 end) > 0
+  ' <<< "$1"
+}
+
+# role_unresolved_message <project_key> <role> <level> <candidates_json> —
+# contract §6.2, the closed question. Two lines.
+role_unresolved_message() {
+  local key="$1" role="$2" level="$3" cands="$4"
+  local list; list="$(jq -r 'map(.logical_name) | join(", ")' <<< "${cands}")"
+  printf 'config: project %s: the %s level (%s) holds more than one issue type: %s. The bridge will not choose one for you (zero writes).\nconfig: declare it in .specify/jira/config.yml under projects[].hierarchy.%s, or answer once with --issue-type %s=%s=<one of them>.' \
+    "${key}" "${role}" "${level}" "${list}" "${role}" "${key}" "${role}"
+}
+
+# role_unresolved_json <resolve-result-json> <project_key> — the structured
+# `unresolved_roles` block (contract §6.2), emitted through the output
+# module, never a bare `jq` — it is multi-line JSON (research R10).
+role_unresolved_json() {
+  local result="$1" key="$2"
+  jq -c --arg key "${key}" '
+    [ .unresolved[] | {
+        project: $key, role: .role, level: .level,
+        candidates: [ .candidates[] | {logical_name, id} ],
+        declaration: "projects[].hierarchy.\(.role)",
+        flag: "--issue-type \($key)=\(.role)=<name>"
+      } ]
+  ' <<< "${result}"
+}
+
+# role_unknown_type_message <project_key> <role> <name> <candidates_json> —
+# contract §6.3.
+role_unknown_type_message() {
+  local key="$1" role="$2" name="$3" cands="$4"
+  local list; list="$(jq -r 'map(.logical_name) | join(", ")' <<< "${cands}")"
+  printf 'config: project %s: %s names issue type "%s", which this project does not offer at that tier. It offers: %s (zero writes).' \
+    "${key}" "${role}" "${name}" "${list}"
+}
+
+# role_duplicate_message <project_key> <role> <name> <level> — contract §6.4.
+role_duplicate_message() {
+  printf 'config: project %s: %s names "%s", which matches more than one issue type at level %s. The bridge will not choose one for you (zero writes).' \
+    "$1" "$2" "$3" "$4"
+}
+
+# role_subtask_misuse_message <project_key> <role> <name> — contract §6.5.
+role_subtask_misuse_message() {
+  printf 'config: project %s: %s names "%s", which is a sub-task type in this project. A %s cannot be a sub-task (zero writes).' \
+    "$1" "$2" "$3" "$2"
+}
+
+# role_task_misuse_message <project_key> <name> <candidates_json> — contract
+# §6.6. An empty candidate list renders as the explicit words, never an
+# empty string.
+role_task_misuse_message() {
+  local key="$1" name="$2" cands="$3"
+  local list
+  list="$(jq -r 'if length == 0 then "none — this project offers no sub-task type" else (map(.logical_name) | join(", ")) end' <<< "${cands}")"
+  printf 'config: project %s: task names "%s", which is not a sub-task type in this project. Its sub-task types are: %s (zero writes).' \
+    "${key}" "${name}" "${list}"
+}
+
+# role_ordering_message <project_key> <spec_name> <spec_level> <story_name> <story_level> — contract §6.7.
+role_ordering_message() {
+  printf 'config: project %s: specification names "%s" at level %s, which is not above story "%s" at level %s. A specification must sit above its stories (zero writes).' \
+    "$1" "$2" "$3" "$4" "$5"
+}
+
+# role_validate <project_key> <roles_json> — contract §4 check 4 (ordering),
+# over the RESOLVED roles map ({specification:{...}, story:{...}, task?:{...}}).
+# Checks 2/3 (subtask flags) are enforced inside role_resolve itself, at the
+# point of matching (see its header); checks 5/6 (parent-link, mandatory
+# fields) remain hierarchy_mandatory_gate, unchanged, run separately. Prints
+# the §6.7 message and returns 1 on an inverted ordering; prints nothing and
+# returns 0 otherwise. Levels compared NUMERICALLY (`tonumber`) — the
+# persisted hierarchy_level is a string (contract §4).
+role_validate() {
+  local key="$1" roles="$2"
+  local spec_level story_level
+  spec_level="$(jq -r '.specification.hierarchy_level // empty' <<< "${roles}")"
+  story_level="$(jq -r '.story.hierarchy_level // empty' <<< "${roles}")"
+  [[ -z "${spec_level}" || -z "${story_level}" ]] && return 0
+  if ! jq -ne --argjson s "${spec_level}" --argjson c "${story_level}" '($s|tonumber) > ($c|tonumber)' > /dev/null 2>&1; then
+    local spec_name story_name
+    spec_name="$(jq -r '.specification.logical_name' <<< "${roles}")"
+    story_name="$(jq -r '.story.logical_name' <<< "${roles}")"
+    role_ordering_message "${key}" "${spec_name}" "${spec_level}" "${story_name}" "${story_level}"
+    return 1
+  fi
+  return 0
+}
+
+# role_reconcile_ordering_message — the §8 re-validation twin of
+# role_ordering_message, "reconcile:" prefixed since no config.yml write is
+# in progress at that point.
+role_reconcile_ordering_message() {
+  printf 'reconcile: project %s: specification names "%s" at level %s, which is not above story "%s" at level %s. A specification must sit above its stories (zero writes).' \
+    "$1" "$2" "$3" "$4" "$5"
+}
+
+# role_validate_reconcile <project_key> <roles_json> — contract §8 (T052):
+# check 4 (ordering) re-run against the PERSISTED binding's roles at
+# reconcile time, with no re-read of the project's metadata. Mirrors
+# role_validate exactly except for the message prefix; an absent
+# specification or story role is non-fatal (§3.4), matching role_validate.
+role_validate_reconcile() {
+  local key="$1" roles="$2"
+  local spec_level story_level
+  spec_level="$(jq -r '.specification.hierarchy_level // empty' <<< "${roles}")"
+  story_level="$(jq -r '.story.hierarchy_level // empty' <<< "${roles}")"
+  [[ -z "${spec_level}" || -z "${story_level}" ]] && return 0
+  if ! jq -ne --argjson s "${spec_level}" --argjson c "${story_level}" '($s|tonumber) > ($c|tonumber)' > /dev/null 2>&1; then
+    local spec_name story_name
+    spec_name="$(jq -r '.specification.logical_name' <<< "${roles}")"
+    story_name="$(jq -r '.story.logical_name' <<< "${roles}")"
+    role_reconcile_ordering_message "${key}" "${spec_name}" "${spec_level}" "${story_name}" "${story_level}"
+    return 1
+  fi
+  return 0
+}
+
+# role_supersession_note <project_key> <role> <declared_name> <local_name> —
+# contract §7.2. One note, not a warning; the run succeeded.
+role_supersession_note() {
+  printf 'config: project %s: %s is declared as "%s" in config.yml; the local answer "%s" was superseded.' \
+    "$1" "$2" "$3" "$4"
+}
+
+# role_promotion_note <project_key> <role> <name> — contract §7.3.
+role_promotion_note() {
+  printf 'config: project %s: commit this so your team mirrors identically —\n  hierarchy:\n    %s: "%s"' \
+    "$1" "$2" "$3"
+}
+
+# role_task_recorded_note <project_key> <name> — contract §7.4.
+role_task_recorded_note() {
+  printf 'config: project %s: task is recorded as "%s" but is not mirrored yet — this release creates no sub-tasks.' \
+    "$1" "$2"
+}
+
 # hierarchy_child_type_unresolved_message <project_key> — contract §6.
 hierarchy_child_type_unresolved_message() {
   printf 'reconcile: project %s has no recorded issue type for user stories. Run /speckit.jira.config to record it (zero writes)' "$1"
