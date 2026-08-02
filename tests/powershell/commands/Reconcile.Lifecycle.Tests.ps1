@@ -8,6 +8,7 @@ BeforeAll {
     $Fixture = Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-mirrored-spec'
     Import-Module (Join-Path $Mock 'Mock.psm1') -Force
     Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '../../../scripts/powershell/lib/Config.psm1') -Force
 
     $env:JIRA_EMAIL = 'user@example.com'
     $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
@@ -158,5 +159,36 @@ Describe 'Invoke-JiraReconcile — the drift, halted, and Flagged rules engage a
         finally { Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue }
         $script:code | Should -Be 0
         @([regex]::Matches($out, 'WARNING:')).Count | Should -Be 1
+    }
+
+    It 'T085 [Phase 9] — a §6 role-mapping refusal (inverted ordering) exits 4 directly, and downgrades to one WARNING under a hook' {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
+
+        $localf = Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml'
+        $localJson = ConvertFrom-JiraConfigYaml -Path $localf
+        $rolesPatch = '{"resolved_ids":{"COMP":{"roles":{
+            "specification": {"logical_name":"Story","id":"10004","hierarchy_level":"0","subtask":false,"source":"declared"},
+            "story": {"logical_name":"Epic","id":"10001","hierarchy_level":"1","subtask":false,"source":"declared"}
+        }}}}'
+        $merged = ($localJson | & jq -cS --argjson patch $rolesPatch '.resolved_ids.COMP.roles = $patch.resolved_ids.COMP.roles')
+        $yaml = ConvertTo-JiraConfigYaml -Json $merged
+        Set-Content -LiteralPath $localf -Value $yaml -NoNewline
+
+        $r = Invoke-Captured @('reconcile', $script:Spec, '--json')
+        $script:code | Should -Be 4
+        $r | Should -Match 'reconcile: project COMP: specification names'
+
+        Clear-Content -LiteralPath $script:M.CallLog
+        $env:SPEC_KIT_JIRA_HOOK_CONTEXT = '1'
+        try {
+            $out = Invoke-Captured @('reconcile', $script:Spec, '--json')
+        }
+        finally { Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue }
+        $script:code | Should -Be 0
+        @([regex]::Matches($out, 'WARNING: ')).Count | Should -Be 1
+        $out | Should -Match 'is not above story'
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
     }
 }

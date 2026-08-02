@@ -9,7 +9,7 @@ flowchart TB
     subgraph L1["1 · Team config — COMMITTABLE"]
         A[".specify/jira/config.yml"]
         A1["projects · epic_strategy · task_strategy"]
-        A2["priority_map · estimation_field"]
+        A2["priority_map · estimation_field · hierarchy"]
         A3["routing + routing_default"]
         A4["teams catalogue"]
         A5["privacy.allowlist"]
@@ -19,7 +19,7 @@ flowchart TB
     subgraph L2["2 · Local binding — GITIGNORED, machine-owned"]
         B[".specify/jira/config.local.yml"]
         B1["resolved_ids per project"]
-        B2["issue types, hierarchy, parent/child"]
+        B2["issue types, resolved roles (specification/story/task),<br/>each with its provenance"]
         B3["priorities · statuses · estimation field id"]
         B4["the operator's hook disable decisions"]
     end

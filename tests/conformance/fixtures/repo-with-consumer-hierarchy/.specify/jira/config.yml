@@ -1,0 +1,9 @@
+# Team config for the consumer conformance fixture (010, T004) — a project
+# offering two issue types at the level above the story tier (Epic, Service
+# Category) and thirteen at the story tier, with no `hierarchy` declared.
+# This fixture must always refuse to configure (FR-004, contract §9.1): a
+# repository with no mapping behaves byte-identically to the pre-010 release.
+projects:
+  - key: CONSUMER
+    style: company_managed
+routing_default: CONSUMER

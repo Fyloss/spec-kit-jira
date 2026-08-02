@@ -1,0 +1,21 @@
+{
+  "issueTypes": [
+    { "id": "10701", "name": "Epic", "subtask": false, "hierarchyLevel": 1 },
+    { "id": "10702", "name": "Service Category", "subtask": false, "hierarchyLevel": 1 },
+    { "id": "10703", "name": "Tâche", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10704", "name": "Story", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10705", "name": "Defect", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10706", "name": "Improvement Action", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10707", "name": "Test", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10708", "name": "Test Set", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10709", "name": "Test Execution", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10710", "name": "Precondition", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10711", "name": "Release", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10712", "name": "Incident SNOW", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10713", "name": "Objective", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10714", "name": "Service", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10715", "name": "Problem SNOW", "subtask": false, "hierarchyLevel": 0 },
+    { "id": "10716", "name": "Sous-tâche", "subtask": true, "hierarchyLevel": -1 },
+    { "id": "10717", "name": "Sub Test Execution", "subtask": true, "hierarchyLevel": -1 }
+  ]
+}

@@ -79,7 +79,7 @@ flowchart LR
         direction TB
         R1["style — with its provenance"]
         R2["issue_types — logical name, id, hierarchy_level, subtask"]
-        R3["parent_type / child_type — derived, or the operator's answer"]
+        R3["roles — specification/story/task, each with its source<br/>(declared/operator/derived); parent_type/child_type<br/>are dual-written from roles.specification/story for reconcile"]
         R4["required_fields — per issue type"]
         R5["priorities — name to id"]
         R6["statuses — name to id"]
@@ -93,6 +93,61 @@ flowchart LR
 The serialisation is deterministic: a second run over an unchanged instance
 rewrites the file byte-for-byte identically. Each project's ids live under
 their own key, so distinct projects never share a namespace.
+
+## Role mapping — declaring which issue type carries the mirror
+
+A Jira instance is not guaranteed to offer exactly one issue type at the
+specification tier and one at the story tier. A consumer instance may offer
+**Epic** and **Service Category** at the level above Story, and a dozen types
+at the story level itself — every one of them a legitimate candidate. Before
+this mapping existed, the ceremony refused as soon as it hit the *first*
+ambiguous tier, leaving the operator with no way to answer the question the
+refusal did not even get to ask.
+
+The resolver evaluates all three roles — `specification`, `story`, `task` —
+in **one pass**, with precedence declared → operator → derived:
+
+```mermaid
+flowchart TD
+    Role["For each role: specification, story, task"] --> Declared{"Declared in<br/>config.yml under<br/>projects[].hierarchy?"}
+    Declared -->|"yes"| Match["Match by exact name against<br/>the WHOLE issue-type list"]
+    Declared -->|"no"| Operator{"Answered via<br/>--issue-type KEY=role=name?"}
+    Operator -->|"yes"| Match
+    Operator -->|"no"| Derive{"task: never derived.<br/>specification/story:<br/>exactly one candidate<br/>at the level?"}
+    Derive -->|"yes"| Resolved["Resolved, source: derived"]
+    Derive -->|"no, task"| Absent["Absent — no entry, no problem (§3.4)"]
+    Derive -->|"no, ambiguous"| Unresolved["Unresolved — accumulated,<br/>not refused yet"]
+    Match --> Resolved2["Resolved, source: declared/operator"]
+```
+
+Every role is evaluated before anything refuses: an unresolved specification
+tier and an unresolved story tier are reported **together**, in one run, not
+one refusal at a time across repeated re-runs. A name that matches an issue
+type of the wrong kind — a sub-task type declared for `story`, say — is
+caught by the sub-task check, not reported as an unknown type, so the
+message names the actual mistake.
+
+Declare it once your project needs it, in the same business vocabulary as
+`priority_map`:
+
+```yaml
+projects:
+  - key: CONSUMER
+    hierarchy:
+      specification: Epic
+      story: Story
+```
+
+or answer it once, per project, without committing anything:
+
+```sh
+speckit.jira.config --issue-type CONSUMER=specification=Epic --issue-type CONSUMER=story=Story
+```
+
+`--child-type KEY=<name>` remains accepted as the short form of
+`--issue-type KEY=story=<name>`. `task` is never derived, even when
+unambiguous — declaring or answering it only **records** the sub-task type;
+mirroring sub-tasks themselves is a later release.
 
 ## Mapping validation — refusing the impossible at config time
 

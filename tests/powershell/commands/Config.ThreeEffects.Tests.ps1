@@ -158,3 +158,65 @@ Describe 'The ceremony records the disable decision (T026, 003 US2)' {
         (Get-FileHash -LiteralPath $env:SPEC_KIT_JIRA_EXTENSIONS_YML -Algorithm SHA256).Hash | Should -BeExactly $before
     }
 }
+
+Describe 'T083 [Phase 9] — the §7.1 per-role audit and the §7.3 promotion note (010)' {
+    # SAFE (Epic 2 / Feature 1 / Story 0 / Sub-task -1) is unambiguous at
+    # every level, so declaring `specification` and answering `task` while
+    # leaving `story` alone gives one role resolved from each of the three
+    # sources in a SINGLE run.
+    BeforeAll {
+        function Invoke-SafeConfigCaptured {
+            param([string[]] $CmdArgs)
+            $sw = [System.IO.StringWriter]::new()
+            $swErr = [System.IO.StringWriter]::new()
+            $orig = [Console]::Out
+            $origErr = [Console]::Error
+            [Console]::SetOut($sw)
+            [Console]::SetError($swErr)
+            try { $code = Invoke-JiraConfig -Arguments $CmdArgs }
+            finally { [Console]::SetOut($orig); [Console]::SetError($origErr) }
+            return [pscustomobject]@{ ExitCode = [int]$code; StdOut = $sw.ToString(); StdErr = $swErr.ToString(); Out = ($sw.ToString() + $swErr.ToString()) }
+        }
+    }
+    BeforeEach {
+        $script:SafeWork = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+        New-Item -ItemType Directory -Path (Join-Path $SafeWork '.specify/jira') -Force | Out-Null
+        $env:JIRA_CONFIG_DIR = Join-Path $SafeWork '.specify/jira'
+        $script:SafeM = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/safe.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $SafeM.BaseUrl
+    }
+    AfterEach {
+        Stop-JiraMock -Mock $SafeM
+        Remove-Item -Recurse -Force $SafeWork -ErrorAction SilentlyContinue
+    }
+
+    It 'reports one role from each source, in prose and --json' {
+        $lines = "projects:`n  - key: SAFE`n    hierarchy:`n      specification: Epic`nrouting_default: SAFE`n"
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), $lines)
+
+        $r = Invoke-SafeConfigCaptured @('config', '--issue-type', 'SAFE=task=Sub-task', '--json')
+        $r.ExitCode | Should -Be 0
+        $obj = $r.StdOut | ConvertFrom-Json
+        $obj.effects.discovery.projects.SAFE.roles.specification.logical_name | Should -Be 'Epic'
+        $obj.effects.discovery.projects.SAFE.roles.specification.source | Should -Be 'declared'
+        $obj.effects.discovery.projects.SAFE.roles.story.logical_name | Should -Be 'Story'
+        $obj.effects.discovery.projects.SAFE.roles.story.source | Should -Be 'derived'
+        $obj.effects.discovery.projects.SAFE.roles.task.logical_name | Should -Be 'Sub-task'
+        $obj.effects.discovery.projects.SAFE.roles.task.source | Should -Be 'operator'
+
+        $prose = Invoke-SafeConfigCaptured @('config', '--issue-type', 'SAFE=task=Sub-task')
+        $prose.ExitCode | Should -Be 0
+        $prose.Out | Should -Match 'specification: Epic \(declared\)'
+        $prose.Out | Should -Match 'story: Story \(derived\)'
+        $prose.Out | Should -Match 'task: Sub-task \(operator\)'
+    }
+
+    It 'the §7.3 promotion note names the role resolved from an operator answer, as a note, exit still 0' {
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), "projects:`n  - key: SAFE`nrouting_default: SAFE`n")
+        $r = Invoke-SafeConfigCaptured @('config', '--issue-type', 'SAFE=task=Sub-task', '--json')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Match 'config: project SAFE: commit this so your team mirrors identically —'
+        $r.Out | Should -Match '    task: "Sub-task"'
+        ($r.Out -split "`n" | Where-Object { $_ -match '^WARNING: ' }).Count | Should -Be 0
+    }
+}

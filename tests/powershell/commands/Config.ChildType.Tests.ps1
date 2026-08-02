@@ -67,11 +67,25 @@ Describe 'Config child-type resolution' {
         $env:SPEC_KIT_JIRA_BASE_URL = $M.BaseUrl
         $r = Invoke-ConfigCaptured @('config', '--json')
         $r.ExitCode | Should -Be 4
-        $r.Out | Should -Match 'child level holds more than one issue type'
+        $r.Out | Should -Match 'the story level'
+        $r.Out | Should -Match 'holds more than one issue type'
 
         $r2 = Invoke-ConfigCaptured @('config', '--child-type', 'COMP=Defect', '--json')
         $r2.ExitCode | Should -Be 0
         $local = Read-LocalBinding
+        $local.resolved_ids.COMP.child_type.logical_name | Should -Be 'Defect'
+        $local.resolved_ids.COMP.child_type.source | Should -Be 'operator'
+    }
+
+    It 'T031 — --issue-type KEY=story=NAME resolves the story role identically to --child-type' {
+        Write-TestConfig 'COMP'
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $M.BaseUrl
+        $r = Invoke-ConfigCaptured @('config', '--issue-type', 'COMP=story=Defect', '--json')
+        $r.ExitCode | Should -Be 0
+        $local = Read-LocalBinding
+        $local.resolved_ids.COMP.roles.story.logical_name | Should -Be 'Defect'
+        $local.resolved_ids.COMP.roles.story.source | Should -Be 'operator'
         $local.resolved_ids.COMP.child_type.logical_name | Should -Be 'Defect'
         $local.resolved_ids.COMP.child_type.source | Should -Be 'operator'
     }
@@ -82,6 +96,6 @@ Describe 'Config child-type resolution' {
         $env:SPEC_KIT_JIRA_BASE_URL = $M.BaseUrl
         $r = Invoke-ConfigCaptured @('config', '--child-type', 'COMP=Epic', '--json')
         $r.ExitCode | Should -Be 4
-        $r.Out | Should -Match 'names no candidate at the child level'
+        $r.Out | Should -Match 'which this project does not offer at that tier'
     }
 }

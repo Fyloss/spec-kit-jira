@@ -5,10 +5,22 @@ All notable changes to the spec-kit-jira extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] - 2026-08-02
 
 ### Added
 
+- A committed `hierarchy` mapping under `projects[]` in `config.yml`
+  (`specification` / `story` / `task` → issue type name), and a repeatable
+  `--issue-type <PROJECT_KEY>=<specification|story|task>=<name>` config flag,
+  for an instance whose hierarchy is ambiguous at more than one tier — e.g. a
+  project offering both `Epic` and `Service Category` at the level above
+  `Story`. The resolver evaluates all three roles in one pass (declared →
+  operator → derived) and reports every unresolved tier together, instead of
+  refusing on the first one and hiding the rest. `--child-type KEY=<name>`
+  is kept as the accepted alias for `--issue-type KEY=story=<name>`. A
+  repository that declares no `hierarchy` key and offers exactly one
+  candidate at each tier is unaffected — same derivation, same output, byte
+  for byte.
 - `tests/conformance/mock-jira/curl-shim.sh` — a scripted `curl` replacement
   (pure `bash` + `jq`, no process, no port) that backs the Bash port's mock
   Jira double, reached through the unchanged `mock_start`/`mock_stop`/
@@ -73,6 +85,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could inherit a stale cursor under heavy parallelism (observed as an
   intermittent conformance divergence). The cursor is now keyed by PID plus
   that process's own start time.
+- The PowerShell port's role-mapping resolver matched a declared or answered
+  issue-type name with `-ceq`, which is case-sensitive but still
+  culture-aware: it treated an NFD name (a base letter plus a combining
+  accent) as equal to the project's NFC form of the same name, silently
+  accepting a byte-different declaration the Bash port's `jq ==` would
+  correctly refuse as unknown. Matching now uses an ordinal
+  `[string]::Equals`, restoring the contract's byte-equal matching rule
+  (contracts/role-mapping.md §3.3) and cross-port parity.
 
 ## [0.8.0] - 2026-08-01
 
@@ -526,7 +546,9 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.4.0...v0.5.0

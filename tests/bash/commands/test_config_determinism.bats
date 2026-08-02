@@ -41,7 +41,7 @@ boot() {
 
 @test "config --json emits a valid machine-readable run summary (FR-002)" {
   boot
-  run cmd_config config --child-type COMP=Story --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
   [ "$status" -eq 0 ]
   [ "$(jq -r '.schema_version' <<< "$output")" = "1.0" ]
   [ "$(jq -r '.command' <<< "$output")" = "config" ]
@@ -85,6 +85,90 @@ boot() {
   [ "$(jq -r '.resolved_ids.COMP.statuses.Backlog' <<< "$json")" = "1" ]
   # The operator-authored local layer (site_alias, overrides) is preserved.
   [ "$(jq -r '.site_alias' <<< "$json")" = "prod" ]
+}
+
+# =============================================================================
+# T020/T039/T079 [Phase 3/5, US1/US3] — role-mapping determinism (contract
+# §5.2): a second ceremony run over unchanged inputs writes byte-identical
+# YAML and emits no question; supersession is a ONE-TIME convergence, so a
+# third run over the now-converged state emits no note either.
+# =============================================================================
+
+_role_mapping_boot() {
+  MOCK="${ROOT}/tests/conformance/mock-jira"
+  mock_start "${MOCK}/configs/consumer-hierarchy.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  RWORK="$(mktemp -d)"
+  mkdir -p "${RWORK}/.specify/jira"
+  JIRA_CONFIG_DIR="${RWORK}/.specify/jira"
+  export JIRA_CONFIG_DIR
+}
+
+@test "T020 — a second run over a declared, unchanged mapping writes byte-identical YAML and asks no question" {
+  _role_mapping_boot
+  {
+    printf 'projects:\n'
+    printf '  - key: CONSUMER\n'
+    printf '    hierarchy:\n'
+    printf '      specification: Epic\n'
+    printf '      story: Story\n'
+    printf 'routing_default: CONSUMER\n'
+  } > "${JIRA_CONFIG_DIR}/config.yml"
+
+  run cmd_config config --json
+  [ "$status" -eq 0 ]
+  cp "${JIRA_CONFIG_DIR}/config.local.yml" "${RWORK}/local1"
+
+  run cmd_config config --json
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'"unresolved_roles"'* ]]
+  run diff "${RWORK}/local1" "${JIRA_CONFIG_DIR}/config.local.yml"
+  [ "$status" -eq 0 ]
+  rm -rf "${RWORK}"
+}
+
+@test "T039/T082 — a committed declaration supersedes a recorded operator answer, once, then converges" {
+  _role_mapping_boot
+  {
+    printf 'projects:\n'
+    printf '  - key: CONSUMER\n'
+    printf 'routing_default: CONSUMER\n'
+  } > "${JIRA_CONFIG_DIR}/config.yml"
+
+  # Run 1: the operator answers once. Both roles persist with source: operator.
+  run cmd_config config --issue-type CONSUMER=specification=Epic --issue-type CONSUMER=story=Story --json
+  [ "$status" -eq 0 ]
+  local localj
+  localj="$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")"
+  [ "$(jq -r '.resolved_ids.CONSUMER.roles.specification.source' <<< "${localj}")" = "operator" ]
+
+  # Run 2: config.yml now declares a DIFFERENT specification type. The
+  # declaration outranks the recorded operator answer (§3, step 1 > step 2);
+  # the binding converges, and the run names both types (§7.2).
+  {
+    printf 'projects:\n'
+    printf '  - key: CONSUMER\n'
+    printf '    hierarchy:\n'
+    printf '      specification: Service Category\n'
+    printf '      story: Story\n'
+    printf 'routing_default: CONSUMER\n'
+  } > "${JIRA_CONFIG_DIR}/config.yml"
+
+  run cmd_config config --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'specification is declared as "Service Category" in config.yml; the local answer "Epic" was superseded.'* ]]
+  cp "${JIRA_CONFIG_DIR}/config.local.yml" "${RWORK}/local2"
+  localj="$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")"
+  [ "$(jq -r '.resolved_ids.CONSUMER.roles.specification.logical_name' <<< "${localj}")" = "Service Category" ]
+  [ "$(jq -r '.resolved_ids.CONSUMER.roles.specification.source' <<< "${localj}")" = "declared" ]
+
+  # Run 3: the same declaration, now converged. No note, byte-identical YAML.
+  run cmd_config config --json
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"was superseded"* ]]
+  run diff "${RWORK}/local2" "${JIRA_CONFIG_DIR}/config.local.yml"
+  [ "$status" -eq 0 ]
+  rm -rf "${RWORK}"
 }
 
 @test "the PowerShell port writes a byte-identical config.local.yml (NFR-1)" {

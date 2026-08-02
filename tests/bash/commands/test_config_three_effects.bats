@@ -43,7 +43,7 @@ boot() {
 
 @test "the --json summary reports discovery, hooks, and readme effects separately" {
   boot
-  run cmd_config config --child-type COMP=Story --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
   [ "$status" -eq 0 ]
   # All effects are present as distinct, named sections (002 adds gitignore).
   [ "$(jq -r '.effects | keys | sort | join(",")' <<< "$output")" = "discovery,gitignore,hooks,readme" ]
@@ -70,7 +70,7 @@ boot() {
 @test "the PowerShell port reports the same three effects (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   boot powershell
-  run cmd_config config --child-type COMP=Story --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
   local bash_out="$output"
 
   local pswork
@@ -130,7 +130,7 @@ seed_disabled_registry() {
   source "${ROOT}/scripts/bash/lib/config.sh"
   seed_disabled_registry
   boot '{"projects":{"COMP":"company"}}'
-  run cmd_config config --child-type COMP=Story --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
   [ "$status" -eq 0 ]
   [ "$(config_hooks_disabled_read "${JIRA_CONFIG_DIR}")" = '["after_implement"]' ]
   # And it is surfaced in the health object the summary carries.
@@ -154,7 +154,7 @@ seed_disabled_registry() {
   source "${ROOT}/scripts/bash/lib/config.sh"
   seed_disabled_registry
   boot '{"projects":{"COMP":"company"}}'
-  run cmd_config config --child-type COMP=Story --dry-run --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --dry-run --json
   [ "$status" -eq 0 ]
   # The report names the held event...
   [[ "$(jq -r '.effects.hooks.detail' <<< "$output")" == *"after_implement"* ]]
@@ -165,10 +165,68 @@ seed_disabled_registry() {
 @test "the ceremony reports the hook effect with the read-only vocabulary (FR-021)" {
   seed_disabled_registry
   boot '{"projects":{"COMP":"company"}}'
-  run cmd_config config --child-type COMP=Story --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
   # `held_disabled` — not a write outcome, because nothing was written.
   [ "$(jq -r '.effects.hooks.status' <<< "$output")" = "held_disabled" ]
   [[ "$(jq -r '.effects.hooks.detail' <<< "$output")" == *"--enable-hook"* ]]
+}
+
+# =============================================================================
+# T083 [Phase 9] — the §7.1 per-role audit and the §7.3 promotion note
+# (010, contracts/role-mapping.md). SAFE (Epic 2 / Feature 1 / Story 0 /
+# Sub-task -1) is unambiguous at every level, so declaring `specification`
+# and answering `task` while leaving `story` alone gives one role resolved
+# from each of the three sources in a SINGLE run.
+# =============================================================================
+
+@test "T083 — the §7.1 per-role audit reports one role from each source, in prose and --json" {
+  local sw="${WORK}/.specify/jira"
+  mkdir -p "${sw}"
+  {
+    printf 'projects:\n'
+    printf '  - key: SAFE\n'
+    printf '    hierarchy:\n'
+    printf '      specification: Epic\n'
+    printf 'routing_default: SAFE\n'
+  } > "${sw}/config.yml"
+  export JIRA_CONFIG_DIR="${sw}"
+  mock_start "${MOCK}/configs/safe.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run --separate-stderr cmd_config config --issue-type SAFE=task=Sub-task --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.effects.discovery.projects.SAFE.roles.specification.logical_name' <<< "$output")" = "Epic" ]
+  [ "$(jq -r '.effects.discovery.projects.SAFE.roles.specification.source' <<< "$output")" = "declared" ]
+  [ "$(jq -r '.effects.discovery.projects.SAFE.roles.story.logical_name' <<< "$output")" = "Story" ]
+  [ "$(jq -r '.effects.discovery.projects.SAFE.roles.story.source' <<< "$output")" = "derived" ]
+  [ "$(jq -r '.effects.discovery.projects.SAFE.roles.task.logical_name' <<< "$output")" = "Sub-task" ]
+  [ "$(jq -r '.effects.discovery.projects.SAFE.roles.task.source' <<< "$output")" = "operator" ]
+
+  run cmd_config config --issue-type SAFE=task=Sub-task
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"specification: Epic (declared)"* ]]
+  [[ "$output" == *"story: Story (derived)"* ]]
+  [[ "$output" == *"task: Sub-task (operator)"* ]]
+}
+
+@test "T083 — the §7.3 promotion note names the role that resolved from an operator answer, as a note, exit still 0" {
+  local sw="${WORK}/.specify/jira"
+  mkdir -p "${sw}"
+  {
+    printf 'projects:\n'
+    printf '  - key: SAFE\n'
+    printf 'routing_default: SAFE\n'
+  } > "${sw}/config.yml"
+  export JIRA_CONFIG_DIR="${sw}"
+  mock_start "${MOCK}/configs/safe.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run --separate-stderr cmd_config config --issue-type SAFE=task=Sub-task --json
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *'config: project SAFE: commit this so your team mirrors identically —'* ]]
+  [[ "$stderr" == *'    task: "Sub-task"'* ]]
+  # Never an escalation: exit 0, no WARNING line.
+  [ "$(grep -c '^WARNING: ' <<< "$stderr")" -eq 0 ]
 }
 
 @test "a healthy registry reports healthy and says the registry was not modified" {
@@ -186,7 +244,7 @@ seed_disabled_registry() {
   } > "${WORK}/.specify/extensions.yml"
   export SPEC_KIT_JIRA_EXTENSIONS_YML="${WORK}/.specify/extensions.yml"
   boot '{"projects":{"COMP":"company"}}'
-  run cmd_config config --child-type COMP=Story --json
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
   [ "$(jq -r '.effects.hooks.status' <<< "$output")" = "healthy" ]
   [[ "$(jq -r '.effects.hooks.detail' <<< "$output")" == *"registry was not modified"* ]]
 }

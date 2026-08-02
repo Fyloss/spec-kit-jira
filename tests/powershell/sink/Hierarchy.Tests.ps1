@@ -344,3 +344,45 @@ Describe 'Invoke-JiraReconcile — the mandatory-field gate runs BEFORE recognit
         (Get-JiraMockCallLog -Mock $script:M).Count | Should -Be 0
     }
 }
+
+Describe 'T084 [Phase 9] — the mandatory-field gate runs at CONFIG time too, over a role the resolver derived (010, contract §4 checks 5/6)' {
+    BeforeAll {
+        function Invoke-ConfigCapturedWithCode {
+            param([string[]] $ArgList)
+            $sw = [System.IO.StringWriter]::new()
+            $orig = [Console]::Out; $origErr = [Console]::Error
+            [Console]::SetOut($sw); [Console]::SetError($sw)
+            try { $code = Invoke-JiraConfig -Arguments $ArgList }
+            finally { [Console]::SetOut($orig); [Console]::SetError($origErr) }
+            return [pscustomobject]@{ ExitCode = [int]$code; Out = $sw.ToString() }
+        }
+    }
+    BeforeEach {
+        $script:CfgWork = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        New-Item -ItemType Directory -Path (Join-Path $script:CfgWork '.specify/jira') -Force | Out-Null
+        $lines = "projects:`n  - key: PM`nrouting_default: PM`n"
+        [System.IO.File]::WriteAllText((Join-Path $script:CfgWork '.specify/jira/config.yml'), $lines)
+        $env:JIRA_CONFIG_DIR = Join-Path $script:CfgWork '.specify/jira'
+        $env:JIRA_EMAIL = 'user@example.com'
+        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+        $env:JIRA_NO_SLEEP = '1'
+    }
+    AfterEach { if ($script:CfgM) { Stop-JiraMock -Mock $script:CfgM; $script:CfgM = $null } }
+
+    It 'refuses at config time, zero writes, over the DERIVED specification role' {
+        $script:CfgM = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/mandatory-field.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:CfgM.BaseUrl
+
+        # story is ambiguous (Story/Defect at level 0) so it must be
+        # answered; specification is left to derive to Deliverable (the
+        # single level-1 candidate) — the type carrying the unsatisfiable
+        # fields. The gate must still catch it.
+        $r = Invoke-ConfigCapturedWithCode @('config', '--issue-type', 'PM=story=Story', '--json')
+        $r.ExitCode | Should -Be 4
+        $r.Out | Should -Match 'Deliverable'
+        $r.Out | Should -Match 'Business Owner'
+        $r.Out | Should -Match 'Program Increment'
+        Test-Path (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml') | Should -Be $false
+        @(Get-JiraMockCallLog -Mock $script:CfgM | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
+    }
+}

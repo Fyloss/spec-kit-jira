@@ -653,7 +653,17 @@ def branchpattern:
             (($p.phase_status_map|type) != "object" or ([$p.phase_status_map[]|type] | any(. != "string")))
          then "projects[\($i)].phase_status_map must be a mapping of lifecycle-event name to status name" else empty end),
         (if ($p | has("halted_statuses")) and (($p.halted_statuses|type) as $t | $t != "array" and $t != "string")
-         then "projects[\($i)].halted_statuses must be a list of status names" else empty end)
+         then "projects[\($i)].halted_statuses must be a list of status names" else empty end),
+        (if ($p | has("hierarchy")) then
+           (if ($p.hierarchy|type) != "object"
+            then "projects[\($i)].hierarchy must be a mapping of role to issue type name"
+            else
+              ( $p.hierarchy | keys_unsorted[] | select(IN($roles[])|not)
+                | "projects[\($i)].hierarchy declares unknown role `\(.)`; the roles are specification, story, task" ),
+              ( $p.hierarchy | to_entries[] | select((.value|type) != "string" or .value == "")
+                | "projects[\($i)].hierarchy.\(.key) must be a non-empty issue type name" )
+            end)
+         else empty end)
       ][] ) )
 ] | flatten'
 # kcov-excl-stop
@@ -678,13 +688,26 @@ _CFG_LOCAL_ERRORS_JQ='
         then "resolved_ids.\($k).style is invalid" else empty end),
        (if (($v|type) == "object") and ($v | has("style_source"))
           and ($v.style_source | IN("api","operator") | not)
-        then "resolved_ids.\($k).style_source is invalid" else empty end) ))
+        then "resolved_ids.\($k).style_source is invalid" else empty end),
+       (if (($v|type) == "object") and ($v | has("roles")) then
+          (if ($v.roles|type) != "object"
+           then "resolved_ids.\($k).roles must be a mapping"
+           else
+             ( $v.roles | keys_unsorted[] | select(IN($roles[])|not)
+               | "resolved_ids.\($k).roles declares unknown role `\(.)`" ),
+             ( $v.roles | to_entries[] | select((.value|type) == "object") | select(.value | has("source"))
+               | select((.value.source | IN("declared","operator","derived") | not))
+               | "resolved_ids.\($k).roles.\(.key).source is invalid" )
+           end)
+        else empty end) ))
 ] | flatten'
 # kcov-excl-stop
 
 # _cfg_schema_errors <jq-program> — read JSON on stdin, print each error line.
+# `$roles` is the closed role set (JIRA_ROLE_NAMES), bound once here so
+# neither jq program below repeats the literal.
 _cfg_schema_errors() {
-  jq -r "${1} | .[]" 2> /dev/null
+  jq -r --argjson roles "$(_cfg_role_names_json)" "${1} | .[]" 2> /dev/null
 }
 
 # =============================================================================
@@ -711,6 +734,20 @@ JIRA_HOOK_EVENT_NAMES=(before_specify after_specify after_clarify after_plan aft
 # _cfg_hook_events_json — the closed set as a JSON array.
 _cfg_hook_events_json() {
   printf '%s\n' "${JIRA_HOOK_EVENT_NAMES[@]}" | jq -cR . | jq -cs .
+}
+
+# The closed role set (010, contracts/role-mapping.md §1) — the repository's
+# own artifact vocabulary (specification, story, task), never Jira's.
+# Declared once per port, following the JIRA_HOOK_EVENT_NAMES precedent above,
+# so the set has exactly one source; sink/jira/hierarchy.sh and both
+# `for role_key in` loops in commands/config.sh consume it rather than
+# redeclaring it. The PowerShell port's mirror is $script:JiraRoleNames
+# (lib/Config.psm1).
+JIRA_ROLE_NAMES=(specification story task)
+
+# _cfg_role_names_json — the closed role set as a JSON array.
+_cfg_role_names_json() {
+  printf '%s\n' "${JIRA_ROLE_NAMES[@]}" | jq -cR . | jq -cs .
 }
 
 # _cfg_local_path <config_dir> — the local binding's path.

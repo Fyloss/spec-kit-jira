@@ -120,6 +120,32 @@ teardown() {
   [ "$(jq -r '.fields.description.content[0].content[0].text' <<< "$output")" = "Human note above the panel." ]
 }
 
+@test "T080 — a second reconcile over the declared-hierarchy fixture issues ZERO writes of every kind" {
+  local work="${BATS_TEST_TMPDIR}/repo-declared-hierarchy-churn"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-declared-hierarchy" "${work}"
+  local spec="${work}/specs/001-consumer-onboarding/spec.md"
+  export JIRA_CONFIG_DIR="${work}/.specify/jira"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-consumer-onboarding"
+  export JIRA_EMAIL="user@example.com"
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  export JIRA_NO_SLEEP=1
+  export SPEC_KIT_JIRA_ID_SOURCE="aaaaaaaaaaaaaaaa 1111111111111111 2222222222222222"
+  unset SPEC_KIT_JIRA_PLAN_CONTEXT SPEC_KIT_JIRA_LIFECYCLE
+  mock_start "${MOCK}/configs/consumer-hierarchy.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  cmd_reconcile reconcile "${spec}" --json > /dev/null
+
+  : > "${MOCK_CALLLOG}"
+  run cmd_reconcile reconcile "${spec}" --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.counts.created' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.counts.skipped' <<< "$output")" -eq 2 ]
+  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 0 ]
+}
+
 @test "the PowerShell port shows the identical zero-churn signature (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   # A native pwsh HTTP client cannot reach the curl shim's sentinel

@@ -76,6 +76,38 @@ setup() {
   [[ "$output" != *"repair_hooks="* ]]
 }
 
+@test "T077 — parse --issue-type KEY=role=name" {
+  run cli_parse config --issue-type CONSUMER=specification=Epic
+  [[ "$output" == *"issue_types=CONSUMER=specification=Epic"* ]]
+  [[ "$output" == *"exit=0"* ]]
+}
+
+@test "T077 — --issue-type is repeatable and last occurrence per (KEY, role) wins" {
+  run cli_parse config --issue-type CONSUMER=specification=Epic --issue-type CONSUMER=story=Story --issue-type CONSUMER=specification=Initiative
+  local list; list="$(sed -n 's/^issue_types=//p' <<< "$output")"
+  [ "$list" = "CONSUMER=specification=Epic CONSUMER=story=Story CONSUMER=specification=Initiative" ]
+  # last-occurrence-wins is config.sh's job over this ordered list; cli_parse's
+  # contract is only to preserve argv order, which config.sh then folds.
+}
+
+@test "T077 — a malformed --issue-type value is a usage error (exit=1), not a configuration error" {
+  run cli_parse config --issue-type CONSUMER=nope=Epic
+  [[ "$output" == *"exit=1"* ]]
+  [[ "$output" == *"error="* ]]
+}
+
+@test "T077 — --issue-type requires a role from the closed set" {
+  run cli_parse config --issue-type CONSUMER=Epic
+  [[ "$output" == *"exit=1"* ]]
+}
+
+@test "T077 — --child-type KEY=name still parses as the story alias" {
+  run cli_parse config --child-type CONSUMER=Story
+  [[ "$output" == *"child_types=CONSUMER=Story"* ]]
+  [[ "$output" == *"issue_types=CONSUMER=story=Story"* ]]
+  [[ "$output" == *"exit=0"* ]]
+}
+
 @test "parse output is byte-identical across ports" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   args="reconcile --dry-run --json --on-drift=proceed --verbose"

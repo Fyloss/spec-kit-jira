@@ -1,0 +1,10 @@
+# Team config for the consumer conformance fixture (010, T005) — the same
+# instance as repo-with-consumer-hierarchy, with the specification and story
+# roles declared so the ambiguity resolves without a question.
+projects:
+  - key: CONSUMER
+    style: company_managed
+    hierarchy:
+      specification: Epic
+      story: Story
+routing_default: CONSUMER

@@ -176,6 +176,17 @@ summary_render_prose() {
           [[ -z "${pstyle}" ]] && continue
           psource="$(jq -r --arg k "${pkey}" '.effects.discovery.projects[$k].style_source // empty' <<< "${json}")"
           printf '    %s: %s (%s)\n' "${pkey}" "${pstyle}" "${psource}"
+          # The per-role audit (010, contract §7.1) — `<role>: <logical_name>
+          # (<source>)`, one line per role this project resolved, in role
+          # order. `task` is omitted entirely when unresolved-but-absent
+          # (§3.4), never printed with an empty name.
+          local rkey rname rsource
+          for rkey in specification story task; do
+            rname="$(jq -r --arg k "${pkey}" --arg r "${rkey}" '.effects.discovery.projects[$k].roles[$r].logical_name // empty' <<< "${json}")"
+            [[ -z "${rname}" ]] && continue
+            rsource="$(jq -r --arg k "${pkey}" --arg r "${rkey}" '.effects.discovery.projects[$k].roles[$r].source // empty' <<< "${json}")"
+            printf '      %s: %s (%s)\n' "${rkey}" "${rname}" "${rsource}"
+          done
         done <<< "$(jq -r '(.effects.discovery.projects // {}) | keys[]?' <<< "${json}")"
       fi
     done

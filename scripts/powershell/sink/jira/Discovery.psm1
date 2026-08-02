@@ -197,6 +197,35 @@ function Get-JiraDiscoveryRequiredFields {
     return $out
 }
 
+function Get-JiraDiscoveryTypeMetadataResult {
+    <#
+    .SYNOPSIS
+      One issue type's required fields and parent-link availability (010,
+      T050/T051), fetched on demand for a role the resolver selected but
+      Get-JiraDiscoveryBindingResult's own single-candidate prefetch
+      (research R1/R2) did not already cover. Mirror of
+      discovery_type_metadata. Returns { ExitCode; RequiredFields;
+      ParentLinkAvailable }.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $ProjectKey, [Parameter(Mandatory)][string] $TypeId)
+
+    $base = $env:SPEC_KIT_JIRA_BASE_URL
+    if (-not $base) {
+        [Console]::Error.WriteLine('discovery: SPEC_KIT_JIRA_BASE_URL is not set')
+        return [pscustomobject]@{ ExitCode = (Get-JiraExitCode 'fail_closed'); RequiredFields = @(); ParentLinkAvailable = $false }
+    }
+    $api = "$base/rest/api/3"
+    $r = Invoke-JiraRequest -Method GET -Url "$api/issue/createmeta/$ProjectKey/issuetypes/$TypeId"
+    if ($r.ExitCode -ne 0) {
+        return [pscustomobject]@{ ExitCode = [int]$r.ExitCode; RequiredFields = @(); ParentLinkAvailable = $false }
+    }
+    $tmeta = $r.Body | ConvertFrom-Json -Depth 100
+    $rf = @(Get-JiraDiscoveryRequiredFields -Fields $tmeta.fields)
+    $pla = [bool]@($tmeta.fields | Where-Object { $_.fieldId -eq 'parent' }).Count
+    return [pscustomobject]@{ ExitCode = 0; RequiredFields = $rf; ParentLinkAvailable = $pla }
+}
+
 function Get-JiraDiscoveryBindingResult {
     <#
     .SYNOPSIS
@@ -584,4 +613,4 @@ function Get-JiraMentionedFetch {
 Export-ModuleMember -Function Get-JiraDiscoveryBinding, Get-JiraDiscoveryBindingResult, `
     Get-JiraDiscoveryStyle, Get-JiraDiscoveryFlaggedField, Get-JiraDiscoveryProjectList, `
     Get-JiraDiscoveryPrioritiesForProject, `
-    Get-JiraMentionedFetch, Get-JiraMentionedFetchResult
+    Get-JiraMentionedFetch, Get-JiraMentionedFetchResult, Get-JiraDiscoveryTypeMetadataResult

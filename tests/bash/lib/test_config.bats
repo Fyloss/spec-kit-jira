@@ -441,6 +441,125 @@ YAML
   [[ "$output" == *"unknown"* ]]
 }
 
+# --- T075/T088 [Phase 9] — the `hierarchy` schema (010, contracts/role-mapping.md §6.1, §2) ---
+
+@test "T075 — projects[].hierarchy that is not an object refuses, exit 4" {
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    hierarchy: "Epic"
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"projects[0].hierarchy must be a mapping of role to issue type name"* ]]
+}
+
+@test "T075 — an unknown role in projects[].hierarchy refuses, naming the closed role set" {
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    hierarchy:
+      epic: Epic
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *'projects[0].hierarchy declares unknown role `epic`; the roles are specification, story, task'* ]]
+}
+
+@test "T075 — an empty projects[].hierarchy.<role> value refuses (non-empty issue type name required)" {
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    hierarchy:
+      specification: ""
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"projects[0].hierarchy.specification must be a non-empty issue type name"* ]]
+}
+
+@test "T075 — a valid projects[].hierarchy declaration loads cleanly" {
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    hierarchy:
+      specification: Epic
+      story: Story
+      task: "Sous-tâche"
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+}
+
+@test "T075 — a non-object resolved_ids.<KEY>.roles refuses, exit 4" {
+  write_valid_team
+  cat > "${DIR}/config.local.yml" <<'YAML'
+resolved_ids:
+  PROJ:
+    roles: "Epic"
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"resolved_ids.PROJ.roles must be a mapping"* ]]
+}
+
+@test "T075 — an unknown role in resolved_ids.<KEY>.roles refuses, exit 4" {
+  write_valid_team
+  cat > "${DIR}/config.local.yml" <<'YAML'
+resolved_ids:
+  PROJ:
+    roles:
+      epic:
+        logical_name: "Epic"
+        id: "10001"
+        hierarchy_level: "1"
+        subtask: false
+        source: declared
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *'resolved_ids.PROJ.roles declares unknown role `epic`'* ]]
+}
+
+@test "T075 — resolved_ids.<KEY>.roles.<role>.source outside declared|operator|derived refuses, exit 4" {
+  write_valid_team
+  cat > "${DIR}/config.local.yml" <<'YAML'
+resolved_ids:
+  PROJ:
+    roles:
+      specification:
+        logical_name: "Epic"
+        id: "10001"
+        hierarchy_level: "1"
+        subtask: false
+        source: guessed
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"resolved_ids.PROJ.roles.specification.source is invalid"* ]]
+}
+
+@test "T075 — a valid resolved_ids.<KEY>.roles block loads cleanly" {
+  write_valid_team
+  cat > "${DIR}/config.local.yml" <<'YAML'
+resolved_ids:
+  PROJ:
+    roles:
+      specification:
+        logical_name: "Epic"
+        id: "10001"
+        hierarchy_level: "1"
+        subtask: false
+        source: declared
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+}
+
 # --- Cross-port parity -------------------------------------------------------
 
 @test "config_yaml_to_json is byte-identical across ports" {

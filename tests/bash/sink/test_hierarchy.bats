@@ -297,6 +297,42 @@ BINDING_MANDATORY='{
   [ -z "$output" ]
 }
 
+@test "T084 [Phase 9] — the mandatory-field gate runs at CONFIG time too, over a role the resolver derived (010, contract §4 checks 5/6)" {
+  # shellcheck disable=SC1090
+  source "${CMD_DIR}/config.sh"
+  local work="${BATS_TEST_TMPDIR}/repo-mandatory-config"
+  mkdir -p "${work}/.specify/jira"
+  {
+    printf 'projects:\n'
+    printf '  - key: PM\n'
+    printf 'routing_default: PM\n'
+  } > "${work}/.specify/jira/config.yml"
+  export JIRA_CONFIG_DIR="${work}/.specify/jira"
+  export JIRA_EMAIL="user@example.com"
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  export JIRA_NO_SLEEP=1
+  mock_start "${MOCK}/configs/mandatory-field.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  # story is ambiguous (Story/Defect at level 0) so it must be answered; the
+  # specification role is NOT declared or answered by the operator anywhere
+  # in this run — it is left to derive to Deliverable (the single level-1
+  # candidate), and Deliverable is the type carrying the unsatisfiable
+  # fields. The gate must still catch it.
+  run cmd_config config --issue-type PM=story=Story --json
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"Deliverable"* ]]
+  [[ "$output" == *"Business Owner"* ]]
+  [[ "$output" == *"Program Increment"* ]]
+  # Zero writes: neither Jira nor the local binding.
+  [ ! -f "${JIRA_CONFIG_DIR}/config.local.yml" ]
+  run mock_calls
+  while IFS= read -r line; do
+    [ -z "${line}" ] && continue
+    [[ "${line}" == GET\ * ]]
+  done <<< "$output"
+}
+
 @test "records required_fields for both types when the whole hierarchy is unambiguous" {
   mock_start "${MOCK}/configs/safe.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
