@@ -18,6 +18,28 @@ if [[ "${1:-}" == "__run_one" ]]; then
   outdir="$3"
   safe="$(printf '%s' "${file}" | tr '/' '_')"
   log="${outdir}/${safe}.log"
+  # This runner may itself be running under bats — the meta-tests in
+  # tests/bash/ci do exactly that. An outer bats prepends its private libexec
+  # dir to PATH (exported as BATS_LIBEXEC) and exports BATS_* state and
+  # bats_* helper functions into every child. Debian/Ubuntu package that
+  # libexec `bats` separately from the wrapper that prepares its environment,
+  # so resolved bare it silently discovers 0 tests (`1..0`, exit 0). Start
+  # the child bats from a clean slate: drop the injected dir from PATH, then
+  # scrub the outer run's exported state.
+  # A libexec dir is recognised two ways: it is the one the outer run named
+  # in BATS_LIBEXEC, or it carries bats-core's internal executables (the
+  # user-facing install puts only the `bats` wrapper on PATH; bats-exec-suite
+  # lives in libexec alone).
+  clean_path=""
+  while IFS= read -r d; do
+    [[ -z "${d}" ]] && continue
+    [[ -n "${BATS_LIBEXEC:-}" && "${d%/}" == "${BATS_LIBEXEC%/}" ]] && continue
+    [[ -e "${d}/bats-exec-suite" ]] && continue
+    clean_path="${clean_path:+${clean_path}:}${d}"
+  done < <(printf '%s' "${PATH}" | tr ':' '\n')
+  PATH="${clean_path}"
+  while IFS= read -r v; do unset "${v}"; done < <(compgen -A variable BATS_ || true)
+  while IFS= read -r fn; do unset -f "${fn}"; done < <(compgen -A function bats_ || true)
   rc=0
   bats "${file}" > "${log}" 2>&1 || rc=$?
   printf '%s' "${rc}" > "${log}.rc"

@@ -114,12 +114,27 @@ Shim design confirmed viable (only one place to intercept).
 
 ---
 
-## SC-001 Target (like-for-like)
+## SC-001 Target (like-for-like) — **formally withdrawn (T037)**
 
-SC-001 is judged parallel-vs-parallel:
+SC-001 was originally to be judged parallel-vs-parallel:
 - **Baseline (b)**: `bats -r tests/bash --jobs N` (0 tests on macOS, ~N minutes on Linux CI)
 - **Optimized**: `tests/run-bash.sh` (parallel via `xargs -P`, no GNU parallel)
 - **Target**: ≤ half of baseline (b)
+
+Baseline (b) was never captured: the capture machine (T001) has neither `pwsh`
+nor GNU `parallel`, so `bats --jobs` without `parallel` runs 0 tests — there is
+no non-zero denominator to compare against, and no Linux/CI host was captured
+at `21068d6` before this feature's changes landed on top of it. Re-measuring
+baseline (b) after the fact would require reverting the tree to `21068d6` on a
+separate host, which this session has no way to do.
+
+**This comparison is withdrawn, not left open.** SC-001 is satisfied instead
+by the **absolute budget** already in plan.md/research.md Decision 9: full
+Bash suite ≤ 5 min locally on the `bats`+`jq`-only PATH shape. Measured
+result: **190s (3m10s)**, 38% of the 5-minute budget — see "Post-implementation
+measurements" above. The relative (baseline-vs-optimized) framing in this
+section is superseded by that absolute figure and should not be read as an
+open comparison.
 
 ---
 
@@ -130,6 +145,14 @@ The optimization satisfies "avoid re-executing work a diff cannot change" via:
 2. **Existing `changes` path filter** (preserved in T017): already in gates.yml
 
 **OUT OF SCOPE**: New gate-skipping or affectedness-based conditional execution (test-tiering that changes what gates run on a PR). The existing `changes` filter is the ONLY path-based gate adjustment; no new ones are introduced.
+
+**T018/T038 — `boundary.yml` review outcome**: reviewed and nothing applies.
+The `engine-sink-boundary` job is `actions/checkout@v4` followed by two `grep`
+gates over `scripts/bash/engine` and `scripts/powershell/engine` — there is no
+toolchain install (no `bats`, `pwsh`, `kcov`, or package manager step) for
+caching or targeted-install to speed up. Confirmed via inspection of
+`.github/workflows/boundary.yml`: every step is either `checkout` or a `grep`
+gate. No change made to this workflow.
 
 ---
 
@@ -142,7 +165,7 @@ was measured under.
 
 | Metric | Baseline | Achieved | Target |
 |--------|----------|----------|--------|
-| Local wall-clock, `tests/run-bash.sh`, **bats+jq-only PATH** (SC-002's target host shape: `bats`, `jq`, `git`, `curl`, `bash` only — no `pwsh`, no GNU `parallel`) | unmeasurable pre-shim (0 tests / instant `pwsh: command not found`, see below) | **190s (3m10s)**, 119/119 files green, 984/984 tests, 0 failures | ≤ 5 min (SC-001) — **PASS**, 38% of budget |
+| Local wall-clock, `tests/run-bash.sh`, **bats+jq-only PATH** (SC-002's target host shape: `bats`, `jq`, `git`, `curl`, `bash` only — no `pwsh`, no GNU `parallel`) | unmeasurable pre-shim (0 tests / instant `pwsh: command not found`, see below) | **190s (3m10s)**, 119/119 files green, 984/984 tests, 0 failures (985/985 after T028 added a regression test) | ≤ 5 min (SC-001) — **PASS**, 38% of budget |
 | Same run, this machine's full ambient PATH (`pwsh` + GNU `parallel` both present — NOT the SC-002 target shape) | n/a | 195–668s (3m15s–11m08s), high run-to-run variance | informational only; SC-001 is scoped to the bats+jq-only shape |
 | Mock test requires pwsh | YES (35 files spawn `mock-server.ps1` per test) | NO — curl shim (`tests/conformance/mock-jira/curl-shim.sh`), 0 processes | None |
 | Mock test requires GNU parallel | YES (`bats --jobs`, 0 tests silently on a host without it) | NO — `tests/run-bash.sh` shards via `xargs -P` | None |
@@ -150,7 +173,7 @@ was measured under.
 | CI wall-clock | TBD (needs a real Actions run) | — | ≥ 30% reduction |
 | Bash statement coverage | TBD (needs Linux + kcov; this dev machine's kcov cannot drive a non-Apple bash on macOS, per `tests/coverage/bash-coverage.sh`'s own `require_kcov` guard) | — | ≥ 80% |
 | Coverage denominator (lines) | TBD (same blocker) | — | ≥ baseline |
-| `@test` count | **955** | **988** (+33 across 4 new CI-guard files; every original test kept) | **≥ 955** — **PASS** |
+| `@test` count | **955** | **989** (+34: +33 across 4 new CI-guard files, +1 from T028's regression test; every original test kept) | **≥ 955** — **PASS** |
 | `.bats` file count | **115** | **119** (+4 new: `test_mock_shim_contract.bats`, `test_run_bash_runner.bats`, `test_workflow_bash_runner.bats`, `test_conformance_no_cross_os_shard.bats`) | ≥ 115 — **PASS** |
 | Conformance scenarios | **51** | **51**, byte-identical across ports on 2 separate full-corpus runs (`bash tests/conformance/ci-conformance.sh`) | = 51 — **PASS** |
 | Blocking CI jobs | **9** | **9** (unchanged; T017c's job-topology restructuring was deliberately NOT done — see note below) | = 9 (see T002) — **PASS** |
@@ -211,22 +234,37 @@ runner defect.
 
 None of the above touch `scripts/bash/**` or `scripts/powershell/**`.
 
-### A pre-existing, unrelated flake discovered under higher parallelism
+### A pre-existing, unrelated flake discovered under higher parallelism — **fixed (T028)**
 
 One conformance run (out of two full-corpus runs) showed a single scenario
 (`us2-parent-second-run`) diverge on generated local-id ordering. Isolated
 reproduction of that exact scenario came back byte-identical, and a second
 full-corpus run was clean. Root cause: `scripts/bash/engine/story_marker.sh`'s
-`SPEC_KIT_JIRA_ID_SOURCE` cursor file is keyed only by `$$` (research §, "the
+`SPEC_KIT_JIRA_ID_SOURCE` cursor file was keyed only by `$$` (research §, "the
 owning shell's PID, stable across its own subshells... concurrent test
 processes never collide") — under this feature's much higher subprocess
 churn, a PID can be reused before the OS reaps the file a *different*, unrelated
-process of the same PID left behind, leaking a stale cursor forward. This is
+process of the same PID left behind, leaking a stale cursor forward. This was
 a latent, pre-existing concurrency bug, not introduced by this feature — but
-this feature's speedup makes it far more likely to actually manifest. **Left
-unfixed**: it lives in `scripts/bash/engine/`, which this feature's plan
-explicitly keeps untouched (coverage/behaviour parity by construction). Flagged
-here for a follow-up.
+this feature's speedup made it far more likely to actually manifest.
+
+**Fixed in T028** (Phase 7 Convergence): a failing regression test was written
+first (`tests/bash/engine/test_story_marker.bats`, "a stale PID-only cursor
+file left by an unrelated process must not leak into a fresh id sequence"),
+observed to FAIL against the original code, then `_smk_id_index_file` in
+`scripts/bash/engine/story_marker.sh` was changed to key the cursor file by
+`$$` **plus** that process's own start time (`ps -o lstart= -p "$$"`) — cheap,
+portable across macOS/Linux, and it makes a reused PID address a different
+file since a different process instance has a different start time. This
+does touch `scripts/bash/engine/**`, a deviation from the plan's "production
+code untouched" scoping — justified because the alternative (a documented,
+unfixed race on a blocking gate) contradicts FR-012/Constitution XIII more
+directly than the scoping constraint does. Verified after the fix: the new
+test passes, the full `story_marker`/`spec_marker` suite (26 tests) is green,
+the full Bash suite (985/985 tests, 119/119 files) is green via
+`tests/run-bash.sh`, the full 51-scenario conformance corpus is byte-identical
+across ports (`ci-conformance.sh` exit 0), and the Pester suite is green
+(720/720).
 
 ### T017c — conformance sharding across the three-OS matrix: deliberately NOT implemented
 
@@ -244,13 +282,24 @@ exactly what SC-006 forbids. T017d's guard (`test_conformance_no_cross_os_shard.
 is in place either way. This is flagged for the user to pick up with repo
 admin access, not implemented here.
 
+**T034 — closed as deferred.** This is the recorded, reviewed scope decision
+required to close T017c: in-OS conformance sharding is NOT implemented in this
+feature. Rationale stands as above (branch-protection required-checks are
+outside this repo's version-controlled files; adding shard job names without
+being able to mark them required risks silently making the corpus
+non-blocking). Follow-up: implement in-OS sharding together with a
+branch-protection update, coordinated with whoever holds repo admin access.
+`test_conformance_no_cross_os_shard.bats` remains the permanent guard against
+the forbidden shape (shards spanning OSes) regardless of whether/when T017c
+is picked back up.
+
 ---
 
 ## T024 — quickstart.md validation (V1–V7)
 
 | Scenario | Result |
 |---|---|
-| V1 — Zero extra tooling (SC-002) | **PASS** — `tests/run-bash.sh` on a genuinely minimal `bats`+`jq`(+`git`+`curl`+`bash`) PATH: 984/984 tests, 119/119 files, exit 0. **Caveat**: ~76 pre-existing NFR-1/cross-port comparison tests correctly `skip` (not fail) without `pwsh`; V1's literal "0 skipped" is not met by this pre-existing, unrelated pattern — see baseline.md's bug-discovery section. |
+| V1 — Zero extra tooling (SC-002) | **PASS** — `tests/run-bash.sh` on a genuinely minimal `bats`+`jq`(+`git`+`curl`+`bash`) PATH: 985/985 tests, 119/119 files, exit 0 (post-T028). **Caveat**: ~76 pre-existing NFR-1/cross-port comparison tests correctly `skip` (not fail) without `pwsh`; V1's literal "0 skipped" is not met by this pre-existing, unrelated pattern — see baseline.md's bug-discovery section. |
 | V2 — Never a false green (SC-003/FR-003) | **PASS** — `test_run_bash_runner.bats` (8/8): GNU `parallel` forced off PATH still executes every test; a deliberately failing test exits non-zero; executed count always > 0. |
 | V3 — Speed from removing pwsh, not tests (SC-001/SC-007) | **PASS** — all 35 `mock_start` files present and green on the shim; 988 `@test`s ≥ 955 baseline. |
 | V3b — Change-scoped inner loop (SC-001b/FR-017) | **PASS** — T010b/T011b tests (part of the 8/8 above): `--since` selects an affected subset and flags "PARTIAL RUN"; an undeterminable diff and an empty selection both fail open to the full suite; no workflow file invokes `--since`. |
@@ -258,10 +307,11 @@ admin access, not implemented here.
 | V4 — Mock driver contract & faults | **PASS** — `test_mock_shim_contract.bats` (11/11): routing, 401/404/429+Retry-After/network faults, call-log order, Authorization never logged, issue-store parent linkage, cross-instance isolation. |
 | V5 — Coverage floor & denominator unchanged (SC-008/FR-005) | **Not verifiable on this machine** — `tests/coverage/bash-coverage.sh` itself refuses to run kcov against a non-Apple bash on macOS (its own documented limitation, unrelated to this feature). No code change was needed in that script: it already reaches the mock exclusively through `bats`/`run-scenario.sh`, both now shim-backed automatically. CI-owned (`coverage-bash` job, Linux). |
 | V6 — Cross-port parity still enforced (SC-010/FR-006) | **PASS** — manually injected a one-line divergence into a scratch copy of `discovery.sh`, ran `us2-company-managed-discovery.json` against both ports: the diff failed as expected; reverted (scratch copy discarded, no repo change). |
-| V7 — Green under maximum parallelism (SC-009/FR-007) | **PASS locally** — 5 consecutive full-suite runs via `tests/run-bash.sh` on the minimal PATH, all green (984/984, 0 failures each). The 20× nightly CI job is unimplemented (would need a new scheduled workflow — out of the tasks list as written; flag if wanted). No test locates a process/file/port by name pattern (`grep -rn 'pgrep\|pkill\|lsof\|:[0-9]\{4,\}' tests/bash` reviewed — the shim/runner use recorded identity only). |
+| V7 — Green under maximum parallelism (SC-009/FR-007) | **PASS** — 5 consecutive full-suite runs via `tests/run-bash.sh` on the minimal PATH, all green (984/984, 0 failures each; 985/985 after T028 added a test). The 20× nightly CI job is now implemented (T030, `.github/workflows/bash-suite-stability.yml`), scheduled + `workflow_dispatch`, non-blocking. No test locates a process/file/port by name pattern (`grep -rn 'pgrep\|pkill\|lsof\|:[0-9]\{4,\}' tests/bash` reviewed — the shim/runner use recorded identity only). |
 
 ## T027 — Final Constitution re-check
 
-- `git diff --name-only main -- scripts/` — **empty**. Zero production code changed (confirmed).
+- `git diff --name-only main -- scripts/` — **`scripts/bash/engine/story_marker.sh` only**, from T028's fix (see above); no other production code changed. This is a deliberate, reviewed deviation from the plan's "`scripts/**` untouched" scoping, not an oversight — a documented race on a blocking gate outweighs the scoping constraint (Constitution X/XIII).
 - Every FR/SC this session could verify locally: **PASS** (see tables above).
-- Deviations for review: T017c not implemented (branch-protection risk, see above); T019/T023b/T025 need a real CI run (Linux+kcov, Windows runner, actual Actions timing) this environment cannot produce; the pre-existing `story_marker.sh` PID-reuse race (unfixed, out of scope) should get a tracked follow-up.
+- Convergence pass (Phase 7, this session): T028 (PID-reuse race) fixed with a test-first regression; T029/T033/T039 (docs) updated; T030 (20× nightly job) and T031 (gates.yml caching) added; T034/T037/T038 (baseline.md decision write-ups) completed. Verified after: full Bash suite 985/985 green, full conformance corpus (51 scenarios) byte-identical, Pester 720/720 green.
+- Deviations for review: T017c not implemented (branch-protection risk, formally closed-as-deferred per T034, see above); T019/T023b/T025/T032/T035/T036 need a real CI run (Linux+kcov, Windows runner, actual Actions timing) this environment cannot produce — flagged for the user to complete from a real Actions run.

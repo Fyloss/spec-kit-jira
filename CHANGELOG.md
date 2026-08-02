@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI caching for the Pester module and the `uv`-installed `specify-cli`
   (`.github/workflows/ci.yml`), and a 15-minute budget on the `coverage-bash`
   gate (`.github/workflows/gates.yml`).
+- CI caching for the pinned `bats-core` install and apt package downloads on
+  the `coverage-bash` gate, and for the Pester module on `coverage-pwsh`
+  (`.github/workflows/gates.yml`).
+- `.github/workflows/bash-suite-stability.yml` — a scheduled, non-blocking job
+  that runs `tests/run-bash.sh` 20 consecutive times nightly and reports, as
+  ongoing evidence the parallel suite never flakes.
 
 ### Changed
 
@@ -32,6 +38,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   locally — only `bats` and `jq`.
 - `tests/conformance/run-scenario.sh` selects the mock backend by port: the
   curl shim for `bash`, the real PowerShell server for `powershell`.
+
+### Fixed
+
+- `tests/run-bash.sh` silently executed 0 tests per file on Debian/Ubuntu when
+  invoked from inside another bats run (as its own meta-tests do on CI): the
+  outer bats prepends its private libexec directory to `PATH`, and
+  Debian's packaging ships that libexec `bats` without the wrapper environment
+  it needs, so it discovers no tests (`1..0`, exit 0). Each worker now strips
+  the injected libexec directory from `PATH` and scrubs the outer run's
+  exported `BATS_*` state before starting the inner bats. Covered by a
+  regression test that simulates the Debian split on any host.
+- The runner meta-tests themselves carried two Linux-only defects: their
+  fixture suites were written through heredocs whose column-0 `@test` lines
+  bats 1.10 (Debian/Ubuntu's package) preprocesses away before bash ever runs
+  the file, and their "GNU-parallel-free PATH" dropped `/usr/bin` wholesale on
+  images where the bats package pulls GNU `parallel` in as a Recommends.
+  Fixtures are now assembled at run time and `parallel`-carrying directories
+  are shadowed rather than removed.
+- The `coverage-bash` gate's traced suite and its suite-green rescue check now
+  run through the parallel `tests/run-bash.sh` instead of a serial `bats -r`,
+  which had outgrown every wall clock the job owns (the gate had been red on
+  `main` since the suite passed ~900 tests).
+- A latent race in `scripts/bash/engine/story_marker.sh`: the
+  `SPEC_KIT_JIRA_ID_SOURCE` test-determinism cursor was keyed only by the
+  owning process's PID, so a PID reused by an unrelated, already-dead process
+  could inherit a stale cursor under heavy parallelism (observed as an
+  intermittent conformance divergence). The cursor is now keyed by PID plus
+  that process's own start time.
 
 ## [0.8.0] - 2026-08-01
 

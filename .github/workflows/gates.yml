@@ -71,14 +71,36 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      # T031 — cache the pinned bats-core install (a plain file copy, no
+      # system-library dependency) so a cache hit skips the download+build
+      # entirely; cache the apt archive directory so a hit still runs the
+      # REAL `apt-get install` (dependency resolution unchanged) but skips
+      # re-downloading the .deb files. Neither cache can change the gate
+      # verdict: on a miss, everything installs exactly as before.
+      - name: Cache bats-core v1.13.0 install
+        id: cache-bats
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/bin/bats
+            /usr/local/lib/bats-core
+            /usr/local/libexec/bats-core
+          key: bats-core-1.13.0-${{ runner.os }}
+      - name: Cache apt archives (jq, curl, kcov)
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-archives-coverage-bash-${{ runner.os }}-jq-curl-kcov
       - name: Install toolchain
         run: |
           sudo apt-get update && sudo apt-get install -y jq curl kcov
           # Jammy's apt bats is 1.2.1, which predates BATS_TEST_TMPDIR (added in
           # bats 1.4.0) — the suite's tmpdir fixtures silently resolve to `/` on
           # it. Install a modern pinned bats-core from the upstream release.
-          curl -sSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.13.0.tar.gz | tar xz -C /tmp
-          sudo /tmp/bats-core-1.13.0/install.sh /usr/local
+          if [ "${{ steps.cache-bats.outputs.cache-hit }}" != 'true' ]; then
+            curl -sSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.13.0.tar.gz | tar xz -C /tmp
+            sudo /tmp/bats-core-1.13.0/install.sh /usr/local
+          fi
       - name: Measure statement coverage with kcov
         id: kcov
         # continue-on-error lets the traceability fallback rescue the JOB when
@@ -120,7 +142,10 @@ jobs:
           # 2 is the runner's "could not measure" (no kcov, unusable
           # interpreter, empty report); only that hands over to the fallback.
           if [ "${rc}" -eq 2 ]; then
-            bats -r tests/bash
+            # The parallel runner, not a serial `bats -r`: this re-run only
+            # proves the suite is green before the fallback vouches for it,
+            # and the serial form alone outgrows the step's own timeout.
+            tests/run-bash.sh
             echo "suite green but coverage unmeasurable — using the traceability fallback"
             echo "rescue=true" >> "${GITHUB_OUTPUT}"
             exit 42
@@ -162,6 +187,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install toolchain
         run: sudo apt-get update && sudo apt-get install -y jq curl
+      - name: Cache the Pester module
+        id: cache-pester
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/powershell/Modules/Pester
+          key: pester-${{ runner.os }}-5.0.0
       - name: Measure statement coverage with Pester
         shell: pwsh
         run: |

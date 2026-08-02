@@ -13,25 +13,51 @@ setup() {
 
   # A small, fast fixture suite — NOT the real 955-test suite, so this file
   # stays fast regardless of the real suite's size or health.
+  #
+  # `@test` must never sit at column 0 inside this file's own heredocs or
+  # format strings: the OUTER bats preprocesses this whole source file before
+  # bash ever parses it, and bats 1.10 (Debian/Ubuntu's package) rewrites any
+  # line-start `@test` — heredoc bodies included — into its preprocessed
+  # form. The fixture then reaches the inner bats with no `@test` left and
+  # runs as `1..0`. Assembling the keyword at run time keeps the fixture
+  # literal on every bats version.
+  T='@test'
   FIXDIR="$(mktemp -d)"
-  cat > "${FIXDIR}/test_a.bats" << 'EOF'
-#!/usr/bin/env bats
-@test "a passes" { [ 1 -eq 1 ]; }
-@test "a passes too" { [ 2 -eq 2 ]; }
-EOF
-  cat > "${FIXDIR}/test_b.bats" << 'EOF'
-#!/usr/bin/env bats
-@test "b passes" { [ 1 -eq 1 ]; }
-EOF
+  printf '#!/usr/bin/env bats\n%s "a passes" { [ 1 -eq 1 ]; }\n%s "a passes too" { [ 2 -eq 2 ]; }\n' \
+    "${T}" "${T}" > "${FIXDIR}/test_a.bats"
+  printf '#!/usr/bin/env bats\n%s "b passes" { [ 1 -eq 1 ]; }\n' \
+    "${T}" > "${FIXDIR}/test_b.bats"
 
   # A GNU-parallel-free PATH: the exact regression this runner exists to fix.
-  NO_PARALLEL_PATH="$(printf '%s' "${PATH}" | tr ':' '\n' | while IFS= read -r d; do
-    [ -x "${d}/parallel" ] || printf '%s\n' "${d}"
-  done | paste -sd: -)"
+  # Dropping every directory that happens to contain `parallel` is not an
+  # option: Debian's bats package pulls GNU parallel into /usr/bin
+  # (Recommends), and removing /usr/bin removes bash itself — the runner then
+  # dies with exit 127 before proving anything. A directory that ships
+  # `parallel` is replaced by a shadow directory symlinking everything else
+  # it contains.
+  SHADOW_DIRS=()
+  NO_PARALLEL_PATH=""
+  local d shadow
+  while IFS= read -r d; do
+    [ -n "${d}" ] || continue
+    if [ -x "${d}/parallel" ]; then
+      shadow="$(mktemp -d)"
+      SHADOW_DIRS+=("${shadow}")
+      ln -s "${d}"/* "${shadow}/" 2> /dev/null || true
+      rm -f "${shadow}/parallel"
+      NO_PARALLEL_PATH="${NO_PARALLEL_PATH:+${NO_PARALLEL_PATH}:}${shadow}"
+    else
+      NO_PARALLEL_PATH="${NO_PARALLEL_PATH:+${NO_PARALLEL_PATH}:}${d}"
+    fi
+  done < <(printf '%s\n' "${PATH}" | tr ':' '\n')
 }
 
 teardown() {
   rm -rf "${FIXDIR}"
+  local s
+  for s in "${SHADOW_DIRS[@]:-}"; do
+    [ -n "${s}" ] && rm -rf "${s}"
+  done
 }
 
 @test "runs the full fixture suite without GNU parallel, executed count never 0" {
@@ -42,16 +68,33 @@ teardown() {
 }
 
 @test "a deliberately failing test makes the runner exit non-zero" {
-  cat > "${FIXDIR}/test_fail.bats" << 'EOF'
-#!/usr/bin/env bats
-@test "this one fails on purpose" { [ 1 -eq 2 ]; }
-EOF
+  printf '#!/usr/bin/env bats\n%s "this one fails on purpose" { [ 1 -eq 2 ]; }\n' \
+    "${T}" > "${FIXDIR}/test_fail.bats"
   run env PATH="${NO_PARALLEL_PATH}" "${RUNNER}" "${FIXDIR}"
   [ "$status" -ne 0 ]
 }
 
 @test "the summary reports a test count greater than zero" {
   run "${RUNNER}" "${FIXDIR}"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ tests\ executed:\ 3 ]]
+}
+
+@test "an outer bats' injected libexec dir never leaks into the workers (Debian split packaging)" {
+  # An outer bats prepends its private libexec dir to PATH and exports it as
+  # BATS_LIBEXEC. Debian/Ubuntu package that libexec `bats` WITHOUT the
+  # wrapper's environment, so resolved bare it silently discovers 0 tests
+  # (`1..0`, exit 0) — which turned every nested runner invocation on the CI
+  # ubuntu images into "0 tests executed". The worker must strip the injected
+  # dir so the real wrapper is found. Simulated here so the defect is
+  # reproducible on hosts whose bats has no such split.
+  local libexec
+  libexec="$(mktemp -d)"
+  printf '#!/usr/bin/env bash\nprintf "1..0\\n"\n' > "${libexec}/bats"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "${libexec}/bats-exec-suite"
+  chmod +x "${libexec}/bats" "${libexec}/bats-exec-suite"
+  run env BATS_LIBEXEC="${libexec}" PATH="${libexec}:${PATH}" "${RUNNER}" "${FIXDIR}"
+  rm -rf "${libexec}"
   [ "$status" -eq 0 ]
   [[ "$output" =~ tests\ executed:\ 3 ]]
 }

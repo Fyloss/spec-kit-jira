@@ -34,6 +34,20 @@ setup() {
   [ "$(story_marker_generate_id)" = "1111111111111111" ]
 }
 
+# T028 (Phase 7 Convergence): a stale cursor file left behind at a
+# PID-only-keyed path — exactly what an unrelated, already-dead process
+# reusing this same PID would leave — must never be adopted by a fresh
+# SPEC_KIT_JIRA_ID_SOURCE sequence. Reproduces the race without relying on
+# genuine PID reuse: plant the stale file the OLD PID-only scheme would read,
+# then assert the sequence still starts at index 0.
+@test "a stale PID-only cursor file left by an unrelated process must not leak into a fresh id sequence (T028)" {
+  local stale="${TMPDIR:-/tmp}/.speckit-jira-id-index.$$"
+  printf '5' > "${stale}"
+  export SPEC_KIT_JIRA_ID_SOURCE="1111111111111111 2222222222222222"
+  [ "$(story_marker_generate_id)" = "1111111111111111" ]
+  rm -f "${stale}"
+}
+
 # --- Grammar: valid / ignored / malformed -----------------------------------
 
 @test "valid form: story= alone" {

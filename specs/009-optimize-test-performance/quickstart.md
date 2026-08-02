@@ -31,7 +31,11 @@ command -v pwsh || echo "no pwsh (expected)"
 command -v parallel || echo "no GNU parallel (expected)"
 tests/run-bash.sh
 ```
-**Pass**: every test executes; 0 skipped/failed for missing tooling; exit 0.
+**Pass**: every test executes; 0 tests skipped or failed for missing tooling
+**among the Bash port's own tests**; exit 0. (Pre-existing NFR-1 cross-port
+comparison tests correctly `skip` without `pwsh` — that is a shared-harness
+assertion about the PowerShell port, explicitly out of scope for SC-002 per
+spec.md, not an unmet criterion here.)
 
 ### V2 — Never a false green (SC-003 / FR-003)
 Force GNU `parallel` off `PATH` and confirm the runner still runs everything:

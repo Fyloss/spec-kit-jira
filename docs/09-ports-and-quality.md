@@ -172,10 +172,15 @@ machine-wide scan.
 ## Running the suites locally
 
 ```sh
-bats -r tests/bash --jobs "$(getconf _NPROCESSORS_ONLN)"
+tests/run-bash.sh
 pwsh -NoProfile -Command "Invoke-Pester -Path tests/powershell -PassThru"
 ```
 
-`--jobs` runs independent test cases across cores via GNU parallel; each test
-isolates its own tmpdir and the mock binds an ephemeral port, so concurrent
-runs cannot collide.
+`tests/run-bash.sh` requires only `bats` and `jq` — no PowerShell, no GNU
+`parallel`. It shards one `bats` invocation per file across cores with
+`xargs -P`, falling back to serial execution when concurrency is unavailable,
+and never silently reports zero executed tests. Each test isolates its own
+tmpdir and the mock binds an ephemeral port (or, for the Bash port, no port at
+all — a scripted `curl` shim), so concurrent runs cannot collide. Use
+`tests/run-bash.sh --since <ref>` for a change-scoped inner loop; it fails
+open to the full suite on any doubt about what a diff affects.

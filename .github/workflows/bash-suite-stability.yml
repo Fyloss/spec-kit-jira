@@ -1,0 +1,51 @@
+# T030 (Phase 7 Convergence) — SC-009's 20x nightly stability evidence for
+# `tests/run-bash.sh`. A 20x LOCAL gate would cost ~7 hours per run and defeat
+# the purpose of the speedup this feature delivers, so the strong evidence
+# lives here instead, where it costs no developer time (quickstart.md V7).
+#
+# Non-blocking by construction: schedule + workflow_dispatch only, never
+# push/pull_request — this workflow must never become part of, or be
+# mistaken for, the 9-job blocking inventory (SC-006/FR-010).
+name: Bash Suite Stability (nightly)
+
+on:
+  schedule:
+    # 37 5 * * * UTC — an off-the-hour time, so this run does not compete
+    # with every other repository's on-the-hour cron for shared runner
+    # capacity (same rationale as live.yml's cron).
+    - cron: '37 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stability-20x:
+    name: Run tests/run-bash.sh 20 consecutive times
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bash toolchain
+        run: sudo apt-get update && sudo apt-get install -y bats jq curl
+
+      - name: Run tests/run-bash.sh 20 times and report
+        run: |
+          set -uo pipefail
+          failures=0
+          for i in $(seq 1 20); do
+            echo "::group::Run ${i}/20"
+            if tests/run-bash.sh; then
+              echo "Run ${i}/20: PASS"
+            else
+              echo "Run ${i}/20: FAIL"
+              failures=$((failures + 1))
+            fi
+            echo "::endgroup::"
+          done
+          echo "Failures: ${failures}/20"
+          exit "${failures}"
