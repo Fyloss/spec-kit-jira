@@ -36,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   filter, where nothing can rewrite it, restoring byte parity with the
   PowerShell port. Windows operators who could not copy-paste the resume
   command no longer need to correct it by hand.
+- On Windows, the same confirmation-pending object was terminated with CRLF by
+  the PowerShell port and with LF by the Bash port: its three
+  `[Console]::Out.WriteLine` calls ended their line with `Environment.NewLine`
+  instead of the explicit `` "`n" `` the rest of the port writes. The payload
+  was identical; only the terminator diverged, which is why it stayed hidden
+  behind the defect above until that one was fixed. A consumer piping
+  `--json` output of a paused reconcile on Windows now receives the same bytes
+  as on macOS and Linux.
 
 ## [0.10.1] - 2026-08-04
 

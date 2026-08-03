@@ -1022,13 +1022,19 @@ function Invoke-JiraReconcile {
                 resume_with       = "/speckit.jira.reconcile $specFile --accept-defaults"
             }
             $fdConfirmationJson = ConvertTo-JiraJsonValue $fdConfirmation
+            # `Out.Write` with an explicit "`n", never `Out.WriteLine`: the
+            # latter terminates with Environment.NewLine, which is CRLF on
+            # Windows, while the Bash twin writes a bare LF on every host —
+            # a divergence in the terminator alone, invisible on macOS and
+            # Linux (docs/10-windows-portability.md quirk 8). This is the
+            # convention the summary writer below already follows.
             if ($json) {
-                [Console]::Out.WriteLine($fdConfirmationJson)
+                [Console]::Out.Write($fdConfirmationJson + "`n")
             }
             else {
                 $fdLabels = ($fdFields | ForEach-Object { [string]$_.label }) -join ', '
-                [Console]::Out.WriteLine("Jira mirror paused: confirm $fdLabels before $created creation(s) are written.")
-                [Console]::Out.WriteLine("Resume with: $($fdConfirmation.resume_with)")
+                [Console]::Out.Write("Jira mirror paused: confirm $fdLabels before $created creation(s) are written.`n")
+                [Console]::Out.Write("Resume with: $($fdConfirmation.resume_with)`n")
             }
             return 0
         }

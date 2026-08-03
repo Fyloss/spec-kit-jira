@@ -96,6 +96,31 @@ reach for that variable to fix a site: disabling conversion process-wide would
 also strip the conversion that `curl` and `git` arguments currently rely on,
 trading a known divergence for an unmeasured one.
 
+### 8. `Console::Out.WriteLine` terminates with CRLF
+
+`[Console]::Out.WriteLine(x)` ends its line with `Environment.NewLine` — CRLF
+on Windows, LF everywhere else — while the Bash twin writes a bare LF on every
+host. One such call is therefore a Windows-only divergence in the **terminator
+alone**, with the payload byte-identical, and it cannot be reproduced on macOS
+or Linux where `Environment.NewLine` already is LF.
+
+Measured (`us2-field-defaults-question`, CI run 30854733840, once quirk 7 was
+closed): the ports differed at byte 414, `bash=0a` against `pwsh=0d`, sizes
+414 / 415 — a 413-byte document terminated `\n` on one port and `\r\n` on the
+other. Note what this cost: two independent defects had stacked in a single
+scenario, and the first hid the second entirely, because the byte report stops
+at the first differing byte. **Closing one divergence does not mean the
+scenario is green — it means the next one becomes visible.** Re-run the probe
+after every Windows fix rather than assuming the corpus is clean.
+
+Rule: write stdout with `[Console]::Out.Write` and an explicit `` "`n" ``,
+never `WriteLine`. `tests/bash/ci/test_no_translating_stdout_write.bats`
+enforces it. The rule is scoped to stdout deliberately:
+`[Console]::Error.WriteLine` is the port's settled idiom for the WARNING/error
+channel at some thirty sites, and stderr sits outside the byte contract —
+`ci-conformance.sh` diffs `stdout`, `exit`, `calls.log` and the written tree,
+never stderr.
+
 ## The probe loop — how to ask Windows a question
 
 `.github/workflows/windows-conformance.yml` runs the conformance corpus alone
