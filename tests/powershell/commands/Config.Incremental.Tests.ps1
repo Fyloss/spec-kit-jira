@@ -75,4 +75,37 @@ Describe 'Config incremental re-bind' {
         ($obj.resolved_ids.TEAM.issue_types | Where-Object { $_.logical_name -eq "Story" }).id | Should -Not -BeNullOrEmpty
         ($obj.resolved_ids.COMP.issue_types | Where-Object { $_.logical_name -eq "Story" }).id | Should -Not -Be ($obj.resolved_ids.TEAM.issue_types | Where-Object { $_.logical_name -eq "Story" }).id
     }
+
+    It '013 — a resolved label containing a double quote survives an incremental run untouched, not re-resolved (FR-005)' {
+        # Pre-seed COMP as already resolved from a prior ceremony, with a logical_name
+        # containing a double quote — recorded escaped, as the writer would leave it.
+        $local = @'
+resolved_ids:
+  COMP:
+    issue_types:
+      - logical_name: "Platform \"legacy\""
+        id: "10199"
+        hierarchy_level: "0"
+        subtask: false
+'@ + "`n"
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml'), $local, (New-Object System.Text.UTF8Encoding($false)))
+        # Only TEAM is configured this run — COMP is not touched.
+        $cfg = @'
+projects:
+  - key: TEAM
+    style: team_managed
+routing_default: "TEAM"
+'@ + "`n"
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), $cfg, (New-Object System.Text.UTF8Encoding($false)))
+
+        $sw = [System.IO.StringWriter]::new()
+        $orig = [Console]::Out
+        [Console]::SetOut($sw)
+        try { [void](Invoke-JiraConfig -Arguments @('config', '--child-type', 'TEAM=Story', '--json')) }
+        finally { [Console]::SetOut($orig) }
+
+        $json = Get-LocalObject
+        $json.resolved_ids.COMP.issue_types[0].logical_name | Should -Be 'Platform "legacy"'
+        $json.resolved_ids.COMP.issue_types[0].id | Should -Be '10199'
+    }
 }

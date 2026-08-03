@@ -134,3 +134,11 @@ comments, blank lines. Out of scope by design: flow collections and anchors.
 Failing closed rather than silently dropping the rest of the file is the point:
 a partially-read config would mirror into the wrong project with the wrong
 mapping, and nobody would find out until the tickets existed.
+
+## Writing configuration, fail-closed
+
+The writer escapes `"` and `\` inside every quoted scalar it emits (`\"` and
+`\\`), so a Jira label or value containing either round-trips through
+`config.local.yml` unchanged. Only a string value containing a line break
+refuses the write — at exit `4`, naming the offending path — because this
+restricted YAML dialect has no way to represent one.

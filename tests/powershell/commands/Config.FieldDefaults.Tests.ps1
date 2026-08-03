@@ -105,6 +105,16 @@ Describe 'Set-JiraFieldDefaultsBlock — the managed-region splice (T044/T045)' 
         ([regex]::Matches($content, [regex]::Escape($FieldDefaultsEndToken))).Count | Should -Be 1
     }
 
+    It '013 — a field default containing a double quote is written escaped and reads back identical (FR-004, FR-021)' {
+        $merged = '{"FD":{"ask":true,"Epic":{"Program Increment":"Platform \"legacy\""}}}'
+        $r = Set-JiraFieldDefaultsBlock -Path $script:Path -MapJson $merged -DryRun $false
+        $r.Status | Should -Be 'created'
+        $content = [System.IO.File]::ReadAllText($script:Path)
+        $content | Should -Match ([regex]::Escape('"Program Increment": "Platform \"legacy\""'))
+        $json = (ConvertFrom-JiraConfigYaml -Path $script:Path) | ConvertFrom-Json
+        $json.field_defaults.FD.Epic.'Program Increment' | Should -Be 'Platform "legacy"'
+    }
+
     It "T040 — the host's dominant CRLF line ending is respected" {
         [System.IO.File]::WriteAllText($script:Path, "projects:`r`n  - key: FD`r`nrouting_default: FD`r`n")
         Set-JiraFieldDefaultsBlock -Path $script:Path -MapJson '{"FD":{"ask":true,"Epic":{"Business Owner":"Platform Team"}}}' -DryRun $false | Out-Null
@@ -159,6 +169,13 @@ Describe 'Get-JiraFieldDefaultAnswerProblem / Merge-JiraFieldDefault / Get-JiraF
     It 'a value inside allowed_values passes' {
         $answers = '[{"type":"Epic","label":"Program Increment","value":"PI-2026-Q3"}]'
         $out = Get-JiraFieldDefaultAnswerProblem -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $script:Defaultable -AnswersJson $answers | ConvertFrom-Json
+        @($out).Count | Should -Be 0
+    }
+
+    It '013 — a value containing a double quote inside allowed_values is accepted, not outside_allowed (FR-004)' {
+        $defaultable = '{"10101":[{"logical_name":"Program Increment","field_id":"customfield_40012","schema_type":"option","required":true,"defaultable":true,"allowed_values":["Platform \"legacy\"","clean"]}]}'
+        $answers = '[{"type":"Epic","label":"Program Increment","value":"Platform \"legacy\""}]'
+        $out = Get-JiraFieldDefaultAnswerProblem -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $defaultable -AnswersJson $answers | ConvertFrom-Json
         @($out).Count | Should -Be 0
     }
 
@@ -238,6 +255,14 @@ Describe 'Get-JiraFieldDefaultAnswerProblem / Merge-JiraFieldDefault / Get-JiraF
         $out | Should -Match ([regex]::Escape("(answer with --field-default 'PM=Deliverable=Business Owner=<value>')"))
         $out | Should -Match ([regex]::Escape("(answer with --field-default 'PM=Deliverable=Program Increment=<value>')"))
         $out | Should -Match ([regex]::Escape('choose one of: PI-2026-Q2, PI-2026-Q3'))
+    }
+
+    It 'the pending hint renders a quoted allowed-value label as Jira shows it, no escape notation (013 FR-003)' {
+        $report = '{"orphaned":[],"not_yet_consumed":[],"undefaultable_required":[],' +
+            '"pending":[{"type":"Deliverable","label":"Platform","allowed_values":["Platform \"legacy\"","clean"]}]}'
+        $out = Get-JiraFieldDefaultNote -ProjectKey 'PM' -ReportJson $report
+        $out | Should -Match ([regex]::Escape('choose one of: Platform "legacy", clean'))
+        $out | Should -Not -Match ([regex]::Escape('\"'))
     }
 
     It 'an entry recorded for a type the project no longer offers is orphaned' {

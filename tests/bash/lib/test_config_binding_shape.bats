@@ -121,15 +121,21 @@ setup() {
     "$(jq -cS '.resolved_ids.CONSUMER.parent_type' <<< "${json}")" ]
 }
 
-@test "a logical_name the reader cannot unescape refuses with a located, redacted message, even nested (T014c/FR-003b)" {
+@test "a logical_name containing a double quote is written escaped and round-trips, even nested (013 contract §1, was: T014c/FR-003b refusal)" {
   local json
   json='{"resolved_ids":{"COMP":{"issue_types":[
     {"logical_name":"Bad\"Name","id":"1","hierarchy_level":"0","subtask":false}
   ]}}}'
+  local yaml
   run config_to_yaml <<< "${json}"
-  [ "$status" -eq 4 ]
-  [[ "$output" == *"resolved_ids.COMP.issue_types[0].logical_name"* ]]
-  [[ "$output" != *'Bad"Name'* ]]
+  [ "$status" -eq 0 ]
+  yaml="${output}"
+  [[ "$yaml" == *'"Bad\"Name"'* ]]
+  local tmpf; tmpf="${BATS_TEST_TMPDIR}/roundtrip-badname.yml"
+  printf '%s' "${yaml}" > "${tmpf}"
+  local roundtripped
+  roundtripped="$(config_yaml_to_json "${tmpf}")"
+  [ "$(jq -r '.resolved_ids.COMP.issue_types[0].logical_name' <<< "${roundtripped}")" = 'Bad"Name' ]
 }
 
 # --- T009 [Phase 2, 011] — defaultable_fields carries through the binding

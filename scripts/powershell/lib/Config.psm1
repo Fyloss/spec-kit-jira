@@ -131,16 +131,59 @@ $script:CfgFile = $null
 # global on the other would unwind differently and reorder stderr).
 $script:CfgErr = $null
 
+function ConvertFrom-CfgEscape {
+    <#
+    .SYNOPSIS
+      Undo the writer's escaping (contracts/yaml-string-escaping.md §2.1): a
+      left-to-right walk where `\"` becomes `"` and `\\` becomes `\`; any
+      other backslash, including one at the end of the body, is kept literal
+      (FR-012) rather than treated as a parse failure. Mirror of
+      _cfg_decode_escapes.
+    #>
+    param([string] $Body)
+    if ($Body.IndexOf('\') -lt 0) { return $Body }
+    $out = [System.Text.StringBuilder]::new()
+    $n = $Body.Length
+    $i = 0
+    while ($i -lt $n) {
+        $ch = $Body[$i]
+        if ($ch -eq '\' -and ($i + 1) -lt $n -and ($Body[$i + 1] -eq '"' -or $Body[$i + 1] -eq '\')) {
+            [void]$out.Append($Body[$i + 1])
+            $i += 2
+            continue
+        }
+        [void]$out.Append($ch)
+        $i++
+    }
+    return $out.ToString()
+}
+
 function Remove-CfgInlineComment {
     param([string] $Line)
     $out = [System.Text.StringBuilder]::new()
     $inS = $false; $inD = $false; $prev = ''
-    foreach ($ch in $Line.ToCharArray()) {
+    $n = $Line.Length
+    $i = 0
+    while ($i -lt $n) {
+        $ch = $Line[$i]
+        if ($inD -and $ch -eq '\') {
+            # Escape-aware (contracts/yaml-string-escaping.md §2.3): a `\`
+            # inside a double-quoted region consumes the following character
+            # without changing quote state, so an escaped `"` cannot close
+            # the region.
+            $nxt = if (($i + 1) -lt $n) { $Line[$i + 1] } else { $null }
+            [void]$out.Append($ch)
+            if ($null -ne $nxt) { [void]$out.Append($nxt) }
+            $prev = if ($null -ne $nxt) { $nxt } else { '' }
+            $i += 2
+            continue
+        }
         if ($ch -eq "'" -and -not $inD) { $inS = -not $inS }
         elseif ($ch -eq '"' -and -not $inS) { $inD = -not $inD }
         elseif ($ch -eq '#' -and -not $inS -and -not $inD -and ($prev -eq '' -or $prev -eq ' ' -or $prev -eq "`t")) { break }
         [void]$out.Append($ch)
         $prev = $ch
+        $i++
     }
     return $out.ToString().TrimEnd()
 }
@@ -238,12 +281,24 @@ function Get-CfgMapEntryKey {
     $first = $Content[0]
     if ($first -eq '"' -or $first -eq "'") {
         # Quoted key (§1.1): bounded by the NEXT occurrence of the same quote
-        # character — no escape sequences are interpreted. The delimiter colon
-        # must immediately follow the closing quote, then whitespace or EOL.
+        # character. When that quote is `"`, the scan is escape-aware
+        # (contracts/yaml-string-escaping.md §2.3): a `\` consumes the
+        # following character without ending the key, so the closing quote is
+        # the next `"` not preceded by an escaping backslash. A single-quoted
+        # key has no escape sequences at all (§2.2). The delimiter colon must
+        # immediately follow the closing quote, then whitespace or EOL.
         $q = $first
         $close = -1
-        for ($i = 1; $i -lt $n; $i++) {
-            if ($Content[$i] -eq $q) { $close = $i; break }
+        if ($q -eq '"') {
+            for ($i = 1; $i -lt $n; $i++) {
+                if ($Content[$i] -eq '\') { $i++; continue }
+                if ($Content[$i] -eq $q) { $close = $i; break }
+            }
+        }
+        else {
+            for ($i = 1; $i -lt $n; $i++) {
+                if ($Content[$i] -eq $q) { $close = $i; break }
+            }
         }
         if ($close -lt 0) { return $false }
         $colonIdx = $close + 1
@@ -253,6 +308,7 @@ function Get-CfgMapEntryKey {
         if ($null -ne $nxt -and $nxt -ne ' ' -and $nxt -ne "`t") { return $false }
         $key = $Content.Substring(1, $close - 1)
         if ($key -eq '') { return $false }
+        if ($q -eq '"') { $key = ConvertFrom-CfgEscape $key }
         $script:CfgKey = $key
         $tail = if ($afterIdx -lt $n) { $Content.Substring($afterIdx) } else { '' }
         $script:CfgRestText = $tail.TrimStart()
@@ -293,7 +349,9 @@ function Test-CfgMapEntry {
 function Convert-CfgScalar {
     param([string] $Raw)
     $s = $Raw.Trim()
-    if ($s.Length -ge 2 -and $s[0] -eq '"' -and $s[-1] -eq '"') { return $s.Substring(1, $s.Length - 2) }
+    if ($s.Length -ge 2 -and $s[0] -eq '"' -and $s[-1] -eq '"') {
+        return (ConvertFrom-CfgEscape ($s.Substring(1, $s.Length - 2)))
+    }
     if ($s.Length -ge 2 -and $s[0] -eq "'" -and $s[-1] -eq "'") { return $s.Substring(1, $s.Length - 2) }
     switch ($s) {
         'true' { return $true }
@@ -460,11 +518,23 @@ function ConvertFrom-JiraConfigYaml {
 # config_to_yaml; emits byte-identical output.
 # =============================================================================
 
+function ConvertTo-CfgEscape {
+    <#
+    .SYNOPSIS
+      Encode a string for emission inside double quotes (contracts/
+      yaml-string-escaping.md §1.1): backslash first, then quote. Reversing
+      the order double-escapes the backslash the first replacement introduces.
+      Mirror of the Bash writer's `yesc` jq def.
+    #>
+    param([string] $Value)
+    return $Value.Replace('\', '\\').Replace('"', '\"')
+}
+
 function Write-CfgYamlScalar {
     param($Value)
     if ($null -eq $Value) { return 'null' }
     if ($Value -is [bool]) { return $(if ($Value) { 'true' } else { 'false' }) }
-    if ($Value -is [string]) { return '"' + $Value + '"' }
+    if ($Value -is [string]) { return '"' + (ConvertTo-CfgEscape $Value) + '"' }
     if ($Value -is [int] -or $Value -is [long] -or $Value -is [double] -or
         $Value -is [decimal] -or $Value -is [single]) {
         return [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0}', $Value)
@@ -473,49 +543,59 @@ function Write-CfgYamlScalar {
 }
 
 function Test-CfgUnrepresentable {
-    # True when a string contains `"` or `\`, which the reader cannot
-    # unescape — mirror of the Bash writer's badchars jq def (research R3).
+    # True when a string contains LF or CR, which cannot be represented on a
+    # single line — mirror of the Bash writer's badchars jq def (contract
+    # yaml-string-escaping.md §1.4).
     param([string] $Value)
-    return ($Value.IndexOf('"') -ge 0 -or $Value.IndexOf('\') -ge 0)
+    return ($Value.IndexOf("`n") -ge 0 -or $Value.IndexOf("`r") -ge 0)
 }
 
 function Get-CfgWriteRefusalError {
     <#
     .SYNOPSIS
-      Walk a parsed structure and return the first "<path>: <reason>" for a
-      key or string value the writer cannot represent (contract §2.3). The
+      Walk a parsed structure and return every deduplicated "<path>: <reason>"
+      for a key or string value the writer cannot represent (contract §2.3),
+      sorted so both ports report offending paths in the same order. The
       value itself is never included — only the path at which it occurred.
-      Mirror of _cfg_write_refusal_errors.
+      Mirror of _cfg_write_refusal_errors (bash's `unique | .[]`).
     #>
     param($Node, [string] $Path)
+
+    $errors = [System.Collections.Generic.List[string]]::new()
+    Get-CfgWriteRefusalErrors -Node $Node -Path $Path -Errors $errors
+    if ($errors.Count -eq 0) { return $null }
+    $sorted = $errors | Sort-Object -Unique
+    return ($sorted -join "`n")
+}
+
+function Get-CfgWriteRefusalErrors {
+    param($Node, [string] $Path, [System.Collections.Generic.List[string]] $Errors)
 
     if ($Node -is [System.Collections.IDictionary] -or $Node -is [System.Management.Automation.PSCustomObject]) {
         $map = [ordered]@{}
         if ($Node -is [System.Collections.IDictionary]) { foreach ($k in $Node.Keys) { $map[[string]$k] = $Node[$k] } }
         else { foreach ($p in $Node.PSObject.Properties) { $map[[string]$p.Name] = $p.Value } }
         foreach ($k in $map.Keys) {
-            if (Test-CfgUnrepresentable ([string]$k)) {
-                return "${Path}: a key here contains `" or \, which this writer cannot represent"
-            }
             $childPath = if ($Path -eq '') { [string]$k } else { "$Path.$k" }
-            $err = Get-CfgWriteRefusalError $map[$k] $childPath
-            if ($err) { return $err }
+            if (Test-CfgUnrepresentable ([string]$k)) {
+                $Errors.Add("${Path}: a key here contains a line break, which this writer cannot represent")
+                continue
+            }
+            Get-CfgWriteRefusalErrors -Node $map[$k] -Path $childPath -Errors $Errors
         }
-        return $null
+        return
     }
     if (($Node -is [System.Collections.IEnumerable]) -and ($Node -isnot [string])) {
         $i = 0
         foreach ($item in $Node) {
-            $err = Get-CfgWriteRefusalError $item "$Path[$i]"
-            if ($err) { return $err }
+            Get-CfgWriteRefusalErrors -Node $item -Path "$Path[$i]" -Errors $Errors
             $i++
         }
-        return $null
+        return
     }
     if ($Node -is [string] -and (Test-CfgUnrepresentable $Node)) {
-        return "${Path}: a string value here contains `" or \, which this writer cannot represent"
+        $Errors.Add("${Path}: a string value here contains a line break, which this writer cannot represent")
     }
-    return $null
 }
 
 function Write-CfgYamlNode {
@@ -540,7 +620,7 @@ function Write-CfgYamlNode {
         $names.Sort([System.StringComparer]::Ordinal)
         $lines = foreach ($k in $names) {
             $v = $map[$k]
-            $qk = '"' + $k + '"'
+            $qk = '"' + (ConvertTo-CfgEscape $k) + '"'
             if ($v -is [System.Collections.IDictionary] -or $v -is [System.Management.Automation.PSCustomObject]) {
                 $childCount = @($(if ($v -is [System.Collections.IDictionary]) { $v.Keys } else { $v.PSObject.Properties })).Count
                 if ($childCount -eq 0) { "$Ind${qk}: {}" }
@@ -574,15 +654,19 @@ function ConvertTo-JiraConfigYaml {
       Emit a JSON value as canonical YAML (no trailing newline), byte-identical to
       the Bash port's config_to_yaml. The caller adds exactly one trailing newline.
       Every key is quoted unconditionally (contract yaml-key-grammar.md §2.1).
-      Throws when a key or string value contains `"` or `\`, which this writer
-      cannot represent (research R3) — the value itself never appears in the
+      `"` and `\` are escaped rather than refused (research R3). Throws when a
+      key or string value contains a line break, which this writer cannot
+      represent (research R5/R8) — the value itself never appears in the
       exception message (Constitution IV).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Json)
     $obj = $Json | ConvertFrom-Json -Depth 100
     $refusal = Get-CfgWriteRefusalError $obj ''
-    if ($refusal) { throw "config: $refusal" }
+    if ($refusal) {
+        $prefixed = ($refusal -split "`n") | ForEach-Object { "config: $_" }
+        throw ($prefixed -join "`n")
+    }
     return (Write-CfgYamlNode $obj '')
 }
 

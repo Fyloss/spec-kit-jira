@@ -104,14 +104,21 @@ JSON object. This holds in particular for keys containing:
 - a leading `- `;
 - leading or trailing whitespace.
 
-### 2.3 What the writer refuses
+### 2.3 What the writer refuses — SUPERSEDED
 
-A key or a string value containing `"` (U+0022) or `\` (U+005C) **cannot** be represented,
+**Superseded by** `specs/013-fix-yaml-string-escaping/contracts/yaml-string-escaping.md` §1.1 and
+§1.4. `"` and `\` are now representable via an escape the reader undoes (§1.1 there); the writer's
+refusal narrows to a value containing a line break (§1.4 there). The rest of this document — §1,
+§2.1, §2.2 and §3 — remains in force.
+
+The paragraph below is retained for history only and no longer describes the writer's behaviour:
+
+~~A key or a string value containing `"` (U+0022) or `\` (U+005C) **cannot** be represented,
 because the reader performs no unescaping. The writer MUST refuse it: a named error identifying
-the path at which it occurred, and exit `EXIT_CONFIG` (4). It MUST NOT emit the value.
+the path at which it occurred, and exit `EXIT_CONFIG` (4). It MUST NOT emit the value.~~
 
 The error names the path, never the value — the value may be credential-shaped
-(Constitution IV, NFR-3).
+(Constitution IV, NFR-3). This rule is unchanged by the supersession.
 
 ---
 

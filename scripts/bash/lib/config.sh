@@ -119,9 +119,20 @@ _CFG_ERR=""
 # _cfg_strip_inline_comment <line> — drop a ` #...` trailing comment that is not
 # inside quotes. Prints the cleaned line.
 _cfg_strip_inline_comment() {
-  local line="$1" out="" i ch in_s=0 in_d=0 prev=""
-  for ((i = 0; i < ${#line}; i++)); do
+  local line="$1"
+  local out="" i=0 n=${#line} ch nxt in_s=0 in_d=0 prev=""
+  while ((i < n)); do
     ch="${line:i:1}"
+    if [[ ${in_d} -eq 1 && "${ch}" == "\\" ]]; then
+      # Escape-aware (contracts/yaml-string-escaping.md §2.3): a `\` inside a
+      # double-quoted region consumes the following character without
+      # changing quote state, so an escaped `"` cannot close the region.
+      nxt="${line:i+1:1}"
+      out+="${ch}${nxt}"
+      prev="${nxt}"
+      i=$((i + 2))
+      continue
+    fi
     if [[ "${ch}" == "'" && ${in_d} -eq 0 ]]; then
       in_s=$((1 - in_s))
     elif [[ "${ch}" == '"' && ${in_s} -eq 0 ]]; then
@@ -131,6 +142,7 @@ _cfg_strip_inline_comment() {
     fi
     out+="${ch}"
     prev="${ch}"
+    i=$((i + 1))
   done
   # rtrim
   out="${out%"${out##*[![:space:]]}"}"
@@ -226,6 +238,30 @@ _cfg_raise_duplicate_key() {
 # delimiter colon found, or the key is empty after trimming (§1.2 step 4,
 # §1.1 by the same rule) — clears both and returns 1: "not a mapping entry",
 # not yet a verdict on whether that is fatal (§1.4 leaves that to the caller).
+# _cfg_decode_escapes <body> — undo the writer's escaping (contracts/
+# yaml-string-escaping.md §2.1): a left-to-right walk where `\"` becomes `"`
+# and `\\` becomes `\`; any other backslash, including one at the end of the
+# body, is kept literal (FR-012) rather than treated as a parse failure.
+_cfg_decode_escapes() {
+  local s="$1"
+  [[ "${s}" != *"\\"* ]] && { printf '%s' "${s}"; return; }
+  local out="" i=0 n=${#s} ch nxt
+  while ((i < n)); do
+    ch="${s:i:1}"
+    if [[ "${ch}" == "\\" ]]; then
+      nxt="${s:i+1:1}"
+      if [[ "${nxt}" == '"' || "${nxt}" == "\\" ]]; then
+        out+="${nxt}"
+        i=$((i + 2))
+        continue
+      fi
+    fi
+    out+="${ch}"
+    i=$((i + 1))
+  done
+  printf '%s' "${out}"
+}
+
 _CFG_KEY=""
 _CFG_REST=""
 _cfg_map_entry_key() {
@@ -237,13 +273,27 @@ _cfg_map_entry_key() {
   local first="${content:0:1}"
   if [[ "${first}" == '"' || "${first}" == "'" ]]; then
     # Quoted key (§1.1): the key is bounded by the NEXT occurrence of the same
-    # quote character — no escape sequences are interpreted. The character
-    # immediately after the closing quote must be the delimiter colon, itself
-    # followed by whitespace or end of line.
+    # quote character. When that quote is `"`, the scan is escape-aware
+    # (contracts/yaml-string-escaping.md §2.3): a `\` consumes the following
+    # character without ending the key, so the closing quote is the next `"`
+    # not preceded by an escaping backslash. A single-quoted key has no
+    # escape sequences at all (§2.2). The character immediately after the
+    # closing quote must be the delimiter colon, itself followed by
+    # whitespace or end of line.
     local q="${first}" i close=-1
-    for ((i = 1; i < n; i++)); do
-      if [[ "${content:i:1}" == "${q}" ]]; then close=${i}; break; fi
-    done
+    if [[ "${q}" == '"' ]]; then
+      for ((i = 1; i < n; i++)); do
+        if [[ "${content:i:1}" == "\\" ]]; then
+          i=$((i + 1))
+          continue
+        fi
+        if [[ "${content:i:1}" == "${q}" ]]; then close=${i}; break; fi
+      done
+    else
+      for ((i = 1; i < n; i++)); do
+        if [[ "${content:i:1}" == "${q}" ]]; then close=${i}; break; fi
+      done
+    fi
     ((close < 0)) && return 1
     local colon_idx=$((close + 1))
     [[ "${content:colon_idx:1}" != ":" ]] && return 1
@@ -252,6 +302,7 @@ _cfg_map_entry_key() {
     [[ -n "${nxt}" && "${nxt}" != " " && "${nxt}" != $'\t' ]] && return 1
     local key="${content:1:close-1}"
     [[ -z "${key}" ]] && return 1
+    [[ "${q}" == '"' ]] && key="$(_cfg_decode_escapes "${key}")"
     _CFG_KEY="${key}"
     local tail="${content:after_idx}"
     _CFG_REST="${tail#"${tail%%[![:space:]]*}"}"
@@ -295,6 +346,7 @@ _cfg_scalar_json() {
   case "${s}" in
     '"'*'"')
       s="${s#\"}"; s="${s%\"}"
+      s="$(_cfg_decode_escapes "${s}")"
       jq -Rn --arg v "${s}" '$v'
       ;;
     "'"*"'")
@@ -459,9 +511,11 @@ config_yaml_to_json() {
 # string, exactly as the reader produces). The PowerShell port
 # (ConvertTo-JiraConfigYaml) emits byte-identical output.
 #
-# A key or a string value containing `"` or `\` cannot be represented — the
-# reader performs no unescaping — so the writer REFUSES it (research R3):
-# EXIT_CONFIG, naming the path, never the value (Constitution IV).
+# `"` and `\` in a key or string value are escaped (`\"`, `\\`) rather than
+# refused — the reader undoes exactly those two sequences (013, research R3).
+# A key or a string value containing a line break still cannot be represented
+# in this dialect, so the writer REFUSES it (research R5/R8): EXIT_CONFIG,
+# naming the path, never the value (Constitution IV).
 
 # _cfg_write_refusal_errors — read a JSON value on stdin; print one error line
 # per key or string value the writer cannot represent (contract §2.3). The
@@ -472,15 +526,15 @@ _CFG_WRITE_REFUSAL_JQ='
 def disppath:
   reduce .[] as $p (""; . + (if ($p|type)=="number" then "[\($p)]"
                              elif . == "" then $p else "." + $p end));
-def badchars: test("[\"\\\\]");
+def badchars: test("[\n\r]");
 ( [ paths as $p
     | ($p[-1]) as $last
     | select(($last|type)=="string") | select($last|badchars)
-    | "\($p[:-1]|disppath): a key here contains \" or \\, which this writer cannot represent"
+    | "\($p[:-1]|disppath): a key here contains a line break, which this writer cannot represent"
   ]
   + [ paths(scalars) as $p
       | select(getpath($p)|type=="string") | select(getpath($p)|badchars)
-      | "\($p|disppath): a string value here contains \" or \\, which this writer cannot represent"
+      | "\($p|disppath): a string value here contains a line break, which this writer cannot represent"
     ]
 ) | unique | .[]'
 # kcov-excl-stop
@@ -492,12 +546,13 @@ def badchars: test("[\"\\\\]");
 # shellcheck disable=SC2016  # `\(...)`-free; single-quoted jq program
 # kcov-excl-start — jq literal (string lines are not statements)
 _CFG_YAML_EMIT_JQ='
+def yesc: (. / "\\" | join("\\\\")) | (. / "\"" | join("\\\""));
 def yscalar:
-  if type=="string" then "\"" + . + "\""
+  if type=="string" then "\"" + (.|yesc) + "\""
   elif type=="boolean" then (if . then "true" else "false" end)
   elif type=="null" then "null"
   else tostring end;
-def qkey: "\"" + . + "\"";
+def qkey: "\"" + (.|yesc) + "\"";
 def yemit(ind):
   if type=="object" then
     (to_entries | sort_by(.key) | map(
