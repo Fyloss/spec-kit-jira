@@ -85,3 +85,32 @@ routing_default: PROJ
 # documentation Confluence host).
 privacy:
   allowlist: []
+
+# Values this bridge sends when it CREATES a ticket of the named type — the
+# answer to "a mandatory Jira field the bridge cannot supply on its own"
+# (011). Written by `/speckit.jira.config`, inside the marker-delimited
+# managed region below; edit a value by hand if you like, but keep it
+# between the markers — an entry outside them is a duplicate top-level key
+# and the next read refuses it (exit 4). Removing an entry stops the bridge
+# sending that field on the next creation; if the field is required, the
+# pre-existing refusal returns, naming the field and the command that
+# records it again.
+#
+# Only fields Jira marks REQUIRED are ever asked about; an optional
+# defaultable field (like the example below) is recorded only through
+# `--field-default` or by hand — the ceremony never turns it into a
+# question. `ask` (default true) is the per-project switch for whether a
+# creation carrying a recorded default pauses for one consolidated
+# confirmation before it is sent; set it to `false` once your team has
+# settled and wants defaults applied silently.
+#
+# --- spec-kit-jira:field_defaults:begin ---
+# field_defaults:
+#   PROJ:
+#     ask: true
+#     Epic:
+#       Business Owner: "Platform Team"
+#       Program Increment: "PI-2026-Q3"
+#     Story:
+#       Team: "Payments"
+# --- spec-kit-jira:field_defaults:end ---

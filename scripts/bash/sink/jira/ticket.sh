@@ -48,15 +48,54 @@ ticket_validate() {
     '{key: $k, project: ($r.fields.project.key // null)}' | json_canonical
 }
 
-# jira_create_fields_base <project> <summary> <issue-type-id> — the mandatory
-# base every creation path must produce: {project, issuetype, summary} (research
-# R3, FR-025). Both `_ticket_create_body` and `plan_writes` build on this single
-# builder so the two creation paths cannot drift apart again. The issue type is
-# carried by ID only (never a literal name — Constitution VII).
+# jira_create_fields_base <project> <summary> <issue-type-id> [<field_defaults_by_type_json>]
+# — the mandatory base every creation path must produce: {project, issuetype,
+# summary} (research R3, FR-025), plus (011, research R2) any recorded
+# defaults for the type actually being created. Both `_ticket_create_body`
+# and `plan_writes` build on this single builder so the two creation paths
+# cannot drift apart again. The issue type is carried by ID only (never a
+# literal name — Constitution VII).
+#
+# field_defaults_by_type_json is the WHOLE plan-context map, {type_id:
+# {field_id: value}} — this function itself scopes the merge to `typeid`,
+# so a caller cannot get FR-018 wrong by passing the wrong sub-map: a
+# default recorded for a different issue type never reaches this payload.
+# Omitted or empty ⇒ the merge is a no-op (FR-028, research R6).
 jira_create_fields_base() {
-  local project="$1" summary="$2" typeid="$3"
-  jq -cn --arg p "${project}" --arg s "${summary}" --arg t "${typeid}" \
-    '{project: {key: $p}, issuetype: {id: $t}, summary: $s}'
+  local project="$1" summary="$2" typeid="$3" defaults_by_type="${4:-}"
+  [[ -z "${defaults_by_type}" ]] && defaults_by_type='{}'
+  jq -cn --arg p "${project}" --arg s "${summary}" --arg t "${typeid}" --argjson dbt "${defaults_by_type}" \
+    '{project: {key: $p}, issuetype: {id: $t}, summary: $s} + (($dbt[$t]) // {})'
+}
+
+# ticket_field_rejection_message <defaultable_fields_by_type_json> <action_json>
+# <error_body_json> — 011, contract §3.7, FR-019: when Jira rejects a creation
+# because a value THIS RUN sent — from a recorded default or a this-run
+# answer — is no longer valid, translate Jira's raw error body into one line
+# per rejected field, naming it by its Jira label and the value that was
+# sent, and the rejection in Jira's own words — never the raw API body.
+#
+# Only a field that (a) this run actually SENT in the action's own body and
+# (b) is one of the type's defaultable_fields is reported here — a rejection
+# on a bridge-supplied field (summary, description, …) is a different defect
+# and is left to the existing generic failure path. Prints one line per
+# rejected field, newline-joined, empty when Jira's rejected fields do not
+# overlap anything this run defaulted.
+ticket_field_rejection_message() {
+  local df="${1:-}" action="${2:-{\}}" errbody="${3:-{\}}"
+  [[ -z "${df}" ]] && df='{}'
+  [[ -z "${errbody}" ]] && errbody='{}'
+  jq -e . > /dev/null 2>&1 <<< "${errbody}" || errbody='{}'
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -rn --argjson df "${df}" --argjson a "${action}" --argjson e "${errbody}" '
+    (($a.body.fields.issuetype.id) // "") as $tid
+    | (($df[$tid]) // []) as $fields
+    | (($e.errors) // {}) | to_entries[] | . as $err
+    | (first($fields[] | select(.field_id == $err.key)) // null) as $meta
+    | select($meta != null and ($a.body.fields | has($err.key)))
+    | "reconcile: Jira rejected the value for \"\($meta.logical_name)\" — sent \($a.body.fields[$err.key] | tostring), rejected because: \($err.value). Nothing was substituted and the creation was not retried."
+  '
+  # kcov-excl-stop
 }
 
 # _ticket_create_body <project> <summary> <story-type-id> — the canonical create

@@ -625,8 +625,38 @@ def branchpattern:
    then "projects must be a non-empty array" else empty end),
   (if (.routing_default|type) != "string" or ((.routing_default|projkey) != true)
    then "routing_default must be a valid project key" else empty end),
-  (keys_unsorted[] | select(IN("version_compat","projects","routing","routing_default","privacy","teams")|not)
+  (keys_unsorted[] | select(IN("version_compat","projects","routing","routing_default","privacy","teams","field_defaults")|not)
    | "unknown top-level key: \(.)"),
+  ( . as $top
+    | ($top.projects // []) | map(.key) as $declaredKeys
+    | ($top.field_defaults // {}) | to_entries[] as $proj
+    | ($proj.key) as $pk | ($proj.value) as $pv
+    | (
+        (if ($declaredKeys | index($pk)) == null then
+          "field_defaults.\($pk) names a project key that is not declared in projects[]"
+        else empty end),
+        (if ($pv|type) != "object" then
+          "field_defaults.\($pk) must be a mapping"
+        else empty end),
+        (select($pv|type == "object") | $pv as $pv2
+          | (
+              (if ($pv2|has("ask")) and (($pv2.ask|type) != "boolean") then
+                "field_defaults.\($pk).ask must be a boolean"
+              else empty end),
+              ($pv2 | to_entries[] | select(.key != "ask")) as $te
+              | ($te.key) as $ftype | ($te.value) as $fields
+              | (
+                  (if ($fields|type) != "object" then
+                    "field_defaults.\($pk).\($ftype) must be a mapping of field label to value"
+                  else empty end),
+                  (select($fields|type == "object") | $fields | to_entries[] |
+                    select( ((.value|type) as $vt | ($vt != "string" and $vt != "number" and $vt != "boolean")) or (.value == "") )
+                    | "field_defaults.\($pk).\($ftype).\(.key) must be a non-empty value")
+                )
+            )
+        )
+      )
+  ),
   ((.teams // []) | to_entries[] | .key as $i | .value as $t |
     ( [ (if (($t.id // "") | test("^[a-z][a-z0-9]*$") | not)
          then "teams[\($i)].id is invalid" else empty end),
@@ -748,6 +778,38 @@ JIRA_ROLE_NAMES=(specification story task)
 # _cfg_role_names_json — the closed role set as a JSON array.
 _cfg_role_names_json() {
   printf '%s\n' "${JIRA_ROLE_NAMES[@]}" | jq -cR . | jq -cs .
+}
+
+# config_field_defaults_for <project_key> <merged-cfg-json> — one project's
+# `field_defaults` entry (011, data-model.md §1): `{ask, <Type>: {<Label>:
+# <Value>}, ...}`. `ask` defaults to `true` when the project records none at
+# all (FR-014) — the ceremony's question stays on until a team turns it off.
+# A project with no `field_defaults` entry gets `{ask:true}` (research R6:
+# absence is the off switch — nothing else in the map, nothing merged
+# downstream). Prints the canonical object.
+config_field_defaults_for() {
+  local key="$1" cfg="$2"
+  # NOT `$fd.ask // true`: jq's `//` treats a literal `false` the same as
+  # absent, so a team that recorded `ask: false` would silently read back as
+  # `true` (FR-014's whole off switch, undone by one operator precedence
+  # surprise). `has("ask")` is the only correct absence test.
+  jq -c --arg k "${key}" '
+    ((.field_defaults // {})[$k] // {}) as $fd
+    | {ask: (if ($fd | has("ask")) then $fd.ask else true end)} + ($fd | del(.ask))
+  ' <<< "${cfg}" | json_canonical
+}
+
+# config_field_defaults_yaml <field-defaults-map-json> — the canonical YAML
+# text of the whole top-level `field_defaults:` mapping (011, T042), keys
+# sorted at every level so a re-run over unchanged input reproduces identical
+# bytes (FR-007). Reuses `config_to_yaml`'s scalar quoting/refusal rules
+# rather than a second YAML renderer — the region's content is a JSON value
+# like any other this port writes. No trailing newline (matches
+# `config_to_yaml`; the caller adds exactly one).
+config_field_defaults_yaml() {
+  local map="${1:-}"
+  [[ -z "${map}" ]] && map='{}'
+  jq -cn --argjson m "${map}" '{field_defaults: $m}' | config_to_yaml
 }
 
 # _cfg_local_path <config_dir> — the local binding's path.

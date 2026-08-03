@@ -23,6 +23,8 @@ Import-Module (Join-Path $PSScriptRoot '../sink/jira/Hierarchy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Credentials.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../hooks/ReadmeBlock.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../engine/ManagedSection.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/PlanApply.psm1') -Force
 
 $script:ExitConfig = 4
 
@@ -109,6 +111,11 @@ function Get-JiraResolvedIdMap {
     }
     if ($b.PSObject.Properties.Match('parent_link_available').Count -and @($b.parent_link_available.PSObject.Properties).Count -gt 0) {
         $result['parent_link_available'] = $b.parent_link_available
+    }
+    # defaultable_fields (011, T012) gets the same treatment — a binding
+    # written before this feature simply carries no such key.
+    if ($b.PSObject.Properties.Match('defaultable_fields').Count -and @($b.defaultable_fields.PSObject.Properties).Count -gt 0) {
+        $result['defaultable_fields'] = $b.defaultable_fields
     }
     return (ConvertTo-JiraJsonValue $result)
 }
@@ -281,6 +288,385 @@ function Get-JiraOperatorRolesFor {
         $out[$role] = $name
     }
     return $out
+}
+
+function Get-JiraFieldAnswersFor {
+    <#
+    .SYNOPSIS
+      This run's --field-default answers for one project (011, contract
+      §2.4), reduced to an array of {type; label; value} in argv order.
+      FieldDefaults is Invoke-JiraCliParse's \x1f-joined stream (NOT
+      space-joined — a field VALUE may itself contain spaces). A standalone
+      copy of Cli.psm1's Get-JiraFieldAnswersFor rather than a delegate to
+      it: importing lib/Cli.psm1 -Force from a module that is itself
+      imported by a Pester BeforeAll can tear an already-imported lib module
+      out of the caller's scope (order-dependent breakage seen before with
+      lib/Config.psm1 — see the project memory on this). Duplicated on
+      purpose; keep both copies in step if either changes.
+    #>
+    [CmdletBinding()]
+    param([string] $ProjectKey, [string] $FieldDefaults)
+    $out = [System.Collections.Generic.List[object]]::new()
+    if ([string]::IsNullOrEmpty($FieldDefaults)) { return (ConvertTo-JiraJsonValue $out) }
+    $us = [char]0x1F
+    foreach ($tok in $FieldDefaults.Split($us)) {
+        if ([string]::IsNullOrEmpty($tok)) { continue }
+        $parts = Get-JiraFieldFlagPart -Value $tok
+        if ($null -eq $parts) { continue }
+        if ($parts.ProjectKey -ne $ProjectKey) { continue }
+        $out.Add([ordered]@{ type = $parts.IssueType; label = $parts.Label; value = $parts.Value })
+    }
+    return (ConvertTo-JiraJsonValue $out)
+}
+
+# Marker tokens for the field_defaults managed region (011, T045). Substrings,
+# not full lines — mirrors $script:ReadmeBeginToken's convention.
+$script:FieldDefaultsBeginToken = '# --- spec-kit-jira:field_defaults:begin ---'
+$script:FieldDefaultsEndToken = '# --- spec-kit-jira:field_defaults:end ---'
+
+function Get-JiraFieldDefaultsBlock {
+    <#
+    .SYNOPSIS
+      The field_defaults region's full text (markers included), no trailing
+      newline. Mirror of _config_field_defaults_block.
+    #>
+    [CmdletBinding()]
+    param([string] $MapJson = '{}')
+    if ([string]::IsNullOrEmpty($MapJson)) { $MapJson = '{}' }
+    $yaml = Get-JiraFieldDefaultsYaml -MapJson $MapJson
+    $lines = @(
+        $script:FieldDefaultsBeginToken,
+        '# Recorded defaults for custom fields on ticket creation (011), written by',
+        '# `/speckit.jira.config`. Edit a value here by hand if you like — keep it',
+        '# between these markers; an entry outside them is a duplicate top-level key',
+        '# and the next read refuses it (exit 4).',
+        $yaml,
+        $script:FieldDefaultsEndToken
+    )
+    return ($lines -join "`n")
+}
+
+function Set-JiraFieldDefaultsBlock {
+    <#
+    .SYNOPSIS
+      Splice the resolved field_defaults map into the team config through the
+      existing managed-section engine. Returns { ExitCode; Status } where
+      Status is created|written|unchanged|refused|inert. `inert` (research
+      R6, FR-028): an empty map and a file that has never carried the region
+      are left completely untouched. Mirror of _config_field_defaults_write.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [string] $MapJson = '{}',
+        [bool] $DryRun = $false
+    )
+    if ([string]::IsNullOrEmpty($MapJson)) { $MapJson = '{}' }
+
+    $existed = Test-Path -LiteralPath $Path
+    $current = if ($existed) { [System.IO.File]::ReadAllText($Path) } else { '' }
+
+    $mapObj = $MapJson | ConvertFrom-Json -Depth 100
+    $isEmpty = (@($mapObj.PSObject.Properties)).Count -eq 0
+    if ($isEmpty -and -not $current.Contains($script:FieldDefaultsBeginToken)) {
+        return [pscustomobject]@{ ExitCode = 0; Status = 'inert' }
+    }
+
+    $block = Get-JiraFieldDefaultsBlock -MapJson $MapJson
+
+    $r = Invoke-JiraManagedSectionSplice -Text $current -BeginToken $script:FieldDefaultsBeginToken `
+        -EndToken $script:FieldDefaultsEndToken -NewBlock $block
+    if ($r.ExitCode -ne 0) {
+        return [pscustomobject]@{ ExitCode = $script:ExitConfig; Status = 'refused' }
+    }
+    $new = $r.Content
+
+    $status = if ($existed -and [System.String]::Equals($current, $new, [System.StringComparison]::Ordinal)) {
+        'unchanged'
+    }
+    elseif (-not $existed) { 'created' }
+    else { 'written' }
+
+    if (-not $DryRun -and $status -ne 'unchanged') {
+        if ($PSCmdlet.ShouldProcess($Path, 'write managed field_defaults block')) {
+            [System.IO.File]::WriteAllText($Path, $new, (New-Object System.Text.UTF8Encoding($false)))
+        }
+    }
+    return [pscustomobject]@{ ExitCode = 0; Status = $status }
+}
+
+function Get-JiraFieldDefaultAnswerProblem {
+    <#
+    .SYNOPSIS
+      Every §2.4 refusal a THIS-RUN answer produces: unknown issue-type name
+      (listing the discovered types), unknown field label (listing that
+      type's defaultable fields), a field whose shape cannot be defaulted
+      (naming its undefaultable_reason, US3 scenario 3), an empty value, a
+      value outside allowed_values, or a credential-shaped value (Principle
+      IV — the value itself is never in the problem). Batched, never one
+      refusal per answer. Mirror of _config_field_default_answer_problems.
+    #>
+    [CmdletBinding()]
+    param(
+        [string] $IssueTypesJson = '[]',
+        [string] $DefaultableFieldsByTypeJson = '{}',
+        [string] $AnswersJson = '[]'
+    )
+    if ([string]::IsNullOrEmpty($IssueTypesJson)) { $IssueTypesJson = '[]' }
+    if ([string]::IsNullOrEmpty($DefaultableFieldsByTypeJson)) { $DefaultableFieldsByTypeJson = '{}' }
+    if ([string]::IsNullOrEmpty($AnswersJson)) { $AnswersJson = '[]' }
+
+    $itypes = @($IssueTypesJson | ConvertFrom-Json -Depth 100)
+    $df = $DefaultableFieldsByTypeJson | ConvertFrom-Json -Depth 100
+    $ans = @($AnswersJson | ConvertFrom-Json -Depth 100)
+
+    function Resolve-DfdTypeId([string] $Name) {
+        foreach ($t in $itypes) { if ([string]$t.logical_name -eq $Name) { return [string]$t.id } }
+        return $null
+    }
+    function Resolve-DfdField([string] $TypeId, [string] $Label) {
+        $listProp = $df.PSObject.Properties[$TypeId]
+        if ($null -eq $listProp) { return $null }
+        foreach ($f in @($listProp.Value)) { if ([string]$f.logical_name -eq $Label) { return $f } }
+        return $null
+    }
+
+    $problems = [System.Collections.Generic.List[object]]::new()
+    foreach ($a in $ans) {
+        $t = [string]$a.type; $l = [string]$a.label; $v = [string]$a.value
+        $tid = Resolve-DfdTypeId $t
+        if ($null -eq $tid) {
+            $problems.Add([ordered]@{ kind = 'unknown_type'; type = $t; label = $l; candidates = @($itypes | ForEach-Object { [string]$_.logical_name }) })
+            continue
+        }
+        $f = Resolve-DfdField $tid $l
+        if ($null -eq $f) {
+            $listProp = $df.PSObject.Properties[$tid]
+            $cands = if ($null -eq $listProp) { @() } else { @($listProp.Value | ForEach-Object { [string]$_.logical_name }) }
+            $problems.Add([ordered]@{ kind = 'unknown_label'; type = $t; label = $l; candidates = $cands })
+            continue
+        }
+        if ($f.defaultable -ne $true) {
+            $problems.Add([ordered]@{ kind = 'undefaultable'; type = $t; label = $l; reason = $f.undefaultable_reason })
+            continue
+        }
+        if ($v -eq '') {
+            $problems.Add([ordered]@{ kind = 'empty_value'; type = $t; label = $l })
+            continue
+        }
+        $allowed = @($f.allowed_values)
+        if ($allowed.Count -gt 0 -and -not ($allowed -contains $v)) {
+            $problems.Add([ordered]@{ kind = 'outside_allowed'; type = $t; label = $l; candidates = $allowed })
+            continue
+        }
+        $shapeErrors = @(Get-JiraConfigCredentialError -Object ([ordered]@{ value = $v }))
+        if ($shapeErrors.Count -gt 0) {
+            $shape = ($shapeErrors[0] -split ': ', 2)[1]
+            $problems.Add([ordered]@{ kind = 'credential'; type = $t; label = $l; shape = $shape })
+        }
+    }
+    return (ConvertTo-JiraJsonValue $problems)
+}
+
+function Merge-JiraFieldDefault {
+    <#
+    .SYNOPSIS
+      The union of §2.6: the project's recorded entry (minus `ask`)
+      re-emitted, with each THIS-RUN answer overwriting the matching (type,
+      label) entry; every other entry carries forward unchanged. Pure
+      structural merge — validation is Get-JiraFieldDefaultAnswerProblem's
+      job. Mirror of _config_field_default_merge.
+    #>
+    [CmdletBinding()]
+    param([string] $RecordedJson = '{}', [string] $AnswersJson = '[]')
+    if ([string]::IsNullOrEmpty($RecordedJson)) { $RecordedJson = '{}' }
+    if ([string]::IsNullOrEmpty($AnswersJson)) { $AnswersJson = '[]' }
+    $rec = $RecordedJson | ConvertFrom-Json -Depth 100
+    $ans = @($AnswersJson | ConvertFrom-Json -Depth 100)
+
+    $merged = [ordered]@{}
+    foreach ($p in $rec.PSObject.Properties) {
+        if ($p.Name -eq 'ask') { continue }
+        $entry = [ordered]@{}
+        foreach ($fp in $p.Value.PSObject.Properties) { $entry[$fp.Name] = $fp.Value }
+        $merged[$p.Name] = $entry
+    }
+    foreach ($a in $ans) {
+        $t = [string]$a.type; $l = [string]$a.label
+        if (-not $merged.Contains($t)) { $merged[$t] = [ordered]@{} }
+        $merged[$t][$l] = $a.value
+    }
+    return (ConvertTo-JiraJsonValue $merged)
+}
+
+function Get-JiraFieldDefaultsReport {
+    <#
+    .SYNOPSIS
+      Three non-blocking reports plus one refusal trigger, computed over the
+      merged (already-valid) field_defaults entry: orphaned (a recorded type
+      or field label the project no longer offers, §2.8/FR-008);
+      not_yet_consumed (a recorded type the bridge does not write, §2.8/
+      FR-027); undefaultable_required (a required field whose shape cannot
+      be defaulted, reported once, §2.3 — the pre-existing mandatory gate
+      still refuses it, US3 scenario 3); pending (a required, defaultable
+      field of an in-scope type with neither a recorded value nor a
+      this-run answer — the ceremony's own refusal trigger). Mirror of
+      _config_field_default_report.
+    #>
+    [CmdletBinding()]
+    param(
+        [string] $IssueTypesJson = '[]',
+        [string] $DefaultableFieldsByTypeJson = '{}',
+        [string] $AskTypesJson = '[]',
+        [string] $MergedJson = '{}',
+        [string] $BridgeTypeIdsJson = '[]'
+    )
+    if ([string]::IsNullOrEmpty($IssueTypesJson)) { $IssueTypesJson = '[]' }
+    if ([string]::IsNullOrEmpty($DefaultableFieldsByTypeJson)) { $DefaultableFieldsByTypeJson = '{}' }
+    if ([string]::IsNullOrEmpty($AskTypesJson)) { $AskTypesJson = '[]' }
+    if ([string]::IsNullOrEmpty($MergedJson)) { $MergedJson = '{}' }
+    if ([string]::IsNullOrEmpty($BridgeTypeIdsJson)) { $BridgeTypeIdsJson = '[]' }
+
+    $itypes = @($IssueTypesJson | ConvertFrom-Json -Depth 100)
+    $df = $DefaultableFieldsByTypeJson | ConvertFrom-Json -Depth 100
+    $askTypes = @($AskTypesJson | ConvertFrom-Json -Depth 100 | ForEach-Object { [string]$_ })
+    $merged = $MergedJson | ConvertFrom-Json -Depth 100
+    $bridge = @($BridgeTypeIdsJson | ConvertFrom-Json -Depth 100 | ForEach-Object { [string]$_ })
+
+    function Resolve-RepTypeId([string] $Name) {
+        foreach ($t in $itypes) { if ([string]$t.logical_name -eq $Name) { return [string]$t.id } }
+        return $null
+    }
+    function Get-DfdFieldsFor([string] $TypeId) {
+        $listProp = $df.PSObject.Properties[$TypeId]
+        if ($null -eq $listProp) { return @() }
+        return @($listProp.Value)
+    }
+
+    $orphaned = [System.Collections.Generic.List[object]]::new()
+    $notYetConsumed = [System.Collections.Generic.List[object]]::new()
+    foreach ($p in $merged.PSObject.Properties) {
+        $tname = $p.Name
+        $tid = Resolve-RepTypeId $tname
+        if ($null -eq $tid) {
+            $orphaned.Add([ordered]@{ kind = 'orphaned_type'; type = $tname })
+            continue
+        }
+        $fields = Get-DfdFieldsFor $tid
+        foreach ($fp in $p.Value.PSObject.Properties) {
+            $ok = $false
+            foreach ($f in $fields) { if ([string]$f.logical_name -eq $fp.Name) { $ok = $true; break } }
+            if (-not $ok) { $orphaned.Add([ordered]@{ kind = 'orphaned_label'; type = $tname; label = $fp.Name }) }
+        }
+        if (-not ($bridge -contains $tid)) { $notYetConsumed.Add([ordered]@{ kind = 'not_yet_consumed'; type = $tname }) }
+    }
+
+    $undefaultableRequired = [System.Collections.Generic.List[object]]::new()
+    $pending = [System.Collections.Generic.List[object]]::new()
+    foreach ($tname in $askTypes) {
+        $tid = Resolve-RepTypeId $tname
+        foreach ($f in (Get-DfdFieldsFor $tid)) {
+            if ($f.required -ne $true) { continue }
+            if ($f.defaultable -eq $false) {
+                $undefaultableRequired.Add([ordered]@{ type = $tname; label = $f.logical_name; reason = $f.undefaultable_reason })
+                continue
+            }
+            $typeProp = $merged.PSObject.Properties[$tname]
+            $hasValue = $false
+            if ($null -ne $typeProp) {
+                $fieldProp = $typeProp.Value.PSObject.Properties[$f.logical_name]
+                if ($null -ne $fieldProp -and $null -ne $fieldProp.Value) { $hasValue = $true }
+            }
+            if (-not $hasValue) {
+                $allowed = if ($null -eq $f.allowed_values) { @() } else { @($f.allowed_values) }
+                $pending.Add([ordered]@{ type = $tname; label = $f.logical_name; allowed_values = $allowed })
+            }
+        }
+    }
+
+    return (ConvertTo-JiraJsonValue ([ordered]@{
+        orphaned               = $orphaned
+        not_yet_consumed       = $notYetConsumed
+        undefaultable_required = $undefaultableRequired
+        pending                = $pending
+    }))
+}
+
+function Write-JiraFieldDefaultProblemsReport {
+    <#
+    .SYNOPSIS
+      Refuse this run's --field-default answers (contract §2.4): one message
+      per problem to stderr, plus a structured block on stdout in --json
+      mode. Mirror of _config_report_field_default_problems.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $ProjectKey, [Parameter(Mandatory)][string] $ProblemsJson, [bool] $Json = $false)
+    $problems = @($ProblemsJson | ConvertFrom-Json -Depth 100)
+    foreach ($p in $problems) {
+        $type = [string]$p.type; $label = [string]$p.label
+        switch ([string]$p.kind) {
+            'unknown_type' {
+                [Console]::Error.WriteLine("config: project $ProjectKey`: --field-default names an issue type this project does not offer: $type (discovered types: $((@($p.candidates)) -join ', '))")
+            }
+            'unknown_label' {
+                [Console]::Error.WriteLine("config: project $ProjectKey`: issue type $type has no field named $label (defaultable fields: $((@($p.candidates)) -join ', '))")
+            }
+            'undefaultable' {
+                [Console]::Error.WriteLine("config: project $ProjectKey`: $label ($type) cannot be defaulted — $($p.reason)")
+            }
+            'empty_value' {
+                [Console]::Error.WriteLine("config: project $ProjectKey`: $label ($type) — a default may not be empty")
+            }
+            'outside_allowed' {
+                [Console]::Error.WriteLine("config: project $ProjectKey`: $label ($type) must be one of: $((@($p.candidates)) -join ', ')")
+            }
+            'credential' {
+                [Console]::Error.WriteLine("config: project $ProjectKey`: $label ($type) looks like a $($p.shape) and is refused — it never becomes a recorded default")
+            }
+        }
+        [Console]::Error.WriteLine('')
+    }
+    if ($Json) {
+        [Console]::Out.Write((ConvertTo-JiraJsonValue ([ordered]@{ field_default_problems = $problems })) + "`n")
+    }
+}
+
+function Get-JiraFieldDefaultNote {
+    <#
+    .SYNOPSIS
+      The three non-blocking field-defaults reports (contract §2.8, §2.3),
+      newline-joined, empty when there is nothing to report. Never a
+      warning, never a refusal — mirrors role notes. Mirror of
+      _config_field_default_notes.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $ProjectKey, [Parameter(Mandatory)][string] $ReportJson)
+    $report = $ReportJson | ConvertFrom-Json -Depth 100
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($o in @($report.orphaned)) {
+        if ([string]$o.kind -eq 'orphaned_type') {
+            $lines.Add("config: project ${ProjectKey}: field_defaults records issue type '$($o.type)', which the project no longer offers — remove it (orphaned entry, FR-008)")
+        }
+        else {
+            $lines.Add("config: project $ProjectKey, type $($o.type): field_defaults records '$($o.label)', which the type no longer offers — remove it (orphaned entry, FR-008)")
+        }
+    }
+    foreach ($n in @($report.not_yet_consumed)) {
+        $lines.Add("config: project ${ProjectKey}: field_defaults records issue type '$($n.type)', which the bridge does not write yet — recorded, not yet consumed (FR-027)")
+    }
+    foreach ($u in @($report.undefaultable_required)) {
+        $lines.Add("config: project $ProjectKey, type $($u.type): $($u.label) cannot be defaulted — $($u.reason) (the pre-existing mandatory-field refusal applies unchanged)")
+    }
+    foreach ($q in @($report.pending)) {
+        $allowed = @($q.allowed_values) -join ', '
+        if ($allowed) {
+            $lines.Add("config: project $ProjectKey, type $($q.type) requires a value for $($q.label) — choose one of: $allowed (answer with --field-default '$ProjectKey=$($q.type)=$($q.label)=<value>')")
+        }
+        else {
+            $lines.Add("config: project $ProjectKey, type $($q.type) requires a value for $($q.label) (answer with --field-default '$ProjectKey=$($q.type)=$($q.label)=<value>')")
+        }
+    }
+    return ($lines -join "`n")
 }
 
 function Write-JiraRoleProblemsReport {
@@ -477,6 +863,7 @@ function Invoke-JiraConfig {
     $styles = if ($state.ContainsKey('styles')) { $state['styles'] } else { '' }
     $issueTypes = if ($state.ContainsKey('issue_types')) { $state['issue_types'] } else { '' }
     $enableHooks = if ($state.ContainsKey('enable_hooks')) { $state['enable_hooks'] } else { '' }
+    $fieldDefaults = if ($state.ContainsKey('field_defaults')) { $state['field_defaults'] } else { '' }
 
     $configdir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
 
@@ -567,6 +954,8 @@ function Invoke-JiraConfig {
     $projStyles = [ordered]@{}
     $projRoles = [ordered]@{}
     $roleNotes = [System.Collections.Generic.List[string]]::new()
+    $projFieldDefaults = [ordered]@{}
+    $fdNotes = [System.Collections.Generic.List[string]]::new()
     foreach ($pkey in $keys) {
         $p = $null
         foreach ($cand in $projects) {
@@ -623,6 +1012,10 @@ function Invoke-JiraConfig {
         if ($rids.Contains('parent_link_available') -and $null -ne $rids['parent_link_available']) {
             foreach ($prop in $rids['parent_link_available'].PSObject.Properties) { $plaMap[$prop.Name] = $prop.Value }
         }
+        $dfMap = [ordered]@{}
+        if ($rids.Contains('defaultable_fields') -and $null -ne $rids['defaultable_fields']) {
+            foreach ($prop in $rids['defaultable_fields'].PSObject.Properties) { $dfMap[$prop.Name] = $prop.Value }
+        }
         foreach ($roleKey in @('specification', 'story', 'task')) {
             if (-not $result.Roles.Contains($roleKey)) { continue }
             $roleId = [string]$result.Roles[$roleKey].id
@@ -632,9 +1025,11 @@ function Invoke-JiraConfig {
             if ($tm.ExitCode -ne 0) { return [int] $tm.ExitCode }
             $rfMap[$roleId] = $tm.RequiredFields
             $plaMap[$roleId] = $tm.ParentLinkAvailable
+            $dfMap[$roleId] = $tm.DefaultableFields
         }
         $rids['required_fields'] = $rfMap
         $rids['parent_link_available'] = $plaMap
+        if ($dfMap.Count -gt 0) { $rids['defaultable_fields'] = $dfMap }
         $rids['roles'] = $result.Roles
         if ($result.Roles.Contains('story')) {
             $storyRole = $result.Roles['story']
@@ -645,12 +1040,72 @@ function Invoke-JiraConfig {
             $rids['parent_type'] = [ordered]@{ logical_name = $specRole.logical_name; id = $specRole.id; source = $specRole.source }
         }
 
+        # Field-defaults ceremony (011, contract §2): validate this run's
+        # --field-default answers for this project (§2.4), merge them with
+        # the project's recorded entry (§2.6), ask about any
+        # required+defaultable field of an in-scope type still unanswered
+        # (§2.1-§2.3, research R4), and collect the three non-blocking
+        # reports (§2.8). In scope: the specification and story roles, plus
+        # any type an answer names this run (FR-026).
+        $itypesJson = ConvertTo-JiraJsonValue $itypes
+        $dfMapJson = ConvertTo-JiraJsonValue $dfMap
+        $fdAnswersJson = Get-JiraFieldAnswersFor -ProjectKey $pkey -FieldDefaults $fieldDefaults
+        $fdRecordedJson = Get-JiraFieldDefaultsFor -ProjectKey $pkey -ConfigJson $cfg.Json
+        $fdProblemsJson = Get-JiraFieldDefaultAnswerProblem -IssueTypesJson $itypesJson -DefaultableFieldsByTypeJson $dfMapJson -AnswersJson $fdAnswersJson
+        $fdProblems = @($fdProblemsJson | ConvertFrom-Json -Depth 100)
+        if ($fdProblems.Count -gt 0) {
+            Write-JiraFieldDefaultProblemsReport -ProjectKey $pkey -ProblemsJson $fdProblemsJson -Json $json
+            return $script:ExitConfig
+        }
+
+        $fdMergedJson = Merge-JiraFieldDefault -RecordedJson $fdRecordedJson -AnswersJson $fdAnswersJson
+        $askTypeNames = [System.Collections.Generic.List[string]]::new()
+        if ($result.Roles.Contains('specification')) { $askTypeNames.Add([string]$result.Roles['specification'].logical_name) }
+        if ($result.Roles.Contains('story')) { $askTypeNames.Add([string]$result.Roles['story'].logical_name) }
+        foreach ($a in @($fdAnswersJson | ConvertFrom-Json -Depth 100)) { $askTypeNames.Add([string]$a.type) }
+        $fdAskTypesJson = ConvertTo-JiraJsonValue (@($askTypeNames | Select-Object -Unique))
+        $bridgeIds = [System.Collections.Generic.List[string]]::new()
+        if ($result.Roles.Contains('specification')) { $bridgeIds.Add([string]$result.Roles['specification'].id) }
+        if ($result.Roles.Contains('story')) { $bridgeIds.Add([string]$result.Roles['story'].id) }
+        $fdBridgeIdsJson = ConvertTo-JiraJsonValue (@($bridgeIds))
+        $fdReportJson = Get-JiraFieldDefaultsReport -IssueTypesJson $itypesJson -DefaultableFieldsByTypeJson $dfMapJson `
+            -AskTypesJson $fdAskTypesJson -MergedJson $fdMergedJson -BridgeTypeIdsJson $fdBridgeIdsJson
+        # A pending question (contract §6: "consolidated question pending | 0
+        # — not a failure") is NON-BLOCKING at config time — see the mirror
+        # comment on the same change in commands/config.sh. Reconcile's own
+        # ask/refuse gate (Phase 4/5) is where reachability is judged;
+        # Get-JiraFieldDefaultNote reports every pending field by its
+        # remedy line below.
+        $fdNote = Get-JiraFieldDefaultNote -ProjectKey $pkey -ReportJson $fdReportJson
+        if ($fdNote) { $fdNotes.Add($fdNote) }
+        $fdMerged = $fdMergedJson | ConvertFrom-Json -Depth 100
+        # Absence is the off switch (research R6, FR-028): a project with
+        # nothing recorded and no this-run answer must never gain a bare
+        # {ask: $true} entry it never had. A project that ALREADY carries an
+        # entry is carried forward even if the merge is now empty (an
+        # operator's hand-edit removing the last field, §5.2).
+        $fdHadEntry = $false
+        $cfgFdProp = $cfgObj.PSObject.Properties['field_defaults']
+        if ($null -ne $cfgFdProp -and $null -ne $cfgFdProp.Value) {
+            $fdHadEntry = $cfgFdProp.Value.PSObject.Properties.Match($pkey).Count -gt 0
+        }
+        if (@($fdMerged.PSObject.Properties).Count -gt 0 -or $fdHadEntry) {
+            $fdEntry = [ordered]@{ ask = ($fdRecordedJson | ConvertFrom-Json -Depth 100).ask }
+            foreach ($p in $fdMerged.PSObject.Properties) { $fdEntry[$p.Name] = $p.Value }
+            $projFieldDefaults[$pkey] = $fdEntry
+        }
+
         # Mandatory-field / parent-link gate, pulled to configuration time
         # (T050/T051, contract §4 checks 5/6): the same existing gate, run
         # over the roles this mapping just selected — including one
-        # derivation would never have chosen.
+        # derivation would never have chosen. (011, research R5): a field
+        # with a recorded default or a this-run answer is now satisfiable; a
+        # required field whose shape cannot be defaulted still refuses here,
+        # unchanged (US3 scenario 3).
+        $fdDefaultsByType = (Get-JiraPlanResolveFieldDefault -IssueTypesJson $itypesJson -DefaultableFieldsByTypeJson $dfMapJson `
+                -RecordedJson $fdMergedJson -AnswersJson '[]' | ConvertFrom-Json -Depth 100).field_defaults
         $gateBinding = (ConvertTo-JiraJsonValue $rids) | ConvertFrom-Json -Depth 100
-        $gateResult = Get-JiraHierarchyMandatoryGate -Binding $gateBinding -ProjectKey $pkey
+        $gateResult = Get-JiraHierarchyMandatoryGate -Binding $gateBinding -ProjectKey $pkey -DefaultsByType $fdDefaultsByType
         if ($gateResult.status -ne 'ok') {
             [Console]::Error.WriteLine($gateResult.message)
             return $script:ExitConfig
@@ -696,6 +1151,27 @@ function Invoke-JiraConfig {
         $projStyles[$pkey] = [ordered]@{ style = $sr.Style; style_source = $sr.Source }
         $nproj++
     }
+
+    # The three non-blocking field-defaults reports (§2.8, §2.3): never a
+    # warning, never a refusal — printed alongside the role notes.
+    if ($fdNotes.Count -gt 0) { [Console]::Error.WriteLine(($fdNotes -join "`n")) }
+
+    # Field-defaults write (011, T042/T044): the union of every processed
+    # project's resolved entry, overlaid onto whatever the committed config
+    # already held for OTHER projects this run did not touch. Absence is
+    # the off switch (research R6, FR-028): Set-JiraFieldDefaultsBlock never
+    # introduces the key when there is nothing to record and the region has
+    # never existed.
+    $fdBase = [ordered]@{}
+    $cfgFieldDefaults = Get-CmdProp $cfgObj 'field_defaults'
+    if ($null -ne $cfgFieldDefaults) {
+        foreach ($p in $cfgFieldDefaults.PSObject.Properties) { $fdBase[$p.Name] = $p.Value }
+    }
+    foreach ($k in $projFieldDefaults.Keys) { $fdBase[$k] = $projFieldDefaults[$k] }
+    $teamConfigPath = Join-Path $configdir 'config.yml'
+    $fdWriteResult = Set-JiraFieldDefaultsBlock -Path $teamConfigPath -MapJson (ConvertTo-JiraJsonValue $fdBase) -DryRun ([bool]$dryRun)
+    if ($fdWriteResult.ExitCode -ne 0) { return [int] $fdWriteResult.ExitCode }
+    $fdWriteStatus = $fdWriteResult.Status
 
     # Merge the resolved-id table into the machine-owned local layer, preserving
     # the operator's site_alias / overrides, and emit deterministic canonical YAML.
@@ -785,10 +1261,11 @@ function Invoke-JiraConfig {
     # The hooks effect was computed up front and is a READ-ONLY verification —
     # nothing in this command writes the hook registry (003 FR-022).
     $effects = [ordered]@{
-        discovery = [ordered]@{ status = $discStatus; detail = "$nproj project(s) discovered"; projects = $projStyles }
-        hooks     = [ordered]@{ status = $hooksStatus; detail = $hooksDetail }
-        readme    = [ordered]@{ status = $readmeStatus; detail = $readmeDetail }
-        gitignore = [ordered]@{ status = $gitignoreStatus; detail = 'personal.yml gitignore coverage' }
+        discovery      = [ordered]@{ status = $discStatus; detail = "$nproj project(s) discovered"; projects = $projStyles }
+        hooks          = [ordered]@{ status = $hooksStatus; detail = $hooksDetail }
+        readme         = [ordered]@{ status = $readmeStatus; detail = $readmeDetail }
+        gitignore      = [ordered]@{ status = $gitignoreStatus; detail = 'personal.yml gitignore coverage' }
+        field_defaults = [ordered]@{ status = $fdWriteStatus; detail = 'recorded field defaults in config.yml' }
     }
 
     # §7.2/§7.3/§7.4 notes (supersession, promotion, task-recorded): never a
@@ -817,4 +1294,7 @@ function Invoke-JiraConfig {
 
 Export-ModuleMember -Function Test-JiraMappingValidity, New-JiraProjectMapping, `
     Get-JiraResolvedIdMap, Get-JiraDeclaredHierarchyFor, Get-JiraOperatorRolesFor, `
-    Write-JiraRoleProblemsReport, Invoke-JiraConfig
+    Write-JiraRoleProblemsReport, Invoke-JiraConfig, `
+    Get-JiraFieldAnswersFor, Get-JiraFieldDefaultsBlock, Set-JiraFieldDefaultsBlock, `
+    Get-JiraFieldDefaultAnswerProblem, Merge-JiraFieldDefault, Get-JiraFieldDefaultsReport, `
+    Write-JiraFieldDefaultProblemsReport, Get-JiraFieldDefaultNote

@@ -258,6 +258,58 @@ Describe 'Get-JiraHierarchyMandatoryGate' {
         $r.message | Should -Match 'Story'
         $r.message | Should -Match 'COMP'
     }
+
+    # --- T021 [Phase 2, 011] — satisfiability, one predicate, defaults-aware.
+    It 'T021 — a required field with a recorded default is satisfiable' {
+        $fields = @([pscustomobject]@{ logical_name = 'Business Owner'; field_id = 'customfield_40011' })
+        $defaults = [pscustomobject]@{ customfield_40011 = 'Platform Team' }
+        (Get-JiraHierarchyUnsatisfiableFields -Fields $fields -HasParentLink $true -Defaults $defaults).Count | Should -Be 0
+    }
+
+    It 'T021 — without a recorded default the same field is still unsatisfiable' {
+        $fields = @([pscustomobject]@{ logical_name = 'Business Owner'; field_id = 'customfield_40011' })
+        (Get-JiraHierarchyUnsatisfiableFields -Fields $fields -HasParentLink $true) | Should -Be @('Business Owner')
+    }
+
+    It 'T021 — a required parent field on the PARENT type stays unsatisfiable regardless of any recorded default (contract §1.2)' {
+        $fields = @([pscustomobject]@{ logical_name = 'Parent'; field_id = 'parent' })
+        $defaults = [pscustomobject]@{ parent = 'whatever' }
+        (Get-JiraHierarchyUnsatisfiableFields -Fields $fields -HasParentLink $false -Defaults $defaults) | Should -Be @('Parent')
+    }
+
+    It 'T021 — Get-JiraHierarchyMandatoryGate accepts a per-type defaults map and clears the refusal once both fields are recorded' {
+        $binding = $script:BindingMandatoryJson | ConvertFrom-Json
+        $defaultsByType = [pscustomobject]@{
+            '10101' = [pscustomobject]@{ customfield_40011 = 'Platform Team'; customfield_40012 = 'PI-2026-Q3' }
+        }
+        $r = Get-JiraHierarchyMandatoryGate -Binding $binding -ProjectKey 'PM' -DefaultsByType $defaultsByType
+        $r.status | Should -Be 'ok'
+    }
+
+    It 'T021 — Get-JiraHierarchyMandatoryGate still refuses when only ONE of the two required fields is recorded' {
+        $binding = $script:BindingMandatoryJson | ConvertFrom-Json
+        $defaultsByType = [pscustomobject]@{
+            '10101' = [pscustomobject]@{ customfield_40011 = 'Platform Team' }
+        }
+        $r = Get-JiraHierarchyMandatoryGate -Binding $binding -ProjectKey 'PM' -DefaultsByType $defaultsByType
+        $r.message | Should -Match 'Program Increment'
+        $r.message | Should -Not -Match 'Business Owner'
+    }
+
+    It 'T021 — Get-JiraHierarchyMandatoryGate defaults to no recorded defaults when omitted (backward compatible)' {
+        $binding = $script:BindingMandatoryJson | ConvertFrom-Json
+        $r = Get-JiraHierarchyMandatoryGate -Binding $binding -ProjectKey 'PM'
+        $r.status | Should -Be 'unsatisfiable'
+    }
+}
+
+Describe 'Get-JiraHierarchyUndefaultableRequiredFields' {
+    It 'T077 — a non-defaultable field is reported with its reason, by label' {
+        $fields = @([pscustomobject]@{ logical_name = 'Attachment'; field_id = 'attachment'; required = $true; defaultable = $false; undefaultable_reason = 'a list of values cannot be expressed as a single recorded value' })
+        $out = @(Get-JiraHierarchyUndefaultableRequiredFields -Fields $fields)
+        $out[0].logical_name | Should -Be 'Attachment'
+        $out[0].reason | Should -Be 'a list of values cannot be expressed as a single recorded value'
+    }
 }
 
 Describe 'T097 — the diagnostics catalogue, matched verbatim' {
@@ -335,7 +387,13 @@ Describe 'Invoke-JiraReconcile — the mandatory-field gate runs BEFORE recognit
         $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
         $spec = Join-Path $script:Work 'specs/001-reporting/spec.md'
 
-        $r = Invoke-CapturedWithCode @('reconcile', $spec, '--json')
+        # A bare invocation now stops at the consolidated field-defaults
+        # question (011, contract §3.3's second trigger) before reaching the
+        # gate at all — exit 0, confirmation-pending, zero writes.
+        # --accept-defaults declares this an unreachable-operator run
+        # (contract §3.10) and reaches the surviving refusal this test was
+        # written to prove.
+        $r = Invoke-CapturedWithCode @('reconcile', $spec, '--json', '--accept-defaults')
         $r.ExitCode | Should -Be 4
         $r.Out | Should -Match 'Deliverable'
         $r.Out | Should -Match 'Business Owner'

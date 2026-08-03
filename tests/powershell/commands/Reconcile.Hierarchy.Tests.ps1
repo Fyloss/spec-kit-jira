@@ -7,6 +7,14 @@ BeforeAll {
     $Mock = Join-Path $PSScriptRoot '../../conformance/mock-jira'
     $Fixture = Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-mirrored-spec'
     Import-Module (Join-Path $Mock 'Mock.psm1') -Force
+    # Config.psm1 imported BEFORE Reconcile.psm1: a -Force reimport of a
+    # shared dependency (e.g. Hierarchy.psm1) can tear its exports out of an
+    # ALREADY-importing caller's scope and re-scope them to the LATER
+    # importer instead (documented landmine — see the project memory on
+    # nested -Force imports). Importing Reconcile.psm1 last keeps ITS
+    # dependencies (Get-JiraHierarchyMandatoryGate, etc.) the ones this test
+    # script actually calls through.
+    Import-Module (Join-Path $CmdDir 'Config.psm1') -Force
     Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot '../../../scripts/powershell/lib/Config.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot '../../../scripts/powershell/lib/Output.psm1') -Force
@@ -231,19 +239,76 @@ Describe 'Invoke-JiraReconcile — T095 dry-run parity for the mandatory-field r
     AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
 
     It '--dry-run predicts the mandatory-field refusal exactly as the real run — same exit code, same message, zero writes' {
+        # 011, contract §3.10: a direct invocation not passing --accept-defaults is
+        # assumed to have a reachable operator, so — unlike before Phase 4 — the
+        # REAL run without it would stop for the consolidated question instead of
+        # refusing outright (ask defaults to true, contract §3.3). This test's own
+        # intent (refusal + dry-run/real agreement, §4.3/§3.6) is unrelated to that
+        # question; --accept-defaults on both invocations preserves it, and is
+        # itself the §3.10 shape of "a direct script invocation".
         $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/mandatory-field.json')
         $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
         $spec = Join-Path $script:Work 'specs/001-reporting/spec.md'
 
-        $dry = Invoke-CapturedWithCode @('reconcile', $spec, '--dry-run', '--json')
+        $dry = Invoke-CapturedWithCode @('reconcile', $spec, '--dry-run', '--accept-defaults', '--json')
         $dry.ExitCode | Should -Be 4
         $dry.Out | Should -Match 'Deliverable'
         $dry.Out | Should -Match 'Business Owner'
 
-        $real = Invoke-CapturedWithCode @('reconcile', $spec, '--json')
+        $real = Invoke-CapturedWithCode @('reconcile', $spec, '--accept-defaults', '--json')
         $real.ExitCode | Should -Be $dry.ExitCode
         $real.Out | Should -Be $dry.Out
 
         (Get-JiraMockCallLog -Mock $script:M).Count | Should -Be 0
+    }
+}
+
+Describe 'Invoke-JiraReconcile — 011, contract §3.3 trigger 1' {
+    BeforeEach {
+        $script:Work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse (Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-mandatory-field') $script:Work
+        $env:JIRA_CONFIG_DIR = Join-Path $script:Work '.specify/jira'
+        $env:SPEC_KIT_JIRA_REPO = 'acme/app'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-reporting'
+        $env:SPEC_KIT_JIRA_ID_SOURCE = 'aaaaaaaaaaaaaaaa 1111111111111111'
+    }
+    AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
+
+    It 'once both required fields are recorded, reconcile asks to CONFIRM them before creating — it does not apply them silently' {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/mandatory-field.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $spec = Join-Path $script:Work 'specs/001-reporting/spec.md'
+
+        # Config's own structural gate (pre-existing, unchanged by this
+        # feature — plan.md's Summary) only lets the ceremony complete once
+        # every required field of a bridge-written type is resolved —
+        # recording BOTH here is what makes the project's binding
+        # satisfiable at all (US1). `ask` defaults to true, so the NEXT
+        # reconcile, with no --accept-defaults, hits trigger 1 (§3.3: "a
+        # recorded default would be sent") and stops to confirm rather than
+        # silently sending it.
+        $cfgCode = Invoke-JiraConfig -Arguments @('config', 'PM', '--issue-type', 'PM=story=Story', `
+                '--field-default', 'PM=Deliverable=Business Owner=Platform Team', `
+                '--field-default', 'PM=Deliverable=Program Increment=PI-2026-Q3', '--json')
+        $cfgCode | Should -Be 0
+
+        $first = Invoke-CapturedWithCode @('reconcile', $spec, '--json')
+        $first.ExitCode | Should -Be 0
+        $firstObj = $first.Out | ConvertFrom-Json
+        $firstObj.status | Should -Be 'confirmation-pending'
+        $firstObj.creations_pending | Should -BeGreaterThan 0
+        ($firstObj.fields | Where-Object { $_.label -eq 'Business Owner' }).recorded_value | Should -Be 'Platform Team'
+        ($firstObj.fields | Where-Object { $_.label -eq 'Program Increment' }).recorded_value | Should -Be 'PI-2026-Q3'
+        $firstObj.resume_with | Should -Match '--accept-defaults'
+        (Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^POST /rest/api/3/issue$' }).Count | Should -Be 0
+        (Get-Content -Raw -LiteralPath $spec) | Should -Not -Match 'speckit-jira'
+
+        $second = Invoke-CapturedWithCode @('reconcile', $spec, '--accept-defaults', '--json')
+        $second.ExitCode | Should -Be 0
+        $secondObj = $second.Out | ConvertFrom-Json
+        ($secondObj.PSObject.Properties.Match('status')).Count | Should -Be 0
+        $parentAction = $secondObj.actions | Where-Object { $_.role -eq 'parent' }
+        $parentAction.body.fields.customfield_40011 | Should -Be 'Platform Team'
+        $parentAction.body.fields.customfield_40012 | Should -Be 'PI-2026-Q3'
     }
 }

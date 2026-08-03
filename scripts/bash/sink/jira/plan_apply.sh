@@ -42,6 +42,106 @@ source "${_plan_apply_dir}/../../engine/story_marker.sh" # R5 steps 4/6 — mark
 # shellcheck source=/dev/null
 source "${_plan_apply_dir}/identity.sh" # stamp the identity marker on each created ticket (R5 step 6)
 
+# plan_resolve_field_defaults <issue_types_json> <defaultable_fields_by_type_json>
+# <recorded_json> <answers_json> — 011, research R2/R3, contract §3.1/§3.2,
+# data-model.md §3: join the labels one project's `field_defaults` holds (and
+# this run's `--field-value` answers) to the field ids the binding's
+# `defaultable_fields` holds, for that project.
+#
+#   issue_types_json: [{logical_name, id}, ...] — resolves a Type NAME to an
+#     issue-type id.
+#   defaultable_fields_by_type_json: {type_id: [{logical_name, field_id, ...}]}
+#     — resolves a Label to a field id, WITHIN the type its default was
+#     recorded for (FR-018 — a label is never resolved against a different
+#     type's fields).
+#   recorded_json: the project's `field_defaults` entry (config_field_defaults_for's
+#     output) — {ask, <Type>: {<Label>: <Value>}, ...}. The literal key
+#     `ask` is never mistaken for an issue-type name.
+#   answers_json: [{type, label, value}, ...] — this run's `--field-value`
+#     answers, already scoped to this project by the caller.
+#
+# Precedence (contract §3.1): an answer wins over the recorded default for
+# the same (type, label); a value with neither is absent from the result
+# entirely (research R6 — absence is the off switch). An unresolvable type
+# name or field label is reported in `unresolved`, never silently dropped
+# (FR-008/FR-026).
+#
+# Prints one canonical object:
+#   {"field_defaults": {type_id: {field_id: value}},
+#    "field_default_sources": {type_id: {field_id: "team-config"|"operator-answer"}},
+#    "unresolved": [{type, label, reason}, ...]}
+plan_resolve_field_defaults() {
+  local itypes="${1:-[]}" defaultable="${2:-{\}}" recorded="${3:-{\}}" answers="${4:-[]}"
+  [[ -z "${itypes}" ]] && itypes='[]'
+  [[ -z "${defaultable}" ]] && defaultable='{}'
+  [[ -z "${recorded}" ]] && recorded='{}'
+  [[ -z "${answers}" ]] && answers='[]'
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -cn --argjson itypes "${itypes}" --argjson df "${defaultable}" --argjson rec "${recorded}" --argjson ans "${answers}" '
+    def typeId($name): (first($itypes[] | select(.logical_name == $name)) // null) | .id;
+    def fieldIdFor($tid; $label): (first((($df[$tid]) // [])[] | select(.logical_name == $label)) // null) | .field_id;
+    ( [ ($rec | to_entries[] | select(.key != "ask")) as $te
+        | ($te.key) as $type | ($te.value | to_entries[]) as $fe
+        | {type: $type, label: $fe.key, value: $fe.value, source: "team-config"} ]
+      + [ $ans[] | {type: .type, label: .label, value: .value, source: "operator-answer"} ]
+    ) as $entries
+    | reduce $entries[] as $e
+        ( {field_defaults: {}, field_default_sources: {}, unresolved: []}
+        ; (typeId($e.type)) as $tid
+          | if $tid == null then
+              . + {unresolved: (.unresolved + [{type: $e.type, label: $e.label, reason: "unknown issue type"}])}
+            else
+              (fieldIdFor($tid; $e.label)) as $fid
+              | if $fid == null then
+                  . + {unresolved: (.unresolved + [{type: $e.type, label: $e.label, reason: "unknown field label"}])}
+                else
+                  .field_defaults[$tid][$fid] = $e.value
+                  | .field_default_sources[$tid][$fid] = $e.source
+                end
+            end
+        )
+  ' | json_canonical
+  # kcov-excl-stop
+}
+
+# plan_confirmation_fields <issue_types_json> <defaultable_fields_by_type_json>
+# <field_defaults_by_type_json> <pending_type_ids_json> — 011, contract §3.3,
+# data-model.md §4: the `fields` array of the consolidated question, scoped to
+# the issue types that actually have a creation pending THIS run (never a
+# type the project merely offers — that is what keeps §5.1/FR-028 true and
+# what distinguishes a trigger from a mere offer).
+#
+# For each pending type, a field is included exactly when it is about to be
+# **sent** (its field_id is a key of field_defaults_by_type_json[type], value
+# taken from there) OR it is **required** and NOT about to be sent (included
+# with recorded_value null — the case an answer, not a confirmation, is
+# needed). A merely-defaultable, optional, unresolved field is never
+# included — it is not a trigger (contract §3.3).
+#
+# An empty result means neither §3.3 trigger fires: the caller asks nothing.
+#
+# Prints the canonical `fields` array of data-model.md §4:
+#   [{issue_type, label, recorded_value, required, allowed_values}, ...]
+plan_confirmation_fields() {
+  local itypes="${1:-[]}" defaultable="${2:-{\}}" defaults="${3:-{\}}" pending="${4:-[]}"
+  [[ -z "${itypes}" ]] && itypes='[]'
+  [[ -z "${defaultable}" ]] && defaultable='{}'
+  [[ -z "${defaults}" ]] && defaults='{}'
+  [[ -z "${pending}" ]] && pending='[]'
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -cn --argjson itypes "${itypes}" --argjson df "${defaultable}" --argjson fd "${defaults}" --argjson pending "${pending}" '
+    def typeName($tid): (first($itypes[] | select(.id == $tid)) // null) | .logical_name // $tid;
+    [ $pending[] as $tid
+      | (($df[$tid]) // [])[] as $f
+      | ($fd[$tid][$f.field_id] // null) as $sent
+      | select($sent != null or $f.required == true)
+      | { issue_type: typeName($tid), label: $f.logical_name,
+          recorded_value: $sent, required: $f.required,
+          allowed_values: ($f.allowed_values // []) } ]
+  ' | json_canonical
+  # kcov-excl-stop
+}
+
 # plan_writes <neutral-doc-json> <plan-context-json> — resolve the validated
 # neutral document into an ordered write plan (US3, T058; Phase 5, US2,
 # T072, R7). Each story becomes a create OR an update, with logical values
@@ -80,10 +180,15 @@ source "${_plan_apply_dir}/identity.sh" # stamp the identity marker on each crea
 # Scope, "no migration".
 plan_writes() {
   local doc="$1" ctx="$2"
-  local base story_type estid project
+  local base story_type estid project field_defaults
   base="$(jq -r '.base_url // ""' <<< "${ctx}")"
   story_type="$(jq -r '.story_type_id // ""' <<< "${ctx}")"
   estid="$(jq -r '.estimation_field_id // ""' <<< "${ctx}")"
+  # 011, research R2: {type_id: {field_id: value}}. Absent ⇒ the merge below
+  # is a no-op (FR-028) — jira_create_fields_base itself scopes it to the
+  # type being created, so a default recorded for the OTHER written type
+  # never reaches this payload (FR-018).
+  field_defaults="$(jq -c '.field_defaults // {}' <<< "${ctx}")"
   # The payload's project comes from the neutral document's validated
   # routing.project_key — never from the plan context — so it cannot disagree
   # with the run summary's resolved project (research R2, FR-023).
@@ -113,7 +218,7 @@ plan_writes() {
       # priority + estimation (create-only) + the parent-key placeholder
       # (T072/T073), resolved once the parent's create response is read. A
       # bridge-created ticket owns its whole description (no delimiter, FR-040).
-      base_fields="$(jira_create_fields_base "${project}" "${title}" "${story_type}")"
+      base_fields="$(jira_create_fields_base "${project}" "${title}" "${story_type}" "${field_defaults}")"
       fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${adf}" \
         '$base + {description:$d, parent:{key:"<resolved at apply time>"}}')"
       [[ -n "${priority_id}" ]] && fields="$(jq -c --arg pid "${priority_id}" '. + {priority:{id:$pid}}' <<< "${fields}")"
@@ -183,9 +288,12 @@ _plan_writes_parent() {
   local parent_key; parent_key="$(jq -r '.parent_key // ""' <<< "${ctx}")"
 
   if [[ -z "${parent_key}" ]]; then
-    # CREATE: no parent recognised yet.
-    local base_fields fields
-    base_fields="$(jira_create_fields_base "${project}" "${epic_title}" "${parent_type}")"
+    # CREATE: no parent recognised yet. 011, research R2: same field_defaults
+    # map the story branch reads, scoped to the parent type by the shared
+    # builder itself.
+    local base_fields fields field_defaults
+    field_defaults="$(jq -c '.field_defaults // {}' <<< "${ctx}")"
+    base_fields="$(jira_create_fields_base "${project}" "${epic_title}" "${parent_type}" "${field_defaults}")"
     fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${epic_adf}" '$base + {description:$d}')"
     jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" --arg lid "${epic_local_id}" \
       '{method:"POST", url:$u, body:{fields:$f}, local_id:$lid, role:"parent"}'
@@ -375,6 +483,21 @@ _apply_known_coords() {
     '($e + (if $h == "" then [] else [$h] end)) | unique'
 }
 
+# _plan_apply_report_rejection <method> <url> <action-json> <defaultable-by-type-json>
+# — 011, contract §3.7, FR-019: when a CREATE (POST .../issue) fails with a 400
+# whose Jira error body names a field this run defaulted, print the human
+# translation to stderr (mirrors privacy_guard_scan's own self-printing
+# pattern) before the caller returns fail-closed. A rejection on any other
+# field, method, or status is left to the existing generic failure path —
+# nothing is printed here for it.
+_plan_apply_report_rejection() {
+  local method="$1" url="$2" action="$3" defaultable_by_type="${4:-{\}}"
+  [[ "${method}" == "POST" && "${url}" == */issue && "${JIRA_LAST_STATUS:-}" == "400" ]] || return 0
+  local msg
+  msg="$(ticket_field_rejection_message "${defaultable_by_type}" "${action}" "${JIRA_LAST_ERROR_BODY:-{\}}")"
+  [[ -n "${msg}" ]] && printf '%s\n' "${msg}" >&2
+}
+
 # apply_writes <actions-json> [extra-known-coords-json] — guard every payload,
 # then perform the writes in order. Returns EXIT_BLOCK (9) with zero writes if any
 # payload is blocked; otherwise returns the worst (highest) transport exit code.
@@ -418,7 +541,7 @@ apply_writes() {
 }
 
 # apply_writes_with_recognition <plan-json> <spec-ref-json> <spec-file>
-#   [known-parent-key] [extra-known-coords-json]
+#   [known-parent-key] [extra-known-coords-json] [defaultable-fields-by-type-json]
 #   Mirror of apply_writes's guard-then-write discipline (US11), extended
 #   with R5 steps 4 and 6, and with Phase 5/US2's parent-first ordering
 #   (contracts/parent-marker.md "Ordering within one run", steps 8-11).
@@ -437,8 +560,15 @@ apply_writes() {
 #   IMMEDIATELY, never batched (step 6/11): a run interrupted between one
 #   create's response and its record leaves every OTHER story's identifier
 #   untouched and creatable by the next run.
+#
+#   defaultable-fields-by-type-json (011, contract §3.7, FR-019): the
+#   binding's defaultable_fields map, {type_id: [{logical_name, field_id,
+#   ...}]}. Omitted or empty ⇒ a rejected creation falls through to the
+#   existing generic failure path unchanged (FR-028).
 apply_writes_with_recognition() {
   local plan="$1" spec_ref="$2" spec_file="$3" known_parent_key="${4:-}" extra="${5:-[]}"
+  local defaultable_by_type="${6:-}"
+  [[ -z "${defaultable_by_type}" ]] && defaultable_by_type='{}'
   local coords allow
   coords="$(_apply_known_coords "${extra}")"
   allow="${SPEC_KIT_JIRA_ALLOWLIST:-[]}"
@@ -493,6 +623,7 @@ apply_writes_with_recognition() {
     rc=$?
     ((rc > worst)) && worst=${rc}
     if ((rc >= 2)); then
+      _plan_apply_report_rejection "${method}" "${url}" "${parent}" "${defaultable_by_type}"
       rm -f "${resp}"
       return "${worst}"
     fi
@@ -533,6 +664,7 @@ apply_writes_with_recognition() {
     rc=$?
     ((rc > worst)) && worst=${rc}
     if ((rc >= 2)); then
+      _plan_apply_report_rejection "${method}" "${url}" "${action}" "${defaultable_by_type}"
       rm -f "${resp}"
       return "${worst}"
     fi

@@ -226,3 +226,13 @@ run_in_work() {
   [ "$(jq -r '.effects.discovery.status' <<< "${summary}")" = "skipped" ]
   [ "$(jq -r '.effects.hooks.status' <<< "${summary}")" = "unreadable" ]
 }
+
+@test "T052 [011] — degraded mode asks no field-default question and writes nothing to config.yml (FR-009)" {
+  unset SPEC_KIT_JIRA_BASE_URL
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  local before; before="$(cat "${JIRA_CONFIG_DIR}/config.yml")"
+  run run_in_work config --field-default 'TEAM=Epic=Business Owner=Platform Team' --json
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"field_defaults"* ]]
+  [ "$(cat "${JIRA_CONFIG_DIR}/config.yml")" = "${before}" ]
+}

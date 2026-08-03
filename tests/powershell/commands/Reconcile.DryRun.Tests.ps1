@@ -10,6 +10,10 @@ BeforeAll {
     $CmdDir = Join-Path $Root 'scripts/powershell/commands'
     $Mock = Join-Path $Root 'tests/conformance/mock-jira'
     Import-Module (Join-Path $Mock 'Mock.psm1') -Force
+    # Config.psm1 BEFORE Reconcile.psm1 — the reverse order re-imports a
+    # shared sink dependency (Hierarchy.psm1) in a way that clobbers
+    # Reconcile.psm1's already-bound functions in this scope.
+    Import-Module (Join-Path $CmdDir 'Config.psm1') -Force
     Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
     Import-Module (Join-Path $Root 'scripts/powershell/lib/Config.psm1') -Force
     Import-Module (Join-Path $Root 'scripts/powershell/lib/Output.psm1') -Force
@@ -99,6 +103,42 @@ Describe 'Invoke-JiraReconcile --dry-run — the declared-hierarchy fixture (010
         $real.ExitCode | Should -Be $dry.ExitCode
         $real.Out | Should -Be $dry.Out
 
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
+    }
+}
+
+Describe 'Invoke-JiraReconcile --dry-run — field defaults (011, contract §4.3, FR-023)' {
+    BeforeEach {
+        $script:Work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse (Join-Path $Root 'tests/conformance/fixtures/repo-with-mandatory-field') $script:Work
+        $script:Spec = Join-Path $script:Work 'specs/001-reporting/spec.md'
+        $env:JIRA_CONFIG_DIR = Join-Path $script:Work '.specify/jira'
+        $env:SPEC_KIT_JIRA_REPO = 'acme/app'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-reporting'
+        $env:SPEC_KIT_JIRA_ID_SOURCE = 'aaaaaaaaaaaaaaaa 1111111111111111'
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/mandatory-field.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+    }
+    AfterEach {
+        if ($script:M) { Stop-JiraMock -Mock $script:M }
+        Remove-Item -Recurse -Force $script:Work -ErrorAction SilentlyContinue
+    }
+
+    It 'FR-023 — the preview predicts every defaulted value and its source, asks no question, and writes nothing' {
+        $code = Invoke-JiraConfig -Arguments @('config', 'PM', '--issue-type', 'PM=story=Story', `
+                '--field-default', 'PM=Deliverable=Business Owner=Platform Team', `
+                '--field-default', 'PM=Deliverable=Program Increment=PI-2026-Q3', '--json')
+        $code | Should -Be 0
+
+        $r = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--dry-run', '--json')
+        $r.ExitCode | Should -Be 0
+        $obj = $r.Out | ConvertFrom-Json
+        $obj.dry_run | Should -Be $true
+        ($obj.PSObject.Properties.Match('status')).Count | Should -Be 0
+        $parentAction = $obj.actions | Where-Object { $_.role -eq 'parent' }
+        $parentAction.body.fields.customfield_40011 | Should -Be 'Platform Team'
+        $parentAction.body.fields.customfield_40012 | Should -Be 'PI-2026-Q3'
+        $r.Out | Should -Match 'sent from team-config'
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
     }
 }

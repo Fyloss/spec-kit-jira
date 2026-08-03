@@ -1,11 +1,12 @@
 {
   "name": "us3-mandatory-field-refusal",
-  "description": "T085/T096a: a project whose parent type declares required custom fields the bridge cannot supply refuses cleanly, naming every unsatisfiable field of every written type in one message — no read, no write, byte-identical on both ports (contracts/hierarchy-resolution.md §5). Run 1 is --dry-run, run 2 is the real run: the refusal is PREDICTED, not discovered mid-write (spec FR-025) — both runs refuse identically.",
+  "description": "T085/T096a/T081a: a project whose parent type declares required custom fields the bridge cannot supply. Run 1 (--dry-run) predicts the surviving refusal unchanged (contract §4.3 — the preview never asks). Run 2, a plain invocation with nothing recorded, now stops for the consolidated question instead of refusing outright (011, contract §3.3's second trigger: a required field is unsatisfiable and the operator is reachable) — the fixture's defaultable_fields (research R3) makes the field-level detail available. Run 3 declares the operator unreachable with --accept-defaults, carrying the refusal this scenario was named for: naming every unsatisfiable field of every written type in one message, no read, no write, byte-identical on both ports (contracts/hierarchy-resolution.md §5, 011 contract §3.6).",
   "mock": { "projects": { "PM": "company" }, "createmetaFields": { "10101": "parent-mandatory" } },
   "fixture": "tests/conformance/fixtures/repo-with-mandatory-field",
   "runs": [
     { "argv": ["reconcile", "--dry-run", "--json", "specs/001-reporting/spec.md"] },
-    { "argv": ["reconcile", "--json", "specs/001-reporting/spec.md"] }
+    { "argv": ["reconcile", "--json", "specs/001-reporting/spec.md"] },
+    { "argv": ["reconcile", "--json", "--accept-defaults", "specs/001-reporting/spec.md"] }
   ],
   "env": {
     "JIRA_EMAIL": "user@example.com",

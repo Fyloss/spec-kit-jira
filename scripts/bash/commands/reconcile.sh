@@ -170,6 +170,58 @@ _reconcile_phase_order() {
   ' | json_canonical
 }
 
+# _reconcile_field_default_notes <project-key> <issue-types-json>
+# <defaultable-fields-by-type-json> <resolved-defaults-json> <actions-json>
+# <parent-action-json> <ask> <accept-defaults> — 011, contract §4.1/§4.2:
+# for every field this run actually sent that came from a recorded default or
+# a this-run answer (never a bridge-supplied field — those are not part of
+# `resolved-defaults-json`), one provenance line naming the field, the value,
+# and its source; for a source of `operator-answer`, one further line with the
+# `/speckit.jira.config --field-default …` command that would make the
+# override permanent (FR-021). Deduplicated by (type, field) — reported once
+# per run, not once per creation (mirrors FR-011's "each field once"). When at
+# least one field was filled AND the confirmation question never fired because
+# `ask` is off or `--accept-defaults` was given, one final line states which
+# reason applied (§4.2, FR-015). Prints one line per note, newline-joined,
+# empty when nothing was defaulted this run (FR-028 — the off switch).
+_reconcile_field_default_notes() {
+  local pkey="$1" itypes="${2:-[]}" df="${3:-{\}}" resolved="${4:-{\}}" \
+    actions="${5:-[]}" parent="${6:-null}" ask="$7" accept="$8" dry_run="${9:-false}"
+  [[ -z "${itypes}" ]] && itypes='[]'
+  [[ -z "${df}" ]] && df='{}'
+  [[ -z "${resolved}" ]] && resolved='{}'
+  [[ -z "${actions}" ]] && actions='[]'
+  [[ -z "${parent}" ]] && parent='null'
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -rn --arg pkey "${pkey}" --argjson itypes "${itypes}" --argjson df "${df}" \
+    --argjson resolved "${resolved}" --argjson actions "${actions}" --argjson parent "${parent}" \
+    --arg ask "${ask}" --arg accept "${accept}" --arg dry "${dry_run}" '
+    def typeName($tid): (first($itypes[] | select(.id == $tid)) // null) | .logical_name // $tid;
+    def labelFor($tid; $fid): (first((($df[$tid]) // [])[] | select(.field_id == $fid)) // null) | .logical_name // $fid;
+    ( ([$parent] + $actions) | map(select(. != null and .method == "POST" and (.url | endswith("/issue"))))) as $creates
+    | ( [ $creates[] | (.body.fields.issuetype.id) as $tid
+          | ((($resolved.field_defaults[$tid]) // {}) | keys[]) as $fid
+          | { tid: $tid, fid: $fid,
+              value: ($resolved.field_defaults[$tid][$fid]),
+              source: ($resolved.field_default_sources[$tid][$fid] // "team-config") } ]
+      | unique_by([.tid, .fid])
+    ) as $entries
+    | ( $entries[]
+        | "config: project \($pkey): \(labelFor(.tid; .fid)) (\(typeName(.tid))) = \"\(.value)\" — sent from \(.source)" ),
+      ( $entries[] | select(.source == "operator-answer")
+        | "config: project \($pkey): make this override permanent — /speckit.jira.config \($pkey) --field-default '\''\($pkey)=\(typeName(.tid))=\(labelFor(.tid; .fid))=\(.value)'\''" ),
+      ( if ($entries | length) == 0 then empty
+        elif $dry == "true" then
+          "config: project \($pkey): this is a preview (--dry-run) — no question was asked and nothing was written"
+        elif $accept == "true" then
+          "config: project \($pkey): the confirmation question was skipped — --accept-defaults was given"
+        elif $ask == "false" then
+          "config: project \($pkey): the confirmation question was skipped — field-defaults confirmation is off for this project (ask: false)"
+        else empty end)
+  '
+  # kcov-excl-stop
+}
+
 # _reconcile_local_binding_for <project-key> <config-dir> — the persisted
 # binding's resolved_ids entry for one project, read directly from the
 # machine-owned local layer (independent of config.yml — a project key may be
@@ -214,7 +266,7 @@ _reconcile_local_binding_for() {
 #   base_url always wins. Returns 2 / 3 exactly as _reconcile_local_binding_for
 #   when no override is set and the binding cannot be read.
 _reconcile_plan_context() {
-  local base="$1" key="$2" dir="$3" cfg="$4" recog="${5:-}"
+  local base="$1" key="$2" dir="$3" cfg="$4" recog="${5:-}" field_values="${6:-}"
   # NOT "${5:-{}}" as the default inline: bash's brace-matching for a
   # `${...}` parameter expansion misparses a `{}`-shaped default value,
   # corrupting how the REST OF THE FUNCTION is parsed (a real, reproduced
@@ -250,6 +302,19 @@ _reconcile_plan_context() {
   priorities="$(jq -c '.priorities // {}' <<< "${binding}")"
   est_field="$(jq -r '.estimation_field_id // empty' <<< "${binding}")"
 
+  # Recorded field defaults (011, research R2): resolved to {issue-type-id:
+  # {field-id: value}} at plan time, the same shape jira_create_fields_base
+  # merges into a create payload. Absence is the off switch (FR-028) — with
+  # nothing recorded and no --field-value answer this resolves to {}, and
+  # the omitted key below leaves plan_writes' output byte-identical to
+  # before this feature.
+  local fd_itypes fd_df fd_recorded fd_answers field_defaults
+  fd_itypes="$(jq -c '.issue_types // []' <<< "${binding}")"
+  fd_df="$(jq -c '.defaultable_fields // {}' <<< "${binding}")"
+  fd_recorded="$(config_field_defaults_for "${key}" "${cfg}")"
+  fd_answers="$(cli_field_answers_for "${key}" "${field_values}")"
+  field_defaults="$(plan_resolve_field_defaults "${fd_itypes}" "${fd_df}" "${fd_recorded}" "${fd_answers}" | jq -c '.field_defaults')"
+
   # Two-step priority resolution (FR-008): level -> logical name (team config)
   # -> identifier (persisted binding). Either step yielding nothing omits the
   # level rather than blocking the run (FR-011).
@@ -279,7 +344,7 @@ _reconcile_plan_context() {
   jq -cn --arg b "${base}" --arg st "${story_type}" --argjson pids "${priority_ids}" --arg ef "${est_field}" \
     --arg pt "${parent_type_id}" --argjson psl "${parent_supports_link}" \
     --argjson tk "${tickets}" --argjson to "${ticket_origins}" --argjson td "${ticket_descriptions}" \
-    --argjson tp "${ticket_parents}" '
+    --argjson tp "${ticket_parents}" --argjson fd "${field_defaults}" '
     {base_url:$b}
     + (if $st == "" then {} else {story_type_id:$st} end)
     + (if $pt == "" then {} else {parent_type_id:$pt} end)
@@ -289,19 +354,23 @@ _reconcile_plan_context() {
     + (if ($tk|length) == 0 then {} else {tickets:$tk} end)
     + (if ($to|length) == 0 then {} else {ticket_origins:$to} end)
     + (if ($td|length) == 0 then {} else {ticket_descriptions:$td} end)
-    + (if ($tp|length) == 0 then {} else {ticket_parents:$tp} end)'
+    + (if ($tp|length) == 0 then {} else {ticket_parents:$tp} end)
+    + (if ($fd|length) == 0 then {} else {field_defaults:$fd} end)'
 }
 
 # cmd_reconcile <argv...> — reconcile one specification into its Jira project.
 # Echoes the run summary to stdout; returns the exit code.
 cmd_reconcile() {
   local parsed json="false" dry_run="false" on_drift="abort" exit_code="0" error=""
+  local field_values="" accept_defaults="false"
   parsed="$(cli_parse "$@")"
   while IFS='=' read -r key value; do
     case "${key}" in
       json) json="${value}" ;;
       dry_run) dry_run="${value}" ;;
       on_drift) on_drift="${value}" ;;
+      field_values) field_values="${value}" ;;
+      accept_defaults) accept_defaults="${value}" ;;
       exit) exit_code="${value}" ;;
       error) error="${value}" ;;
     esac
@@ -444,6 +513,80 @@ cmd_reconcile() {
   phase_status_map="$(_reconcile_phase_status_map "${project_key}" "${cfg}")"
   halted_statuses="$(_reconcile_halted_statuses "${project_key}" "${cfg}")"
 
+  # Mandatory-field gate (Phase 6, US3, T086/T087/T088; contracts/
+  # hierarchy-resolution.md §4/§5), moved ahead of spec-marker assignment by
+  # Phase 4 (US2, T065): a run that turns out to stop for the consolidated
+  # question (below) must write NEITHER spec.md's markers NOR anything to
+  # Jira, so the marker file write further down is gated on `fd_ask_pending`
+  # too. Runs after derivation and before recognition, so no read and no
+  # write has happened yet. Reads the SAME persisted binding the plan
+  # context reads later; a binding that cannot be read yet, or resolves to
+  # no bound project, is reported exactly as the plan-context path already
+  # reports it — that error surfaces at its usual point below rather than
+  # being duplicated here.
+  local fd_ask_pending="false" fd_itypes="[]" fd_df="{}" fd_defaults_by_type="{}"
+  local gate_resolved="{}" gate_ask="true"
+  local gate_binding rc_gate_binding=0
+  gate_binding="$(_reconcile_local_binding_for "${project_key}" "${cfg_dir}")" || rc_gate_binding=$?
+  if [[ "${rc_gate_binding}" -eq 0 ]]; then
+    local gate_child_type; gate_child_type="$(jq -r '.child_type.id // empty' <<< "${gate_binding}")"
+    if [[ -n "${gate_child_type}" ]]; then
+      # Recorded field defaults (011, research R2/R5, contract §3.3/§3.4/
+      # §3.10): a required field with a recorded default or a this-run
+      # --field-value answer is now satisfiable. A required field that
+      # remains unsatisfiable still refuses here UNCHANGED when the operator
+      # cannot be asked — `ask` is off, --accept-defaults was given, or this
+      # is a --dry-run (§4.3: the preview never asks, only ever previews or
+      # refuses). Otherwise the refusal is DEFERRED to the consolidated
+      # question below (fd_ask_pending), fired only once the plan shows a
+      # creation is actually pending (FR-013) — never merely offered
+      # (FR-028). Absence is the off switch: with nothing recorded and no
+      # answer this resolves to {}, and the gate's behaviour is
+      # byte-identical to before this feature.
+      local gate_recorded gate_answers gate_resolved gate_result gate_status gate_ask
+      fd_itypes="$(jq -c '.issue_types // []' <<< "${gate_binding}")"
+      fd_df="$(jq -c '.defaultable_fields // {}' <<< "${gate_binding}")"
+      gate_recorded="$(config_field_defaults_for "${project_key}" "${cfg}")"
+      gate_answers="$(cli_field_answers_for "${project_key}" "${field_values}")"
+      gate_resolved="$(plan_resolve_field_defaults "${fd_itypes}" "${fd_df}" "${gate_recorded}" "${gate_answers}")"
+      fd_defaults_by_type="$(jq -c '.field_defaults' <<< "${gate_resolved}")"
+      gate_ask="$(jq -r '.ask' <<< "${gate_recorded}")"
+
+      gate_result="$(hierarchy_mandatory_gate "${gate_binding}" "${project_key}" "${fd_defaults_by_type}")"
+      gate_status="$(jq -r '.status' <<< "${gate_result}")"
+      local gate_askable="false"
+      [[ "${gate_ask}" == "true" && "${accept_defaults}" != "true" && "${dry_run}" != "true" ]] && gate_askable="true"
+      if [[ "${gate_status}" == "unsatisfiable" && "${gate_askable}" == "true" ]]; then
+        fd_ask_pending="true"
+      elif [[ "${gate_status}" != "ok" ]]; then
+        _reconcile_fault "${EXIT_CONFIG}" "$(jq -r '.message' <<< "${gate_result}")"
+        return $?
+      elif [[ "${gate_askable}" == "true" && "$(jq -r '. != {}' <<< "${fd_defaults_by_type}")" == "true" ]]; then
+        # gate_status == ok but at least one default is resolved: a recorded
+        # default might be about to land on a pending creation (§3.3 trigger
+        # 1) — confirmed once the plan is known, below.
+        fd_ask_pending="true"
+      fi
+    fi
+
+    # §8 re-validation (Phase 6, US4, T052; contract §8): check 4 (ordering)
+    # re-run against the PERSISTED binding's roles, `reconcile:` prefixed, no
+    # re-read of the project's metadata. Checks 5/6 are already re-validated
+    # above via hierarchy_mandatory_gate, which reads the same dual-written
+    # child_type/parent_type keys regardless of this feature. A binding with
+    # no `roles` key — written before 010, or a project whose mapping was
+    # never resolved past style — stays non-fatal.
+    local gate_roles
+    gate_roles="$(jq -c '.roles // empty' <<< "${gate_binding}")"
+    if [[ -n "${gate_roles}" ]]; then
+      local reconcile_ordering_msg
+      if ! reconcile_ordering_msg="$(role_validate_reconcile "${project_key}" "${gate_roles}")"; then
+        _reconcile_fault "${EXIT_CONFIG}" "${reconcile_ordering_msg}"
+        return $?
+      fi
+    fi
+  fi
+
   # R5 step 1 — ASSIGN (Phase 2/3, contracts/story-marker.md, research R5):
   # every story section with no marker at all gets a durable identifier,
   # spliced into spec.md. A dry run computes the SAME assignment but never
@@ -462,7 +605,9 @@ cmd_reconcile() {
   local parent_needs_assign; parent_needs_assign="$(jq -r '(.epic.marker.state // "absent")=="absent"' <<< "${pre_parse}")"
 
   # Ordering within one run, step 1/2 (contracts/parent-marker.md): stories
-  # first, the parent second — same pass, same file, ONE splice.
+  # first, the parent second — same pass, same file, ONE splice. Deferred
+  # (never written here) when fd_ask_pending — see it performed later,
+  # after the plan shows whether the consolidated question actually fires.
   local assigned_spec="${raw_spec}"
   local need_write="false"
   if ((assigned_count > 0)); then
@@ -473,7 +618,7 @@ cmd_reconcile() {
     assigned_spec="$(printf '%s' "${assigned_spec}" | spec_marker_assign; printf x)"; assigned_spec="${assigned_spec%x}"
     need_write="true"
   fi
-  if [[ "${need_write}" == "true" && "${dry_run}" != "true" ]]; then
+  if [[ "${need_write}" == "true" && "${dry_run}" != "true" && "${fd_ask_pending}" != "true" ]]; then
     if ! marker_splice_write_file "${spec_file}" "${assigned_spec}" > /dev/null 2>&1; then
       _reconcile_fault "${EXIT_CONFIG}" "reconcile: ${spec_file} could not be written — no ticket may be created before its identifier is recorded (zero writes)"
       return $?
@@ -506,45 +651,6 @@ cmd_reconcile() {
   fi
   if [[ "$(jq 'length' <<< "${plan_blocks}")" -gt 0 ]]; then
     doc="$(jq -c --argjson pb "${plan_blocks}" '.epic.description.blocks += $pb' <<< "${doc}")"
-  fi
-
-  # Mandatory-field gate (Phase 6, US3, T086/T087/T088; contracts/
-  # hierarchy-resolution.md §4/§5): runs after derivation and before
-  # recognition, so no read and no write has happened yet. Reads the SAME
-  # persisted binding the plan context reads later; a binding that cannot
-  # be read yet, or resolves to no bound project, is reported exactly as
-  # the plan-context path already reports it — that error surfaces at its
-  # usual point below rather than being duplicated here.
-  local gate_binding rc_gate_binding=0
-  gate_binding="$(_reconcile_local_binding_for "${project_key}" "${cfg_dir}")" || rc_gate_binding=$?
-  if [[ "${rc_gate_binding}" -eq 0 ]]; then
-    local gate_child_type; gate_child_type="$(jq -r '.child_type.id // empty' <<< "${gate_binding}")"
-    if [[ -n "${gate_child_type}" ]]; then
-      local gate_result gate_status
-      gate_result="$(hierarchy_mandatory_gate "${gate_binding}" "${project_key}")"
-      gate_status="$(jq -r '.status' <<< "${gate_result}")"
-      if [[ "${gate_status}" != "ok" ]]; then
-        _reconcile_fault "${EXIT_CONFIG}" "$(jq -r '.message' <<< "${gate_result}")"
-        return $?
-      fi
-    fi
-
-    # §8 re-validation (Phase 6, US4, T052; contract §8): check 4 (ordering)
-    # re-run against the PERSISTED binding's roles, `reconcile:` prefixed, no
-    # re-read of the project's metadata. Checks 5/6 are already re-validated
-    # above via hierarchy_mandatory_gate, which reads the same dual-written
-    # child_type/parent_type keys regardless of this feature. A binding with
-    # no `roles` key — written before 010, or a project whose mapping was
-    # never resolved past style — stays non-fatal.
-    local gate_roles
-    gate_roles="$(jq -c '.roles // empty' <<< "${gate_binding}")"
-    if [[ -n "${gate_roles}" ]]; then
-      local reconcile_ordering_msg
-      if ! reconcile_ordering_msg="$(role_validate_reconcile "${project_key}" "${gate_roles}")"; then
-        _reconcile_fault "${EXIT_CONFIG}" "${reconcile_ordering_msg}"
-        return $?
-      fi
-    fi
   fi
 
   # R5 step 2a — RECOGNISE THE PARENT (Phase 5, US2, T070/T077;
@@ -592,7 +698,7 @@ cmd_reconcile() {
   # SPEC_KIT_JIRA_PLAN_CONTEXT overrides the derived object wholesale;
   # otherwise it is built from the resolved project's persisted binding.
   local plan_ctx rc_pc=0
-  plan_ctx="$(_reconcile_plan_context "${base}" "${project_key}" "${cfg_dir}" "${cfg}" "${recog}")" || rc_pc=$?
+  plan_ctx="$(_reconcile_plan_context "${base}" "${project_key}" "${cfg_dir}" "${cfg}" "${recog}" "${field_values}")" || rc_pc=$?
   if [[ "${rc_pc}" -eq 2 ]]; then
     _reconcile_notice \
       'Jira mirror skipped: this repository is not bound to a Jira project yet.' \
@@ -723,6 +829,55 @@ cmd_reconcile() {
   local has_lifecycle="${has_override_lifecycle}"
   [[ "${warn_count}" -gt 0 ]] && has_lifecycle="true"
 
+  # The consolidated question (Phase 4, US2, T065/T067; contract §3.3/§3.4;
+  # data-model.md §4): fired only now that recognition and planning show
+  # whether a creation is actually pending (FR-013) — fd_ask_pending above
+  # was merely a STRUCTURAL candidate, computed before recognition ran.
+  # Scoped to the types that actually have a creation pending THIS run
+  # (never a type the project merely offers — FR-028). Zero writes on this
+  # path: neither the marker file (deferred above) nor any Jira call has
+  # happened yet.
+  if [[ "${fd_ask_pending}" == "true" && "${created}" -gt 0 ]]; then
+    local fd_pending_types
+    fd_pending_types="$(jq -c '[.[] | select(.method=="POST" and (.url|endswith("/issue"))) | .body.fields.issuetype.id] | unique' <<< "${actions}")"
+    if [[ "${parent_action}" != "null" && "$(jq -r '.method' <<< "${parent_action}")" == "POST" ]]; then
+      fd_pending_types="$(jq -c --argjson p "${parent_action}" '. + [$p.body.fields.issuetype.id] | unique' <<< "${fd_pending_types}")"
+    fi
+    local fd_fields; fd_fields="$(plan_confirmation_fields "${fd_itypes}" "${fd_df}" "${fd_defaults_by_type}" "${fd_pending_types}")"
+    if [[ "$(jq -r 'length' <<< "${fd_fields}")" -gt 0 ]]; then
+      local fd_confirmation
+      fd_confirmation="$(jq -cn --arg proj "${project_key}" --argjson f "${fd_fields}" --argjson cp "${created}" \
+        --arg rw "/speckit.jira.reconcile ${spec_file} --accept-defaults" \
+        '{status:"confirmation-pending", project:$proj, fields:$f, creations_pending:$cp, resume_with:$rw}' | json_canonical)"
+      if [[ "${json}" == "true" ]]; then
+        printf '%s\n' "${fd_confirmation}"
+      else
+        local fd_labels; fd_labels="$(jq -r '[.fields[].label] | join(", ")' <<< "${fd_confirmation}")"
+        printf 'Jira mirror paused: confirm %s before %s creation(s) are written.\n' "${fd_labels}" "${created}"
+        printf 'Resume with: %s\n' "$(jq -r '.resume_with' <<< "${fd_confirmation}")"
+      fi
+      return 0
+    elif [[ "${gate_status:-}" == "unsatisfiable" ]]; then
+      # The gate found a pending creation's type structurally unsatisfiable,
+      # but no field-level detail could be built for it — the binding
+      # predates defaultable-field discovery for that type (no
+      # `defaultable_fields` entry). Refuse via the gate's own message
+      # rather than silently writing a payload missing a required field.
+      _reconcile_fault "${EXIT_CONFIG}" "$(jq -r '.message' <<< "${gate_result}")"
+      return $?
+    fi
+  fi
+
+  # The marker write deferred above, now that we know the question did not
+  # fire (either fd_ask_pending was never true, or it was but neither §3.3
+  # trigger held once the plan was known).
+  if [[ "${fd_ask_pending}" == "true" && "${need_write}" == "true" ]]; then
+    if ! marker_splice_write_file "${spec_file}" "${assigned_spec}" > /dev/null 2>&1; then
+      _reconcile_fault "${EXIT_CONFIG}" "reconcile: ${spec_file} could not be written — no ticket may be created before its identifier is recorded (zero writes)"
+      return $?
+    fi
+  fi
+
   if [[ "${dry_run}" != "true" ]]; then
     # `|| rc=$?` keeps a fail-closed apply (exit >= 2) from aborting the command
     # under the dispatcher's `set -e`, so the run summary always prints (FR-032).
@@ -733,7 +888,7 @@ cmd_reconcile() {
     local apply_plan known_parent_key=""
     apply_plan="$(jq -cn --argjson p "${parent_action}" --argjson s "${actions}" '{parent:$p, stories:$s}')"
     [[ "${parent_state}" == "bound" ]] && known_parent_key="$(jq -r '.key' <<< "${recog_parent}")"
-    apply_writes_with_recognition "${apply_plan}" "${spec_ref}" "${spec_file}" "${known_parent_key}" || rc=$?
+    apply_writes_with_recognition "${apply_plan}" "${spec_ref}" "${spec_file}" "${known_parent_key}" "[]" "${fd_df}" || rc=$?
   fi
 
   # T071: the catalogued `re-routed` notice, once the new key is recorded.
@@ -813,6 +968,21 @@ cmd_reconcile() {
     printf 'WARNING: Jira mirror not completed — %s (exit %s). This spec-kit command completed normally. Run /speckit.jira.config to re-check the binding.\n' \
       "${cause}" "${rc}" >&2
     rc=0
+  fi
+
+  # Field-default provenance (011, T073, contract §4.1/§4.2): every field this
+  # run actually sent that came from a recorded default or a this-run answer,
+  # attributed to its source, plus the promotion command for an override and
+  # the skipped-confirmation reason. Reads the SAME resolved map the gate
+  # already computed (gate_resolved) — never a second resolution pass, so the
+  # preview and the real run cannot disagree (§4.3). Empty when nothing was
+  # defaulted this run (FR-028 — the off switch).
+  local fd_notes
+  fd_notes="$(_reconcile_field_default_notes "${project_key}" "${fd_itypes}" "${fd_df}" "${gate_resolved}" \
+    "${actions}" "${parent_action}" "${gate_ask}" "${accept_defaults}" "${dry_run}")"
+  if [[ -n "${fd_notes}" ]]; then
+    notes="$(jq -c --arg n "${fd_notes}" '. + ($n | split("\n"))' <<< "${notes}")"
+    has_lifecycle="true"
   fi
 
   # Report the action set with the base URL stripped to a host-relative path: the

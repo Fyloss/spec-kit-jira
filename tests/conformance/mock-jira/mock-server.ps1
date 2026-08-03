@@ -449,7 +449,12 @@ try {
                 $status = [int]$fault.status
                 $extra = @{}
                 if ($fault.ContainsKey('retryAfter')) { $extra['Retry-After'] = "$($fault.retryAfter)" }
-                Write-Response -Stream $stream -Status $status -Body "{`"errorMessages`":[`"injected fault $status`"]}" -Extra $extra
+                # errors (011, FR-019): an optional field-validation body,
+                # {field_id: reason}, so a fault can exercise the
+                # recorded-default-rejected path — mirrors curl-shim.sh.
+                $errs = if ($fault.ContainsKey('errors')) { $fault.errors } else { @{} }
+                $errsJson = ($errs | ConvertTo-Json -Compress -Depth 100)
+                Write-Response -Stream $stream -Status $status -Body "{`"errorMessages`":[`"injected fault $status`"],`"errors`":$errsJson}" -Extra $extra
                 continue
             }
 

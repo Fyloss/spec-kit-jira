@@ -49,3 +49,67 @@ Describe 'Invoke-JiraCliParse' {
         $out | Should -Match 'args=PROJ-123'
     }
 }
+
+Describe 'Invoke-JiraCliParse — field-default flags (011, T018)' {
+    It 'parses --field-default KEY=Type=Label=Value' {
+        $out = Invoke-JiraCliParse @('config', '--field-default', 'CONSUMER=Epic=Business=Platform')
+        $out | Should -Match 'field_defaults=CONSUMER=Epic=Business=Platform'
+        $out | Should -Match 'exit=0'
+    }
+
+    It 'is repeatable, argv order preserved, joined with \x1f (not a space, so a spaced value cannot swallow the next entry)' {
+        $out = Invoke-JiraCliParse @('config', '--field-default', 'CONSUMER=Epic=Owner=A', '--field-default', 'CONSUMER=Story=Team=B')
+        $us = [char]0x1F
+        $out | Should -Match ([regex]::Escape("field_defaults=CONSUMER=Epic=Owner=A${us}CONSUMER=Story=Team=B"))
+    }
+
+    It 'two values that each contain a space are still separable (the \x1f join, not a space, is the boundary)' {
+        $out = Invoke-JiraCliParse @('config', '--field-default', 'CONSUMER=Epic=Business Owner=Platform Team', '--field-default', 'CONSUMER=Story=Team=Payments')
+        $us = [char]0x1F
+        $out | Should -Match ([regex]::Escape("field_defaults=CONSUMER=Epic=Business Owner=Platform Team${us}CONSUMER=Story=Team=Payments"))
+    }
+
+    It 'accepts a value containing further ''='' signs (split on the first three separators only)' {
+        $out = Invoke-JiraCliParse @('config', '--field-default', 'CONSUMER=Epic=Owner=a=b=c')
+        $out | Should -Match ([regex]::Escape('field_defaults=CONSUMER=Epic=Owner=a=b=c'))
+    }
+
+    It 'accepts a value containing spaces' {
+        $out = Invoke-JiraCliParse @('config', '--field-default', 'CONSUMER=Epic=Business Owner=Platform Team')
+        $out | Should -Match ([regex]::Escape('field_defaults=CONSUMER=Epic=Business Owner=Platform Team'))
+    }
+
+    It 'rejects a malformed value (missing a segment), same message shape as --issue-type' {
+        $out = Invoke-JiraCliParse @('config', '--field-default', 'CONSUMER=Epic')
+        $out | Should -Match 'exit=1'
+        $out | Should -Match 'invalid --field-default value'
+    }
+
+    It 'requires a value' {
+        (Invoke-JiraCliParse @('config', '--field-default')) | Should -Match 'exit=1'
+    }
+
+    It 'parses --field-value KEY=Type=Label=Value, repeatable, same shape as --field-default' {
+        $out = Invoke-JiraCliParse @('reconcile', '--field-value', 'CONSUMER=Epic=Owner=A', '--field-value', 'CONSUMER=Story=Team=B')
+        $us = [char]0x1F
+        $out | Should -Match ([regex]::Escape("field_values=CONSUMER=Epic=Owner=A${us}CONSUMER=Story=Team=B"))
+        $out | Should -Match 'exit=0'
+    }
+
+    It 'rejects a malformed --field-value value' {
+        $out = Invoke-JiraCliParse @('reconcile', '--field-value', 'CONSUMER=Epic')
+        $out | Should -Match 'exit=1'
+        $out | Should -Match 'invalid --field-value value'
+    }
+
+    It 'parses --accept-defaults as a boolean flag' {
+        $out = Invoke-JiraCliParse @('reconcile', '--accept-defaults')
+        $out | Should -Match 'accept_defaults=true'
+        $out | Should -Match 'exit=0'
+    }
+
+    It 'defaults --accept-defaults to false' {
+        $out = Invoke-JiraCliParse @('reconcile')
+        $out | Should -Match 'accept_defaults=false'
+    }
+}

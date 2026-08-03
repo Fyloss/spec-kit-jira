@@ -149,6 +149,34 @@ speckit.jira.config --issue-type CONSUMER=specification=Epic --issue-type CONSUM
 unambiguous — declaring or answering it only **records** the sub-task type;
 mirroring sub-tasks themselves is a later release.
 
+## Field defaults — recording the answers once (011)
+
+A required field the bridge cannot supply itself used to block every mirror
+outright. The ceremony now asks about it once, per project, and the answer
+survives every later run.
+
+```mermaid
+flowchart TD
+    Scope["Specification and story types<br/>(+ any type named by --field-default)"] --> Fields["For each field createmeta<br/>marks required, that the bridge<br/>cannot supply itself"]
+    Fields --> Shape{"Shape expressible<br/>as a recorded value?"}
+    Shape -->|"no"| Report["Reported once, by label,<br/>with the reason — never asked (FR-010)"]
+    Shape -->|"yes"| Closed{"allowedValues<br/>non-empty?"}
+    Closed -->|"yes"| ClosedQ["Closed question<br/>over exactly those values"]
+    Closed -->|"no"| OpenQ["Open question for a scalar"]
+    ClosedQ --> Answer["Operator answers, or keeps<br/>the existing recorded value"]
+    OpenQ --> Answer
+    Answer --> Splice["Spliced into config.yml's<br/>field_defaults managed region"]
+```
+
+An optional defaultable field is never turned into a question: a team states
+it only through `--field-default <KEY>=<Type>=<Label>=<Value>` or by writing
+the entry by hand into the managed region, and both are validated exactly as
+an answered field is. The region is written by the same byte-preserving
+`managed_section_splice` the README block uses — every entry the ceremony
+did not ask about this run (an optional field, an opted-in type not named,
+a hand-written line) is re-emitted unchanged, so a run whose answers match
+what is already recorded reproduces `config.yml` byte-for-byte.
+
 ## Mapping validation — refusing the impossible at config time
 
 ```mermaid

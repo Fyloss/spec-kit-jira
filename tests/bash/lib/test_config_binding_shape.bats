@@ -131,3 +131,87 @@ setup() {
   [[ "$output" == *"resolved_ids.COMP.issue_types[0].logical_name"* ]]
   [[ "$output" != *'Bad"Name'* ]]
 }
+
+# --- T009 [Phase 2, 011] — defaultable_fields carries through the binding
+# reshape and survives the round trip, keyed by issue-type id -------------
+
+@test "T009 [011] — defaultable_fields carries straight through config_resolved_ids_for, keyed by issue-type id" {
+  binding='{
+    "issue_types": [ { "logical_name": "Deliverable", "id": "10101", "hierarchy_level": 1, "subtask": false } ],
+    "priorities": [], "statuses": [],
+    "defaultable_fields": { "10101": [
+      { "logical_name": "Business Owner", "field_id": "customfield_40011", "schema_type": "user",
+        "required": true, "defaultable": true, "allowed_values": [] }
+    ] }
+  }'
+  run config_resolved_ids_for "${binding}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.defaultable_fields."10101"[0].logical_name' <<< "$output")" = "Business Owner" ]
+}
+
+@test "T009 [011] — defaultable_fields is OMITTED, never emitted empty, when discovery resolved no type" {
+  binding='{ "issue_types": [], "priorities": [], "statuses": [] }'
+  run config_resolved_ids_for "${binding}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("defaultable_fields")' <<< "$output")" = "false" ]
+}
+
+@test "T009 [011] — a full defaultable_fields entry (allowed_values + undefaultable_reason) round-trips byte for byte" {
+  local json yaml tmpf roundtripped
+  json='{"resolved_ids":{"PM":{
+    "defaultable_fields": { "10101": [
+      { "logical_name": "Business Owner", "field_id": "customfield_40011", "schema_type": "user",
+        "required": true, "defaultable": true, "allowed_values": [] },
+      { "logical_name": "Program Increment", "field_id": "customfield_40012", "schema_type": "option",
+        "required": true, "defaultable": true, "allowed_values": ["PI-2026-Q2", "PI-2026-Q3"] },
+      { "logical_name": "Attachment", "field_id": "attachment", "schema_type": "array",
+        "required": true, "defaultable": false, "allowed_values": [],
+        "undefaultable_reason": "a list of values cannot be expressed as a single recorded value" }
+    ] }
+  }}}'
+  yaml="$(printf '%s' "${json}" | config_to_yaml)"
+  tmpf="${BATS_TEST_TMPDIR}/roundtrip-defaultable.yml"
+  printf '%s' "${yaml}" > "${tmpf}"
+  roundtripped="$(config_yaml_to_json "${tmpf}")"
+  [ "$(jq -cS . <<< "${roundtripped}")" = "$(jq -cS . <<< "${json}")" ]
+}
+
+@test "T009 [011] — a second write of the same binding is byte-identical (FR-007's persistence half)" {
+  binding='{
+    "issue_types": [ { "logical_name": "Deliverable", "id": "10101", "hierarchy_level": 1, "subtask": false } ],
+    "priorities": [], "statuses": [],
+    "defaultable_fields": { "10101": [
+      { "logical_name": "Business Owner", "field_id": "customfield_40011", "schema_type": "user",
+        "required": true, "defaultable": true, "allowed_values": [] }
+    ] }
+  }'
+  local first second
+  first="$(config_resolved_ids_for "${binding}")"
+  second="$(config_resolved_ids_for "${binding}")"
+  [ "${first}" = "${second}" ]
+}
+
+@test "T009 [011] — a binding written BEFORE this feature (no defaultable_fields key at all) still loads" {
+  # A dedicated inline fixture, not tests/conformance/fixtures/repo-with-mandatory-field —
+  # that shared fixture has since gained defaultable_fields of its own, to let the
+  # US3 reconcile scenarios exercise the consolidated question without a config
+  # ceremony run first. Reusing it here would test the wrong thing.
+  local json yaml tmpf
+  json='{"resolved_ids":{"PM":{
+    "issue_types": [ { "logical_name": "Deliverable", "id": "10101", "hierarchy_level": 1, "subtask": false } ],
+    "priorities": [], "statuses": [],
+    "required_fields": { "10101": [
+      { "logical_name": "Summary", "field_id": "summary" },
+      { "logical_name": "Business Owner", "field_id": "customfield_40011" },
+      { "logical_name": "Program Increment", "field_id": "customfield_40012" }
+    ] }
+  }}}'
+  yaml="$(printf '%s' "${json}" | config_to_yaml)"
+  tmpf="${BATS_TEST_TMPDIR}/pre-011-binding.yml"
+  printf '%s' "${yaml}" > "${tmpf}"
+  run config_yaml_to_json "${tmpf}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.resolved_ids.PM | has("defaultable_fields")' <<< "$output")" = "false" ]
+  # required_fields, written by the pre-011 shape, is untouched.
+  [ "$(jq -r '.resolved_ids.PM.required_fields."10101" | length' <<< "$output")" -eq 3 ]
+}

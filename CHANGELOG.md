@@ -5,6 +5,53 @@ All notable changes to the spec-kit-jira extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Recorded field defaults, so a project whose written issue types require a
+  custom field beyond what the bridge supplies is no longer refused outright
+  (`specs/011-jira-field-defaults/`). The config ceremony asks about every
+  field Jira's create metadata marks required, once per project, for the
+  `specification` and `story` types; the answer is spliced into `config.yml`'s
+  new `field_defaults` managed region and survives every later run
+  byte-for-byte. An optional defaultable field is recorded the same way
+  through the new repeatable `--field-default <KEY>=<Type>=<Label>=<Value>`
+  flag, or by hand, without ever being asked about.
+- A consolidated confirmation before a creating reconcile run sends a
+  recorded default or still leaves a required field unsatisfiable: the run
+  stops before any write and reports every such field once. The new
+  `--accept-defaults` flag proceeds with the recorded values (also the
+  non-interactive answer for CI and unattended runs); the new repeatable
+  `--field-value <KEY>=<Type>=<Label>=<Value>` flag overrides one for that
+  run only. `--dry-run` predicts the same values through the same code path.
+- When nothing is recorded and no answer can be obtained, the pre-existing
+  refusal now names each unsatisfiable field by its Jira label and carries a
+  copy-pasteable `speckit.jira.config --field-default …` remedy line.
+
+### Changed
+
+- `commands/speckit.jira.config.md` and `commands/speckit.jira.reconcile.md`
+  document the new closed field-default questions, the consolidated
+  confirmation, and the unreachable-operator contract (a caller that cannot
+  reach an operator must pass `--accept-defaults` on its first invocation;
+  the entry point never sniffs a TTY).
+
+### Fixed
+
+- `.extensionignore` now also excludes `docs/`, `AGENTS.md`, `CLAUDE.md`,
+  `.gitattributes`, and `testResults.xml` from `specify extension add`.
+  `docs/` and the two instruction files describe how this repository builds
+  the extension — the engine/sink boundary, the Windows probe loop, the
+  contributor conventions — none of which a consuming repository needs, and
+  `docs/` cites `.specify/memory/constitution.md`, itself development-only, so
+  shipping either would plant broken links or hand a coding agent working in
+  the consumer's repository marching orders that do not apply there.
+  `.gitattributes`' `* text=auto eol=lf` is unanchored and would impose this
+  repository's line-ending policy — which exists to protect its own Windows
+  test fixtures — on the consumer's tree. `testResults.xml` is the same class
+  of local-only test artifact `coverage.xml` was already excluded for.
+
 ## [0.9.0] - 2026-08-02
 
 ### Added

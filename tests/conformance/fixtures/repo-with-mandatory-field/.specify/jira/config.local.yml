@@ -2,6 +2,12 @@
 # committed here only as a fixture). Reuses the company-managed hierarchy;
 # the parent type (Deliverable, 10101) declares two required custom fields
 # the bridge cannot supply — the gate of contracts/hierarchy-resolution.md §5.
+#
+# defaultable_fields (011, research R3) mirrors the mock's "parent-mandatory"
+# createmeta shape (tests/conformance/mock-jira/fixtures/createmeta-fields-
+# parent-mandatory.json) so a reconcile-only test — no config ceremony run —
+# can exercise the consolidated question and the surviving refusal (contract
+# §3.3/§3.6) directly against this fixture.
 resolved_ids:
   PM:
     style: company_managed
@@ -46,6 +52,20 @@ resolved_ids:
       "10102":
         - logical_name: "Summary"
           field_id: "summary"
+    defaultable_fields:
+      "10101":
+        - logical_name: "Business Owner"
+          field_id: "customfield_40011"
+          schema_type: "user"
+          required: true
+          defaultable: true
+          allowed_values: []
+        - logical_name: "Program Increment"
+          field_id: "customfield_40012"
+          schema_type: "string"
+          required: true
+          defaultable: true
+          allowed_values: []
     parent_link_available:
       "10102": true
     priorities:

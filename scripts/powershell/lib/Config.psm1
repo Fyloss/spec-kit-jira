@@ -672,10 +672,50 @@ function Test-JiraTeamConfig {
         $errs.Add('routing_default must be a valid project key')
     }
 
-    $allowedTop = @('version_compat', 'projects', 'routing', 'routing_default', 'privacy', 'teams')
+    $allowedTop = @('version_compat', 'projects', 'routing', 'routing_default', 'privacy', 'teams', 'field_defaults')
     if ($Object -is [System.Collections.IDictionary]) {
         foreach ($k in (Get-JiraOrdinalSorted $Object.Keys)) {
             if ($allowedTop -cnotcontains [string]$k) { $errs.Add("unknown top-level key: $k") }
+        }
+    }
+
+    # field_defaults (011, research R1, data-model.md §1): project -> issue
+    # type -> label -> value, with a per-project `ask` switch. Mirror of the
+    # Bash port's _CFG_TEAM_ERRORS_JQ addition. Issue-type/field-label
+    # existence is the ceremony's job, not this schema check's (data-model.md
+    # §1 "Validation").
+    $declaredKeys = [System.Collections.Generic.List[string]]::new()
+    if ($isArray) { foreach ($p in $projects) { $declaredKeys.Add([string](Get-CfgProp $p 'key')) } }
+    $fieldDefaults = Get-CfgProp $Object 'field_defaults'
+    if ($fieldDefaults -is [System.Collections.IDictionary]) {
+        foreach ($pk in (Get-JiraOrdinalSorted $fieldDefaults.Keys)) {
+            $pv = $fieldDefaults[[string]$pk]
+            if (-not $declaredKeys.Contains([string]$pk)) {
+                $errs.Add("field_defaults.$pk names a project key that is not declared in projects[]")
+                continue
+            }
+            if ($pv -isnot [System.Collections.IDictionary]) {
+                $errs.Add("field_defaults.$pk must be a mapping")
+                continue
+            }
+            if ($pv.Contains('ask') -and ($pv['ask'] -isnot [bool])) {
+                $errs.Add("field_defaults.$pk.ask must be a boolean")
+            }
+            foreach ($ftype in (Get-JiraOrdinalSorted $pv.Keys)) {
+                if ([string]$ftype -ceq 'ask') { continue }
+                $fields = $pv[[string]$ftype]
+                if ($fields -isnot [System.Collections.IDictionary]) {
+                    $errs.Add("field_defaults.$pk.$ftype must be a mapping of field label to value")
+                    continue
+                }
+                foreach ($label in (Get-JiraOrdinalSorted $fields.Keys)) {
+                    $v = $fields[[string]$label]
+                    $isScalar = ($v -is [string]) -or ($v -is [bool]) -or ($v -is [int]) -or ($v -is [long]) -or ($v -is [double])
+                    if (-not $isScalar -or ($v -ceq '')) {
+                        $errs.Add("field_defaults.$pk.$ftype.$label must be a non-empty value")
+                    }
+                }
+            }
         }
     }
 
@@ -1153,6 +1193,51 @@ function Get-JiraRoleNameList {
     return $script:JiraRoleNames
 }
 
+function Get-JiraFieldDefaultsFor {
+    <#
+    .SYNOPSIS
+      One project's `field_defaults` entry (011, data-model.md §1): {ask;
+      <Type>: {<Label>: <Value>}, ...}. `ask` defaults to $true when the
+      project records none at all (FR-014). A project with no field_defaults
+      entry gets {ask=$true} and nothing else (research R6: absence is the
+      off switch). Mirror of config_field_defaults_for.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $ProjectKey, [Parameter(Mandatory)] [string] $ConfigJson)
+    # $cfg is a PSCustomObject (ConvertFrom-Json), not the IDictionary
+    # Get-CfgProp expects from the YAML reader's internal shape — property
+    # access here is direct rather than through that helper.
+    $cfg = $ConfigJson | ConvertFrom-Json -Depth 100
+    $fd = [ordered]@{}
+    $all = $cfg.PSObject.Properties['field_defaults']
+    if ($null -ne $all -and $null -ne $all.Value) {
+        $entryProp = $all.Value.PSObject.Properties[$ProjectKey]
+        if ($null -ne $entryProp -and $null -ne $entryProp.Value) {
+            foreach ($p in $entryProp.Value.PSObject.Properties) { $fd[$p.Name] = $p.Value }
+        }
+    }
+    $ask = $true
+    if ($fd.Contains('ask')) { $ask = [bool] $fd['ask']; $fd.Remove('ask') }
+    $result = [ordered]@{ ask = $ask }
+    foreach ($k in $fd.Keys) { $result[$k] = $fd[$k] }
+    return (ConvertTo-JiraJsonValue $result)
+}
+
+function Get-JiraFieldDefaultsYaml {
+    <#
+    .SYNOPSIS
+      The canonical YAML text of the whole top-level `field_defaults:`
+      mapping (011, T042). Mirror of config_field_defaults_yaml — reuses
+      ConvertTo-JiraConfigYaml's scalar quoting/refusal rules rather than a
+      second renderer. No trailing newline; the caller adds exactly one.
+    #>
+    [CmdletBinding()]
+    param([string] $MapJson = '{}')
+    if ([string]::IsNullOrEmpty($MapJson)) { $MapJson = '{}' }
+    $wrapped = ConvertTo-JiraJsonValue ([ordered]@{ field_defaults = ($MapJson | ConvertFrom-Json -Depth 100) })
+    return (ConvertTo-JiraConfigYaml -Json $wrapped)
+}
+
 function Get-CfgLocalPath {
     param([string] $ConfigDir = (Get-JiraConfigDirPath))
     return (Join-Path $ConfigDir 'config.local.yml')
@@ -1291,4 +1376,5 @@ Export-ModuleMember -Function Get-JiraExtensionVersion, Assert-JiraSingleVersion
     Get-JiraStatusClassification, Get-JiraPhaseStatusTargetSet, `
     Test-JiraPlaceholderKey, Get-JiraPlaceholderKey, `
     Get-JiraHookEventNameList, Get-JiraHooksDisabled, Add-JiraHooksDisabled, Remove-JiraHooksDisabled, `
-    Get-CfgLocalPath, Get-CfgLocalObject, Get-JiraRoleNameList
+    Get-CfgLocalPath, Get-CfgLocalObject, Get-JiraRoleNameList, Get-JiraFieldDefaultsFor, `
+    Get-JiraFieldDefaultsYaml

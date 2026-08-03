@@ -339,46 +339,101 @@ hierarchy_binding_shape_stale_message() {
   printf 'reconcile: the local binding for %s predates parent support and does not record issue-type hierarchy. The project is bound — its binding is simply a version behind. Run /speckit.jira.config to refresh it (zero writes)' "$1"
 }
 
-# hierarchy_mandatory_fields_message <unsatisfiable_json> — contract §5. Input:
-# [{"type_name":"…","fields":["…","…"]}, …]. One refusal naming every
-# unsatisfiable field of every written type, fields named by their Jira
-# `name`, never a customfield_NNNNN id.
+# hierarchy_mandatory_fields_message <unsatisfiable_json> [<project_key>] —
+# contract §5, §3.6, FR-016. Input: [{"type_name":"…","fields":["…","…"]}, …].
+# One refusal naming every unsatisfiable field of every written type, fields
+# named by their Jira `name`, never a customfield_NNNNN id — followed, when a
+# project_key is given, by one copy-pasteable `speckit.jira.config
+# --field-default …` line per field that records a default for it permanently
+# (011, US3). The value is left as a placeholder for the operator to fill in;
+# only the KEY=Type=Label positions are known here. The KEY=Type=Label=Value
+# token is single-quoted: labels routinely carry a space ("Business Owner"),
+# and `<value>` would otherwise read as an input redirection — either would
+# break the copy-paste this line exists to offer.
 hierarchy_mandatory_fields_message() {
-  local unsat="$1"
+  local unsat="$1" project="${2:-}"
   # kcov-excl-start — jq literal (string lines are not statements)
-  jq -r '
-    map("Issue type \"\(.type_name)\" requires fields this bridge cannot supply: "
+  jq -rn --argjson u "${unsat}" --arg p "${project}" '
+    (($u | map("Issue type \"\(.type_name)\" requires fields this bridge cannot supply: "
         + (.fields | map("\"" + . + "\"") | join(", ")) + ".")
-    | join(" ")
-  ' <<< "${unsat}"
+      | join(" "))
+      + " Nothing was written (zero writes). Either make these fields optional for these types in the project'\''s field configuration, or create the parent and its stories by hand and record their keys in specs/…/spec.md."
+    ) as $refusal
+    | if $p == "" then $refusal
+      else
+        ($u | [ .[] as $t | $t.fields[] | "  speckit.jira.config \($p) --field-default '\''\($p)=\($t.type_name)=\(.)=<value>'\''" ]) as $remedies
+        | ([$refusal, "Record a default for each to fix this permanently:"] + $remedies) | join("\n")
+      end
+  '
   # kcov-excl-stop
 }
 
-# hierarchy_unsatisfiable_fields <required_fields_json> <has_parent_link:true|false> — contract §5:
-# which required fields the bridge can supply. required_fields_json is a
-# single type's list [{"logical_name":"…","field_id":"…"}]. Prints the
-# unsatisfiable logical_names as a canonical array.
+# hierarchy_unsatisfiable_fields <required_fields_json> <has_parent_link:true|false>
+# [<defaults_json>] — contract §1/§5: the ONE predicate both the ceremony's
+# gate and the reconcile's gate call (research R5, 011). required_fields_json
+# is a single type's list [{"logical_name":"…","field_id":"…"}]. defaults_json
+# is that same type's recorded-or-answered defaults, {field_id: value}
+# (already merged: an answer for this run wins over the recorded one — the
+# caller's job, not this function's). A field is satisfiable when the bridge
+# supplies it OR a default exists for it — EXCEPT a required `parent` field,
+# which stays unsatisfiable whatever is recorded (contract §1.2: a parent has
+# no parent) — `has_link` is `false` for exactly that case already, so no
+# extra check is needed here. Prints the unsatisfiable logical_names as a
+# canonical array.
 hierarchy_unsatisfiable_fields() {
   local fields="$1" has_link="${2:-false}"
+  # NOT "${3:-{}}" as the default inline: bash's brace-matching for a
+  # `${...}` parameter expansion misparses a `{}`-shaped default value,
+  # corrupting how the REST OF THE FUNCTION is parsed (see
+  # commands/reconcile.sh, _reconcile_plan_context, for the reproduced
+  # failure). Default it in a separate, brace-free statement instead.
+  local defaults="${3:-}"
+  [[ -z "${defaults}" ]] && defaults='{}'
   # kcov-excl-start — jq literal (string lines are not statements)
-  jq -cn --argjson f "${fields}" --argjson link "${has_link}" '
-    [ $f[] | select(
-        (.field_id | IN("summary","description","issuetype","project","priority","reporter")) or
-        (.field_id == "parent" and $link)
+  jq -cn --argjson f "${fields}" --argjson link "${has_link}" --argjson d "${defaults}" '
+    [ $f[] | .field_id as $fid | select(
+        ($fid | IN("summary","description","issuetype","project","priority","reporter")) or
+        ($fid == "parent" and $link) or
+        (($fid != "parent") and ($d | has($fid)))
         | not)
       | .logical_name ]
   '
   # kcov-excl-stop
 }
 
-# hierarchy_mandatory_gate <binding_json> [project_key] — Phase 6, US3,
-# T086/T087/T088: the parent-link-unavailable refusal (contract §4, research
-# R4) and the mandatory-field gate (contract §5), run over BOTH written
-# types. Runs after derivation and before recognition (contract §5, §7), so
-# no read and no write has happened yet.
+# hierarchy_undefaultable_required_fields <defaultable_fields_json> — contract
+# §2.3, FR-010: the REQUIRED fields of one type's defaultable_fields list
+# whose shape cannot be a recorded value at all — reported by label with the
+# reason, once, never as a question. A field with `required: false` is
+# excluded even when its shape is undefaultable (contract §2.3: "an optional
+# field the team has said nothing about is not a finding"). Prints the
+# canonical [{logical_name, reason}, ...] array.
+hierarchy_undefaultable_required_fields() {
+  local fields="${1:-[]}"
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -cn --argjson f "${fields}" '
+    [ $f[] | select(.required == true and .defaultable == false)
+      | {logical_name: .logical_name, reason: .undefaultable_reason} ]
+  '
+  # kcov-excl-stop
+}
+
+# hierarchy_mandatory_gate <binding_json> [project_key] [defaults_by_type_json]
+# — Phase 6, US3, T086/T087/T088; 011 research R5 adds the third argument:
+# the parent-link-unavailable refusal (contract §4, research R4) and the
+# mandatory-field gate (contract §5/§1), run over BOTH written types. Runs
+# after derivation and before recognition (contract §5, §7), so no read and
+# no write has happened yet.
 #
 # binding_json: the persisted binding's resolved_ids.<KEY> shape —
 # {child_type, parent_type, parent_link_available, required_fields}.
+#
+# defaults_by_type_json: {issue_type_id: {field_id: value}}, ALREADY merged
+# by the caller (recorded default, overridden by this run's answer where one
+# was given) — this function does not know the difference between the two
+# sources (contract §1: "or an answer for it was supplied to this run").
+# Omitted or empty ⇒ every call site behaves exactly as before this feature
+# (FR-028): the map defaults to no defaults anywhere.
 #
 # The parent-link check runs FIRST: it is a structural prerequisite (whether
 # the child type's own create metadata offers a `parent` field at all), not
@@ -392,6 +447,9 @@ hierarchy_unsatisfiable_fields() {
 #   {"status":"unsatisfiable", "reason":"mandatory-fields-unsatisfiable", "message":".."}
 hierarchy_mandatory_gate() {
   local binding="$1" project="${2:-}"
+  # See hierarchy_unsatisfiable_fields above for why this is not inlined.
+  local defaults_by_type="${3:-}"
+  [[ -z "${defaults_by_type}" ]] && defaults_by_type='{}'
   local child_id child_name parent_id parent_name has_link
   child_id="$(jq -r '.child_type.id' <<< "${binding}")"
   child_name="$(jq -r '.child_type.logical_name' <<< "${binding}")"
@@ -405,13 +463,15 @@ hierarchy_mandatory_gate() {
     return 0
   fi
 
-  local child_fields parent_fields child_unsat parent_unsat unsat="[]"
+  local child_fields parent_fields child_defaults parent_defaults child_unsat parent_unsat unsat="[]"
   child_fields="$(jq -c --arg t "${child_id}" '.required_fields[$t] // []' <<< "${binding}")"
   parent_fields="$(jq -c --arg t "${parent_id}" '.required_fields[$t] // []' <<< "${binding}")"
+  child_defaults="$(jq -c --arg t "${child_id}" '.[$t] // {}' <<< "${defaults_by_type}")"
+  parent_defaults="$(jq -c --arg t "${parent_id}" '.[$t] // {}' <<< "${defaults_by_type}")"
   # The parent's own `parent` field, were one ever required, is always
-  # unsatisfiable — a parent has no parent (contract §5).
-  child_unsat="$(hierarchy_unsatisfiable_fields "${child_fields}" "true")"
-  parent_unsat="$(hierarchy_unsatisfiable_fields "${parent_fields}" "false")"
+  # unsatisfiable — a parent has no parent (contract §5, §1.2).
+  child_unsat="$(hierarchy_unsatisfiable_fields "${child_fields}" "true" "${child_defaults}")"
+  parent_unsat="$(hierarchy_unsatisfiable_fields "${parent_fields}" "false" "${parent_defaults}")"
 
   if [[ "$(jq 'length' <<< "${parent_unsat}")" -gt 0 ]]; then
     unsat="$(jq -c --arg n "${parent_name}" --argjson f "${parent_unsat}" '. + [{type_name:$n, fields:$f}]' <<< "${unsat}")"
@@ -425,7 +485,7 @@ hierarchy_mandatory_gate() {
     return 0
   fi
 
-  local msg; msg="$(hierarchy_mandatory_fields_message "${unsat}")"
-  jq -cn --arg m "reconcile: ${msg} Nothing was written (zero writes). Either make these fields optional for these types in the project's field configuration, or create the parent and its stories by hand and record their keys in specs/…/spec.md." \
+  local msg; msg="$(hierarchy_mandatory_fields_message "${unsat}" "${project}")"
+  jq -cn --arg m "reconcile: ${msg}" \
     '{status:"unsatisfiable", reason:"mandatory-fields-unsatisfiable", message:$m}'
 }

@@ -36,11 +36,53 @@ cli_exit_code() {
   esac
 }
 
+# _cli_field_flag_parts <value> — split a `--field-default`/`--field-value`
+# argument on the FIRST THREE `=` separators only (011, T017/T019): the value
+# (fourth segment) may itself contain `=` or whitespace, and is never split
+# further. Prints "pkey<TAB>itype<TAB>label<TAB>value" and returns 0 when the
+# shape is well-formed (a valid project key, and a non-empty type and label);
+# prints nothing and returns 1 otherwise. Content validity — an empty VALUE,
+# one outside allowed_values, an unknown type or label — is the ceremony's
+# job at record time (contract §2.4), not this shape check's.
+_cli_field_flag_parts() {
+  local rest="$1" pkey itype label value
+  [[ "${rest}" != *"="* ]] && return 1
+  pkey="${rest%%=*}"; rest="${rest#*=}"
+  [[ "${rest}" != *"="* ]] && return 1
+  itype="${rest%%=*}"; rest="${rest#*=}"
+  [[ "${rest}" != *"="* ]] && return 1
+  label="${rest%%=*}"; rest="${rest#*=}"
+  value="${rest}"
+  [[ -z "${pkey}" || -z "${itype}" || -z "${label}" ]] && return 1
+  [[ "${pkey}" =~ ^[A-Z][A-Z0-9_]+$ ]] || return 1
+  printf '%s\t%s\t%s\t%s' "${pkey}" "${itype}" "${label}" "${value}"
+}
+
+# cli_field_answers_for <project-key> <field-flags-string> — one project's
+# --field-default/--field-value answers for this run (011, contract §2.4/
+# §3.5), reduced to `[{type, label, value}]` in argv order. `field_flags` is
+# cli_parse's \x1f-joined field_defaults/field_values stream (NOT
+# space-joined like every other repeatable flag — a field VALUE may itself
+# contain spaces). Shared by the config ceremony and the reconcile command,
+# so a malformed token is parsed identically wherever it is answered.
+cli_field_answers_for() {
+  local key="$1" field_flags="$2" tok parts pkey itype label value out='[]'
+  while IFS=$'\x1f' read -r -d $'\x1f' tok || [[ -n "${tok}" ]]; do
+    [[ -z "${tok}" ]] && continue
+    parts="$(_cli_field_flag_parts "${tok}")" || continue
+    IFS=$'\t' read -r pkey itype label value <<< "${parts}"
+    [[ "${pkey}" == "${key}" ]] || continue
+    out="$(jq -c --arg t "${itype}" --arg l "${label}" --arg v "${value}" '. + [{type: $t, label: $l, value: $v}]' <<< "${out}")"
+  done <<< "${field_flags}$(printf '\x1f')"
+  printf '%s' "${out}"
+}
+
 # cli_parse <args...> — parse the command line; print key=value state lines.
 cli_parse() {
   local command="" dry_run=false json=false on_drift=abort
-  local verbose=false help=false error="" use_team=""
+  local verbose=false help=false error="" use_team="" accept_defaults=false
   local -a positional=() styles=() enable_hooks=() child_types=() issue_types=()
+  local -a field_defaults=() field_values=()
 
   while (($#)); do
     case "$1" in
@@ -102,6 +144,42 @@ cli_parse() {
           fi
         fi
         ;;
+      --field-default)
+        # The recording flag of FR-006/contract §2.4: repeatable
+        # <PROJECT_KEY>=<Type>=<Label>=<Value>, validated the same way
+        # --issue-type is — a malformed shape is a usage error here; an
+        # empty/disallowed VALUE is the ceremony's content refusal (§2.4),
+        # not this one's.
+        if [[ $# -lt 2 ]]; then
+          error="--field-default requires a value (--field-default KEY=Type=Label=Value)"
+        else
+          shift
+          if _cli_field_flag_parts "$1" > /dev/null; then
+            field_defaults+=("$1")
+          else
+            error="invalid --field-default value: $1 (expected <PROJECT_KEY>=<Type>=<Label>=<Value>)"
+          fi
+        fi
+        ;;
+      --field-value)
+        # The per-run answer of FR-012/contract §3.5 — same shape, same
+        # validation, applied for this run only rather than persisted.
+        if [[ $# -lt 2 ]]; then
+          error="--field-value requires a value (--field-value KEY=Type=Label=Value)"
+        else
+          shift
+          if _cli_field_flag_parts "$1" > /dev/null; then
+            field_values+=("$1")
+          else
+            error="invalid --field-value value: $1 (expected <PROJECT_KEY>=<Type>=<Label>=<Value>)"
+          fi
+        fi
+        ;;
+      --accept-defaults)
+        # Contract §3.3/§3.10 — proceed with the recorded defaults, asking no
+        # consolidated question this run.
+        accept_defaults=true
+        ;;
       --use-team)
         # The answer to the cross-team closed confirmation (002 US3, FR-014).
         if [[ $# -lt 2 ]]; then
@@ -146,6 +224,7 @@ cli_parse() {
   fi
 
   local args_joined styles_joined enable_hooks_joined child_types_joined issue_types_joined
+  local field_defaults_joined field_values_joined
   args_joined="$(
     IFS=' '
     printf '%s' "${positional[*]}"
@@ -166,6 +245,20 @@ cli_parse() {
     IFS=' '
     printf '%s' "${issue_types[*]-}"
   )"
+  # Joined with ASCII Unit Separator (\x1f), not a space: a --field-default/
+  # --field-value VALUE may itself contain spaces (011, T017), so the
+  # space-joined scheme every other repeatable flag uses here would let one
+  # entry's value swallow the next entry's KEY=Type=Label on a downstream
+  # `for tok in ${field_defaults}` word-split. \x1f cannot appear in an
+  # operator-typed argv token, so it is a safe token boundary.
+  field_defaults_joined="$(
+    IFS=$'\x1f'
+    printf '%s' "${field_defaults[*]-}"
+  )"
+  field_values_joined="$(
+    IFS=$'\x1f'
+    printf '%s' "${field_values[*]-}"
+  )"
 
   printf 'command=%s\n' "${command}"
   printf 'dry_run=%s\n' "${dry_run}"
@@ -178,6 +271,9 @@ cli_parse() {
   printf 'issue_types=%s\n' "${issue_types_joined}"
   printf 'use_team=%s\n' "${use_team}"
   printf 'enable_hooks=%s\n' "${enable_hooks_joined}"
+  printf 'field_defaults=%s\n' "${field_defaults_joined}"
+  printf 'field_values=%s\n' "${field_values_joined}"
+  printf 'accept_defaults=%s\n' "${accept_defaults}"
   printf 'args=%s\n' "${args_joined}"
   printf 'exit=%s\n' "${EXIT_OK}"
 }

@@ -1,0 +1,18 @@
+# Team config for the field-defaults conformance fixture (011, US1) — a
+# company-managed project whose specification type requires one free-text
+# and one enumerated custom field the bridge cannot supply on its own
+# (committable, credential-free). The hierarchy is declared explicitly so
+# discovery resolves both written types without an --issue-type answer —
+# the ambiguity at the shared "company" style's story level is orthogonal
+# to what this fixture exists to exercise.
+projects:
+  - key: FD
+    style: company_managed
+    hierarchy:
+      specification: Deliverable
+      story: Story
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: FD
+routing_default: FD

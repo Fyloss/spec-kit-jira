@@ -10,8 +10,9 @@
 #       401 / 403      -> auth (3)
 #       404 / 5xx / network / 429-exhausted -> fail_closed (2)  (empty Body)
 #
-# Returns a result object { Status; Body; ExitCode }. On failure Body is empty so
-# a caller sees the empty result of a fail-closed read (zero writes, FR-032).
+# Returns a result object { Status; Body; ErrorBody; ExitCode }. On failure Body
+# is empty so a caller sees the empty result of a fail-closed read (zero writes,
+# FR-032); ErrorBody always carries the raw response text (011, FR-019).
 
 Set-StrictMode -Version Latest
 
@@ -83,21 +84,23 @@ function Invoke-JiraRequest {
         }
 
         if ($networkFailed) {
-            return [pscustomobject]@{ Status = 0; Body = ''; ExitCode = (Get-JiraExitCode 'fail_closed') }
+            return [pscustomobject]@{ Status = 0; Body = ''; ErrorBody = ''; ExitCode = (Get-JiraExitCode 'fail_closed') }
         }
         if ($status -ge 200 -and $status -lt 300) {
-            return [pscustomobject]@{ Status = $status; Body = $bodyText; ExitCode = 0 }
+            return [pscustomobject]@{ Status = $status; Body = $bodyText; ErrorBody = $bodyText; ExitCode = 0 }
         }
         if ($status -eq 401 -or $status -eq 403) {
-            return [pscustomobject]@{ Status = $status; Body = ''; ExitCode = (Get-JiraExitCode 'auth') }
+            return [pscustomobject]@{ Status = $status; Body = ''; ErrorBody = $bodyText; ExitCode = (Get-JiraExitCode 'auth') }
         }
         if ($status -eq 429 -and $attempt -lt $maxAttempts) {
             Get-JiraTransportBackoff -RetryAfter $retryAfter -Attempt $attempt
             $attempt++
             continue
         }
-        # 429 exhausted, 404, 5xx, anything else -> fail-closed.
-        return [pscustomobject]@{ Status = $status; Body = ''; ExitCode = (Get-JiraExitCode 'fail_closed') }
+        # 429 exhausted, 404, 5xx, anything else -> fail-closed. ErrorBody carries
+        # the raw response (011, contract Sec3.7, FR-019) — never printed to a
+        # human directly; a caller translates it before it reaches the summary.
+        return [pscustomobject]@{ Status = $status; Body = ''; ErrorBody = $bodyText; ExitCode = (Get-JiraExitCode 'fail_closed') }
     }
 }
 

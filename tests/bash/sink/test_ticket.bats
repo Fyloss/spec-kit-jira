@@ -108,3 +108,60 @@ boot() {
   # Zero writes: nothing reached the mock.
   [ -z "$(mock_calls)" ]
 }
+
+# --- T029/T029a [Phase 2, 011] — the payload merge (research R2) -----------
+# jira_create_fields_base gains a fourth, OPTIONAL argument: the plan
+# context's field_defaults map, {type_id: {field_id: value}}. The function
+# itself scopes the merge to the type being created (its own 3rd argument),
+# so a caller cannot get FR-018 wrong by passing the whole map.
+
+@test "T029 — merges the defaults for the type being created" {
+  local defaults_by_type='{"10101":{"customfield_40011":"Platform Team"}}'
+  run jira_create_fields_base "IJT" "invoice export" "10101" "${defaults_by_type}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.customfield_40011' <<< "$output")" = "Platform Team" ]
+  [ "$(jq -r '.project.key' <<< "$output")" = "IJT" ]
+}
+
+@test "T029 — merges nothing when the map is empty (FR-028, absence is the off switch)" {
+  run jira_create_fields_base "IJT" "invoice export" "10101" "{}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -cS 'keys' <<< "$output")" = '["issuetype","project","summary"]' ]
+}
+
+@test "T029 — the fourth argument is entirely optional — omitting it behaves exactly as before (regression)" {
+  run jira_create_fields_base "IJT" "invoice export" "10101"
+  [ "$status" -eq 0 ]
+  [ "$(jq -cS 'keys' <<< "$output")" = '["issuetype","project","summary"]' ]
+}
+
+@test "T029 — merges NOTHING recorded against a DIFFERENT issue type (FR-018 negative)" {
+  # A default recorded for the specification type (10101) is absent from a
+  # story payload (10102) — the edge case \"mandatory on one type, absent from
+  # another\".
+  local defaults_by_type='{"10101":{"customfield_40011":"Platform Team"}}'
+  run jira_create_fields_base "IJT" "a story" "10102" "${defaults_by_type}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("customfield_40011")' <<< "$output")" = "false" ]
+}
+
+@test "T029a — the defaulted value reaches the privacy guard's scan, proving the merge happens before it, at plan time" {
+  local defaults_by_type='{"10201":{"customfield_99999":"RAWSECRET-shaped-value ATATT3xFfGF0abcdef"}}'
+  local body; body="$(_ticket_create_body "IJT" "invoice export" "10201")"
+  # _ticket_create_body itself does not merge defaults (only plan_writes'
+  # create branch does, per research R2) — this test proves the BUILDER can
+  # carry a defaulted value through to a body the guard scans, by building
+  # the body from the merged fields directly.
+  local merged; merged="$(jira_create_fields_base "IJT" "invoice export" "10201" "${defaults_by_type}")"
+  local guarded_body; guarded_body="$(jq -cn --argjson f "${merged}" '{fields:$f}')"
+  run privacy_guard_scan "${guarded_body}" "[]" "[]"
+  [ "$status" -eq 9 ]
+}
+
+@test "T029a — an allowlisted defaulted value passes the guard silently" {
+  local defaults_by_type='{"10201":{"customfield_1":"support.example.atlassian.net"}}'
+  local merged; merged="$(jira_create_fields_base "IJT" "invoice export" "10201" "${defaults_by_type}")"
+  local guarded_body; guarded_body="$(jq -cn --argjson f "${merged}" '{fields:$f}')"
+  run privacy_guard_scan "${guarded_body}" "[]" '["support.example.atlassian.net"]'
+  [ "$status" -eq 0 ]
+}
