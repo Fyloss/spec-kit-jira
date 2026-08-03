@@ -37,6 +37,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reach an operator must pass `--accept-defaults` on its first invocation;
   the entry point never sniffs a TTY).
 
+### Fixed
+
+- `.extensionignore` now also excludes `docs/`, `AGENTS.md`, `CLAUDE.md`,
+  `.gitattributes`, and `testResults.xml` from `specify extension add`.
+  `docs/` and the two instruction files describe how this repository builds
+  the extension — the engine/sink boundary, the Windows probe loop, the
+  contributor conventions — none of which a consuming repository needs, and
+  `docs/` cites `.specify/memory/constitution.md`, itself development-only, so
+  shipping either would plant broken links or hand a coding agent working in
+  the consumer's repository marching orders that do not apply there.
+  `.gitattributes`' `* text=auto eol=lf` is unanchored and would impose this
+  repository's line-ending policy — which exists to protect its own Windows
+  test fixtures — on the consumer's tree. `testResults.xml` is the same class
+  of local-only test artifact `coverage.xml` was already excluded for.
+
 ## [0.9.0] - 2026-08-02
 
 ### Added

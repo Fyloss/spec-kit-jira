@@ -265,3 +265,112 @@ _record_both_fields() {
   run mock_calls
   [ "$(grep -c '^POST /rest/api/3/issue$' <<< "$output")" -eq 1 ]
 }
+
+# --- T101 — a reconcile run never modifies config.yml (contract §3.8, FR-021) -
+
+@test "T101 — a plain run that stops at the consolidated question leaves config.yml byte-for-byte unchanged" {
+  mock_start "${MOCK}/configs/mandatory-field.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  _record_both_fields
+  local cfg="${JIRA_CONFIG_DIR}/config.yml"
+  local before; before="${BATS_TEST_TMPDIR}/config.yml.before"
+  cp "${cfg}" "${before}"
+
+  run cmd_reconcile reconcile "${SPEC}" --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' <<< "$output")" = "confirmation-pending" ]
+  cmp "${before}" "${cfg}"
+}
+
+@test "T101 — an --accept-defaults run that writes tickets leaves config.yml byte-for-byte unchanged" {
+  mock_start "${MOCK}/configs/mandatory-field.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  _record_both_fields
+  local cfg="${JIRA_CONFIG_DIR}/config.yml"
+  local before; before="${BATS_TEST_TMPDIR}/config.yml.before"
+  cp "${cfg}" "${before}"
+
+  run cmd_reconcile reconcile "${SPEC}" --accept-defaults --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.counts.created' <<< "$output")" -gt 0 ]
+  cmp "${before}" "${cfg}"
+}
+
+@test "T101 — a --field-value override run leaves config.yml byte-for-byte unchanged" {
+  mock_start "${MOCK}/configs/mandatory-field.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  _record_both_fields
+  local cfg="${JIRA_CONFIG_DIR}/config.yml"
+  local before; before="${BATS_TEST_TMPDIR}/config.yml.before"
+  cp "${cfg}" "${before}"
+
+  run cmd_reconcile reconcile "${SPEC}" \
+    --field-value 'PM=Deliverable=Business Owner=Override Team' --accept-defaults --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.actions[] | select(.role=="parent")][0].body.fields.customfield_40011' <<< "$output")" = "Override Team" ]
+  cmp "${before}" "${cfg}"
+}
+
+@test "T101 — a hook-fired run leaves config.yml byte-for-byte unchanged" {
+  mock_start "${MOCK}/configs/mandatory-field.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  _record_both_fields
+  local cfg="${JIRA_CONFIG_DIR}/config.yml"
+  local before; before="${BATS_TEST_TMPDIR}/config.yml.before"
+  cp "${cfg}" "${before}"
+  export SPEC_KIT_JIRA_HOOK_CONTEXT=1
+
+  run cmd_reconcile reconcile "${SPEC}" --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' <<< "$output")" = "confirmation-pending" ]
+  cmp "${before}" "${cfg}"
+  unset SPEC_KIT_JIRA_HOOK_CONTEXT
+}
+
+# --- T103 — the write-path half of the removal off switch (FR-029, contract §5.2) -
+
+@test "T103 — removing a recorded default for an optional field excludes it from the next creation payload" {
+  mock_start "${MOCK}/configs/optional-field.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  # Type id 10101 (the derived specification role, "Deliverable") carries the
+  # fd-optional shape's sole custom field, "Slack Channel" — optional, never
+  # asked about (FR-004), recorded here by flag.
+  cmd_config config PM --issue-type "PM=story=Story" \
+    --field-default 'PM=Deliverable=Slack Channel=general' --json > /dev/null
+
+  # The operator removes the entry by hand — the map the region carries no
+  # longer names "Slack Channel" at all (§2.6's carry-forward has nothing left
+  # to carry for it).
+  local map='{"PM":{}}'
+  _config_field_defaults_write "${JIRA_CONFIG_DIR}/config.yml" "${map}" "false" > /dev/null
+
+  run cmd_reconcile reconcile "${SPEC}" --accept-defaults --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.counts.created' <<< "$output")" -eq 2 ]
+  [ "$(jq -r '[.actions[] | select(.role=="parent")][0].body.fields | has("customfield_40099")' <<< "$output")" = "false" ]
+  [[ "$output" != *"general"* ]]
+}
+
+@test "T103 — removing a recorded default for a required field returns the §3.6 refusal with zero writes and the remedy line" {
+  mock_start "${MOCK}/configs/mandatory-field.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  _record_both_fields
+
+  # The operator removes only "Program Increment"; "Business Owner" stays
+  # recorded and satisfiable.
+  local map='{"PM":{"Deliverable":{"Business Owner":"Platform Team"}}}'
+  _config_field_defaults_write "${JIRA_CONFIG_DIR}/config.yml" "${map}" "false" > /dev/null
+
+  run cmd_reconcile reconcile "${SPEC}" --accept-defaults --json
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"Program Increment"* ]]
+  [[ "$output" == *"speckit.jira.config PM --field-default PM=Deliverable=Program Increment="* ]]
+  # Business Owner is still satisfiable — it is not named as an unsatisfiable field.
+  [[ "$output" != *"speckit.jira.config PM --field-default PM=Deliverable=Business Owner="* ]]
+
+  run mock_calls
+  while IFS= read -r line; do
+    [ -z "${line}" ] && continue
+    [[ "${line}" == GET\ * ]]
+  done <<< "$output"
+}

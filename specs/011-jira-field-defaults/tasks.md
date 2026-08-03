@@ -605,3 +605,42 @@ files only in `commands/reconcile.sh` (US2 and US3), which is worth coordinating
   loop. Continuous-integration runners are roughly 6–8× slower than a local machine — size any
   timeout from real Actions timings, not from local wall clocks.
 - Commit after each task or logical pair (a behaviour and its twin).
+
+---
+
+## Phase 7: Convergence
+
+**Purpose**: the mechanism ships complete on both ports — discovery, persistence, the CLI surface,
+satisfiability, the payload merge, the ceremony's questions and managed region, the consolidated
+confirmation, the surviving refusal, the docs and the CHANGELOG. The Bash suite is green (1196 tests),
+the conformance corpus is green across all 65 scenarios on both ports, `shellcheck` is clean and the
+engine/sink boundary greps hold. What remains are two properties the artifacts require and nothing
+asserts, one requirement tested on only one of its two halves, and one packaging change no artifact
+asked for.
+
+- [X] T101 Assert in both ports that a reconcile run never modifies `config.yml` — snapshot the file's
+      bytes before and after a plain run, an `--accept-defaults` run, a `--field-value` run and a
+      hook-fired run, and assert equality — in `tests/bash/commands/test_reconcile_field_defaults.bats`
+      and `tests/powershell/commands/Reconcile.FieldDefaults.Tests.ps1`. The conformance harness
+      compares one port's output against the other's (`tests/conformance/ci-conformance.sh:154-162`),
+      so it cannot prove an absolute "unmodified" property — a scenario in which both ports wrote the
+      file passes. Quickstart Scenario 3 asks for this assertion "on the file's bytes" per FR-021,
+      contract §3.8 and SC-009 (missing)
+- [X] T102 Bump `extension.version` `0.9.0` → `0.10.0` in `extension.yml` — additive committable-format
+      key and new flags, so MINOR — and confirm `config_assert_single_version_source` still passes.
+      plan.md's Constitution XII gate reads "MINOR bump, CHANGELOG entry"; T094 delivered the CHANGELOG
+      entry and no task covers the bump, so the tree still carries 010's release version per
+      Constitution XII (missing)
+- [X] T103 Add the write-path half of the removal off switch — remove a recorded default and assert the
+      field is absent from the next creation payload, and that a removed **required** field returns
+      §3.6's refusal with zero writes and the remedy line — to
+      `tests/bash/commands/test_reconcile_field_defaults.bats` and
+      `tests/powershell/commands/Reconcile.FieldDefaults.Tests.ps1`. Only the recording half is tested
+      today (`test_config_field_defaults.bats:67`, the emptied managed region), per FR-029 and contract
+      §5.2 (partial)
+- [X] T104 Justify or drop the `.extensionignore` exclusions added in `98fa1ae` — `docs/`, `AGENTS.md`,
+      `CLAUDE.md`, `.gitattributes`, `testResults.xml`. They change what a consuming repository
+      receives on install, and no functional requirement, no plan touch-point and no task above calls
+      for them; the `[Unreleased]` CHANGELOG entry does not mention them either. Either record the
+      change in the CHANGELOG and in the artifact that owns packaging, or move it out of this feature
+      (unrequested)

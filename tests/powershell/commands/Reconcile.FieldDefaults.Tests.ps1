@@ -260,4 +260,106 @@ Describe 'Invoke-JiraReconcile — the consolidated question (011)' {
         $rejectionLine[0] | Should -Not -Match 'customfield_40012'
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'POST /rest/api/3/issue' }).Count | Should -Be 1
     }
+
+    # --- T101 — a reconcile run never modifies config.yml (contract §3.8, FR-021) -
+
+    It 'T101 — a plain run that stops at the consolidated question leaves config.yml byte-for-byte unchanged' {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/mandatory-field.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        Set-BothFieldsRecorded
+        $cfgPath = Join-Path $env:JIRA_CONFIG_DIR 'config.yml'
+        $before = Get-Content -Raw -LiteralPath $cfgPath
+
+        $r = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--json')
+        $r.ExitCode | Should -Be 0
+        ($r.Out | ConvertFrom-Json).status | Should -Be 'confirmation-pending'
+        (Get-Content -Raw -LiteralPath $cfgPath) | Should -Be $before
+    }
+
+    It 'T101 — an --accept-defaults run that writes tickets leaves config.yml byte-for-byte unchanged' {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/mandatory-field.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        Set-BothFieldsRecorded
+        $cfgPath = Join-Path $env:JIRA_CONFIG_DIR 'config.yml'
+        $before = Get-Content -Raw -LiteralPath $cfgPath
+
+        $r = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--accept-defaults', '--json')
+        $r.ExitCode | Should -Be 0
+        ($r.Out | ConvertFrom-Json).counts.created | Should -BeGreaterThan 0
+        (Get-Content -Raw -LiteralPath $cfgPath) | Should -Be $before
+    }
+
+    It 'T101 — a --field-value override run leaves config.yml byte-for-byte unchanged' {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/mandatory-field.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        Set-BothFieldsRecorded
+        $cfgPath = Join-Path $env:JIRA_CONFIG_DIR 'config.yml'
+        $before = Get-Content -Raw -LiteralPath $cfgPath
+
+        $r = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--field-value', 'PM=Deliverable=Business Owner=Override Team', '--accept-defaults', '--json')
+        $r.ExitCode | Should -Be 0
+        $obj = $r.Out | ConvertFrom-Json
+        ($obj.actions | Where-Object { $_.role -eq 'parent' }).body.fields.customfield_40011 | Should -Be 'Override Team'
+        (Get-Content -Raw -LiteralPath $cfgPath) | Should -Be $before
+    }
+
+    It 'T101 — a hook-fired run leaves config.yml byte-for-byte unchanged' {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/mandatory-field.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        Set-BothFieldsRecorded
+        $cfgPath = Join-Path $env:JIRA_CONFIG_DIR 'config.yml'
+        $before = Get-Content -Raw -LiteralPath $cfgPath
+        $env:SPEC_KIT_JIRA_HOOK_CONTEXT = '1'
+
+        $r = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--json')
+        $r.ExitCode | Should -Be 0
+        ($r.Out | ConvertFrom-Json).status | Should -Be 'confirmation-pending'
+        (Get-Content -Raw -LiteralPath $cfgPath) | Should -Be $before
+        Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue
+    }
+
+    # --- T103 — the write-path half of the removal off switch (FR-029, contract §5.2) -
+
+    It 'T103 — removing a recorded default for an optional field excludes it from the next creation payload' {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/optional-field.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        # Type id 10101 (the derived specification role, "Deliverable") carries
+        # the fd-optional shape's sole custom field, "Slack Channel" —
+        # optional, never asked about (FR-004), recorded here by flag.
+        $code = Invoke-JiraConfig -Arguments @('config', 'PM', '--issue-type', 'PM=story=Story', `
+                '--field-default', 'PM=Deliverable=Slack Channel=general', '--json')
+        $code | Should -Be 0
+
+        # The operator removes the entry by hand — the map the region carries
+        # no longer names "Slack Channel" at all.
+        $cfgPath = Join-Path $env:JIRA_CONFIG_DIR 'config.yml'
+        Set-JiraFieldDefaultsBlock -Path $cfgPath -MapJson '{"PM":{}}' -DryRun $false | Out-Null
+
+        $r = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--accept-defaults', '--json')
+        $r.ExitCode | Should -Be 0
+        $obj = $r.Out | ConvertFrom-Json
+        $obj.counts.created | Should -Be 2
+        $parentAction = $obj.actions | Where-Object { $_.role -eq 'parent' }
+        ($parentAction.body.fields.PSObject.Properties.Match('customfield_40099')).Count | Should -Be 0
+        $r.Out | Should -Not -Match 'general'
+    }
+
+    It 'T103 — removing a recorded default for a required field returns the §3.6 refusal with zero writes and the remedy line' {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/mandatory-field.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        Set-BothFieldsRecorded
+
+        # The operator removes only "Program Increment"; "Business Owner"
+        # stays recorded and satisfiable.
+        $cfgPath = Join-Path $env:JIRA_CONFIG_DIR 'config.yml'
+        $map = '{"PM":{"Deliverable":{"Business Owner":"Platform Team"}}}'
+        Set-JiraFieldDefaultsBlock -Path $cfgPath -MapJson $map -DryRun $false | Out-Null
+
+        $r = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--accept-defaults', '--json')
+        $r.ExitCode | Should -Be 4
+        $r.Out | Should -Match 'Program Increment'
+        $r.Out | Should -Match ([regex]::Escape('speckit.jira.config PM --field-default PM=Deliverable=Program Increment='))
+        $r.Out | Should -Not -Match ([regex]::Escape('speckit.jira.config PM --field-default PM=Deliverable=Business Owner='))
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
+    }
 }

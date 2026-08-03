@@ -328,8 +328,9 @@ resolves the great majority of cases; a hand-edited `config.yml` or
 This is the extension's SOURCE repository, following the official extension
 layout: the manifest (`extension.yml`), `commands/`, `scripts/`, and
 `templates/` live at the root and are what `specify extension add` copies;
-`specs/`, `tests/`, `.specify/`, and `.github/` are development-only and are
-excluded from installation by `.extensionignore`.
+`specs/`, `tests/`, `.specify/`, `.github/`, `docs/`, `AGENTS.md`, `CLAUDE.md`,
+and `.gitattributes` are development-only and are excluded from installation
+by `.extensionignore`.
 
 | Path | Role |
 |------|------|
@@ -338,6 +339,8 @@ excluded from installation by `.extensionignore`.
 | `scripts/bash/`, `scripts/powershell/` | The twin ports (module-for-module mirrors) |
 | `templates/` | Config scaffold and managed README block template |
 | `specs/`, `tests/`, `.specify/`, `.github/` | Development only — never installed |
+| `docs/`, `AGENTS.md`, `CLAUDE.md` | Contributor architecture and instructions — describe how THIS repository is built, not the installed bridge; excluded so a coding agent in a consuming repository never mistakes them for its own marching orders |
+| `.gitattributes` | This repository's own line-ending policy (protects its Windows test fixtures) — excluded so it never governs a consumer's tree |
 
 ## Development
 
