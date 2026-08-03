@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-03
+
 ### Added
 
 - Recorded field defaults, so a project whose written issue types require a
@@ -593,7 +595,8 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.6.0...v0.7.0
