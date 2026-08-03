@@ -93,7 +93,7 @@ ticket_field_rejection_message() {
     | (($e.errors) // {}) | to_entries[] | . as $err
     | (first($fields[] | select(.field_id == $err.key)) // null) as $meta
     | select($meta != null and ($a.body.fields | has($err.key)))
-    | "reconcile: Jira rejected the recorded value for \"\($meta.logical_name)\" — sent \($a.body.fields[$err.key] | tostring), rejected because: \($err.value). Nothing was substituted and the creation was not retried."
+    | "reconcile: Jira rejected the value for \"\($meta.logical_name)\" — sent \($a.body.fields[$err.key] | tostring), rejected because: \($err.value). Nothing was substituted and the creation was not retried."
   '
   # kcov-excl-stop
 }

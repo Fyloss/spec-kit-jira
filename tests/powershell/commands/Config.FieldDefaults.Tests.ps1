@@ -226,6 +226,20 @@ Describe 'Get-JiraFieldDefaultAnswerProblem / Merge-JiraFieldDefault / Get-JiraF
         @($out.undefaultable_required).Count | Should -Be 0
     }
 
+    # The pending question's `answer with …` hint tells the operator exactly
+    # what to type, so its KEY=Type=Label=Value token must survive a shell
+    # round-trip: labels routinely carry a space and the placeholder is spelled
+    # `<value>`, which an unquoted token would turn into an input redirection.
+    It 'the pending hint quotes the --field-default token, with and without an allowed-value list' {
+        $report = '{"orphaned":[],"not_yet_consumed":[],"undefaultable_required":[],' +
+            '"pending":[{"type":"Deliverable","label":"Business Owner","allowed_values":[]},' +
+            '{"type":"Deliverable","label":"Program Increment","allowed_values":["PI-2026-Q2","PI-2026-Q3"]}]}'
+        $out = Get-JiraFieldDefaultNote -ProjectKey 'PM' -ReportJson $report
+        $out | Should -Match ([regex]::Escape("(answer with --field-default 'PM=Deliverable=Business Owner=<value>')"))
+        $out | Should -Match ([regex]::Escape("(answer with --field-default 'PM=Deliverable=Program Increment=<value>')"))
+        $out | Should -Match ([regex]::Escape('choose one of: PI-2026-Q2, PI-2026-Q3'))
+    }
+
     It 'an entry recorded for a type the project no longer offers is orphaned' {
         $merged = '{"Retired Type":{"Team":"Payments"}}'
         $out = Get-JiraFieldDefaultsReport -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $script:Defaultable -AskTypesJson '["Epic"]' -MergedJson $merged -BridgeTypeIdsJson '["10101"]' | ConvertFrom-Json

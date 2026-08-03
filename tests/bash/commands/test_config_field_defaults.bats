@@ -229,6 +229,23 @@ DEFAULTABLE='{"10101":[
   [ "$(jq -r '.undefaultable_required | length' <<< "$output")" -eq 0 ]
 }
 
+# --- The pending question's `answer with …` hint is copy-pasteable ----------
+# The hint tells the operator exactly what to type, so its KEY=Type=Label=Value
+# token must survive a shell round-trip: labels routinely carry a space and the
+# placeholder is spelled `<value>`, which an unquoted token would turn into an
+# input redirection.
+
+@test "the pending hint quotes the --field-default token, with and without an allowed-value list" {
+  local report='{"orphaned":[],"not_yet_consumed":[],"undefaultable_required":[],
+    "pending":[{"type":"Deliverable","label":"Business Owner","allowed_values":[]},
+               {"type":"Deliverable","label":"Program Increment","allowed_values":["PI-2026-Q2","PI-2026-Q3"]}]}'
+  run _config_field_default_notes "PM" "${report}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"(answer with --field-default 'PM=Deliverable=Business Owner=<value>')"* ]]
+  [[ "$output" == *"(answer with --field-default 'PM=Deliverable=Program Increment=<value>')"* ]]
+  [[ "$output" == *"choose one of: PI-2026-Q2, PI-2026-Q3"* ]]
+}
+
 @test "T050 — an entry recorded for a type the project no longer offers is orphaned" {
   local merged='{"Retired Type":{"Team":"Payments"}}'
   run _config_field_default_report "${ITYPES}" "${DEFAULTABLE}" '["Epic"]' "${merged}" '["10101"]'

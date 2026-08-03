@@ -145,7 +145,7 @@ function Get-JiraTicketFieldRejectionMessage {
         # jq's `tostring` on the Bash twin: identity for a string, compact JSON
         # for anything else — matched here so both ports print the same text.
         $sentValue = if ($raw -is [string]) { $raw } else { ConvertTo-JiraJsonValue $raw }
-        $lines.Add("reconcile: Jira rejected the recorded value for `"$($meta.logical_name)`" — sent $sentValue, rejected because: $reason. Nothing was substituted and the creation was not retried.")
+        $lines.Add("reconcile: Jira rejected the value for `"$($meta.logical_name)`" — sent $sentValue, rejected because: $reason. Nothing was substituted and the creation was not retried.")
     }
     return ($lines -join "`n")
 }

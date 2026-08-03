@@ -412,8 +412,11 @@ function Get-JiraHierarchyMandatoryFieldsMessage {
       followed — when ProjectKey is given — by one copy-pasteable
       `speckit.jira.config --field-default …` line per field that records a
       default for it permanently (011, US3). The value is left as a
-      placeholder; only the KEY=Type=Label positions are known here. Mirror
-      of hierarchy_mandatory_fields_message.
+      placeholder; only the KEY=Type=Label positions are known here. The
+      KEY=Type=Label=Value token is single-quoted: labels routinely carry a
+      space ("Business Owner"), and `<value>` would otherwise read as an
+      input redirection — either would break the copy-paste this line exists
+      to offer. Mirror of hierarchy_mandatory_fields_message.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Unsatisfiable, [string] $ProjectKey = '')
@@ -426,7 +429,7 @@ function Get-JiraHierarchyMandatoryFieldsMessage {
 
     $remedies = foreach ($u in @($Unsatisfiable)) {
         foreach ($label in @($u.fields)) {
-            "  speckit.jira.config $ProjectKey --field-default $ProjectKey=$($u.type_name)=$label=<value>"
+            "  speckit.jira.config $ProjectKey --field-default '$ProjectKey=$($u.type_name)=$label=<value>'"
         }
     }
     return (@($refusal, 'Record a default for each to fix this permanently:') + @($remedies)) -join "`n"

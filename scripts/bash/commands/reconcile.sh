@@ -209,7 +209,7 @@ _reconcile_field_default_notes() {
     | ( $entries[]
         | "config: project \($pkey): \(labelFor(.tid; .fid)) (\(typeName(.tid))) = \"\(.value)\" — sent from \(.source)" ),
       ( $entries[] | select(.source == "operator-answer")
-        | "config: project \($pkey): make this override permanent — /speckit.jira.config \($pkey) --field-default \($pkey)=\(typeName(.tid))=\(labelFor(.tid; .fid))=\(.value)" ),
+        | "config: project \($pkey): make this override permanent — /speckit.jira.config \($pkey) --field-default '\''\($pkey)=\(typeName(.tid))=\(labelFor(.tid; .fid))=\(.value)'\''" ),
       ( if ($entries | length) == 0 then empty
         elif $dry == "true" then
           "config: project \($pkey): this is a preview (--dry-run) — no question was asked and nothing was written"

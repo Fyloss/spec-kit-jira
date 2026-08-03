@@ -346,7 +346,10 @@ hierarchy_binding_shape_stale_message() {
 # project_key is given, by one copy-pasteable `speckit.jira.config
 # --field-default …` line per field that records a default for it permanently
 # (011, US3). The value is left as a placeholder for the operator to fill in;
-# only the KEY=Type=Label positions are known here.
+# only the KEY=Type=Label positions are known here. The KEY=Type=Label=Value
+# token is single-quoted: labels routinely carry a space ("Business Owner"),
+# and `<value>` would otherwise read as an input redirection — either would
+# break the copy-paste this line exists to offer.
 hierarchy_mandatory_fields_message() {
   local unsat="$1" project="${2:-}"
   # kcov-excl-start — jq literal (string lines are not statements)
@@ -358,7 +361,7 @@ hierarchy_mandatory_fields_message() {
     ) as $refusal
     | if $p == "" then $refusal
       else
-        ($u | [ .[] as $t | $t.fields[] | "  speckit.jira.config \($p) --field-default \($p)=\($t.type_name)=\(.)=<value>" ]) as $remedies
+        ($u | [ .[] as $t | $t.fields[] | "  speckit.jira.config \($p) --field-default '\''\($p)=\($t.type_name)=\(.)=<value>'\''" ]) as $remedies
         | ([$refusal, "Record a default for each to fix this permanently:"] + $remedies) | join("\n")
       end
   '

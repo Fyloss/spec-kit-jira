@@ -160,6 +160,9 @@ Describe 'Invoke-JiraReconcile — the consolidated question (011)' {
         @($notes | Where-Object { $_ -match 'Business Owner' -and $_ -match 'sent from operator-answer' }).Count | Should -Be 1
         @($notes | Where-Object { $_ -match 'Program Increment' -and $_ -match 'sent from team-config' }).Count | Should -Be 1
         @($notes | Where-Object { $_ -match 'speckit\.jira\.config' -and $_ -match '--field-default' }).Count | Should -BeGreaterOrEqual 1
+        # The promotion line is copy-pasteable, so its KEY=Type=Label=Value token
+        # is quoted — both the label and the answered value here carry a space.
+        @($notes | Where-Object { $_ -match ([regex]::Escape("--field-default 'PM=Deliverable=Business Owner=Override Team'")) }).Count | Should -Be 1
         ($notes -join "`n") | Should -Not -Match 'customfield_'
         ($notes -join "`n") | Should -Not -Match 'field_default_sources'
     }
@@ -223,8 +226,12 @@ Describe 'Invoke-JiraReconcile — the consolidated question (011)' {
         $r.ExitCode | Should -Be 4
         $r.Out | Should -Match 'Business Owner'
         $r.Out | Should -Match 'Program Increment'
-        $r.Out | Should -Match ([regex]::Escape('speckit.jira.config PM --field-default PM=Deliverable=Business Owner='))
-        $r.Out | Should -Match ([regex]::Escape('speckit.jira.config PM --field-default PM=Deliverable=Program Increment='))
+        # The remedy is advertised as copy-pasteable, so the KEY=Type=Label=Value
+        # token must survive a shell round-trip: both labels here carry a space,
+        # and the placeholder is spelled `<value>` — unquoted, the token would
+        # word-split and `<value>` would read as an input redirection.
+        $r.Out | Should -Match ([regex]::Escape("speckit.jira.config PM --field-default 'PM=Deliverable=Business Owner=<value>'"))
+        $r.Out | Should -Match ([regex]::Escape("speckit.jira.config PM --field-default 'PM=Deliverable=Program Increment=<value>'"))
         $r.Out | Should -Not -Match 'customfield_'
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
     }
@@ -248,9 +255,11 @@ Describe 'Invoke-JiraReconcile — the consolidated question (011)' {
 
         $r = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--accept-defaults', '--json')
         $r.ExitCode | Should -BeGreaterOrEqual 2
-        $rejectionLine = @($r.Out -split "`n" | Where-Object { $_ -match 'Jira rejected the recorded value' })
+        # "the value", not "the recorded value": this path also reports a value
+        # that came from a --field-value answer this run, never recorded.
+        $rejectionLine = @($r.Out -split "`n" | Where-Object { $_ -match 'Jira rejected the value' })
         $rejectionLine.Count | Should -Be 1
-        $rejectionLine[0] | Should -Match ([regex]::Escape('Jira rejected the recorded value for "Program Increment"'))
+        $rejectionLine[0] | Should -Match ([regex]::Escape('Jira rejected the value for "Program Increment"'))
         $rejectionLine[0] | Should -Match ([regex]::Escape('sent PI-2026-Q3'))
         $rejectionLine[0] | Should -Match 'Option id 123 is not valid'
         $rejectionLine[0] | Should -Match 'Nothing was substituted and the creation was not retried'
@@ -358,8 +367,8 @@ Describe 'Invoke-JiraReconcile — the consolidated question (011)' {
         $r = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--accept-defaults', '--json')
         $r.ExitCode | Should -Be 4
         $r.Out | Should -Match 'Program Increment'
-        $r.Out | Should -Match ([regex]::Escape('speckit.jira.config PM --field-default PM=Deliverable=Program Increment='))
-        $r.Out | Should -Not -Match ([regex]::Escape('speckit.jira.config PM --field-default PM=Deliverable=Business Owner='))
+        $r.Out | Should -Match ([regex]::Escape("speckit.jira.config PM --field-default 'PM=Deliverable=Program Increment=<value>'"))
+        $r.Out | Should -Not -Match ([regex]::Escape("speckit.jira.config PM --field-default 'PM=Deliverable=Business Owner="))
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
     }
 }

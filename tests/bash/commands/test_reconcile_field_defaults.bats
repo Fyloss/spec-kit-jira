@@ -154,8 +154,11 @@ _record_both_fields() {
   [ "$(jq -r '[.[] | select(contains("Business Owner") and contains("sent from operator-answer"))] | length' <<< "${notes}")" -eq 1 ]
   [ "$(jq -r '[.[] | select(contains("Program Increment") and contains("sent from team-config"))] | length' <<< "${notes}")" -eq 1 ]
   # An operator-answer override carries the promotion line so it can be made
-  # permanent through the config ceremony (FR-021).
+  # permanent through the config ceremony (FR-021). It is copy-pasteable, so
+  # the KEY=Type=Label=Value token is quoted — both the label and the answered
+  # value here carry a space and would otherwise word-split.
   [ "$(jq -r '[.[] | select(contains("speckit.jira.config") and contains("--field-default"))] | length' <<< "${notes}")" -ge 1 ]
+  [ "$(jq -r "[.[] | select(contains(\"--field-default 'PM=Deliverable=Business Owner=Override Team'\"))] | length" <<< "${notes}")" -eq 1 ]
   # Never a raw field id, and never the internal map keys, in a note.
   [[ "${notes}" != *"customfield_"* ]]
   [[ "${notes}" != *"field_default_sources"* ]]
@@ -219,8 +222,12 @@ _record_both_fields() {
   [ "$status" -eq 4 ]
   [[ "$output" == *"Business Owner"* ]]
   [[ "$output" == *"Program Increment"* ]]
-  [[ "$output" == *"speckit.jira.config PM --field-default PM=Deliverable=Business Owner="* ]]
-  [[ "$output" == *"speckit.jira.config PM --field-default PM=Deliverable=Program Increment="* ]]
+  # The remedy is advertised as copy-pasteable, so the KEY=Type=Label=Value
+  # token must survive a shell round-trip: both labels here carry a space, and
+  # the placeholder is spelled `<value>` — unquoted, the shell would word-split
+  # the token and read `<value>` as an input redirection.
+  [[ "$output" == *"speckit.jira.config PM --field-default 'PM=Deliverable=Business Owner=<value>'"* ]]
+  [[ "$output" == *"speckit.jira.config PM --field-default 'PM=Deliverable=Program Increment=<value>'"* ]]
   [[ "$output" != *"customfield_"* ]]
 
   run mock_calls
@@ -251,9 +258,11 @@ _record_both_fields() {
   # exactly one attempt reaches the mock for the failing creation.
   [ "$status" -ge 2 ]
   local rejection_line
-  rejection_line="$(grep -F 'Jira rejected the recorded value' <<< "$output")"
+  # "the value", not "the recorded value": this path also reports a value that
+  # came from a --field-value answer this run, which was never recorded.
+  rejection_line="$(grep -F 'Jira rejected the value' <<< "$output")"
   [ -n "${rejection_line}" ]
-  [[ "${rejection_line}" == *'Jira rejected the recorded value for "Program Increment"'* ]]
+  [[ "${rejection_line}" == *'Jira rejected the value for "Program Increment"'* ]]
   [[ "${rejection_line}" == *'sent PI-2026-Q3'* ]]
   [[ "${rejection_line}" == *"Option id 123 is not valid"* ]]
   [[ "${rejection_line}" == *"Nothing was substituted and the creation was not retried"* ]]
@@ -364,9 +373,9 @@ _record_both_fields() {
   run cmd_reconcile reconcile "${SPEC}" --accept-defaults --json
   [ "$status" -eq 4 ]
   [[ "$output" == *"Program Increment"* ]]
-  [[ "$output" == *"speckit.jira.config PM --field-default PM=Deliverable=Program Increment="* ]]
+  [[ "$output" == *"speckit.jira.config PM --field-default 'PM=Deliverable=Program Increment=<value>'"* ]]
   # Business Owner is still satisfiable — it is not named as an unsatisfiable field.
-  [[ "$output" != *"speckit.jira.config PM --field-default PM=Deliverable=Business Owner="* ]]
+  [[ "$output" != *"speckit.jira.config PM --field-default 'PM=Deliverable=Business Owner="* ]]
 
   run mock_calls
   while IFS= read -r line; do

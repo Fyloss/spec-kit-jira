@@ -509,9 +509,9 @@ _config_field_default_notes() {
     label="$(jq -r '.label' <<< "${q}")"
     allowed="$(jq -r '.allowed_values | join(", ")' <<< "${q}")"
     if [[ -n "${allowed}" ]]; then
-      out="${out}${out:+$'\n'}config: project ${pkey}, type ${type} requires a value for ${label} — choose one of: ${allowed} (answer with --field-default ${pkey}=${type}=${label}=<value>)"
+      out="${out}${out:+$'\n'}config: project ${pkey}, type ${type} requires a value for ${label} — choose one of: ${allowed} (answer with --field-default '${pkey}=${type}=${label}=<value>')"
     else
-      out="${out}${out:+$'\n'}config: project ${pkey}, type ${type} requires a value for ${label} (answer with --field-default ${pkey}=${type}=${label}=<value>)"
+      out="${out}${out:+$'\n'}config: project ${pkey}, type ${type} requires a value for ${label} (answer with --field-default '${pkey}=${type}=${label}=<value>')"
     fi
   done
   printf '%s' "${out}"

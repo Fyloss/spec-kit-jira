@@ -268,7 +268,7 @@ function Get-JiraReconcileFieldDefaultNote {
         if ($e.source -ne 'operator-answer') { continue }
         $label = Resolve-RfdnLabel $e.tid $e.fid
         $typeName = Resolve-RfdnTypeName $e.tid
-        $lines.Add("config: project ${ProjectKey}: make this override permanent — /speckit.jira.config $ProjectKey --field-default $ProjectKey=$typeName=$label=$($e.value)")
+        $lines.Add("config: project ${ProjectKey}: make this override permanent — /speckit.jira.config $ProjectKey --field-default '$ProjectKey=$typeName=$label=$($e.value)'")
     }
     if ($entries.Count -gt 0) {
         if ($DryRun) {

@@ -660,10 +660,10 @@ function Get-JiraFieldDefaultNote {
     foreach ($q in @($report.pending)) {
         $allowed = @($q.allowed_values) -join ', '
         if ($allowed) {
-            $lines.Add("config: project $ProjectKey, type $($q.type) requires a value for $($q.label) — choose one of: $allowed (answer with --field-default $ProjectKey=$($q.type)=$($q.label)=<value>)")
+            $lines.Add("config: project $ProjectKey, type $($q.type) requires a value for $($q.label) — choose one of: $allowed (answer with --field-default '$ProjectKey=$($q.type)=$($q.label)=<value>')")
         }
         else {
-            $lines.Add("config: project $ProjectKey, type $($q.type) requires a value for $($q.label) (answer with --field-default $ProjectKey=$($q.type)=$($q.label)=<value>)")
+            $lines.Add("config: project $ProjectKey, type $($q.type) requires a value for $($q.label) (answer with --field-default '$ProjectKey=$($q.type)=$($q.label)=<value>')")
         }
     }
     return ($lines -join "`n")
