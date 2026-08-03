@@ -1,0 +1,66 @@
+# Machine-owned resolved identifiers (gitignored in a real repository;
+# committed only in the fixture). Reuses the company-managed hierarchy; the
+# parent type (Deliverable, 10101) declares one required custom field whose
+# Jira-side allowed values contain a quote and a backslash (013,
+# contracts/yaml-string-escaping.md §1) — mirrors the mock's "quoted-label"
+# createmeta shape (tests/conformance/mock-jira/fixtures/createmeta-fields-
+# quoted-label.json).
+resolved_ids:
+  PM:
+    style: company_managed
+    style_source: api
+    issue_types:
+      - logical_name: "Initiative"
+        id: "10100"
+        hierarchy_level: "2"
+        subtask: false
+      - logical_name: "Deliverable"
+        id: "10101"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "10102"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "Defect"
+        id: "10103"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "Sub-task"
+        id: "10104"
+        hierarchy_level: "-1"
+        subtask: true
+    child_type:
+      logical_name: "Story"
+      id: "10102"
+      source: operator
+    parent_type:
+      logical_name: "Deliverable"
+      id: "10101"
+      source: derived
+    required_fields:
+      "10101":
+        - logical_name: "Summary"
+          field_id: "summary"
+        - logical_name: "Program Increment"
+          field_id: "customfield_40012"
+      "10102":
+        - logical_name: "Summary"
+          field_id: "summary"
+    defaultable_fields:
+      "10101":
+        - logical_name: "Program Increment"
+          field_id: "customfield_40012"
+          schema_type: "option"
+          required: true
+          defaultable: true
+          allowed_values: ["Platform \"legacy\"", "Delivery\\Platform", "clean"]
+    parent_link_available:
+      "10102": true
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"
+    estimation_field_id: null

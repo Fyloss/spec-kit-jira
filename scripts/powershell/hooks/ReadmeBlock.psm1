@@ -10,7 +10,11 @@
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot '../engine/ManagedSection.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force # Get-JiraExtensionVersion — the single version source
+# No -Force: this module is imported -Global and LAST by callers that already
+# hold lib/Config.psm1 in session scope, and -Force is a Remove-Module +
+# Import-Module pair that would tear that copy out of their scope and
+# re-attach it to this module's, taking ConvertFrom-JiraConfigYaml with it.
+Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') # Get-JiraExtensionVersion — the single version source
 
 $script:ReadmeBeginToken = '<!-- spec-kit-jira:begin'
 $script:ReadmeEndToken = '<!-- spec-kit-jira:end'

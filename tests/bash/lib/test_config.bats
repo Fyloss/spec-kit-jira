@@ -194,18 +194,282 @@ EOF
   [ "$(jq -cS . <<< "${input}")" = "$(jq -cS . <<< "$(config_yaml_to_json "${DIR}/crlf.yml")")" ]
 }
 
-@test "a key containing a double quote is refused on write, and the key text never appears (007 research R3)" {
-  local out status=0
-  out="$(printf '%s' '{"a":{"say \"hi\"":"1"}}' | config_to_yaml 2>&1)" || status=$?
-  [ "$status" -eq 4 ]
-  [[ "$out" != *'say "hi"'* ]]
+# --- Escape decoding (013, contracts/yaml-string-escaping.md §2) ------------
+
+@test "a quoted-legacy escaped sequence item decodes to the label with an embedded quote (013 contract §2.4)" {
+  cat > "${DIR}/a.yml" <<'EOF'
+allowed:
+  - "Platform \"legacy\""
+EOF
+  json="$(config_yaml_to_json "${DIR}/a.yml")"
+  [ "$(jq -r '.allowed[0]' <<< "${json}")" = 'Platform "legacy"' ]
 }
 
-@test "a string value containing a double quote is refused on write, value never printed (007 research R3)" {
-  local out status=0
-  out="$(printf '%s' '{"a":{"k":"say \"hi\""}}' | config_to_yaml 2>&1)" || status=$?
+@test "a double backslash in a quoted scalar decodes to one backslash (013 contract §2.4)" {
+  cat > "${DIR}/b.yml" <<'EOF'
+k: "Delivery\\Platform"
+EOF
+  json="$(config_yaml_to_json "${DIR}/b.yml")"
+  [ "$(jq -r '.k' <<< "${json}")" = 'Delivery\Platform' ]
+}
+
+@test "a trailing escaped backslash does not swallow the closing delimiter (013 contract §2.1 rule 2)" {
+  cat > "${DIR}/c.yml" <<'EOF'
+allowed:
+  - "trailing\\"
+  - "second"
+EOF
+  json="$(config_yaml_to_json "${DIR}/c.yml")"
+  [ "$(jq -r '.allowed[0]' <<< "${json}")" = 'trailing\' ]
+  [ "$(jq -r '.allowed[1]' <<< "${json}")" = 'second' ]
+}
+
+@test "an escaped backslash followed by an escaped quote decodes to backslash-quote, two characters (013 contract §2.4)" {
+  cat > "${DIR}/d.yml" <<'EOF'
+k: "\\\""
+EOF
+  json="$(config_yaml_to_json "${DIR}/d.yml")"
+  [ "$(jq -r '.k' <<< "${json}")" = '\"' ]
+}
+
+@test "the escaped form decodes identically as a sequence item and as a mapping value (013 contract §2.4)" {
+  cat > "${DIR}/e.yml" <<'EOF'
+seq:
+  - "Platform \"legacy\""
+val: "Platform \"legacy\""
+EOF
+  json="$(config_yaml_to_json "${DIR}/e.yml")"
+  [ "$(jq -r '.seq[0]' <<< "${json}")" = "$(jq -r '.val' <<< "${json}")" ]
+  [ "$(jq -r '.val' <<< "${json}")" = 'Platform "legacy"' ]
+}
+
+@test "an escaped quote inside a double-quoted scalar does not end the string at a following # (013 FR-011)" {
+  cat > "${DIR}/tricky.yml" <<'EOF'
+tricky: "a \" # b"
+EOF
+  json="$(config_yaml_to_json "${DIR}/tricky.yml")"
+  [ "$(jq -r '.tricky' <<< "${json}")" = 'a " # b' ]
+}
+
+@test "an escaped quote inside a quoted key is decoded, not treated as the closing delimiter (013 FR-010, contract §2.3)" {
+  cat > "${DIR}/key.yml" <<'EOF'
+"say \"x\"": v
+EOF
+  json="$(config_yaml_to_json "${DIR}/key.yml")"
+  [ "$(jq -r 'keys[0]' <<< "${json}")" = 'say "x"' ]
+  [ "$(jq -r '.[keys[0]]' <<< "${json}")" = "v" ]
+}
+
+# --- Escape encoding (013, contracts/yaml-string-escaping.md §1) -----------
+
+@test "a value with an embedded double quote is emitted with the exact escaped bytes (013 contract §1.3)" {
+  local out
+  out="$(printf '%s' '{"k":"Platform \"legacy\""}' | config_to_yaml)"
+  [[ "${out}" == *'"k": "Platform \"legacy\""'* ]]
+}
+
+@test "a value with a single backslash is emitted doubled (013 contract §1.3)" {
+  local out
+  out="$(printf '%s' '{"k":"Delivery\\Platform"}' | config_to_yaml)"
+  [[ "${out}" == *'"k": "Delivery\\Platform"'* ]]
+}
+
+@test "a value with both a quote and a backslash is emitted backslash-first (013 contract §1.1, §1.3)" {
+  local out
+  out="$(printf '%s' '{"k":"Group \"A\\B\""}' | config_to_yaml)"
+  [[ "${out}" == *'"k": "Group \"A\\B\""'* ]]
+}
+
+@test "a value that is exactly backslash-quote round-trips without double-escaping (013 contract §1.3)" {
+  local out
+  out="$(printf '%s' '{"k":"\\\""}' | config_to_yaml)"
+  [[ "${out}" == *'"k": "\\\""'* ]]
+}
+
+@test "a value with neither character is emitted byte-identically to before this feature (013 contract §1.3)" {
+  local out
+  out="$(printf '%s' '{"k":"clean"}' | config_to_yaml)"
+  [[ "${out}" == *'"k": "clean"'* ]]
+}
+
+@test "a mapping key containing a double quote is emitted escaped and reads back identical (013 FR-010, FR-014)" {
+  local out
+  out="$(printf '%s' '{"say \"hi\"":"1"}' | config_to_yaml)"
+  [[ "${out}" == *'"say \"hi\""'* ]]
+  printf '%s' "${out}" > "${DIR}/qkey.yml"
+  local json
+  json="$(config_yaml_to_json "${DIR}/qkey.yml")"
+  [ "$(jq -r 'keys[0]' <<< "${json}")" = 'say "hi"' ]
+}
+
+# --- Compatibility guards: must stay green throughout (013 FR-012/013, 007 R1, 013 research R2) -
+
+@test "an unrecognised backslash escape stays literal, both backslashes kept (013 FR-012)" {
+  cat > "${DIR}/path.yml" <<'EOF'
+path: "C:\Users\shared"
+EOF
+  json="$(config_yaml_to_json "${DIR}/path.yml")"
+  [ "$(jq -r '.path' <<< "${json}")" = 'C:\Users\shared' ]
+}
+
+@test "a single-quoted scalar is never decoded (013 FR-013, contract §2.2)" {
+  cat > "${DIR}/single.yml" <<'EOF'
+single: 'a\"b'
+EOF
+  json="$(config_yaml_to_json "${DIR}/single.yml")"
+  [ "$(jq -r '.single' <<< "${json}")" = 'a\"b' ]
+}
+
+@test "a bare apostrophe key still parses, guarding the non-escape-aware bare scan (007 research R1)" {
+  cat > "${DIR}/apos.yml" <<'EOF'
+Won't Do: "10004"
+EOF
+  json="$(config_yaml_to_json "${DIR}/apos.yml")"
+  [ "$(jq -r 'keys[0]' <<< "${json}")" = "Won't Do" ]
+  [ "$(jq -r '.[keys[0]]' <<< "${json}")" = "10004" ]
+}
+
+@test "a literal TAB inside a quoted scalar round-trips unchanged (013 research R2)" {
+  printf 'k: "a\tb"\n' > "${DIR}/tab.yml"
+  json="$(config_yaml_to_json "${DIR}/tab.yml")"
+  [ "$(jq -r '.k' <<< "${json}")" = "$(printf 'a\tb')" ]
+}
+
+# --- Privacy guard: must stay green throughout (013 FR-024, Constitution IX) -
+
+@test "a malformed line with an escaped quote before a credential-shaped token is still redacted (013 FR-024)" {
+  cat > "${DIR}/leak2.yml" <<'EOF'
+resolved_ids:
+  JET:
+    bad "a \" # ATATT3xFfGF0secrettoken
+EOF
+  local status=0
+  config_yaml_to_json "${DIR}/leak2.yml" 2> "${DIR}/err2.txt" > /dev/null || status=$?
   [ "$status" -eq 4 ]
-  [[ "$out" != *'say "hi"'* ]]
+  local firstline
+  firstline="$(sed -n 1p "${DIR}/err2.txt")"
+  [[ "${firstline}" != *"ATATT3xFfGF0secrettoken"* ]]
+  [ "$(grep -c '\[redacted\]' <<< "${firstline}")" -ge 1 ]
+}
+
+@test "a key containing a double quote is written and round-trips (013 contract §1, was: refused on write, 007 research R3)" {
+  local out status=0
+  out="$(printf '%s' '{"a":{"say \"hi\"":"1"}}' | config_to_yaml)" || status=$?
+  [ "$status" -eq 0 ]
+  [[ "$out" == *'"say \"hi\""'* ]]
+  printf '%s' "${out}" > "${DIR}/key.yml"
+  local json
+  json="$(config_yaml_to_json "${DIR}/key.yml")"
+  [ "$(jq -r '.a | keys[0]' <<< "${json}")" = 'say "hi"' ]
+}
+
+@test "a string value containing a double quote is written and round-trips (013 contract §1, was: refused on write, 007 research R3)" {
+  local out status=0
+  out="$(printf '%s' '{"a":{"k":"say \"hi\""}}' | config_to_yaml)" || status=$?
+  [ "$status" -eq 0 ]
+  [[ "$out" == *'"say \"hi\""'* ]]
+  printf '%s' "${out}" > "${DIR}/val.yml"
+  local json
+  json="$(config_yaml_to_json "${DIR}/val.yml")"
+  [ "$(jq -r '.a.k' <<< "${json}")" = 'say "hi"' ]
+}
+
+# --- Round-trip corpus (013, User Story 2, T030) ----------------------------
+
+@test "a run of consecutive backslashes is preserved in count after a round trip (013 FR-006, edge case)" {
+  local raw='a\\\b'
+  local json out decoded
+  json="$(jq -n --arg v "${raw}" '{k:$v}')"
+  out="$(printf '%s' "${json}" | config_to_yaml)"
+  printf '%s' "${out}" > "${DIR}/backslashes.yml"
+  decoded="$(config_yaml_to_json "${DIR}/backslashes.yml" | jq -r '.k')"
+  [ "${decoded}" = "${raw}" ]
+}
+
+@test "a quote adjacent to the delimiter round-trips as literal content (013 edge case)" {
+  local raw='"quoted"'
+  local json out decoded
+  json="$(jq -n --arg v "${raw}" '{k:$v}')"
+  out="$(printf '%s' "${json}" | config_to_yaml)"
+  printf '%s' "${out}" > "${DIR}/adjacent.yml"
+  decoded="$(config_yaml_to_json "${DIR}/adjacent.yml" | jq -r '.k')"
+  [ "${decoded}" = "${raw}" ]
+}
+
+@test "a quoted and an unquoted variant of a label stay distinct values after a round trip (013 FR-006 invariant I5)" {
+  local rawA='Platform "legacy"'
+  local rawB='Platform legacy'
+  local json out decoded
+  json="$(jq -n --arg a "${rawA}" --arg b "${rawB}" '{a:$a,b:$b}')"
+  out="$(printf '%s' "${json}" | config_to_yaml)"
+  printf '%s' "${out}" > "${DIR}/distinct.yml"
+  decoded="$(config_yaml_to_json "${DIR}/distinct.yml")"
+  [ "$(jq -r '.a' <<< "${decoded}")" = "${rawA}" ]
+  [ "$(jq -r '.b' <<< "${decoded}")" = "${rawB}" ]
+  [ "$(jq -r '.a' <<< "${decoded}")" != "$(jq -r '.b' <<< "${decoded}")" ]
+}
+
+# --- Determinism (013 FR-017, quickstart Scenario 5, T034) ------------------
+
+@test "write, read, write yields a byte-identical file for a document holding a quoted label (013 FR-017, quickstart Scenario 5)" {
+  local json='{"k":"Platform \"legacy\""}'
+  local out1 out2 decoded
+  out1="$(printf '%s' "${json}" | config_to_yaml)"
+  printf '%s' "${out1}" > "${DIR}/det.yml"
+  decoded="$(config_yaml_to_json "${DIR}/det.yml")"
+  out2="$(printf '%s' "${decoded}" | config_to_yaml)"
+  [ "${out1}" = "${out2}" ]
+}
+
+# --- Wedged-configuration recovery (013 US3, quickstart Scenario 1, T036) --
+
+@test "a pre-seeded file already holding the escaped form loads and rewrites byte-identically (013 US3, quickstart Scenario 1)" {
+  cat > "${DIR}/wedged.yml" <<'EOF'
+"allowed":
+  - "Platform \"legacy\""
+EOF
+  local json
+  json="$(config_yaml_to_json "${DIR}/wedged.yml")"
+  [ "$(jq -r '.allowed[0]' <<< "${json}")" = 'Platform "legacy"' ]
+  local rewritten
+  rewritten="$(printf '%s' "${json}" | config_to_yaml)"
+  [ "${rewritten}" = "$(cat "${DIR}/wedged.yml")" ]
+}
+
+# --- Line-break refusal (013 FR-020, contract §1.4, §4) ---------------------
+
+@test "a string value containing a line break (LF) is refused at exit 4, nothing written, value never printed (013 FR-020)" {
+  local out status=0
+  out="$(printf '%s' '{"k":"before\nafter"}' | config_to_yaml 2>"${DIR}/err.txt")" || status=$?
+  [ "$status" -eq 4 ]
+  [ -z "$out" ]
+  local err
+  err="$(cat "${DIR}/err.txt")"
+  [[ "$err" == *"k"* ]]
+  [[ "$err" != *"before"* ]]
+  [[ "$err" != *"after"* ]]
+}
+
+@test "a string value containing a bare CR is refused at exit 4 (013 FR-020, contract §4)" {
+  local out status=0
+  out="$(printf '%s' '{"k":"before\rafter"}' | config_to_yaml 2>"${DIR}/err.txt")" || status=$?
+  [ "$status" -eq 4 ]
+  [ -z "$out" ]
+  local err
+  err="$(cat "${DIR}/err.txt")"
+  [[ "$err" == *"k"* ]]
+  [[ "$err" != *"before"* ]]
+  [[ "$err" != *"after"* ]]
+}
+
+@test "a document with two unrepresentable paths reports both, deduplicated and in the same order (013 US4, research R5)" {
+  local out status=0
+  out="$(printf '%s' '{"a":"before\nafter","b":"before\nafter"}' | config_to_yaml 2>"${DIR}/err.txt")" || status=$?
+  [ "$status" -eq 4 ]
+  [ -z "$out" ]
+  [ "$(sed -n 1p "${DIR}/err.txt")" = 'config: a: a string value here contains a line break, which this writer cannot represent' ]
+  [ "$(sed -n 2p "${DIR}/err.txt")" = 'config: b: a string value here contains a line break, which this writer cannot represent' ]
+  [ "$(wc -l < "${DIR}/err.txt" | tr -d ' ')" = "2" ]
 }
 
 # --- Fail-closed on a line that cannot be interpreted (007, contracts/parse-failure.md) -

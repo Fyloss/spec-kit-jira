@@ -1,0 +1,38 @@
+resolved_ids:
+  PM:
+    style: company_managed
+    style_source: api
+    issue_types:
+      - logical_name: "Platform \"legacy\""
+        id: "10101"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "10102"
+        hierarchy_level: "0"
+        subtask: false
+    child_type:
+      logical_name: "Story"
+      id: "10102"
+      source: operator
+    parent_type:
+      logical_name: "Platform \"legacy\""
+      id: "10101"
+      source: derived
+    defaultable_fields:
+      "10101":
+        - logical_name: "Program Increment"
+          field_id: "customfield_40012"
+          schema_type: "option"
+          required: true
+          defaultable: true
+          allowed_values:
+            - "Platform \"legacy\""
+            - "Delivery\\Platform"
+            - "clean"
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"

@@ -162,6 +162,26 @@ DEFAULTABLE='{"10101":[
   [ "$(jq 'length' <<< "$output")" -eq 0 ]
 }
 
+@test "013 — a value containing a double quote inside allowed_values is accepted, not outside_allowed (FR-004)" {
+  local defaultable='{"10101":[{"logical_name":"Program Increment","field_id":"customfield_40012","schema_type":"option","required":true,"defaultable":true,"allowed_values":["Platform \"legacy\"","clean"]}]}'
+  local answers='[{"type":"Epic","label":"Program Increment","value":"Platform \"legacy\""}]'
+  run _config_field_default_answer_problems "${ITYPES}" "${defaultable}" "${answers}"
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<< "$output")" -eq 0 ]
+}
+
+@test "013 — a field default containing a double quote is written escaped and reads back identical (FR-004, FR-021)" {
+  local path="${DIR}/config.yml"
+  local merged='{"FD":{"ask":true,"Epic":{"Program Increment":"Platform \"legacy\""}}}'
+  run _config_field_defaults_write "${path}" "${merged}" "false"
+  [ "$status" -eq 0 ]
+  [ "$output" = "created" ]
+  grep -qF '"Program Increment": "Platform \"legacy\""' "${path}"
+  local json
+  json="$(config_yaml_to_json "${path}")"
+  [ "$(jq -r '.field_defaults.FD.Epic."Program Increment"' <<< "${json}")" = 'Platform "legacy"' ]
+}
+
 @test "T048 — a field whose shape cannot be defaulted is refused, naming the reason (US3 scenario 3)" {
   local answers='[{"type":"Epic","label":"Impediment","value":"X"}]'
   run _config_field_default_answer_problems "${ITYPES}" "${DEFAULTABLE}" "${answers}"
@@ -244,6 +264,15 @@ DEFAULTABLE='{"10101":[
   [[ "$output" == *"(answer with --field-default 'PM=Deliverable=Business Owner=<value>')"* ]]
   [[ "$output" == *"(answer with --field-default 'PM=Deliverable=Program Increment=<value>')"* ]]
   [[ "$output" == *"choose one of: PI-2026-Q2, PI-2026-Q3"* ]]
+}
+
+@test "the pending hint renders a quoted allowed-value label as Jira shows it, no escape notation (013 FR-003)" {
+  local report='{"orphaned":[],"not_yet_consumed":[],"undefaultable_required":[],
+    "pending":[{"type":"Deliverable","label":"Platform","allowed_values":["Platform \"legacy\"","clean"]}]}'
+  run _config_field_default_notes "PM" "${report}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'choose one of: Platform "legacy", clean'* ]]
+  [[ "$output" != *'\"'* ]]
 }
 
 @test "T050 — an entry recorded for a type the project no longer offers is orphaned" {

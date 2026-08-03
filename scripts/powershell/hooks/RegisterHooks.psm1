@@ -21,7 +21,11 @@
 
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force # YAML reader (READ only)
+# No -Force: this module is imported -Global and LAST by callers that already
+# hold lib/Config.psm1 in session scope, and -Force is a Remove-Module +
+# Import-Module pair that would tear that copy out of their scope and
+# re-attach it to this module's, taking ConvertFrom-JiraConfigYaml with it.
+Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') # YAML reader (READ only)
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force # canonical serialiser
 
 # The owning-extension id the host writes into every entry it registers for us.

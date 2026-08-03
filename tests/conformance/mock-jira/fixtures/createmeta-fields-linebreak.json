@@ -1,0 +1,10 @@
+{
+  "fields": [
+    { "fieldId": "summary", "name": "Summary", "required": true, "schema": { "type": "string" } },
+    { "fieldId": "description", "name": "Description", "required": false, "schema": { "type": "doc" } },
+    { "fieldId": "priority", "name": "Priority", "required": false, "schema": { "type": "priority" } },
+    { "fieldId": "customfield_20011", "name": "T-Shirt Estimate", "required": false, "schema": { "type": "number", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:float" } },
+    { "fieldId": "customfield_20044", "name": "Impediment", "required": false, "schema": { "type": "array", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:multicheckboxes" } },
+    { "fieldId": "parent", "name": "Parent", "required": false, "schema": { "type": "issuelink" } }
+  ]
+}

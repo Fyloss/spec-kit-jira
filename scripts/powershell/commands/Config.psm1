@@ -17,7 +17,7 @@ Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot '../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force -Global # ConvertFrom-JiraConfigYaml must reach callers — a nested import here is not enough
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Hierarchy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Credentials.psm1') -Force
@@ -1180,7 +1180,16 @@ function Invoke-JiraConfig {
         foreach ($prop in $existing.PSObject.Properties) { $existingMap[$prop.Name] = $prop.Value }
     }
     $existingMap['resolved_ids'] = $resolved
-    $yaml = ConvertTo-JiraConfigYaml -Json (ConvertTo-JiraJsonValue $existingMap)
+    # ConvertTo-JiraConfigYaml throws when the document cannot be represented
+    # (research R3/R5); caught here and turned into the Bash port's contract —
+    # a plain stderr message and EXIT_CONFIG, not a default exception trace.
+    try {
+        $yaml = ConvertTo-JiraConfigYaml -Json (ConvertTo-JiraJsonValue $existingMap)
+    }
+    catch {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        return [int] $script:ExitConfig
+    }
 
     # Discovery-effect status: created / unchanged / written.
     $discStatus = 'written'

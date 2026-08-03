@@ -1,0 +1,65 @@
+# Pre-fix baseline (T001)
+
+Recorded on this worktree, branch `013-fix-yaml-string-escaping` / `feat/handle-tasks`,
+before any code changes for this feature, by running quickstart.md Scenarios 1, 3 and 4
+verbatim against the unmodified `scripts/bash/lib/config.sh`.
+
+## Scenario 1 — the reported defect
+
+Input `/tmp/013.yml`:
+
+```yaml
+allowed:
+  - "Platform \"legacy\""
+```
+
+Output:
+
+```text
+--- decoded ---
+{"allowed":["Platform \\\"legacy\\\""]}
+exit_decode=0
+--- rewritten ---
+config: allowed[0]: a string value here contains " or \, which this writer cannot represent
+exit_rewrite=4
+```
+
+Confirms: the reader silently decodes to literal backslashes at exit 0 (corruption), and the
+writer then refuses the corrupted value at exit 4.
+
+## Scenario 3 — nothing that loads today stops loading
+
+Input `/tmp/013-hand.yml`:
+
+```yaml
+path: "C:\Users\shared"
+single: 'a\"b'
+bare: Won't Do
+tricky: "a \" # b"
+```
+
+Output:
+
+```json
+{"bare":"Won't Do","path":"C:\\Users\\shared","single":"a\\\"b","tricky":"a \\"}
+```
+
+exit=0
+
+Confirms: `tricky` truncates to `a \` (FR-011 defect — the odd escaped-quote count before `#`
+sends the naive quote-toggling comment stripper outside the string).
+
+## Scenario 4 — the refusal that survives
+
+Command: `jq -cn '{label:"has\nnewline"}' | config_to_yaml`
+
+Output:
+
+```text
+"label": "has
+newline"
+exit=0
+```
+
+Confirms: a line-break value is written raw, uncaught by the current refusal predicate, at
+exit 0 — producing a file the reader cannot subsequently parse (research R8).
