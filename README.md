@@ -106,7 +106,7 @@ This copies the extension to `.specify/extensions/jira/` **and registers and
 activates the seven lifecycle hooks**. Verify the bridge answers:
 
 ```sh
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
 ```
 
 ### 6. Bind the repository to a Jira project
@@ -203,7 +203,7 @@ No trailing slash on the URL — the sink appends `/rest/api/3/…` directly.
 
 ```sh
 specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/archive/refs/heads/main.zip
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
 ```
 
 ### 6. Bind the repository and mirror

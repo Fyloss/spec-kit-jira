@@ -64,6 +64,12 @@ distinguishing at minimum:
 | Jira unreachable | Network failure or exhausted retries |
 | **Bridge unavailable** | The per-port entry point above does not exist at its repository-relative path, or exists but is not executable — the bridge never started and produced nothing |
 
+> **Superseded by `specs/014-fix-install-exec-bit/contracts/bridge-invocation.md`
+> C4/C5/C6**: the "or exists but is not executable" clause above no longer
+> applies — 014 narrows the bridge-unavailable cause to absent-only and drops
+> the executable-bit check from the detection predicate on both ports. Do not
+> restore this clause as a "regression fix"; it is not one.
+
 The last row is the state the reported defect actually described, and it is the
 only one the bridge itself cannot report, because in that state the bridge does
 not run. Everything the operator sees then comes from the agent. That makes it

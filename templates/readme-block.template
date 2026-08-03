@@ -61,7 +61,7 @@ value once — copy it before closing the dialog. Then follow your platform belo
 
 4. **Install and bind.** Run the *Install* command above, check the bridge
    answers with
-   `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help`, then run
+   `bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help`, then run
    `/speckit.jira.config`.
 
 #### Linux

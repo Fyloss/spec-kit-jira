@@ -533,7 +533,7 @@ function Invoke-JiraReconcile {
     $bridgeMissing = Get-JiraMissingBridgeEntry
     if ($bridgeMissing) {
         Write-JiraReconcileNotice -Lines @(
-            "Jira mirror skipped: the bridge entry point $bridgeMissing was not found or is not executable; the extension install is incomplete. This spec-kit command completed normally and nothing was mirrored to Jira. Restore it with: specify extension add --dev <path-to-spec-kit-jira> --force")
+            "Jira mirror skipped: the bridge entry point $bridgeMissing was not found; the extension install is incomplete. This spec-kit command completed normally and nothing was mirrored to Jira. Restore it with: specify extension add --dev <path-to-spec-kit-jira> --force")
         return 0
     }
 

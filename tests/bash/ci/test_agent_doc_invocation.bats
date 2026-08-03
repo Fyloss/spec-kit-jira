@@ -72,10 +72,34 @@ setup() {
   [ -f "${ROOT}/${PWSH_ENTRY#.specify/extensions/jira/}" ]
 }
 
-@test "the Bash entry point is executable — invoking it by path requires it (FR-012)" {
-  # Committed as 0644, every documented invocation would fail with "permission
-  # denied" in a freshly installed repository, while the file plainly exists.
-  [ -x "${ROOT}/scripts/bash/spec-kit-jira.sh" ]
+@test "every bridge invocation in the command documents carries the bash prefix (C2)" {
+  # A path followed by a command or flag is an invocation and MUST be preceded
+  # by `bash ` — the entry point's executable bit is never relied upon (C1.2).
+  local doc line
+  for doc in "${DOCS[@]}"; do
+    while IFS= read -r line; do
+      [[ "${line}" =~ \.specify/extensions/jira/scripts/bash/spec-kit-jira\.sh[[:space:]]+(config|reconcile|mention|feature|--help) ]] || continue
+      [[ "${line}" == *"bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh"* ]] || {
+        printf '%s: invocation missing the bash prefix (C2):\n%s\n' "${doc}" "${line}" >&2
+        return 1
+      }
+    done < "${doc}"
+  done
+}
+
+@test "no filename-only reference to the Bash entry point carries the bash prefix (C2)" {
+  # A path followed by nothing is a filename and MUST NOT be prefixed —
+  # conflating the two produces "the bridge entry point bash …/… was not found".
+  local doc line
+  for doc in "${DOCS[@]}"; do
+    while IFS= read -r line; do
+      [[ "${line}" == *"bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh"* ]] || continue
+      [[ "${line}" =~ \.specify/extensions/jira/scripts/bash/spec-kit-jira\.sh[[:space:]]+(config|reconcile|mention|feature|--help) ]] || {
+        printf '%s: a bash-prefixed occurrence is not an invocation (C2):\n%s\n' "${doc}" "${line}" >&2
+        return 1
+      }
+    done < "${doc}"
+  done
 }
 
 @test "no command document tells the assistant to install anything machine-wide (FR-008)" {

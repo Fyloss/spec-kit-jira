@@ -157,7 +157,7 @@ function Get-JiraBridgeInvocation {
     [CmdletBinding()]
     param([Parameter(ValueFromRemainingArguments = $true)] [string[]] $Arguments = @())
     $a = $Arguments -join ' '
-    return "$($script:JiraBridgeBashEntry) $a (on Windows: $($script:JiraBridgePwshEntry) $a)"
+    return "bash $($script:JiraBridgeBashEntry) $a (on Windows: $($script:JiraBridgePwshEntry) $a)"
 }
 
 function New-JiraSummaryJson {

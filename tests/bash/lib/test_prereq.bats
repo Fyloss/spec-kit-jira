@@ -36,3 +36,17 @@ setup() {
   [[ "$output" == *"jq"* ]]
   [[ "$output" == *"curl"* ]]
 }
+
+@test "prereq_bridge_missing returns empty for a present-but-non-executable Bash entry point (C6.3)" {
+  local fake work
+  work="$(mktemp -d)"
+  fake="${work}/fake-root"
+  mkdir -p "${fake}/scripts/bash" "${fake}/scripts/powershell"
+  cp "${LIB_DIR}/../spec-kit-jira.sh" "${fake}/scripts/bash/spec-kit-jira.sh"
+  chmod a-x "${fake}/scripts/bash/spec-kit-jira.sh"
+  printf '' > "${fake}/scripts/powershell/spec-kit-jira.ps1"
+  run prereq_bridge_missing "${fake}"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  rm -rf "${work}"
+}

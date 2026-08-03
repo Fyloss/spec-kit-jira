@@ -30,3 +30,22 @@ Describe 'Test-JiraPrereq' {
         ($warn -join "`n") | Should -Match 'git'
     }
 }
+
+Describe 'Get-JiraMissingBridgeEntry' {
+    It 'returns empty for a present-but-non-executable Bash entry point (C6.3)' {
+        # PowerShell never had an executable-bit clause (research R4) — this pins
+        # the already-correct behaviour rather than reproducing a defect.
+        $work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
+        $fake = Join-Path $work 'fake-root'
+        New-Item -ItemType Directory -Path (Join-Path $fake 'scripts/bash') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $fake 'scripts/powershell') -Force | Out-Null
+        $bashEntry = Join-Path $fake 'scripts/bash/spec-kit-jira.sh'
+        Set-Content -LiteralPath $bashEntry -Value '#!/usr/bin/env bash'
+        if (Get-Command chmod -ErrorAction SilentlyContinue) { & chmod a-x $bashEntry }
+        Set-Content -LiteralPath (Join-Path $fake 'scripts/powershell/spec-kit-jira.ps1') -Value ''
+        try {
+            Get-JiraMissingBridgeEntry -ExtensionRoot $fake | Should -BeExactly ''
+        }
+        finally { Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue }
+    }
+}

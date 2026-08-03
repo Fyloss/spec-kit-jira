@@ -37,7 +37,7 @@ installs no machine-wide executable. Invoke the entry point by its
 | Windows | `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1` |
 
 ```text
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config [PROJECT_KEY] [flags]
+bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh config [PROJECT_KEY] [flags]
 ```
 
 You MUST NOT invoke a bare `spec-kit-jira` command name. No such command exists
@@ -46,17 +46,17 @@ in a consuming repository, and assuming it does is what produced the reported
 
 ### When the entry point is missing — emit exactly as written
 
-When the entry point is not found or is not executable, emit the following text
+When the entry point is not found, emit the following text
 **exactly as written**. Do not paraphrase it, do not summarise it, and do not
 compose your own explanation of the situation:
 
 ```text
 Jira bridge not available: the entry point
 .specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found or
-is not executable. This spec-kit command completed normally and nothing was
-mirrored to Jira. To restore the bridge, reinstall the extension with
-`specify extension add --dev <path-to-spec-kit-jira> --force`.
+.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+This spec-kit command completed normally and nothing was mirrored to Jira. To
+restore the bridge, reinstall the extension with `specify extension add --dev
+<path-to-spec-kit-jira> --force`.
 ```
 
 ## Git state is never a source (FR-004/FR-007) — normative
@@ -110,7 +110,7 @@ and never trigger the degraded mode — do not retry into it.
    `GET /project/search` read (key, name, style). Ask the operator to choose
    **from that list only**, persist the choice into `config.yml`, and re-invoke
    the entry point by its repository-relative path with the chosen key:
-   `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config <KEY>` (on
+   `bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh config <KEY>` (on
    Windows, the `powershell/spec-kit-jira.ps1` twin). An unknown or
    unresolvable key fails closed
    with the transport's exit code — never substitute another key (FR-006).

@@ -29,14 +29,15 @@ setup() {
   DOCS_DIR="${ROOT}/commands"
   mapfile -t DOCS < <(find "${DOCS_DIR}" -name '*.md' -type f | LC_ALL=C sort)
 
-  # The block, fixed in contracts/reconcile-command.md. Byte for byte.
+  # The block, fixed in contracts/bridge-invocation.md C4 (supersedes 003's
+  # reconcile-command.md wording). Byte for byte.
   read -r -d '' BLOCK << 'EOF' || true
 Jira bridge not available: the entry point
 .specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found or
-is not executable. This spec-kit command completed normally and nothing was
-mirrored to Jira. To restore the bridge, reinstall the extension with
-`specify extension add --dev <path-to-spec-kit-jira> --force`.
+.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+This spec-kit command completed normally and nothing was mirrored to Jira. To
+restore the bridge, reinstall the extension with `specify extension add --dev
+<path-to-spec-kit-jira> --force`.
 EOF
 }
 
@@ -69,12 +70,24 @@ EOF
   done
 }
 
-@test "the block names the true cause — a missing file, not a missing CLI (FR-030)" {
-  [[ "${BLOCK}" == *'was not found or'* ]]
-  [[ "${BLOCK}" == *'is not executable'* ]]
+@test "the block names the true cause — a missing file, not a missing CLI (FR-030, C4)" {
+  [[ "${BLOCK}" == *'was not found.'* ]]
   # The wording the reported message used, and which was never true of this
   # extension: it is not delivered as a machine-wide CLI at all.
   [[ "${BLOCK}" != *'CLI not installed'* ]]
+}
+
+@test "no command document mentions permissions for this cause anywhere (FR-005, C4)" {
+  # 014 narrows the sixth degraded cause to absent-only; a lost executable bit
+  # is never a cause again, in the block, the lead-in prose, or a table row.
+  local doc
+  for doc in "${DOCS[@]}"; do
+    run grep -niE 'is not executable|executable bit' "${doc}"
+    [ "$status" -ne 0 ] || {
+      printf '%s still mentions a permission cause:\n%s\n' "${doc}" "$output" >&2
+      return 1
+    }
+  done
 }
 
 @test "the block states that the host command completed normally (FR-030, FR-015)" {
@@ -90,8 +103,10 @@ EOF
   [ -f "${ROOT}/scripts/powershell/spec-kit-jira.ps1" ]
 
   # ...and the reinstall command is the official one, in the form the operator
-  # actually runs.
-  [[ "${BLOCK}" == *'specify extension add --dev <path-to-spec-kit-jira> --force'* ]]
+  # actually runs. The line break between `--dev` and the placeholder is part
+  # of the verbatim wrap (C4), so compare against the newline-flattened block.
+  local flat="${BLOCK//$'\n'/ }"
+  [[ "${flat}" == *'specify extension add --dev <path-to-spec-kit-jira> --force'* ]]
 
   # Nothing in the block names an assistant command, so there is nothing for the
   # assistant to misremember — the failure mode that produced `/speckit-jira-conifg`.

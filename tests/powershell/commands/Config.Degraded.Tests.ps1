@@ -111,7 +111,7 @@ Describe 'Config degraded mode' {
         $r.ExitCode | Should -Be 0
         $r.Out | Should -Match '  gitignore: skipped'
         $r.Out | Should -Match 'Provisional teams: ijt, wex'
-        $r.Out | Should -Match ([regex]::Escape('Rerun: define SPEC_KIT_JIRA_BASE_URL, then re-run: .specify/extensions/jira/scripts/bash/spec-kit-jira.sh config (on Windows: .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 config)'))
+        $r.Out | Should -Match ([regex]::Escape('Rerun: define SPEC_KIT_JIRA_BASE_URL, then re-run: bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh config (on Windows: .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 config)'))
     }
 }
 

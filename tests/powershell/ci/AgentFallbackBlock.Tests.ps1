@@ -18,15 +18,16 @@ BeforeAll {
     $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:Docs = Get-ChildItem -LiteralPath (Join-Path $script:Root 'commands') -Filter '*.md' -File | Sort-Object Name
 
-    # The block, fixed in contracts/reconcile-command.md. Byte for byte, LF-joined
-    # so it matches whatever line endings the checkout produced.
+    # The block, fixed in contracts/bridge-invocation.md C4 (supersedes 003's
+    # reconcile-command.md wording). Byte for byte, LF-joined so it matches
+    # whatever line endings the checkout produced.
     $script:BlockLines = @(
         'Jira bridge not available: the entry point'
         '.specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,'
-        '.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found or'
-        'is not executable. This spec-kit command completed normally and nothing was'
-        'mirrored to Jira. To restore the bridge, reinstall the extension with'
-        '`specify extension add --dev <path-to-spec-kit-jira> --force`.'
+        '.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.'
+        'This spec-kit command completed normally and nothing was mirrored to Jira. To'
+        'restore the bridge, reinstall the extension with `specify extension add --dev'
+        '<path-to-spec-kit-jira> --force`.'
     )
     $script:Block = $script:BlockLines -join "`n"
 }
@@ -54,11 +55,20 @@ Describe 'The fallback block (FR-030)' {
     }
 
     It 'names the true cause — a missing file, not a missing CLI' {
-        $script:Block | Should -Match ([regex]::Escape('was not found or'))
-        $script:Block | Should -Match ([regex]::Escape('is not executable'))
+        $script:Block | Should -Match ([regex]::Escape('was not found.'))
         # The wording the reported message used, and which was never true of this
         # extension: it is not delivered as a machine-wide CLI at all.
         $script:Block | Should -Not -Match 'CLI not installed'
+    }
+
+    It 'is never mentioned with a permission cause anywhere in the command documents (FR-005)' {
+        # 014 narrows the sixth degraded cause to absent-only; a lost executable
+        # bit is never a cause again, in the block, the lead-in prose, or a
+        # table row.
+        foreach ($doc in $script:Docs) {
+            $text = Get-Content -Raw -LiteralPath $doc.FullName
+            $text | Should -Not -Match '(?i)is not executable|executable bit'
+        }
     }
 
     It 'states that the host command completed normally (FR-015)' {
@@ -68,7 +78,9 @@ Describe 'The fallback block (FR-030)' {
     It 'contains only literals that are runnable as written (FR-018)' {
         Test-Path -LiteralPath (Join-Path $script:Root 'scripts/bash/spec-kit-jira.sh') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $script:Root 'scripts/powershell/spec-kit-jira.ps1') | Should -BeTrue
-        $script:Block | Should -Match ([regex]::Escape('specify extension add --dev <path-to-spec-kit-jira> --force'))
+        # The line break between `--dev` and the placeholder is part of the
+        # verbatim wrap (C4), so compare against the newline-flattened block.
+        ($script:Block -replace "`n", ' ') | Should -Match ([regex]::Escape('specify extension add --dev <path-to-spec-kit-jira> --force'))
         # Nothing in the block names an assistant command, so there is nothing for
         # the assistant to misremember — the failure mode that produced
         # `/speckit-jira-conifg`.

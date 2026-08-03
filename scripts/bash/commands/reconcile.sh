@@ -425,15 +425,15 @@ cmd_reconcile() {
 
   # BRIDGE UNAVAILABLE (FR-017 sixth cause, T090). Reported as its OWN cause and
   # never folded into "not configured" above or the generic prerequisite gate: a
-  # missing or non-executable entry point is an incomplete install with an
-  # install remedy. The state where NEITHER port starts cannot be reported from
-  # here at all — nothing of ours is running — which is why the command documents
-  # carry the verbatim fallback block for it (FR-030).
+  # missing entry point is an incomplete install with an install remedy. The
+  # state where NEITHER port starts cannot be reported from here at all —
+  # nothing of ours is running — which is why the command documents carry the
+  # verbatim fallback block for it (FR-030).
   local bridge_missing
   bridge_missing="$(prereq_bridge_missing)"
   if [[ -n "${bridge_missing}" ]]; then
     _reconcile_notice \
-      "Jira mirror skipped: the bridge entry point ${bridge_missing} was not found or is not executable; the extension install is incomplete. This spec-kit command completed normally and nothing was mirrored to Jira. Restore it with: specify extension add --dev <path-to-spec-kit-jira> --force"
+      "Jira mirror skipped: the bridge entry point ${bridge_missing} was not found; the extension install is incomplete. This spec-kit command completed normally and nothing was mirrored to Jira. Restore it with: specify extension add --dev <path-to-spec-kit-jira> --force"
     return 0
   fi
 
