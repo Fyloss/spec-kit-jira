@@ -68,6 +68,34 @@ runner despite `core.autocrlf=true` (measured: `eol: lf` attribute, 0 CR bytes
 in fixtures). If bytes diverge on Windows, suspect the toolchain above — not
 the checkout.
 
+### 7. MSYS rewrites a native binary's `/`-leading arguments
+
+The MSYS runtime converts every argument that looks like a POSIX absolute path
+when it spawns a **native** child, and `jq` on the runner is native. A value
+handed to it as `--arg rw "/speckit.jira.reconcile …"` therefore reaches the
+filter with the MSYS root spliced in front, and the port serialises a string it
+never wrote.
+
+Measured (the `us2-field-defaults-question` conformance scenario): the ports
+first differ at byte 311, `bash=43` (`C`) against `pwsh=2f` (`/`), for a
+20-byte swell — exactly `C:/Program Files/Git`, the Git for Windows root on
+`windows-latest`. The PowerShell twin builds the same string in-language, where
+there is no argument vector to rewrite, so it stayed correct and the divergence
+was one-sided.
+
+Rule: never spell a jq argument value with a leading `/`. Prepend it inside the
+filter — `--arg rw "speckit…"` with `resume_with: ("/" + $rw)` — where nothing
+between bash and jq can touch it. `tests/bash/ci/test_no_msys_convertible_jq_arg.bats`
+enforces this on the source, because the host that breaks the rule is not the
+host that runs the suite. The same hazard applies to any `/`-leading value a
+variable happens to hold at runtime; only the conformance corpus on the probe
+can see those.
+
+Note this is the *argument* conversion, `MSYS2_ARG_CONV_EXCL`'s domain. Do not
+reach for that variable to fix a site: disabling conversion process-wide would
+also strip the conversion that `curl` and `git` arguments currently rely on,
+trading a known divergence for an unmeasured one.
+
 ## The probe loop — how to ask Windows a question
 
 `.github/workflows/windows-conformance.yml` runs the conformance corpus alone

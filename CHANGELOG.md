@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The sixth degraded cause ("the bridge entry point is absent or not
   executable") narrows to "absent" — a present-but-non-executable entry point
   is no longer treated as broken, on either port.
+- On Windows, the `resume_with` command printed when a reconcile stops to
+  confirm recorded field defaults named a path that does not exist — the MSYS
+  runtime rewrites an argument that looks like a POSIX absolute path when it
+  spawns the native `jq`, so `/speckit.jira.reconcile <spec> --accept-defaults`
+  reached the operator as `C:/Program Files/Git/speckit.jira.reconcile <spec>
+  --accept-defaults`. The Bash port now builds that leading slash inside the jq
+  filter, where nothing can rewrite it, restoring byte parity with the
+  PowerShell port. Windows operators who could not copy-paste the resume
+  command no longer need to correct it by hand.
 
 ## [0.10.1] - 2026-08-04
 

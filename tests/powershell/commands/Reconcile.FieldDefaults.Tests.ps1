@@ -115,6 +115,12 @@ Describe 'Invoke-JiraReconcile — the consolidated question (011)' {
         $obj.creations_pending | Should -Be 2
         @($obj.fields | Where-Object { $_.label -eq 'Business Owner' }).Count | Should -Be 1
         @($obj.fields | Where-Object { $_.label -eq 'Program Increment' }).Count | Should -Be 1
+        # The byte-parity twin of the bash assertion: `resume_with` is
+        # copy-pasteable verbatim (contract §3.3), so its exact spelling —
+        # leading slash included — is the contract. This port has no argument
+        # vector for MSYS to rewrite, which is precisely why it stayed correct
+        # while the bash port diverged on windows-latest.
+        $obj.resume_with | Should -Be "/speckit.jira.reconcile $($script:Spec) --accept-defaults"
     }
 
     It 'FR-012 — an answer applies to every creation in the run' {

@@ -107,6 +107,13 @@ _record_both_fields() {
   [ "$(jq -r '.creations_pending' <<< "$output")" -eq 2 ]
   [ "$(jq -r '[.fields[] | select(.label=="Business Owner")] | length' <<< "$output")" -eq 1 ]
   [ "$(jq -r '[.fields[] | select(.label=="Program Increment")] | length' <<< "$output")" -eq 1 ]
+  # `resume_with` is copy-pasteable verbatim (contract §3.3), which makes its
+  # exact spelling — the leading slash included — part of the contract rather
+  # than cosmetic. Asserted whole, not by suffix: on Windows the MSYS runtime
+  # rewrote a leading `/` in a jq argument into the MSYS root, and a
+  # `*--accept-defaults*` match saw nothing wrong with
+  # "C:/Program Files/Git/speckit.jira.reconcile …".
+  [ "$(jq -r '.resume_with' <<< "$output")" = "/speckit.jira.reconcile ${SPEC} --accept-defaults" ]
 }
 
 @test "FR-012 — an answer applies to every creation in the run" {

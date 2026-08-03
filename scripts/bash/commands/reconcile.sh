@@ -846,9 +846,14 @@ cmd_reconcile() {
     local fd_fields; fd_fields="$(plan_confirmation_fields "${fd_itypes}" "${fd_df}" "${fd_defaults_by_type}" "${fd_pending_types}")"
     if [[ "$(jq -r 'length' <<< "${fd_fields}")" -gt 0 ]]; then
       local fd_confirmation
+      # The leading `/` is prepended INSIDE the filter, never carried in the
+      # argument vector: on Windows jq is a native binary and the MSYS runtime
+      # rewrites any argument that looks like a POSIX absolute path, which
+      # turned this value into "C:/Program Files/Git/speckit.jira.reconcile …"
+      # on windows-latest alone (docs/10-windows-portability.md quirk 7).
       fd_confirmation="$(jq -cn --arg proj "${project_key}" --argjson f "${fd_fields}" --argjson cp "${created}" \
-        --arg rw "/speckit.jira.reconcile ${spec_file} --accept-defaults" \
-        '{status:"confirmation-pending", project:$proj, fields:$f, creations_pending:$cp, resume_with:$rw}' | json_canonical)"
+        --arg rw "speckit.jira.reconcile ${spec_file} --accept-defaults" \
+        '{status:"confirmation-pending", project:$proj, fields:$f, creations_pending:$cp, resume_with:("/" + $rw)}' | json_canonical)"
       if [[ "${json}" == "true" ]]; then
         printf '%s\n' "${fd_confirmation}"
       else
