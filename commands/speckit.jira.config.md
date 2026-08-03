@@ -181,15 +181,35 @@ and never trigger the degraded mode — do not retry into it.
    `4`, zero writes, naming the mistake precisely — never silently corrected.
    Likewise a project with no level above the story tier (`no-parent-level`)
    refuses, naming the candidates it does offer.
-9. **Persist (deterministic write)** — the resolved-id table (logical name → id
-   for issue types — with hierarchy level and sub-task flag — priorities,
-   statuses, `style`/`style_source`, the resolved `roles.<role>` map with each
-   role's provenance, the dual-written `child_type`/`parent_type` derived from
-   `roles.story`/`roles.specification`, `required_fields` and
-   `parent_link_available` per written type) is written into the
-   machine-owned `.specify/jira/config.local.yml` via the canonical
-   serialiser, preserving the operator's `site_alias` / `overrides`.
-   `config.yml` is **not** rewritten.
+9. **Closed questions (field defaults, 011)** — for the `specification` and
+   `story` types (**and no others** — FR-025), plus any type named by
+   `--field-default` this run (FR-026), the entry point asks about every
+   field Jira's create metadata marks **required** that the bridge cannot
+   supply itself (`summary`, `description`, `issuetype`, `project`,
+   `priority`, `reporter`, and `parent` where the type offers it). It asks
+   about no other field: an optional defaultable field is never turned into
+   a question (FR-002, FR-004). Exactly as with role mapping, the entry point does not prompt beyond this fixed list.
+   A team states an optional field's default by writing the entry by hand into `config.yml`'s `field_defaults` managed region, or through `--field-default <KEY>=<Type>=<Label>=<Value>` (repeatable); both are validated identically and carried forward unchanged by every later run.
+   A field with a non-empty `allowedValues` is a closed question
+   over exactly those values; anything else is an open question for a
+   scalar. A field whose shape cannot be expressed as a recorded value (an
+   array, an issue link) is never asked about — it is reported once, by
+   label, with the reason (FR-010). A field already carrying a recorded
+   value is presented with that value as the current answer; keeping it
+   requires no input and reproduces the file byte-for-byte (FR-007). Answer
+   with `--field-default`, one flag per field, and re-invoke.
+10. **Persist (deterministic write)** — the resolved-id table (logical name → id
+    for issue types — with hierarchy level and sub-task flag — priorities,
+    statuses, `style`/`style_source`, the resolved `roles.<role>` map with each
+    role's provenance, the dual-written `child_type`/`parent_type` derived from
+    `roles.story`/`roles.specification`, `required_fields`,
+    `parent_link_available`, and `defaultable_fields` per written type) is
+    written into the machine-owned `.specify/jira/config.local.yml` via the
+    canonical serialiser, preserving the operator's `site_alias` /
+    `overrides`. The field-defaults answers are spliced into `config.yml`'s
+    managed region through the same byte-preserving splice the README block
+    uses; every byte outside the region survives. Nothing else in
+    `config.yml` is rewritten.
 
 Three retired keys from an earlier, never-built mechanism (`epic_strategy`, `task_strategy`, `link_type`) are refused wherever they appear in `config.yml`, exit `4`, naming the project and the retired key. The hierarchy above replaces
 what they were meant to configure; delete the line.
@@ -239,6 +259,11 @@ in your own words when the report already names it.
   wins (010).
 - `--child-type <KEY>=<name>` — repeatable; the accepted alias for
   `--issue-type <KEY>=story=<name>`.
+- `--field-default <KEY>=<Type>=<Label>=<Value>` — repeatable (011); the
+  operator's answer to one required-field question, or a value recorded for
+  an optional defaultable field without ever being asked. A value outside
+  `allowedValues`, an empty value, an unknown type, or an unknown field
+  label each refuse with zero writes, naming the offending item.
 - `--enable-hook <event>` — repeatable; release one lifecycle event the operator
   previously disabled. It clears the extension's own record and **does not touch
   the hook registry**.

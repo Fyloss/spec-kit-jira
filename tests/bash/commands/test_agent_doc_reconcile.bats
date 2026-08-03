@@ -88,3 +88,27 @@ setup() {
 @test "the exit-code section states none of them reaches the host (FR-015)" {
   grep -qi "None of these ever becomes the host command's exit code" "${DOC}"
 }
+
+# --- T089b [Phase 6, 011] — the field-defaults consolidated question, normatively --------
+
+@test "the document states re-invocation with --accept-defaults and --field-value (contract §3.5)" {
+  grep -q -- '--accept-defaults' "${DOC}"
+  grep -q -- '--field-value <KEY>=<Type>=<Label>=<Value>' "${DOC}"
+}
+
+@test "a decline is resumed with --accept-defaults and no decline flag exists (FR-015)" {
+  grep -q 'no decline flag' "${DOC}"
+  grep -qi 're-invoke with `--accept-defaults`' "${DOC}"
+}
+
+@test "the unreachable-operator contract: the caller declares it on its first invocation (research R4, contract §3.10)" {
+  grep -q 'on its \*\*first\*\* invocation' "${DOC}"
+}
+
+@test "the unreachable-operator contract: the entry point never sniffs a TTY (research R4)" {
+  grep -q 'never sniffs a TTY' "${DOC}"
+}
+
+@test "a hook-fired run is documented as not an unreachable-operator caller (contract §3.10)" {
+  grep -q 'is not such a caller' "${DOC}"
+}

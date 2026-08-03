@@ -185,12 +185,48 @@ _disc_required_fields() {
     '[ $f[] | select(.required == true) | {logical_name: .name, field_id: .fieldId} ]' | json_canonical
 }
 
+# _disc_defaultable_fields <createmeta-fields-array-json> — every field this
+# type's create metadata reports that the bridge does NOT itself supply (011,
+# research R3, contract §2.1), whether Jira marks it required or not (FR-004).
+# The bridge-supplied constant (summary, description, issuetype, project,
+# priority, reporter, parent) is never a candidate for a recorded default —
+# it is not extended by this feature (contract §1.1) — so those fields are
+# simply absent from the output, never emitted with defaultable:false.
+#
+# A field is `defaultable: false` only when its shape cannot be a single
+# recorded scalar at all — an array-shaped field (multi-select, checkbox
+# group, attachment, labels) or an issue link — carrying an
+# `undefaultable_reason` a human can read (FR-010). Every other shape,
+# including `user`, is defaultable: the bridge sends exactly what was
+# recorded, and a shape Jira itself then rejects is FR-019's concern, not
+# discovery's. Prints the canonical array.
+_disc_defaultable_fields() {
+  local fields="${1:-[]}"
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -cn --argjson f "${fields}" '
+    def bridgeSupplied: ["summary","description","issuetype","project","priority","reporter","parent"];
+    def undefaultableReason($t):
+      if $t == "array" then "a list of values cannot be expressed as a single recorded value"
+      elif $t == "issuelink" then "an issue link cannot be expressed as a recorded value"
+      else null end;
+    [ $f[] | select((.fieldId as $fid | bridgeSupplied | index($fid)) | not)
+      | (.schema.type // "") as $st
+      | undefaultableReason($st) as $reason
+      | { logical_name: .name, field_id: .fieldId, schema_type: $st,
+          required: (.required == true), defaultable: ($reason == null),
+          allowed_values: [ (.allowedValues // [])[] | (.value // .name) ] }
+        + (if $reason == null then {} else {undefaultable_reason: $reason} end) ]
+  ' | json_canonical
+  # kcov-excl-stop
+}
+
 # discovery_type_metadata <project_key> <type_id> — one issue type's required
-# fields and parent-link availability (010, T050/T051), fetched on demand for
-# a role the resolver selected but discover_binding's own single-candidate
-# prefetch (research R1/R2, `_disc_hierarchy_candidates`) did not already
-# cover — the ordinary case once a mapping is declared or answered rather
-# than derived. Prints {required_fields:[...], parent_link_available:<bool>}.
+# fields, defaultable fields, and parent-link availability (010, T050/T051;
+# 011 adds defaultable_fields), fetched on demand for a role the resolver
+# selected but discover_binding's own single-candidate prefetch (research
+# R1/R2, `_disc_hierarchy_candidates`) did not already cover — the ordinary
+# case once a mapping is declared or answered rather than derived. Prints
+# {required_fields:[...], parent_link_available:<bool>, defaultable_fields:[...]}.
 discovery_type_metadata() {
   local key="$1" type_id="$2"
   local base="${SPEC_KIT_JIRA_BASE_URL:-}"
@@ -203,7 +239,8 @@ discovery_type_metadata() {
   tmeta="$(jira_request GET "${api}/issue/createmeta/${key}/issuetypes/${type_id}")" || return $?
   jq -cn --argjson rf "$(_disc_required_fields "$(jq -c '.fields // []' <<< "${tmeta}")")" \
     --argjson has "$(jq -c 'any(.fields[]?; .fieldId == "parent")' <<< "${tmeta}")" \
-    '{required_fields: $rf, parent_link_available: $has}'
+    --argjson df "$(_disc_defaultable_fields "$(jq -c '.fields // []' <<< "${tmeta}")")" \
+    '{required_fields: $rf, parent_link_available: $has, defaultable_fields: $df}'
 }
 
 # discover_binding <project_key> — see the file header.
@@ -253,7 +290,7 @@ discover_binding() {
   # the type's own metadata, never assumed from project style (R4) —
   # `parent-link-unavailable` (Phase 6, US3) depends on this being an honest
   # per-type fact rather than a guess.
-  local required_fields='{}' parent_link_available='{}' tid tmeta
+  local required_fields='{}' parent_link_available='{}' defaultable_fields='{}' tid tmeta
   for tid in "${child_id}" "${parent_id}"; do
     [[ -z "${tid}" ]] && continue
     [[ "$(jq -r --arg t "${tid}" 'has($t)' <<< "${required_fields}")" == "true" ]] && continue
@@ -267,6 +304,9 @@ discover_binding() {
       '. + {($t): $rf}' <<< "${required_fields}")"
     parent_link_available="$(jq -c --arg t "${tid}" --argjson has "$(jq -c 'any(.fields[]?; .fieldId == "parent")' <<< "${tmeta}")" \
       '. + {($t): $has}' <<< "${parent_link_available}")"
+    defaultable_fields="$(jq -c --arg t "${tid}" \
+      --argjson df "$(_disc_defaultable_fields "$(jq -c '.fields // []' <<< "${tmeta}")")" \
+      '. + {($t): $df}' <<< "${defaultable_fields}")"
   done
 
   # (4) Statuses + statusCategory (seeds the four-category classification).
@@ -302,7 +342,8 @@ discover_binding() {
     --argjson fields "${fields}" \
     --argjson flagged "${flagged}" \
     --argjson rf "${required_fields}" \
-    --argjson pla "${parent_link_available}" '
+    --argjson pla "${parent_link_available}" \
+    --argjson df "${defaultable_fields}" '
     {
       style: (if $style == "" then null else $style end),
       issue_types: [ $itypes.issueTypes[]
@@ -321,7 +362,8 @@ discover_binding() {
         | sort_by([(-.score), .id]) ),
       flagged_field: $flagged,
       required_fields: $rf,
-      parent_link_available: $pla
+      parent_link_available: $pla,
+      defaultable_fields: $df
     }' | json_canonical
   # kcov-excl-stop
 }

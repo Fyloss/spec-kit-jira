@@ -4,6 +4,7 @@
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
     Import-Module (Join-Path $Root 'scripts/powershell/sink/jira/Ticket.psm1') -Force
+    Import-Module (Join-Path $Root 'scripts/powershell/sink/jira/PrivacyGuard.psm1') -Force
     Import-Module (Join-Path $Root 'tests/conformance/mock-jira/Mock.psm1') -Force
     $env:JIRA_EMAIL = 'user@example.com'
     $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
@@ -88,5 +89,47 @@ Describe 'Ticket sink' {
         $r = New-JiraTicket -ProjectKey 'IJT' -Summary 'summary with token ATATT3xFfGF0abcdef' -StoryTypeId '10201'
         $r.ExitCode | Should -Be 9
         @(Get-JiraMockCallLog -Mock $M | Where-Object { $_ }).Count | Should -Be 0
+    }
+}
+
+Describe 'Get-JiraCreateFieldsBase — field defaults (011, T030/T030a)' {
+    It 'merges the defaults for the type being created' {
+        $dbt = '{"10101":{"customfield_40011":"Platform Team"}}'
+        $out = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'invoice export' -IssueTypeId '10101' -FieldDefaultsByTypeJson $dbt
+        $obj = $out | ConvertFrom-Json
+        $obj.customfield_40011 | Should -Be 'Platform Team'
+        $obj.project.key | Should -Be 'IJT'
+    }
+
+    It 'merges nothing when the map is empty (FR-028, absence is the off switch)' {
+        $out = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'invoice export' -IssueTypeId '10101' -FieldDefaultsByTypeJson '{}'
+        @(($out | ConvertFrom-Json).PSObject.Properties.Name | Sort-Object) -join ',' | Should -Be 'issuetype,project,summary'
+    }
+
+    It 'the fourth argument is entirely optional — omitting it behaves exactly as before (regression)' {
+        $out = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'invoice export' -IssueTypeId '10101'
+        @(($out | ConvertFrom-Json).PSObject.Properties.Name | Sort-Object) -join ',' | Should -Be 'issuetype,project,summary'
+    }
+
+    It 'merges NOTHING recorded against a DIFFERENT issue type (FR-018 negative)' {
+        $dbt = '{"10101":{"customfield_40011":"Platform Team"}}'
+        $out = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'a story' -IssueTypeId '10102' -FieldDefaultsByTypeJson $dbt
+        (($out | ConvertFrom-Json).PSObject.Properties.Match('customfield_40011').Count) | Should -Be 0
+    }
+
+    It 'the defaulted value reaches the privacy guard scan, proving the merge happens at plan time' {
+        $dbt = '{"10201":{"customfield_99999":"RAWSECRET-shaped-value ATATT3xFfGF0abcdef"}}'
+        $merged = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'invoice export' -IssueTypeId '10201' -FieldDefaultsByTypeJson $dbt
+        $guardedBody = '{"fields":' + $merged + '}'
+        $code = Test-JiraPrivacyBlock -Payload $guardedBody -KnownCoordinatesJson '[]' -AllowlistJson '[]'
+        $code | Should -Be 9
+    }
+
+    It 'an allowlisted defaulted value passes the guard silently' {
+        $dbt = '{"10201":{"customfield_1":"support.example.atlassian.net"}}'
+        $merged = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'invoice export' -IssueTypeId '10201' -FieldDefaultsByTypeJson $dbt
+        $guardedBody = '{"fields":' + $merged + '}'
+        $code = Test-JiraPrivacyBlock -Payload $guardedBody -KnownCoordinatesJson '[]' -AllowlistJson '["support.example.atlassian.net"]'
+        $code | Should -Be 0
     }
 }

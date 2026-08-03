@@ -197,15 +197,63 @@ function Get-JiraDiscoveryRequiredFields {
     return $out
 }
 
+function Get-JiraDiscoveryDefaultableFields {
+    <#
+    .SYNOPSIS
+      Every field this type's create metadata reports that the bridge does
+      NOT itself supply (011, research R3, contract §2.1), required or not
+      (FR-004). Mirror of _disc_defaultable_fields. The bridge-supplied
+      constant is never a candidate for a recorded default (contract §1.1)
+      and is simply absent from the output. `defaultable: false` only for a
+      shape that cannot be a single recorded scalar — array or issuelink —
+      carrying an `undefaultable_reason` (FR-010).
+    #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Names the set of defaultable-field descriptors it derives; a singular name would misdescribe the value.')]
+    [CmdletBinding()]
+    param($Fields)
+    $bridgeSupplied = @('summary', 'description', 'issuetype', 'project', 'priority', 'reporter', 'parent')
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($f in @($Fields)) {
+        $fid = [string] $f.fieldId
+        if ($bridgeSupplied -contains $fid) { continue }
+        $schema = Get-DiscProp $f 'schema'
+        $st = [string] (Get-DiscProp $schema 'type')
+        $reason = $null
+        if ($st -eq 'array') { $reason = 'a list of values cannot be expressed as a single recorded value' }
+        elseif ($st -eq 'issuelink') { $reason = 'an issue link cannot be expressed as a recorded value' }
+        $allowed = [System.Collections.Generic.List[string]]::new()
+        $avRaw = Get-DiscProp $f 'allowedValues'
+        if ($null -ne $avRaw) {
+            foreach ($av in @($avRaw)) {
+                $v = Get-DiscProp $av 'value'
+                if ($null -eq $v) { $v = Get-DiscProp $av 'name' }
+                $allowed.Add([string] $v)
+            }
+        }
+        $entry = [ordered]@{
+            logical_name = $f.name
+            field_id     = $fid
+            schema_type  = $st
+            required     = [bool] $f.required
+            defaultable  = ($null -eq $reason)
+            allowed_values = $allowed
+        }
+        if ($null -ne $reason) { $entry.undefaultable_reason = $reason }
+        $out.Add($entry)
+    }
+    return $out
+}
+
 function Get-JiraDiscoveryTypeMetadataResult {
     <#
     .SYNOPSIS
-      One issue type's required fields and parent-link availability (010,
-      T050/T051), fetched on demand for a role the resolver selected but
+      One issue type's required fields, defaultable fields, and parent-link
+      availability (010, T050/T051; 011 adds DefaultableFields), fetched on
+      demand for a role the resolver selected but
       Get-JiraDiscoveryBindingResult's own single-candidate prefetch
       (research R1/R2) did not already cover. Mirror of
       discovery_type_metadata. Returns { ExitCode; RequiredFields;
-      ParentLinkAvailable }.
+      ParentLinkAvailable; DefaultableFields }.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $ProjectKey, [Parameter(Mandatory)][string] $TypeId)
@@ -213,17 +261,18 @@ function Get-JiraDiscoveryTypeMetadataResult {
     $base = $env:SPEC_KIT_JIRA_BASE_URL
     if (-not $base) {
         [Console]::Error.WriteLine('discovery: SPEC_KIT_JIRA_BASE_URL is not set')
-        return [pscustomobject]@{ ExitCode = (Get-JiraExitCode 'fail_closed'); RequiredFields = @(); ParentLinkAvailable = $false }
+        return [pscustomobject]@{ ExitCode = (Get-JiraExitCode 'fail_closed'); RequiredFields = @(); ParentLinkAvailable = $false; DefaultableFields = @() }
     }
     $api = "$base/rest/api/3"
     $r = Invoke-JiraRequest -Method GET -Url "$api/issue/createmeta/$ProjectKey/issuetypes/$TypeId"
     if ($r.ExitCode -ne 0) {
-        return [pscustomobject]@{ ExitCode = [int]$r.ExitCode; RequiredFields = @(); ParentLinkAvailable = $false }
+        return [pscustomobject]@{ ExitCode = [int]$r.ExitCode; RequiredFields = @(); ParentLinkAvailable = $false; DefaultableFields = @() }
     }
     $tmeta = $r.Body | ConvertFrom-Json -Depth 100
     $rf = @(Get-JiraDiscoveryRequiredFields -Fields $tmeta.fields)
     $pla = [bool]@($tmeta.fields | Where-Object { $_.fieldId -eq 'parent' }).Count
-    return [pscustomobject]@{ ExitCode = 0; RequiredFields = $rf; ParentLinkAvailable = $pla }
+    $df = @(Get-JiraDiscoveryDefaultableFields -Fields $tmeta.fields)
+    return [pscustomobject]@{ ExitCode = 0; RequiredFields = $rf; ParentLinkAvailable = $pla; DefaultableFields = $df }
 }
 
 function Get-JiraDiscoveryBindingResult {
@@ -282,12 +331,14 @@ function Get-JiraDiscoveryBindingResult {
         # from project style (R4).
         $requiredFields = [ordered]@{}
         $parentLinkAvailable = [ordered]@{}
+        $defaultableFields = [ordered]@{}
         foreach ($tid in @($childId, $parentId)) {
             if (-not $tid) { continue }
             if ($requiredFields.Contains([string]$tid)) { continue }
             $tmeta = if ($tid -eq $metaTypeId) { $meta } else { & $get "$api/issue/createmeta/$ProjectKey/issuetypes/$tid" }
             $requiredFields[[string]$tid] = @(Get-JiraDiscoveryRequiredFields -Fields $tmeta.fields)
             $parentLinkAvailable[[string]$tid] = [bool]@($tmeta.fields | Where-Object { $_.fieldId -eq 'parent' }).Count
+            $defaultableFields[[string]$tid] = @(Get-JiraDiscoveryDefaultableFields -Fields $tmeta.fields)
         }
 
         # (4) Statuses + statusCategory.
@@ -378,6 +429,7 @@ function Get-JiraDiscoveryBindingResult {
         flagged_field         = $flagged
         required_fields       = $requiredFields
         parent_link_available = $parentLinkAvailable
+        defaultable_fields    = $defaultableFields
     }
 
     return [pscustomobject]@{ ExitCode = 0; Binding = (ConvertTo-JiraJsonValue $binding) }
@@ -612,5 +664,5 @@ function Get-JiraMentionedFetch {
 
 Export-ModuleMember -Function Get-JiraDiscoveryBinding, Get-JiraDiscoveryBindingResult, `
     Get-JiraDiscoveryStyle, Get-JiraDiscoveryFlaggedField, Get-JiraDiscoveryProjectList, `
-    Get-JiraDiscoveryPrioritiesForProject, `
+    Get-JiraDiscoveryPrioritiesForProject, Get-JiraDiscoveryDefaultableFields, `
     Get-JiraMentionedFetch, Get-JiraMentionedFetchResult, Get-JiraDiscoveryTypeMetadataResult

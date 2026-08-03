@@ -126,6 +126,13 @@ MD
 }
 
 @test "T095: --dry-run predicts the mandatory-field refusal exactly as the real run — same exit code, same message, zero writes" {
+  # 011, contract §3.10: a direct invocation not passing --accept-defaults is
+  # assumed to have a reachable operator, so — unlike before Phase 4 — the
+  # REAL run without it would stop for the consolidated question instead of
+  # refusing outright (ask defaults to true, contract §3.3). This test's own
+  # intent (refusal + dry-run/real agreement, §4.3/§3.6) is unrelated to that
+  # question; --accept-defaults on both invocations preserves it, and is
+  # itself the §3.10 shape of "a direct script invocation".
   local work="${BATS_TEST_TMPDIR}/repo-mandatory-dry"
   cp -R "${ROOT}/tests/conformance/fixtures/repo-with-mandatory-field" "${work}"
   export JIRA_CONFIG_DIR="${work}/.specify/jira"
@@ -133,18 +140,64 @@ MD
   mock_start "${MOCK}/configs/mandatory-field.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 
-  run cmd_reconcile reconcile "${work}/specs/001-reporting/spec.md" --dry-run --json
+  run cmd_reconcile reconcile "${work}/specs/001-reporting/spec.md" --dry-run --accept-defaults --json
   local dry_status="$status" dry_output="$output"
   [ "$dry_status" -eq 4 ]
   [[ "$dry_output" == *"Deliverable"* ]]
   [[ "$dry_output" == *"Business Owner"* ]]
 
-  run cmd_reconcile reconcile "${work}/specs/001-reporting/spec.md" --json
+  run cmd_reconcile reconcile "${work}/specs/001-reporting/spec.md" --accept-defaults --json
   [ "$status" -eq "$dry_status" ]
   [ "$output" = "$dry_output" ]
 
   run mock_calls
   [ -z "$output" ]
+}
+
+@test "011, contract §3.3 trigger 1: once both required fields are recorded, reconcile asks to CONFIRM them before creating — it does not apply them silently" {
+  # shellcheck source=/dev/null
+  source "${CMD_DIR}/config.sh"
+  local work="${BATS_TEST_TMPDIR}/repo-mandatory-confirm"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-mandatory-field" "${work}"
+  export JIRA_CONFIG_DIR="${work}/.specify/jira"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-reporting"
+  export SPEC_KIT_JIRA_ID_SOURCE="aaaaaaaaaaaaaaaa 1111111111111111"
+  mock_start "${MOCK}/configs/mandatory-field.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  # Config's own structural gate (pre-existing, unchanged by this feature —
+  # plan.md's Summary) only lets the ceremony complete once every required
+  # field of a bridge-written type is resolved — recording BOTH here is
+  # what makes the project's binding satisfiable at all (US1). `ask`
+  # defaults to true (contract §2's default), so the NEXT reconcile, with no
+  # --accept-defaults, hits trigger 1 (§3.3: "a recorded default would be
+  # sent") and stops to confirm rather than silently sending it.
+  run cmd_config config PM --issue-type "PM=story=Story" \
+    --field-default 'PM=Deliverable=Business Owner=Platform Team' \
+    --field-default 'PM=Deliverable=Program Increment=PI-2026-Q3' \
+    --json
+  [ "$status" -eq 0 ]
+
+  run cmd_reconcile reconcile "${work}/specs/001-reporting/spec.md" --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' <<< "$output")" = "confirmation-pending" ]
+  [ "$(jq -r '.creations_pending' <<< "$output")" -gt 0 ]
+  [ "$(jq -r '[.fields[] | select(.label=="Business Owner")][0].recorded_value' <<< "$output")" = "Platform Team" ]
+  [ "$(jq -r '[.fields[] | select(.label=="Program Increment")][0].recorded_value' <<< "$output")" = "PI-2026-Q3" ]
+  [[ "$(jq -r '.resume_with' <<< "$output")" == *"--accept-defaults"* ]]
+
+  run mock_calls
+  [[ "$output" != *"POST /rest/api/3/issue"* ]]
+  run grep -c 'speckit-jira' "${work}/specs/001-reporting/spec.md"
+  [ "$output" -eq 0 ]
+
+  # Resuming with --accept-defaults applies the recorded values and writes.
+  run cmd_reconcile reconcile "${work}/specs/001-reporting/spec.md" --accept-defaults --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status // "ok"' <<< "$output")" != "confirmation-pending" ]
+  [ "$(jq -r '[.actions[] | select(.role=="parent")][0].body.fields.customfield_40011' <<< "$output")" = "Platform Team" ]
+  [ "$(jq -r '[.actions[] | select(.role=="parent")][0].body.fields.customfield_40012' <<< "$output")" = "PI-2026-Q3" ]
 }
 
 @test "T023 [US4] — a retired-key config refuses direct exit 4; under a hook, one WARNING and exit 0" {

@@ -116,3 +116,75 @@ setup() {
   ps_out="$(pwsh -NoProfile -Command "Import-Module '${PS_LIB}/Cli.psm1' -Force; [Console]::Out.Write((Invoke-JiraCliParse @('reconcile','--dry-run','--json','--on-drift=proceed','--verbose')))")"
   [ "$bash_out" = "$ps_out" ]
 }
+
+@test "T017 [011] — parse --field-default KEY=Type=Label=Value" {
+  run cli_parse config --field-default CONSUMER=Epic=Business=Platform
+  [[ "$output" == *"field_defaults=CONSUMER=Epic=Business=Platform"* ]]
+  [[ "$output" == *"exit=0"* ]]
+}
+
+@test "T017 [011] — --field-default is repeatable, argv order preserved, joined with \\x1f (not a space, so a spaced value cannot swallow the next entry)" {
+  run cli_parse config --field-default CONSUMER=Epic=Owner=A --field-default CONSUMER=Story=Team=B
+  local list; list="$(sed -n 's/^field_defaults=//p' <<< "$output")"
+  [ "$list" = "$(printf 'CONSUMER=Epic=Owner=A\x1fCONSUMER=Story=Team=B')" ]
+}
+
+@test "T017 [011] — --field-default's value may itself contain '=' (split on the first three separators only)" {
+  run cli_parse config --field-default 'CONSUMER=Epic=Owner=a=b=c'
+  [[ "$output" == *"field_defaults=CONSUMER=Epic=Owner=a=b=c"* ]]
+  [[ "$output" == *"exit=0"* ]]
+}
+
+@test "T017 [011] — --field-default's value may contain spaces" {
+  run cli_parse config --field-default 'CONSUMER=Epic=Business Owner=Platform Team'
+  [[ "$output" == *"field_defaults=CONSUMER=Epic=Business Owner=Platform Team"* ]]
+  [[ "$output" == *"exit=0"* ]]
+}
+
+@test "T017 [011] — a malformed --field-default value (missing a segment) is a usage error, same message shape as --issue-type" {
+  run cli_parse config --field-default CONSUMER=Epic
+  [[ "$output" == *"exit=1"* ]]
+  [[ "$output" == *"invalid --field-default value"* ]]
+}
+
+@test "T017 [011] — --field-default requires a value" {
+  run cli_parse config --field-default
+  [[ "$output" == *"exit=1"* ]]
+}
+
+@test "T017 [011] — parse --field-value KEY=Type=Label=Value, repeatable, same shape as --field-default" {
+  run cli_parse reconcile --field-value CONSUMER=Epic=Owner=A --field-value CONSUMER=Story=Team=B
+  local list; list="$(sed -n 's/^field_values=//p' <<< "$output")"
+  [ "$list" = "$(printf 'CONSUMER=Epic=Owner=A\x1fCONSUMER=Story=Team=B')" ]
+  [[ "$output" == *"exit=0"* ]]
+}
+
+@test "T017 [011] — two --field-default values that each contain a space are still separable (the \\x1f join, not a space, is the boundary)" {
+  run cli_parse config --field-default 'CONSUMER=Epic=Business Owner=Platform Team' --field-default 'CONSUMER=Story=Team=Payments'
+  local list; list="$(sed -n 's/^field_defaults=//p' <<< "$output")"
+  [ "$list" = "$(printf 'CONSUMER=Epic=Business Owner=Platform Team\x1fCONSUMER=Story=Team=Payments')" ]
+}
+
+@test "T017 [011] — the field_defaults line is byte-identical across ports for two spaced, repeated values" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  bash_out="$(cli_parse config --field-default 'CONSUMER=Epic=Business Owner=Platform Team' --field-default 'CONSUMER=Story=Team=Payments')"
+  ps_out="$(pwsh -NoProfile -Command "Import-Module '${PS_LIB}/Cli.psm1' -Force; [Console]::Out.Write((Invoke-JiraCliParse @('config','--field-default','CONSUMER=Epic=Business Owner=Platform Team','--field-default','CONSUMER=Story=Team=Payments')))")"
+  [ "$bash_out" = "$ps_out" ]
+}
+
+@test "T017 [011] — a malformed --field-value value is a usage error" {
+  run cli_parse reconcile --field-value CONSUMER=Epic
+  [[ "$output" == *"exit=1"* ]]
+  [[ "$output" == *"invalid --field-value value"* ]]
+}
+
+@test "T017 [011] — --accept-defaults is a boolean flag" {
+  run cli_parse reconcile --accept-defaults
+  [[ "$output" == *"accept_defaults=true"* ]]
+  [[ "$output" == *"exit=0"* ]]
+}
+
+@test "T017 [011] — --accept-defaults defaults to false" {
+  run cli_parse reconcile
+  [[ "$output" == *"accept_defaults=false"* ]]
+}

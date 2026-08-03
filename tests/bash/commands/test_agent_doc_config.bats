@@ -42,3 +42,18 @@ setup() {
   # (003 FR-014, FR-018).
   grep -q '.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config <KEY>' "${DOC}"
 }
+
+# --- T089a [Phase 6, 011] — the field-defaults ceremony, normatively --------
+
+@test "the entry point never prompts for a field default (FR-002)" {
+  grep -q 'the entry point does not prompt' "${DOC}"
+}
+
+@test "only a field Jira marks required produces a question" {
+  grep -q 'Jira'\''s create metadata marks \*\*required\*\*' "${DOC}"
+}
+
+@test "an optional field's default is stated through --field-default or written into config.yml by hand (FR-004)" {
+  grep -q -- '--field-default <KEY>=<Type>=<Label>=<Value>' "${DOC}"
+  grep -q 'writing the entry by hand into `config.yml`'\''s `field_defaults`' "${DOC}"
+}

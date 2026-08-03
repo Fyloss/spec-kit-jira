@@ -57,20 +57,97 @@ function Get-JiraCreateFieldsBase {
     <#
     .SYNOPSIS
       The mandatory base every creation path must produce: {project, issuetype,
-      summary} (research R3, FR-025). Mirror of jira_create_fields_base. Both
-      Get-JiraTicketCreateBody and Get-JiraPlanWriteSet build on this single
-      builder so the two creation paths cannot drift apart again. The issue
-      type is carried by ID only (never a literal name — Constitution VII).
+      summary} (research R3, FR-025), plus (011, research R2) any recorded
+      defaults for the type actually being created. Mirror of
+      jira_create_fields_base. Both Get-JiraTicketCreateBody and
+      Get-JiraPlanWriteSet build on this single builder so the two creation
+      paths cannot drift apart again. The issue type is carried by ID only
+      (never a literal name — Constitution VII).
+
+      FieldDefaultsByTypeJson is the WHOLE plan-context map, {type_id:
+      {field_id: value}} — this function itself scopes the merge to
+      IssueTypeId, so a caller cannot get FR-018 wrong by passing the wrong
+      sub-map. Omitted or empty ⇒ the merge is a no-op (FR-028, research R6),
+      and the output is byte-identical to before this feature.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [AllowEmptyString()] [string] $ProjectKey,
         [Parameter(Mandatory)] [AllowEmptyString()] [string] $Summary,
-        [Parameter(Mandatory)] [AllowEmptyString()] [string] $IssueTypeId
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $IssueTypeId,
+        [string] $FieldDefaultsByTypeJson = ''
     )
-    return '{"project":{"key":' + (ConvertTo-JiraJsonString $ProjectKey) +
+    $base = '{"project":{"key":' + (ConvertTo-JiraJsonString $ProjectKey) +
         '},"issuetype":{"id":' + (ConvertTo-JiraJsonString $IssueTypeId) +
         '},"summary":' + (ConvertTo-JiraJsonString $Summary) + '}'
+    if ([string]::IsNullOrEmpty($FieldDefaultsByTypeJson) -or [string]::IsNullOrEmpty($IssueTypeId)) { return $base }
+    $dbt = $FieldDefaultsByTypeJson | ConvertFrom-Json -Depth 100
+    $typeProp = $dbt.PSObject.Properties[$IssueTypeId]
+    if ($null -eq $typeProp -or $null -eq $typeProp.Value) { return $base }
+    $merged = [ordered]@{
+        project   = [ordered]@{ key = $ProjectKey }
+        issuetype = [ordered]@{ id = $IssueTypeId }
+        summary   = $Summary
+    }
+    foreach ($p in $typeProp.Value.PSObject.Properties) { $merged[$p.Name] = $p.Value }
+    return (ConvertTo-JiraJsonValue $merged)
+}
+
+function Get-JiraTicketFieldRejectionMessage {
+    <#
+    .SYNOPSIS
+      011, contract §3.7, FR-019: when Jira rejects a creation because a value
+      THIS RUN sent — from a recorded default or a this-run answer — is no
+      longer valid, translate Jira's raw error body into one line per
+      rejected field, naming it by its Jira label and the value that was
+      sent, and the rejection in Jira's own words — never the raw API body.
+      Mirror of ticket_field_rejection_message.
+
+      Only a field that (a) this run actually sent in the action's own body
+      and (b) is one of the type's defaultable_fields is reported here — a
+      rejection on a bridge-supplied field is a different defect and is left
+      to the existing generic failure path. Returns one line per rejected
+      field, newline-joined, empty when Jira's rejected fields do not
+      overlap anything this run defaulted.
+    #>
+    [CmdletBinding()]
+    param(
+        [string] $DefaultableFieldsByTypeJson = '{}',
+        [Parameter(Mandatory)] [string] $ActionJson,
+        [string] $ErrorBodyJson = '{}'
+    )
+    if ([string]::IsNullOrEmpty($DefaultableFieldsByTypeJson)) { $DefaultableFieldsByTypeJson = '{}' }
+    if ([string]::IsNullOrEmpty($ErrorBodyJson)) { $ErrorBodyJson = '{}' }
+    $df = $DefaultableFieldsByTypeJson | ConvertFrom-Json -Depth 100
+    $action = $ActionJson | ConvertFrom-Json -Depth 100
+    $errBody = $null
+    try { $errBody = $ErrorBodyJson | ConvertFrom-Json -Depth 100 } catch { $null = $_ }
+    if ($null -eq $errBody) { return '' }
+
+    $fields = $action.body.fields
+    $typeId = if ($fields -and $fields.PSObject.Properties['issuetype']) { [string] $fields.issuetype.id } else { '' }
+    $fieldMeta = @()
+    $typeProp = $df.PSObject.Properties[$typeId]
+    if ($null -ne $typeProp) { $fieldMeta = @($typeProp.Value) }
+
+    $errorsProp = $errBody.PSObject.Properties['errors']
+    if ($null -eq $errorsProp -or $null -eq $errorsProp.Value) { return '' }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($ep in $errorsProp.Value.PSObject.Properties) {
+        $fieldId = $ep.Name
+        $reason = $ep.Value
+        if (-not ($fields.PSObject.Properties.Name -contains $fieldId)) { continue }
+        $meta = $null
+        foreach ($f in $fieldMeta) { if ([string] $f.field_id -eq $fieldId) { $meta = $f; break } }
+        if ($null -eq $meta) { continue }
+        $raw = $fields.$fieldId
+        # jq's `tostring` on the Bash twin: identity for a string, compact JSON
+        # for anything else — matched here so both ports print the same text.
+        $sentValue = if ($raw -is [string]) { $raw } else { ConvertTo-JiraJsonValue $raw }
+        $lines.Add("reconcile: Jira rejected the recorded value for `"$($meta.logical_name)`" — sent $sentValue, rejected because: $reason. Nothing was substituted and the creation was not retried.")
+    }
+    return ($lines -join "`n")
 }
 
 function Get-JiraTicketCreateBody {
@@ -130,4 +207,5 @@ function New-JiraTicket {
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue ([ordered]@{ key = $key })) }
 }
 
-Export-ModuleMember -Function Confirm-JiraTicket, Get-JiraCreateFieldsBase, Get-JiraTicketCreateBody, New-JiraTicket
+Export-ModuleMember -Function Confirm-JiraTicket, Get-JiraCreateFieldsBase, Get-JiraTicketCreateBody, New-JiraTicket, `
+    Get-JiraTicketFieldRejectionMessage

@@ -37,6 +37,162 @@ function Get-JiraPlanProp {
     return $member.Value
 }
 
+function Get-JiraPlanResolveFieldDefault {
+    <#
+    .SYNOPSIS
+      011, research R2/R3, contract §3.1/§3.2, data-model.md §3: join the
+      labels one project's field_defaults holds (and this run's
+      --field-value answers) to the field ids the binding's
+      defaultable_fields holds, for that project. Mirror of
+      plan_resolve_field_defaults.
+
+      IssueTypesJson: [{logical_name, id}, ...] — resolves a Type NAME to an
+        issue-type id.
+      DefaultableFieldsByTypeJson: {type_id: [{logical_name, field_id, ...}]}
+        — resolves a Label to a field id, WITHIN the type its default was
+        recorded for (FR-018).
+      RecordedJson: the project's field_defaults entry — {ask, <Type>:
+        {<Label>: <Value>}, ...}. The literal key `ask` is never mistaken
+        for an issue-type name.
+      AnswersJson: [{type, label, value}, ...] — this run's --field-value
+        answers, already scoped to this project by the caller.
+
+      Precedence (contract §3.1): an answer wins over the recorded default
+      for the same (type, label). An unresolvable type name or field label
+      is reported in Unresolved, never silently dropped.
+
+      Returns one canonical object: {field_defaults; field_default_sources;
+      unresolved}.
+    #>
+    [CmdletBinding()]
+    param(
+        [string] $IssueTypesJson = '[]',
+        [string] $DefaultableFieldsByTypeJson = '{}',
+        [string] $RecordedJson = '{}',
+        [string] $AnswersJson = '[]'
+    )
+    if ([string]::IsNullOrEmpty($IssueTypesJson)) { $IssueTypesJson = '[]' }
+    if ([string]::IsNullOrEmpty($DefaultableFieldsByTypeJson)) { $DefaultableFieldsByTypeJson = '{}' }
+    if ([string]::IsNullOrEmpty($RecordedJson)) { $RecordedJson = '{}' }
+    if ([string]::IsNullOrEmpty($AnswersJson)) { $AnswersJson = '[]' }
+
+    $itypes = @($IssueTypesJson | ConvertFrom-Json -Depth 100)
+    $df = $DefaultableFieldsByTypeJson | ConvertFrom-Json -Depth 100
+    $rec = $RecordedJson | ConvertFrom-Json -Depth 100
+    $ans = @($AnswersJson | ConvertFrom-Json -Depth 100)
+
+    function Resolve-TypeId([string] $Name) {
+        foreach ($t in $itypes) { if ([string]$t.logical_name -eq $Name) { return [string]$t.id } }
+        return $null
+    }
+    function Resolve-FieldId([string] $TypeId, [string] $Label) {
+        $listProp = $df.PSObject.Properties[$TypeId]
+        if ($null -eq $listProp) { return $null }
+        foreach ($f in @($listProp.Value)) { if ([string]$f.logical_name -eq $Label) { return [string]$f.field_id } }
+        return $null
+    }
+
+    $entries = [System.Collections.Generic.List[object]]::new()
+    foreach ($p in $rec.PSObject.Properties) {
+        if ($p.Name -eq 'ask') { continue }
+        foreach ($fp in $p.Value.PSObject.Properties) {
+            $entries.Add([pscustomobject]@{ type = $p.Name; label = $fp.Name; value = $fp.Value; source = 'team-config' })
+        }
+    }
+    foreach ($a in $ans) {
+        $entries.Add([pscustomobject]@{ type = [string]$a.type; label = [string]$a.label; value = $a.value; source = 'operator-answer' })
+    }
+
+    $fieldDefaults = [ordered]@{}
+    $sources = [ordered]@{}
+    $unresolved = [System.Collections.Generic.List[object]]::new()
+    foreach ($e in $entries) {
+        $tid = Resolve-TypeId $e.type
+        if ($null -eq $tid) {
+            $unresolved.Add([ordered]@{ type = $e.type; label = $e.label; reason = 'unknown issue type' })
+            continue
+        }
+        $fid = Resolve-FieldId $tid $e.label
+        if ($null -eq $fid) {
+            $unresolved.Add([ordered]@{ type = $e.type; label = $e.label; reason = 'unknown field label' })
+            continue
+        }
+        if (-not $fieldDefaults.Contains($tid)) { $fieldDefaults[$tid] = [ordered]@{} }
+        $fieldDefaults[$tid][$fid] = $e.value
+        if (-not $sources.Contains($tid)) { $sources[$tid] = [ordered]@{} }
+        $sources[$tid][$fid] = $e.source
+    }
+
+    return (ConvertTo-JiraJsonValue ([ordered]@{
+        field_defaults = $fieldDefaults
+        field_default_sources = $sources
+        unresolved = $unresolved
+    }))
+}
+
+function Get-JiraPlanConfirmationField {
+    <#
+    .SYNOPSIS
+      011, contract §3.3, data-model.md §4: the `fields` array of the
+      consolidated question, scoped to the issue types that actually have a
+      creation pending THIS run. Mirror of plan_confirmation_fields.
+
+      A field is included exactly when it is about to be SENT (its field_id
+      is a key of FieldDefaultsByTypeJson[type], value taken from there) OR
+      it is required and NOT about to be sent (included with recorded_value
+      $null). A merely-defaultable, optional, unresolved field is never
+      included — it is not a trigger.
+
+      An empty result means neither §3.3 trigger fires: the caller asks
+      nothing.
+    #>
+    [CmdletBinding()]
+    param(
+        [string] $IssueTypesJson = '[]',
+        [string] $DefaultableFieldsByTypeJson = '{}',
+        [string] $FieldDefaultsByTypeJson = '{}',
+        [string] $PendingTypeIdsJson = '[]'
+    )
+    if ([string]::IsNullOrEmpty($IssueTypesJson)) { $IssueTypesJson = '[]' }
+    if ([string]::IsNullOrEmpty($DefaultableFieldsByTypeJson)) { $DefaultableFieldsByTypeJson = '{}' }
+    if ([string]::IsNullOrEmpty($FieldDefaultsByTypeJson)) { $FieldDefaultsByTypeJson = '{}' }
+    if ([string]::IsNullOrEmpty($PendingTypeIdsJson)) { $PendingTypeIdsJson = '[]' }
+
+    $itypes = @($IssueTypesJson | ConvertFrom-Json -Depth 100)
+    $df = $DefaultableFieldsByTypeJson | ConvertFrom-Json -Depth 100
+    $fd = $FieldDefaultsByTypeJson | ConvertFrom-Json -Depth 100
+    $pending = @($PendingTypeIdsJson | ConvertFrom-Json -Depth 100)
+
+    function Resolve-PcfTypeName([string] $TypeId) {
+        foreach ($t in $itypes) { if ([string]$t.id -eq $TypeId) { return [string]$t.logical_name } }
+        return $TypeId
+    }
+
+    $result = [System.Collections.Generic.List[object]]::new()
+    foreach ($tid in $pending) {
+        $tid = [string]$tid
+        $listProp = $df.PSObject.Properties[$tid]
+        if ($null -eq $listProp) { continue }
+        $fdForType = Get-JiraPlanProp $fd $tid
+        foreach ($f in @($listProp.Value)) {
+            $sent = $null
+            if ($null -ne $fdForType) { $sent = Get-JiraPlanProp $fdForType ([string]$f.field_id) }
+            $required = [bool]$f.required
+            if ($null -eq $sent -and -not $required) { continue }
+            $allowed = @()
+            if ($null -ne (Get-JiraPlanProp $f 'allowed_values')) { $allowed = @($f.allowed_values) }
+            $result.Add([ordered]@{
+                issue_type = (Resolve-PcfTypeName $tid)
+                label = [string]$f.logical_name
+                recorded_value = $sent
+                required = $required
+                allowed_values = $allowed
+            })
+        }
+    }
+    return (ConvertTo-JiraJsonValue $result)
+}
+
 function Get-JiraPlanWriteSet {
     <#
     .SYNOPSIS
@@ -63,6 +219,12 @@ function Get-JiraPlanWriteSet {
     $estId = [string](Get-JiraPlanProp $ctx 'estimation_field_id')
     $tickets = Get-JiraPlanProp $ctx 'tickets'
     $priorityIds = Get-JiraPlanProp $ctx 'priority_ids'
+    # 011, research R2: {type_id: {field_id: value}}. $null ⇒ the merge in
+    # Get-JiraCreateFieldsBase is a no-op (FR-028) — that builder itself
+    # scopes the merge to the type being created, so a default recorded for
+    # the OTHER written type never reaches this payload (FR-018).
+    $fieldDefaultsProp = Get-JiraPlanProp $ctx 'field_defaults'
+    $fieldDefaultsJson = if ($null -eq $fieldDefaultsProp) { '' } else { ConvertTo-JiraJsonValue $fieldDefaultsProp }
     # The payload's project comes from the neutral document's validated
     # routing.project_key — never from the plan context — so it cannot
     # disagree with the run summary's resolved project (research R2, FR-023).
@@ -97,7 +259,7 @@ function Get-JiraPlanWriteSet {
             # resolved once the parent's create response is read. A
             # bridge-created ticket owns its whole description (no delimiter,
             # FR-040).
-            $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $title -IssueTypeId $storyType | ConvertFrom-Json
+            $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $title -IssueTypeId $storyType -FieldDefaultsByTypeJson $fieldDefaultsJson | ConvertFrom-Json
             $fields = [ordered]@{}
             foreach ($p in $baseFields.PSObject.Properties) { $fields[$p.Name] = $p.Value }
             $fields['description'] = $adf
@@ -174,8 +336,12 @@ function Get-JiraPlanWriteSetParent {
     $parentKey = [string](Get-JiraPlanProp $ctx 'parent_key')
 
     if ($parentKey -eq '') {
-        # CREATE: no parent recognised yet.
-        $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $epicTitle -IssueTypeId $parentType | ConvertFrom-Json
+        # CREATE: no parent recognised yet. 011, research R2: same
+        # field_defaults map the story branch reads, scoped to the parent
+        # type by the shared builder itself.
+        $fieldDefaultsProp = Get-JiraPlanProp $ctx 'field_defaults'
+        $fieldDefaultsJson = if ($null -eq $fieldDefaultsProp) { '' } else { ConvertTo-JiraJsonValue $fieldDefaultsProp }
+        $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $epicTitle -IssueTypeId $parentType -FieldDefaultsByTypeJson $fieldDefaultsJson | ConvertFrom-Json
         $fields = [ordered]@{}
         foreach ($p in $baseFields.PSObject.Properties) { $fields[$p.Name] = $p.Value }
         $fields['description'] = $epicAdf
@@ -417,6 +583,29 @@ function Invoke-JiraApplyWriteSet {
     return $worst
 }
 
+function Write-JiraApplyRejectionReport {
+    <#
+    .SYNOPSIS
+      011, contract §3.7, FR-019: when a CREATE (POST .../issue) fails with a
+      400 whose Jira error body names a field this run defaulted, print the
+      human translation to stderr (mirrors Test-JiraPrivacyBlock's own
+      self-printing pattern) before the caller returns fail-closed. Mirror of
+      _plan_apply_report_rejection.
+    #>
+    param(
+        [string] $Method,
+        [string] $Url,
+        $Action,
+        [string] $DefaultableFieldsByTypeJson,
+        $Result
+    )
+    if ($Method -ne 'POST' -or -not $Url.EndsWith('/issue') -or [int]$Result.Status -ne 400) { return }
+    $actionJson = ConvertTo-JiraJsonValue $Action
+    $errBody = if ($Result.ErrorBody) { $Result.ErrorBody } else { '{}' }
+    $msg = Get-JiraTicketFieldRejectionMessage -DefaultableFieldsByTypeJson $DefaultableFieldsByTypeJson -ActionJson $actionJson -ErrorBodyJson $errBody
+    if ($msg) { [Console]::Error.WriteLine($msg) }
+}
+
 function Invoke-JiraApplyWriteSetWithRecognition {
     <#
     .SYNOPSIS
@@ -436,6 +625,11 @@ function Invoke-JiraApplyWriteSetWithRecognition {
       created (parent or story), its identity marker is stamped and its
       `creating` mark is replaced with the recorded key IN $SpecFile — per
       ticket, IMMEDIATELY, never batched (step 6/11).
+
+      DefaultableFieldsByTypeJson (011, contract §3.7, FR-019): the binding's
+      defaultable_fields map, {type_id: [{logical_name, field_id, ...}]}.
+      Omitted or empty ⇒ a rejected creation falls through to the existing
+      generic failure path unchanged (FR-028).
     #>
     [CmdletBinding()]
     param(
@@ -443,8 +637,10 @@ function Invoke-JiraApplyWriteSetWithRecognition {
         [Parameter(Mandatory)] [string] $SpecRefJson,
         [Parameter(Mandatory)] [string] $SpecFile,
         [string] $KnownParentKey = '',
-        [string] $ExtraKnownCoordinatesJson = '[]'
+        [string] $ExtraKnownCoordinatesJson = '[]',
+        [string] $DefaultableFieldsByTypeJson = '{}'
     )
+    if ([string]::IsNullOrEmpty($DefaultableFieldsByTypeJson)) { $DefaultableFieldsByTypeJson = '{}' }
     $coords = Get-JiraApplyKnownCoordinate -ExtraJson $ExtraKnownCoordinatesJson
     $allow = if ($env:SPEC_KIT_JIRA_ALLOWLIST) { $env:SPEC_KIT_JIRA_ALLOWLIST } else { '[]' }
     $plan = $PlanJson | ConvertFrom-Json -Depth 100
@@ -506,7 +702,10 @@ function Invoke-JiraApplyWriteSetWithRecognition {
             $r = Invoke-JiraRequest -Method $parent.method -Url $parent.url
         }
         if ([int]$r.ExitCode -gt $worst) { $worst = [int]$r.ExitCode }
-        if ([int]$r.ExitCode -ge 2) { return $worst }
+        if ([int]$r.ExitCode -ge 2) {
+            Write-JiraApplyRejectionReport -Method $parent.method -Url $parent.url -Action $parent -DefaultableFieldsByTypeJson $DefaultableFieldsByTypeJson -Result $r
+            return $worst
+        }
         if ($parent.method -eq 'POST') {
             $respObj = $null
             # A body that fails to parse is not fatal: $respObj stays $null
@@ -544,7 +743,10 @@ function Invoke-JiraApplyWriteSetWithRecognition {
             $r = Invoke-JiraRequest -Method $action.method -Url $action.url
         }
         if ([int]$r.ExitCode -gt $worst) { $worst = [int]$r.ExitCode }
-        if ([int]$r.ExitCode -ge 2) { return $worst }
+        if ([int]$r.ExitCode -ge 2) {
+            Write-JiraApplyRejectionReport -Method $action.method -Url $action.url -Action $action -DefaultableFieldsByTypeJson $DefaultableFieldsByTypeJson -Result $r
+            return $worst
+        }
 
         if ($action.method -eq 'POST' -and ([string]$action.url).EndsWith('/issue')) {
             $respObj = $null
@@ -566,4 +768,5 @@ function Invoke-JiraApplyWriteSetWithRecognition {
 }
 
 Export-ModuleMember -Function Get-JiraApplyKnownCoordinate, Invoke-JiraApplyWriteSet, Get-JiraPlanWriteSet, Get-JiraLifecyclePlan, `
-    Get-JiraManagedDescriptionStatus, Invoke-JiraApplyWriteSetWithRecognition
+    Get-JiraManagedDescriptionStatus, Invoke-JiraApplyWriteSetWithRecognition, Get-JiraPlanResolveFieldDefault, `
+    Get-JiraPlanConfirmationField

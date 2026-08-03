@@ -40,6 +40,38 @@ Every failure between step 1 and step 9 exits with **zero Jira writes**. That
 is not incidental: the write path is the last thing that happens, after every
 decision has already been made.
 
+## The consolidated field-defaults question (011)
+
+A recorded default makes an otherwise-unsatisfiable required field
+satisfiable — the same predicate the config ceremony's gate uses. Before any
+write, the planning pass (the exact computation `--dry-run` performs) checks
+whether the pending creations would either send a recorded default or still
+leave a required field unsatisfiable:
+
+```mermaid
+flowchart TD
+    Plan["8 · PLAN the ordered action set"] --> Trigger{"Any pending creation sends<br/>a recorded default, OR leaves<br/>a required field unsatisfiable?"}
+    Trigger -->|"no"| Continue["Continue to LIFECYCLE filter,<br/>then APPLY as usual"]
+    Trigger -->|"yes"| Ask{"ask switch on,<br/>AND --accept-defaults<br/>not given?"}
+    Ask -->|"no"| Continue
+    Ask -->|"yes"| Stop["Stop before any write<br/>emit ONE confirmation-pending object<br/>naming every field once<br/>exit 0, zero writes"]
+    Stop --> Reinvoke["Re-invoke with --accept-defaults<br/>and/or --field-value KEY=Type=Label=Value"]
+    Reinvoke --> Plan
+```
+
+The planning pass and the writing pass are the same code, run twice, never a
+second and divergent computation — so a `--dry-run` preview and the run that
+follows it can never disagree about a defaulted value. A **decline** is
+resumed exactly like an acceptance: re-invoke with `--accept-defaults`; there
+is no decline flag. When no answer can be obtained and a required field
+stays unsatisfiable, the run refuses for that specification with the
+pre-existing exit code and a message carrying the copy-pasteable
+`speckit.jira.config --field-default …` remedy line.
+
+A field that is merely *defaultable*, with nothing recorded against it, is
+never a trigger — a project that recorded nothing sees no question and no
+change in behaviour (FR-028).
+
 ## Engine to sink, in sequence
 
 ```mermaid

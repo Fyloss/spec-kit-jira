@@ -183,6 +183,107 @@ function Get-JiraReconcilePhaseOrder {
     return (ConvertTo-JiraJsonValue $distinct)
 }
 
+function Get-JiraReconcileFieldDefaultNote {
+    <#
+    .SYNOPSIS
+      011, contract §4.1/§4.2: mirror of _reconcile_field_default_notes. For
+      every field this run actually sent that came from a recorded default or
+      a this-run answer (never a bridge-supplied field), one provenance line
+      naming the field, the value, and its source; for an `operator-answer`
+      source, one further line with the `/speckit.jira.config --field-default
+      …` command that would make the override permanent (FR-021).
+      Deduplicated by (type, field) — reported once per run, not once per
+      creation. When at least one field was filled AND the confirmation
+      question never fired — `ask` is off, `--accept-defaults` was given, or
+      this is a `-DryRun` — one final line states which reason applied
+      (§4.2, FR-015). Returns an array of strings, empty when nothing was
+      defaulted this run (FR-028 — the off switch).
+    #>
+    [CmdletBinding()]
+    param(
+        [string] $ProjectKey,
+        [string] $IssueTypesJson = '[]',
+        [string] $DefaultableFieldsByTypeJson = '{}',
+        [string] $ResolvedJson = '{}',
+        [string] $ActionsJson = '[]',
+        [string] $ParentActionJson = 'null',
+        [bool] $Ask,
+        [bool] $AcceptDefaults,
+        [bool] $DryRun
+    )
+    if ([string]::IsNullOrEmpty($IssueTypesJson)) { $IssueTypesJson = '[]' }
+    if ([string]::IsNullOrEmpty($DefaultableFieldsByTypeJson)) { $DefaultableFieldsByTypeJson = '{}' }
+    if ([string]::IsNullOrEmpty($ResolvedJson)) { $ResolvedJson = '{}' }
+    if ([string]::IsNullOrEmpty($ActionsJson)) { $ActionsJson = '[]' }
+    if ([string]::IsNullOrEmpty($ParentActionJson)) { $ParentActionJson = 'null' }
+
+    $itypes = @($IssueTypesJson | ConvertFrom-Json -Depth 100)
+    $df = $DefaultableFieldsByTypeJson | ConvertFrom-Json -Depth 100
+    $resolved = $ResolvedJson | ConvertFrom-Json -Depth 100
+    $actions = @($ActionsJson | ConvertFrom-Json -Depth 100)
+    $parent = $ParentActionJson | ConvertFrom-Json -Depth 100
+
+    function Resolve-RfdnTypeName([string] $TypeId) {
+        foreach ($t in $itypes) { if ([string]$t.id -eq $TypeId) { return [string]$t.logical_name } }
+        return $TypeId
+    }
+    function Resolve-RfdnLabel([string] $TypeId, [string] $FieldId) {
+        $listProp = $df.PSObject.Properties[$TypeId]
+        if ($null -ne $listProp) {
+            foreach ($f in @($listProp.Value)) { if ([string]$f.field_id -eq $FieldId) { return [string]$f.logical_name } }
+        }
+        return $FieldId
+    }
+
+    $creates = [System.Collections.Generic.List[object]]::new()
+    if ($null -ne $parent -and [string]$parent.method -eq 'POST' -and ([string]$parent.url).EndsWith('/issue')) { $creates.Add($parent) }
+    foreach ($a in $actions) {
+        if ($null -ne $a -and [string]$a.method -eq 'POST' -and ([string]$a.url).EndsWith('/issue')) { $creates.Add($a) }
+    }
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new()
+    $entries = [System.Collections.Generic.List[object]]::new()
+    foreach ($c in $creates) {
+        $tid = [string]$c.body.fields.issuetype.id
+        $fdForType = Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $resolved 'field_defaults') $tid
+        if ($null -eq $fdForType) { continue }
+        foreach ($p in $fdForType.PSObject.Properties) {
+            $fid = $p.Name
+            $key = "$tid|$fid"
+            if ($seen.Contains($key)) { continue }
+            $seen.Add($key) | Out-Null
+            $srcForType = Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $resolved 'field_default_sources') $tid
+            $source = if ($null -ne $srcForType) { $srcMember = $srcForType.PSObject.Properties[$fid]; if ($srcMember) { [string]$srcMember.Value } else { 'team-config' } } else { 'team-config' }
+            $entries.Add([ordered]@{ tid = $tid; fid = $fid; value = $p.Value; source = $source })
+        }
+    }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($e in $entries) {
+        $label = Resolve-RfdnLabel $e.tid $e.fid
+        $typeName = Resolve-RfdnTypeName $e.tid
+        $lines.Add("config: project ${ProjectKey}: $label ($typeName) = `"$($e.value)`" — sent from $($e.source)")
+    }
+    foreach ($e in $entries) {
+        if ($e.source -ne 'operator-answer') { continue }
+        $label = Resolve-RfdnLabel $e.tid $e.fid
+        $typeName = Resolve-RfdnTypeName $e.tid
+        $lines.Add("config: project ${ProjectKey}: make this override permanent — /speckit.jira.config $ProjectKey --field-default $ProjectKey=$typeName=$label=$($e.value)")
+    }
+    if ($entries.Count -gt 0) {
+        if ($DryRun) {
+            $lines.Add("config: project ${ProjectKey}: this is a preview (--dry-run) — no question was asked and nothing was written")
+        }
+        elseif ($AcceptDefaults) {
+            $lines.Add("config: project ${ProjectKey}: the confirmation question was skipped — --accept-defaults was given")
+        }
+        elseif (-not $Ask) {
+            $lines.Add("config: project ${ProjectKey}: the confirmation question was skipped — field-defaults confirmation is off for this project (ask: false)")
+        }
+    }
+    return $lines
+}
+
 function Get-JiraPlanPropSafe {
     # Safe property read (an empty PSCustomObject throws under StrictMode when
     # indexing a member that does not exist).
@@ -254,7 +355,8 @@ function Get-JiraReconcilePlanContextFromBinding {
         [Parameter(Mandatory)] [string] $ProjectKey,
         [Parameter(Mandatory)] [string] $ConfigDir,
         [Parameter(Mandatory)] [string] $ConfigJson,
-        [string] $RecognitionJson = '{}'
+        [string] $RecognitionJson = '{}',
+        [string] $FieldValues = ''
     )
     if ($env:SPEC_KIT_JIRA_PLAN_CONTEXT) {
         return [pscustomobject]@{ ExitCode = 0; Json = (Get-JiraReconcilePlanContext -BaseUrl $BaseUrl) }
@@ -286,6 +388,21 @@ function Get-JiraReconcilePlanContextFromBinding {
     }
     $priorities = Get-JiraPlanPropSafe $binding 'priorities'
     $estField = [string](Get-JiraPlanPropSafe $binding 'estimation_field_id')
+
+    # Recorded field defaults (011, research R2): resolved to {issue-type-id:
+    # {field-id: value}} at plan time, the same shape Get-JiraCreateFieldsBase
+    # merges into a create payload. Absence is the off switch (FR-028) — with
+    # nothing recorded and no --field-value answer this resolves to {}, and
+    # the omitted key below leaves Get-JiraPlanWriteSet's output
+    # byte-identical to before this feature.
+    $fdItypesRaw = Get-JiraPlanPropSafe $binding 'issue_types'
+    $fdItypesJson = if ($null -ne $fdItypesRaw) { ConvertTo-JiraJsonValue @($fdItypesRaw) } else { '[]' }
+    $fdDfRaw = Get-JiraPlanPropSafe $binding 'defaultable_fields'
+    $fdDfJson = if ($null -ne $fdDfRaw) { ConvertTo-JiraJsonValue $fdDfRaw } else { '{}' }
+    $fdRecordedJson = Get-JiraFieldDefaultsFor -ProjectKey $ProjectKey -ConfigJson $ConfigJson
+    $fdAnswersJson = Get-JiraFieldAnswersFor -ProjectKey $ProjectKey -FieldFlags $FieldValues
+    $fieldDefaultsJson = (Get-JiraPlanResolveFieldDefault -IssueTypesJson $fdItypesJson -DefaultableFieldsByTypeJson $fdDfJson `
+            -RecordedJson $fdRecordedJson -AnswersJson $fdAnswersJson | ConvertFrom-Json -Depth 100).field_defaults
 
     # Two-step priority resolution (FR-008): level -> logical name (team
     # config) -> identifier (persisted binding). Either step yielding nothing
@@ -338,6 +455,7 @@ function Get-JiraReconcilePlanContextFromBinding {
     if ($ticketOrigins.Count -gt 0) { $result['ticket_origins'] = $ticketOrigins }
     if ($ticketDescriptions.Count -gt 0) { $result['ticket_descriptions'] = $ticketDescriptions }
     if ($ticketParents.Count -gt 0) { $result['ticket_parents'] = $ticketParents }
+    if (@($fieldDefaultsJson.PSObject.Properties).Count -gt 0) { $result['field_defaults'] = $fieldDefaultsJson }
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-Json -InputObject $result -Compress -Depth 20) }
 }
 
@@ -362,6 +480,8 @@ function Invoke-JiraReconcile {
     $json = $state['json'] -eq 'true'
     $dryRun = $state['dry_run'] -eq 'true'
     $onDrift = if ($state.ContainsKey('on_drift') -and $state['on_drift']) { $state['on_drift'] } else { 'abort' }
+    $fieldValues = if ($state.ContainsKey('field_values')) { $state['field_values'] } else { '' }
+    $acceptDefaults = $state['accept_defaults'] -eq 'true'
 
     # (0) DISPATCH GUARD — the operator's disable decision, honoured before any
     # prerequisite check, any config read and any network call (FR-020). The exit
@@ -504,6 +624,85 @@ function Invoke-JiraReconcile {
     $phaseStatusMap = Get-JiraReconcilePhaseStatusMap -ProjectKey $projectKey -ConfigJson $cfg
     $haltedStatuses = Get-JiraReconcileHaltedStatuses -ProjectKey $projectKey -ConfigJson $cfg
 
+    # Mandatory-field gate (Phase 6, US3, T086/T087/T088; contracts/
+    # hierarchy-resolution.md §4/§5), moved ahead of spec-marker assignment
+    # by Phase 4 (US2, T066): a run that turns out to stop for the
+    # consolidated question (below) must write NEITHER spec.md's markers NOR
+    # anything to Jira, so the marker file write further down is gated on
+    # $fdAskPending too. Runs after derivation and before recognition, so no
+    # read and no write has happened yet. Reads the SAME persisted binding
+    # the plan context reads later; a binding that cannot be read yet, or
+    # resolves to no bound project, is reported exactly as the plan-context
+    # path already reports it — that error surfaces at its usual point below
+    # rather than being duplicated here.
+    $fdAskPending = $false
+    $fdItypesJson = '[]'
+    $fdDfJson = '{}'
+    $fdDefaultsByTypeJson = '{}'
+    $gateResult = $null
+    $gateResolved = $null
+    $gateAsk = $true
+    $gateBindingResult = Get-JiraReconcileLocalBindingFor -ProjectKey $projectKey -ConfigDir $cfgDir
+    if ($gateBindingResult.ExitCode -eq 0) {
+        $gateBinding = $gateBindingResult.Json | ConvertFrom-Json -Depth 100
+        $gateChildType = [string](Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $gateBinding 'child_type') 'id')
+        if (-not [string]::IsNullOrEmpty($gateChildType)) {
+            # Recorded field defaults (011, research R2/R5, contract §3.3/
+            # §3.4/§3.10): a required field with a recorded default or a
+            # this-run --field-value answer is now satisfiable. A required
+            # field that remains unsatisfiable still refuses here UNCHANGED
+            # when the operator cannot be asked — `ask` is off,
+            # --accept-defaults was given, or this is a --dry-run (§4.3: the
+            # preview never asks, only ever previews or refuses). Otherwise
+            # the refusal is DEFERRED to the consolidated question below
+            # ($fdAskPending), fired only once the plan shows a creation is
+            # actually pending (FR-013) — never merely offered (FR-028).
+            $gateItypesRaw = Get-JiraPlanPropSafe $gateBinding 'issue_types'
+            $fdItypesJson = if ($null -ne $gateItypesRaw) { ConvertTo-JiraJsonValue @($gateItypesRaw) } else { '[]' }
+            $gateDfRaw = Get-JiraPlanPropSafe $gateBinding 'defaultable_fields'
+            $fdDfJson = if ($null -ne $gateDfRaw) { ConvertTo-JiraJsonValue $gateDfRaw } else { '{}' }
+            $gateRecordedJson = Get-JiraFieldDefaultsFor -ProjectKey $projectKey -ConfigJson $cfg
+            $gateAnswersJson = Get-JiraFieldAnswersFor -ProjectKey $projectKey -FieldFlags $fieldValues
+            $gateResolved = Get-JiraPlanResolveFieldDefault -IssueTypesJson $fdItypesJson -DefaultableFieldsByTypeJson $fdDfJson `
+                -RecordedJson $gateRecordedJson -AnswersJson $gateAnswersJson | ConvertFrom-Json -Depth 100
+            $fdDefaultsByTypeJson = ConvertTo-JiraJsonValue $gateResolved.field_defaults
+            $gateAsk = [bool]($gateRecordedJson | ConvertFrom-Json -Depth 100).ask
+
+            $gateResult = Get-JiraHierarchyMandatoryGate -Binding $gateBinding -ProjectKey $projectKey -DefaultsByType ($fdDefaultsByTypeJson | ConvertFrom-Json -Depth 100)
+            $gateAskable = $gateAsk -and (-not $acceptDefaults) -and (-not $dryRun)
+            if ($gateResult.status -eq 'unsatisfiable' -and $gateAskable) {
+                $fdAskPending = $true
+            }
+            elseif ($gateResult.status -ne 'ok') {
+                return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message $gateResult.message)
+            }
+            elseif ($gateAskable -and (@(($fdDefaultsByTypeJson | ConvertFrom-Json -Depth 100).PSObject.Properties).Count -gt 0)) {
+                # gate status == ok but at least one default is resolved: a
+                # recorded default might be about to land on a pending
+                # creation (§3.3 trigger 1) — confirmed once the plan is
+                # known, below.
+                $fdAskPending = $true
+            }
+        }
+
+        # §8 re-validation (Phase 6, US4, T052; contract §8): check 4
+        # (ordering) re-run against the PERSISTED binding's roles,
+        # `reconcile:` prefixed, no re-read of the project's metadata.
+        # Checks 5/6 are already re-validated above via
+        # Get-JiraHierarchyMandatoryGate, which reads the same
+        # dual-written child_type/parent_type keys regardless of this
+        # feature. A binding with no `roles` property — written before
+        # 010, or a project whose mapping was never resolved past style —
+        # stays non-fatal.
+        $gateRoles = Get-JiraPlanPropSafe $gateBinding 'roles'
+        if ($null -ne $gateRoles) {
+            $reconcileOrderingMessage = $null
+            if (-not (Test-JiraRoleMappingReconcile -ProjectKey $projectKey -Roles $gateRoles -Message ([ref]$reconcileOrderingMessage))) {
+                return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message $reconcileOrderingMessage)
+            }
+        }
+    }
+
     # R5 step 1 — ASSIGN (Phase 2/3, contracts/story-marker.md, research R5):
     # every story section with no marker at all gets a durable identifier,
     # spliced into spec.md. A dry run computes the SAME assignment but never
@@ -541,7 +740,7 @@ function Invoke-JiraReconcile {
         $assignedSpec = Set-JiraSpecMarkerAssign -Text $assignedSpec
         $needWrite = $true
     }
-    if ($needWrite -and -not $dryRun) {
+    if ($needWrite -and -not $dryRun -and -not $fdAskPending) {
         try { Write-JiraMarkerSpliceFile -Path $specFile -NewContent $assignedSpec | Out-Null }
         catch {
             return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: $specFile could not be written — no ticket may be created before its identifier is recorded (zero writes)")
@@ -579,42 +778,6 @@ function Invoke-JiraReconcile {
     $planBlocks = @($planBlocksJson | ConvertFrom-Json -Depth 100)
     if ($planBlocks.Count -gt 0) {
         $docObj.epic.description.blocks = @($docObj.epic.description.blocks) + $planBlocks
-    }
-
-    # Mandatory-field gate (Phase 6, US3, T086/T087/T088; contracts/
-    # hierarchy-resolution.md §4/§5): runs after derivation and before
-    # recognition, so no read and no write has happened yet. Reads the SAME
-    # persisted binding the plan context reads later; a binding that cannot
-    # be read yet, or resolves to no bound project, is reported exactly as
-    # the plan-context path already reports it — that error surfaces at its
-    # usual point below rather than being duplicated here.
-    $gateBindingResult = Get-JiraReconcileLocalBindingFor -ProjectKey $projectKey -ConfigDir $cfgDir
-    if ($gateBindingResult.ExitCode -eq 0) {
-        $gateBinding = $gateBindingResult.Json | ConvertFrom-Json -Depth 100
-        $gateChildType = [string](Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $gateBinding 'child_type') 'id')
-        if (-not [string]::IsNullOrEmpty($gateChildType)) {
-            $gateResult = Get-JiraHierarchyMandatoryGate -Binding $gateBinding -ProjectKey $projectKey
-            if ($gateResult.status -ne 'ok') {
-                return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message $gateResult.message)
-            }
-        }
-
-        # §8 re-validation (Phase 6, US4, T052; contract §8): check 4
-        # (ordering) re-run against the PERSISTED binding's roles,
-        # `reconcile:` prefixed, no re-read of the project's metadata.
-        # Checks 5/6 are already re-validated above via
-        # Get-JiraHierarchyMandatoryGate, which reads the same
-        # dual-written child_type/parent_type keys regardless of this
-        # feature. A binding with no `roles` property — written before
-        # 010, or a project whose mapping was never resolved past style —
-        # stays non-fatal.
-        $gateRoles = Get-JiraPlanPropSafe $gateBinding 'roles'
-        if ($null -ne $gateRoles) {
-            $reconcileOrderingMessage = $null
-            if (-not (Test-JiraRoleMappingReconcile -ProjectKey $projectKey -Roles $gateRoles -Message ([ref]$reconcileOrderingMessage))) {
-                return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message $reconcileOrderingMessage)
-            }
-        }
     }
 
     # R5 step 2a — RECOGNISE THE PARENT (Phase 5, US2, T070/T077;
@@ -662,7 +825,7 @@ function Invoke-JiraReconcile {
     # map). An explicit SPEC_KIT_JIRA_PLAN_CONTEXT overrides the derived
     # object wholesale; otherwise it is built from the resolved project's
     # persisted binding.
-    $planCtxResult = Get-JiraReconcilePlanContextFromBinding -BaseUrl $base -ProjectKey $projectKey -ConfigDir $cfgDir -ConfigJson $cfg -RecognitionJson $recogJson
+    $planCtxResult = Get-JiraReconcilePlanContextFromBinding -BaseUrl $base -ProjectKey $projectKey -ConfigDir $cfgDir -ConfigJson $cfg -RecognitionJson $recogJson -FieldValues $fieldValues
     if ($planCtxResult.ExitCode -eq 2) {
         Write-JiraReconcileNotice -Lines @(
             'Jira mirror skipped: this repository is not bound to a Jira project yet.',
@@ -828,6 +991,67 @@ function Invoke-JiraReconcile {
     $hasLifecycle = $hasOverrideLifecycle
     if ($warnCount -gt 0) { $hasLifecycle = $true }
 
+    # The consolidated question (Phase 4, US2, T066/T068; contract §3.3/
+    # §3.4; data-model.md §4): fired only now that recognition and planning
+    # show whether a creation is actually pending (FR-013) — $fdAskPending
+    # above was merely a STRUCTURAL candidate, computed before recognition
+    # ran. Scoped to the types that actually have a creation pending THIS
+    # run (never a type the project merely offers — FR-028). Zero writes on
+    # this path: neither the marker file (deferred above) nor any Jira call
+    # has happened yet.
+    if ($fdAskPending -and $created -gt 0) {
+        $fdPendingTypes = [System.Collections.Generic.List[string]]::new()
+        foreach ($x in $actions) {
+            if ($x.method -eq 'POST' -and ([string]$x.url).EndsWith('/issue')) {
+                $fdPendingTypes.Add([string]$x.body.fields.issuetype.id)
+            }
+        }
+        if ($null -ne $parentAction -and $parentAction.method -eq 'POST') {
+            $fdPendingTypes.Add([string]$parentAction.body.fields.issuetype.id)
+        }
+        $fdPendingTypesJson = ConvertTo-JiraJsonValue (@($fdPendingTypes | Select-Object -Unique))
+        $fdFieldsJson = Get-JiraPlanConfirmationField -IssueTypesJson $fdItypesJson -DefaultableFieldsByTypeJson $fdDfJson `
+            -FieldDefaultsByTypeJson $fdDefaultsByTypeJson -PendingTypeIdsJson $fdPendingTypesJson
+        $fdFields = @($fdFieldsJson | ConvertFrom-Json -Depth 100)
+        if ($fdFields.Count -gt 0) {
+            $fdConfirmation = [ordered]@{
+                status            = 'confirmation-pending'
+                project           = $projectKey
+                fields            = $fdFields
+                creations_pending = $created
+                resume_with       = "/speckit.jira.reconcile $specFile --accept-defaults"
+            }
+            $fdConfirmationJson = ConvertTo-JiraJsonValue $fdConfirmation
+            if ($json) {
+                [Console]::Out.WriteLine($fdConfirmationJson)
+            }
+            else {
+                $fdLabels = ($fdFields | ForEach-Object { [string]$_.label }) -join ', '
+                [Console]::Out.WriteLine("Jira mirror paused: confirm $fdLabels before $created creation(s) are written.")
+                [Console]::Out.WriteLine("Resume with: $($fdConfirmation.resume_with)")
+            }
+            return 0
+        }
+        elseif ($null -ne $gateResult -and $gateResult.status -eq 'unsatisfiable') {
+            # The gate found a pending creation's type structurally
+            # unsatisfiable, but no field-level detail could be built for
+            # it — the binding predates defaultable-field discovery for
+            # that type. Refuse via the gate's own message rather than
+            # silently writing a payload missing a required field.
+            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message $gateResult.message)
+        }
+    }
+
+    # The marker write deferred above, now that we know the question did
+    # not fire (either $fdAskPending was never true, or it was but neither
+    # §3.3 trigger held once the plan was known).
+    if ($fdAskPending -and $needWrite) {
+        try { Write-JiraMarkerSpliceFile -Path $specFile -NewContent $assignedSpec | Out-Null }
+        catch {
+            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: $specFile could not be written — no ticket may be created before its identifier is recorded (zero writes)")
+        }
+    }
+
     $rc = 0
     if (-not $dryRun) {
         # R5 steps 4/6, contract steps 8-11: Invoke-JiraApplyWriteSetWithRecognition
@@ -836,7 +1060,7 @@ function Invoke-JiraReconcile {
         # ticket's key IMMEDIATELY, per ticket.
         $applyPlanJson = ConvertTo-JiraJsonValue ([ordered]@{ parent = $parentAction; stories = @($actionsJson | ConvertFrom-Json -Depth 100) })
         $knownParentKey = if ($parentState -eq 'bound') { [string]$recogParent.key } else { '' }
-        $rc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $applyPlanJson -SpecRefJson $specRefJson -SpecFile $specFile -KnownParentKey $knownParentKey
+        $rc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $applyPlanJson -SpecRefJson $specRefJson -SpecFile $specFile -KnownParentKey $knownParentKey -DefaultableFieldsByTypeJson $fdDfJson
     }
 
     # T079/parent-marker.md `parent-recreated`: a summary note, not a
@@ -923,6 +1147,27 @@ function Invoke-JiraReconcile {
         }
         [Console]::Error.WriteLine("WARNING: Jira mirror not completed — $cause (exit $rc). This spec-kit command completed normally. Run /speckit.jira.config to re-check the binding.")
         $rc = 0
+    }
+
+    # Field-default provenance (011, T074, contract §4.1/§4.2): every field
+    # this run actually sent that came from a recorded default or a this-run
+    # answer, attributed to its source, plus the promotion command for an
+    # override and the skipped-confirmation reason. Reads the SAME resolved
+    # map the gate already computed ($gateResolved) — never a second
+    # resolution pass, so the preview and the real run cannot disagree
+    # (§4.3). Empty when nothing was defaulted this run (FR-028 — the off
+    # switch).
+    $gateResolvedJsonForNotes = if ($null -ne $gateResolved) { ConvertTo-JiraJsonValue $gateResolved } else { '{}' }
+    $fdNoteLines = @(Get-JiraReconcileFieldDefaultNote -ProjectKey $projectKey -IssueTypesJson $fdItypesJson `
+            -DefaultableFieldsByTypeJson $fdDfJson -ResolvedJson $gateResolvedJsonForNotes `
+            -ActionsJson (ConvertTo-JiraJsonValue $actions) -ParentActionJson (ConvertTo-JiraJsonValue $parentAction) `
+            -Ask $gateAsk -AcceptDefaults $acceptDefaults -DryRun $dryRun)
+    if ($fdNoteLines.Count -gt 0) {
+        $notesList3 = [System.Collections.Generic.List[string]]::new()
+        foreach ($n in @($notesJson | ConvertFrom-Json -Depth 100)) { $notesList3.Add([string]$n) }
+        foreach ($n in $fdNoteLines) { $notesList3.Add($n) }
+        $notesJson = ConvertTo-JiraJsonValue $notesList3
+        $hasLifecycle = $true
     }
 
     # Report the action set with the base URL stripped to a host-relative path:

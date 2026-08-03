@@ -45,8 +45,9 @@ boot() {
   boot
   run --separate-stderr cmd_config config --child-type COMP=Story --json
   [ "$status" -eq 0 ]
-  # All effects are present as distinct, named sections (002 adds gitignore).
-  [ "$(jq -r '.effects | keys | sort | join(",")' <<< "$output")" = "discovery,gitignore,hooks,readme" ]
+  # All effects are present as distinct, named sections (002 adds gitignore;
+  # 011 adds field_defaults).
+  [ "$(jq -r '.effects | keys | sort | join(",")' <<< "$output")" = "discovery,field_defaults,gitignore,hooks,readme" ]
   # The discovery effect performed its write this phase.
   [ "$(jq -r '.effects.discovery.status' <<< "$output")" = "written" ]
   # Every effect carries a status from the documented enumeration.

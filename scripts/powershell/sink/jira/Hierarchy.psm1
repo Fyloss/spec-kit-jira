@@ -407,35 +407,78 @@ function Get-JiraHierarchyBindingShapeStaleMessage {
 function Get-JiraHierarchyMandatoryFieldsMessage {
     <#
     .SYNOPSIS
-      Contract §5. Input: array of {type_name; fields:[...]}.
+      Contract §5, §3.6, FR-016. Input: array of {type_name; fields:[...]}.
+      One refusal naming every unsatisfiable field of every written type,
+      followed — when ProjectKey is given — by one copy-pasteable
+      `speckit.jira.config --field-default …` line per field that records a
+      default for it permanently (011, US3). The value is left as a
+      placeholder; only the KEY=Type=Label positions are known here. Mirror
+      of hierarchy_mandatory_fields_message.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] $Unsatisfiable)
+    param([Parameter(Mandatory)] $Unsatisfiable, [string] $ProjectKey = '')
     $parts = foreach ($u in @($Unsatisfiable)) {
         $fields = (@($u.fields) | ForEach-Object { "`"$_`"" }) -join ', '
         "Issue type `"$($u.type_name)`" requires fields this bridge cannot supply: $fields."
     }
-    return ($parts -join ' ')
+    $refusal = ($parts -join ' ') + " Nothing was written (zero writes). Either make these fields optional for these types in the project's field configuration, or create the parent and its stories by hand and record their keys in specs/…/spec.md."
+    if ([string]::IsNullOrEmpty($ProjectKey)) { return $refusal }
+
+    $remedies = foreach ($u in @($Unsatisfiable)) {
+        foreach ($label in @($u.fields)) {
+            "  speckit.jira.config $ProjectKey --field-default $ProjectKey=$($u.type_name)=$label=<value>"
+        }
+    }
+    return (@($refusal, 'Record a default for each to fix this permanently:') + @($remedies)) -join "`n"
 }
 
 function Get-JiraHierarchyUnsatisfiableFields {
     <#
     .SYNOPSIS
-      contract §5: which required fields the bridge can supply. Fields is a
-      single type's list [{logical_name; field_id}]. Mirror of
-      hierarchy_unsatisfiable_fields.
+      contract §1/§5: the ONE predicate both gates call (research R5, 011).
+      Fields is a single type's list [{logical_name; field_id}]. Defaults is
+      that same type's recorded-or-answered defaults, {field_id: value},
+      ALREADY merged by the caller. A field is satisfiable when the bridge
+      supplies it OR a default exists for it — EXCEPT a required `parent`
+      field, which stays unsatisfiable whatever is recorded (contract §1.2).
+      Mirror of hierarchy_unsatisfiable_fields.
     #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Names the set of unsatisfiable fields it derives; a singular name would misdescribe the value.')]
     [CmdletBinding()]
-    param([Parameter(Mandatory)] $Fields, [bool] $HasParentLink = $false)
+    param([Parameter(Mandatory)] $Fields, [bool] $HasParentLink = $false, $Defaults = $null)
     $satisfiable = @('summary', 'description', 'issuetype', 'project', 'priority', 'reporter')
     $out = [System.Collections.Generic.List[string]]::new()
     foreach ($f in @($Fields)) {
         $fid = [string]$f.field_id
-        $ok = ($satisfiable -contains $fid) -or ($fid -eq 'parent' -and $HasParentLink)
+        $hasDefault = $false
+        if ($fid -ne 'parent' -and $null -ne $Defaults) {
+            $hasDefault = ($Defaults.PSObject.Properties.Match($fid).Count -gt 0)
+        }
+        $ok = ($satisfiable -contains $fid) -or ($fid -eq 'parent' -and $HasParentLink) -or $hasDefault
         if (-not $ok) { $out.Add([string]$f.logical_name) }
     }
     return $out.ToArray()
+}
+
+function Get-JiraHierarchyUndefaultableRequiredFields {
+    <#
+    .SYNOPSIS
+      Contract §2.3, FR-010: the REQUIRED fields of one type's
+      defaultable-fields list whose shape cannot be a recorded value at all —
+      reported by label with the reason. A field with required = $false is
+      excluded even when undefaultable. Mirror of
+      hierarchy_undefaultable_required_fields.
+    #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Names the set of undefaultable-field descriptors it derives; a singular name would misdescribe the value.')]
+    [CmdletBinding()]
+    param($Fields)
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($f in @($Fields)) {
+        if ([bool] $f.required -and -not [bool] $f.defaultable) {
+            $out.Add([ordered]@{ logical_name = $f.logical_name; reason = $f.undefaultable_reason })
+        }
+    }
+    return $out
 }
 
 function Get-JiraHierarchyMandatoryGate {
@@ -461,7 +504,7 @@ function Get-JiraHierarchyMandatoryGate {
         @{ status = 'unsatisfiable'; reason = 'mandatory-fields-unsatisfiable'; message = '...' }
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] $Binding, [string] $ProjectKey = '')
+    param([Parameter(Mandatory)] $Binding, [string] $ProjectKey = '', $DefaultsByType = $null)
 
     $childId = [string]$Binding.child_type.id
     $childName = [string]$Binding.child_type.logical_name
@@ -485,10 +528,17 @@ function Get-JiraHierarchyMandatoryGate {
     $parentFields = @()
     if ($null -ne $rf -and $rf.PSObject.Properties.Match($parentId).Count -gt 0) { $parentFields = @($rf.$parentId) }
 
+    $childDefaults = $null
+    $parentDefaults = $null
+    if ($null -ne $DefaultsByType) {
+        if ($DefaultsByType.PSObject.Properties.Match($childId).Count -gt 0) { $childDefaults = $DefaultsByType.$childId }
+        if ($DefaultsByType.PSObject.Properties.Match($parentId).Count -gt 0) { $parentDefaults = $DefaultsByType.$parentId }
+    }
+
     # The parent's own `parent` field, were one ever required, is always
-    # unsatisfiable — a parent has no parent (contract §5).
-    $childUnsat = @(Get-JiraHierarchyUnsatisfiableFields -Fields $childFields -HasParentLink $true)
-    $parentUnsat = @(Get-JiraHierarchyUnsatisfiableFields -Fields $parentFields -HasParentLink $false)
+    # unsatisfiable — a parent has no parent (contract §5, §1.2).
+    $childUnsat = @(Get-JiraHierarchyUnsatisfiableFields -Fields $childFields -HasParentLink $true -Defaults $childDefaults)
+    $parentUnsat = @(Get-JiraHierarchyUnsatisfiableFields -Fields $parentFields -HasParentLink $false -Defaults $parentDefaults)
 
     $unsat = [System.Collections.Generic.List[object]]::new()
     if ($parentUnsat.Count -gt 0) { $unsat.Add([pscustomobject]@{ type_name = $parentName; fields = $parentUnsat }) }
@@ -498,8 +548,8 @@ function Get-JiraHierarchyMandatoryGate {
         return [pscustomobject]@{ status = 'ok' }
     }
 
-    $bodyMsg = Get-JiraHierarchyMandatoryFieldsMessage -Unsatisfiable $unsat.ToArray()
-    $msg = "reconcile: $bodyMsg Nothing was written (zero writes). Either make these fields optional for these types in the project's field configuration, or create the parent and its stories by hand and record their keys in specs/…/spec.md."
+    $bodyMsg = Get-JiraHierarchyMandatoryFieldsMessage -Unsatisfiable $unsat.ToArray() -ProjectKey $ProjectKey
+    $msg = "reconcile: $bodyMsg"
     return [pscustomobject]@{ status = 'unsatisfiable'; reason = 'mandatory-fields-unsatisfiable'; message = $msg }
 }
 
@@ -507,6 +557,7 @@ Export-ModuleMember -Function Get-JiraHierarchyChildLevel, Get-JiraHierarchyDeri
     Get-JiraHierarchyChildTypeUnresolvedMessage, Get-JiraHierarchyParentLinkUnavailableMessage, `
     Get-JiraHierarchyBindingShapeStaleMessage, Get-JiraHierarchyMandatoryFieldsMessage, `
     Get-JiraHierarchyUnsatisfiableFields, Get-JiraHierarchyMandatoryGate, `
+    Get-JiraHierarchyUndefaultableRequiredFields, `
     Get-JiraRoleCandidates, Resolve-JiraRoleMapping, Test-JiraRoleMappingHasProblems, `
     Get-JiraRoleUnresolvedMessage, ConvertTo-JiraRoleUnresolvedJson, Get-JiraRoleUnknownTypeMessage, `
     Get-JiraRoleDuplicateMessage, Get-JiraRoleSubtaskMisuseMessage, Get-JiraRoleTaskMisuseMessage, `

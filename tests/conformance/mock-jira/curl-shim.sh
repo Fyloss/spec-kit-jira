@@ -373,7 +373,11 @@ if [[ "${fault_json}" != "null" ]]; then
     exit 7
   fi
   RESP_STATUS="$(jq -r '.status' <<< "${fault_json}")"
-  RESP_BODY="$(printf '{"errorMessages":["injected fault %s"]}' "${RESP_STATUS}")"
+  # `errors` (011, FR-019): an optional field-validation body, {field_id:
+  # reason}, so a fault can exercise the recorded-default-rejected path —
+  # everything else keeps the pre-existing generic injected body.
+  RESP_BODY="$(jq -cn --arg st "${RESP_STATUS}" --argjson errs "$(jq -c '.errors // {}' <<< "${fault_json}")" \
+    '{errorMessages: ["injected fault \($st)"], errors: $errs}')"
   retry_after="$(jq -r '.retryAfter // empty' <<< "${fault_json}")"
   [[ -n "${retry_after}" ]] && RESP_HEADERS_EXTRA+=("Retry-After: ${retry_after}")
 else

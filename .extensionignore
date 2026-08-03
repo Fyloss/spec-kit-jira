@@ -13,9 +13,31 @@ specs/
 .shellcheckrc
 PSScriptAnalyzerSettings.psd1
 coverage.xml
+testResults.xml
 # The coverage runner's output directory. It is gitignored, so it exists only on
 # a machine that has measured coverage — but `specify extension add --dev` copies
 # the working tree, not the git index, and this directory holds a NAMED PIPE
 # (the xtrace fifo). Python's copytree refuses to copy one, so the install fails
 # outright on any developer machine where the gate has been run.
 coverage/
+
+# Architecture and vision documentation. It describes how the extension is BUILT
+# — the engine/sink boundary, the twin ports, the Windows probe loop, the
+# roadmap — none of which a consuming repository needs to run the bridge; README
+# and INSTALL are the consumer-facing pair. Nothing in the installed surface
+# links here, and these documents cite `.specify/memory/constitution.md`, which
+# is itself development-only, so shipping them would plant broken links.
+docs/
+
+# Contributor instructions for developing THIS extension. A coding agent working
+# in a consuming repository discovers nested instruction files and would read
+# them as its own marching orders — being told to keep a Windows conformance
+# corpus green and to run `tests/run-bash.sh`, neither of which is installed.
+AGENTS.md
+CLAUDE.md
+
+# `* text=auto eol=lf` is unanchored, so wherever this file lands it governs its
+# whole subtree. Installed, it would impose this repository's LF policy on the
+# consumer's tree — a policy that exists to protect OUR Windows test fixtures
+# and is none of their business.
+.gitattributes

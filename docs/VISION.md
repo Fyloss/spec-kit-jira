@@ -37,11 +37,11 @@ nothing and lets discovery derive the rest; the enterprise declares
 everything, and a declaration always wins over a derivation. The distance
 between the two is the length of one YAML file, not a different product.
 
-The enterprise end of that scale has one recurring blocker: a project whose
-issue types carry **mandatory custom fields** cannot be mirrored at all if the
-bridge has nothing to put in them. Recording a default answer per field and
-per issue type, at config time, so that ticket creation never blocks, is
-*specified* and in flight (`specs/011-jira-field-defaults/`).
+The enterprise end of that scale used to have one recurring blocker: a project
+whose issue types carry **mandatory custom fields** could not be mirrored at
+all if the bridge had nothing to put in them. Recording a default answer per
+field and per issue type, at config time, so that ticket creation never
+blocks, has shipped (`specs/011-jira-field-defaults/`) — see Part 1.
 
 **Agile and SAFe, without picking a side.** The bridge has no opinion about
 whether the tier above a story is called an Epic, a Feature, a Capability, or
@@ -137,6 +137,16 @@ Shipped, and described in detail in the [system documentation](README.md):
   reads the ticket's identity marker, refuses with zero writes if the ticket
   already belongs to another spec, fetches its content so the drafted spec
   starts informed, and thereafter treats the description as human-authored.
+- **Records a default for a mandatory custom field, once, so a mirror never
+  blocks.** A project whose written issue types require a field beyond what
+  the bridge supplies used to be refused outright; the config ceremony now
+  asks about each required field once, per project, and the answer is
+  spliced into `config.yml`'s `field_defaults` managed region. A creating
+  reconcile run asks a consolidated question before writing when a recorded
+  default is about to land or a required field is still unsatisfiable, and
+  is otherwise silent — a team that recorded nothing sees no change at all.
+  See [the config ceremony](04-config-ceremony.md) and
+  [the reconcile flow](05-reconcile-flow.md).
 - **Names features ticket-first**, routes spec folders to projects, resolves
   configuration in three layers, keeps credentials out of the tree, guards
   privacy on every write, and supports a universal dry run.
@@ -301,6 +311,148 @@ The other open question is where the figures come from: a value declared in
 `spec.md`, a value the coding agent proposes at planning time, or both with a
 declared value winning. Only the first is available today.
 
+### 8. Running under a GitHub cloud agent
+
+*Envisioned.* The bridge is designed today around a developer at a terminal,
+with a shell profile, an OS secret manager, and someone available to answer a
+question. Increasingly the spec-kit lifecycle runs somewhere else entirely: a
+GitHub cloud agent — the Copilot coding agent, a coding agent running in
+Actions, and their neighbours — picks up an issue, drives `/speckit.specify`
+through `/speckit.implement` unattended, and opens a pull request. The bridge
+has to mirror just as faithfully there, with nobody watching.
+
+Part of this already works, by design rather than by accident. Credential
+resolution is **environment-first** (`JIRA_API_TOKEN`, then the OS secret
+manager, then the gitignored `.env`), so an Actions secret or a Codespaces
+secret resolves without a Keychain or a keyring existing at all — and the
+token still never reaches argv, logs, or a trace. The non-blocking hook rule
+means a bridge failure cannot break the agent's run. The universal dry run
+gives a safe first execution in an unfamiliar environment.
+
+What is missing is everything that assumes a human:
+
+- **No non-interactive mode.** The config ceremony asks questions, and a
+  creating reconcile run asks its own consolidated question when a mandatory
+  field's value is still unsettled (`specs/011-jira-field-defaults/`). With
+  nobody at the prompt, each of those has to resolve from committed
+  configuration or refuse cleanly — never hang, never guess. `--accept-defaults`
+  already gives the field-defaults question a non-interactive answer; the
+  config ceremony's own questions (project key, style, role mapping) still
+  need the same treatment.
+- **The marker write-back has to survive the pull request.** Reconcile splices
+  durable story identifiers into `spec.md` — that is one of the two controlled
+  exceptions to "the filesystem is the source of truth", and the whole
+  recognition design rests on it. In a cloud agent that mutation lives on the
+  agent's branch and must be committed and reach the PR. If it is lost, the
+  next run does not merely lose state: it stops recognising the tickets and
+  creates duplicates, the exact defect this extension was built to fix. This is
+  the sharpest risk of the whole item.
+- **Concurrency is unaddressed.** Zero-churn idempotency protects a re-run over
+  unchanged content; it says nothing about two agents on two pull requests
+  mirroring into the same project at the same moment. Whether that needs
+  ordering, a lock, or simply a create path that tolerates a lost race is an
+  open design question.
+- **Which Jira account the agent authenticates as** is a decision worth making
+  explicitly rather than inheriting. A dedicated bot account keeps the audit
+  trail readable and keeps the bridge-versus-human origin discrimination
+  meaningful — a human's words are only protected if "human" still means
+  something.
+- **The non-blocking rule may want an opt-in inverse.** Inside a hook, a
+  failure is one actionable `WARNING` and the host command still succeeds; that
+  is Principle III and it is right for a developer mid-flow. In an automated
+  pipeline, a warning nobody reads is worse than a red check. A strict mode,
+  opted into per environment, would serve CI without touching the principle
+  that governs interactive runs.
+- **Prerequisites must be established on the runner, not assumed.** Bash ≥ 4,
+  `curl`, `jq`, and `git` are a given on a developer's configured machine and
+  are not a given on every runner image.
+
+This item is the "CI / headless execution" entry the first specification
+recorded as out of scope, grown up: it is no longer a convenience for pipelines
+but the environment a growing share of spec-kit work happens in.
+
+### 9. A choice of transport: the REST API or the Jira MCP server
+
+*Envisioned.* `/speckit.jira.config` asks one more question — how should the
+bridge reach Jira? — and the consumer answers **the Jira REST API**, as today,
+or **the Jira MCP server**, Atlassian's implementation of the Model Context
+Protocol (MCP), the open protocol through which a host exposes tools and data
+to an agent. The answer is recorded once; everything downstream is unchanged.
+
+The appeal is not novelty, it is credentials and governance. An organisation
+that has already sanctioned the Atlassian MCP server has already settled its
+authentication, its consent screen, and its audit trail centrally. Asking each
+developer to also mint a personal API token, and asking this extension to
+carry it through a Keychain, a keyring, or a gitignored `.env`, duplicates a
+decision that was already made — and duplicates the risk that comes with it.
+Over MCP, the token this extension handles most carefully is a token it never
+holds at all.
+
+Note what this is *not*: MCP is a second **transport to the same sink**, not a
+second sink. The Jira knowledge stays exactly where it is. Sinks beyond Jira
+(Part 3) are a different axis entirely.
+
+Architecturally this is more plausible than it sounds, because the seam
+already exists. `sink/jira/client.sh` and its PowerShell twin are the **single
+HTTP conduit** to Jira: every other module in the sink goes through them, and
+the engine above has zero Jira knowledge at all. A second transport is a
+second implementation behind one existing interface, not a rewrite.
+
+What that client owns, and what any second transport must reproduce exactly:
+
+- **The outcome mapping.** `2xx` → success, `401`/`403` → auth, `404`, `5xx`,
+  network failure, and an exhausted retry budget → fail-closed, with **nothing
+  on stdout** so a caller capturing a body sees the empty result of a failed
+  read. Principle III's fail-closed guarantee is that mapping; a transport that
+  reports failure differently makes the guarantee unverifiable rather than
+  merely different.
+- **The bounded retry budget**, honouring `Retry-After` on a 429.
+- **The credential discipline** — whatever an MCP session uses in place of a
+  Basic header must be as absent from argv, logs, and traces as the token is.
+
+The sharpest question, and the one that decides whether this item is feasible
+at all, should be answered before anything else is designed: **does the MCP
+tool surface expose issue entity properties?** A bridge ticket's identity
+lives in a server-side entity property under the key `spec-kit-jira` —
+deliberately not a label and not the summary, because entity properties are
+stable, hidden from the editable UI, and survive a spec-folder rename. Every
+recognition read resolves that marker. If it cannot be read and written over
+MCP, the bridge stops recognising its own tickets and recreates them: the
+duplicate-ticket defect this extension was built to fix, reintroduced through
+a new door. Behind it sit the same questions for issue-creation metadata and
+required fields (on which the shipped field-defaults work depends), available
+transitions, ADF description writes, and per-project issue-type and status
+discovery.
+
+Then a design question worth settling early, because the tempting answer is
+the expensive one. MCP is spoken between a host and a server, and in this
+setting the host is usually the coding agent. So either **the bridge becomes
+an MCP client itself** — JSON-RPC from Bash and PowerShell, a real lift, but
+the script stays the actor and stays deterministic — or **the bridge delegates
+the calls to the agent** that already holds the connection. The second shape
+is much less work and costs the property the whole design rests on: the script
+is deterministic and the agent merely invokes it. Put a language model in the
+write path and zero-churn idempotency, byte-equivalence between the ports, and
+the meaning of a dry run all become unverifiable. The preference is the first
+shape.
+
+Two constraints to carry into the spec:
+
+- **Never a silent fallback.** If the selected transport cannot perform an
+  operation, the bridge fails closed and names the reason. It must never quietly
+  reach for the REST token an operator believed was out of the picture.
+- **The conformance corpus needs a second double.** Today the Bash port's Jira
+  is a scripted `curl` replacement and the PowerShell port's is a mock server;
+  an MCP transport needs its own, and the two ports still have to be proven
+  byte-equivalent through it.
+
+Where the answer is recorded is a smaller open question with a real edge: the
+transport looks like a **local binding** concern — this machine has an MCP
+server configured, that one does not — yet an organisation may want to mandate
+it for everyone. Most likely both layers participate: the team may pin a
+transport in `config.yml`, and a developer selects one locally when the team
+has not.
+
 ## Part 3 — The longer backlog
 
 Recorded in the "Out of Scope" section of the first specification and carried
@@ -314,8 +466,8 @@ forward here so it is not lost. All *envisioned*, none of them near-term:
   Agile Framework).
 - Release management: a git tag becoming a Jira version.
 - An interactive assistant that asks a human for missing information rather
-  than refusing — of which the recorded field defaults work
-  (`specs/011-jira-field-defaults/`) is the first, narrow instalment.
+  than refusing, beyond the mandatory-custom-field case already shipped
+  (`specs/011-jira-field-defaults/`, see Part 1).
 - Sinks beyond Jira. The engine already contains zero Jira knowledge and the
   neutral interchange document is schema-validated, so a second sink is a
   matter of writing one — but, per Principle XV, only when a spec asks for it.

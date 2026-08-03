@@ -130,3 +130,38 @@ boot_declared_hierarchy() {
   [ "$(jq -r '.actions[0].body.fields.issuetype.id' <<< "${ps_out}")" = "10701" ]
   [ "$(jq -r '[.actions[] | select(.role=="story")] | length' <<< "${ps_out}")" -eq 2 ]
 }
+
+# --- T061 [US2] — dry-run/real-run agreement for field defaults (011, ------
+# contract §4.3, FR-023) --------------------------------------------------
+@test "FR-023 — the preview predicts every defaulted value and its source, asks no question, and writes nothing" {
+  local work="${BATS_TEST_TMPDIR}/repo-field-defaults-dry"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-mandatory-field" "${work}"
+  local spec="${work}/specs/001-reporting/spec.md"
+  export JIRA_CONFIG_DIR="${work}/.specify/jira"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-reporting"
+  export SPEC_KIT_JIRA_ID_SOURCE="aaaaaaaaaaaaaaaa 1111111111111111"
+  mock_start "${MOCK}/configs/mandatory-field.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  cmd_config config PM --issue-type "PM=story=Story" \
+    --field-default 'PM=Deliverable=Business Owner=Platform Team' \
+    --field-default 'PM=Deliverable=Program Increment=PI-2026-Q3' \
+    --json > /dev/null
+
+  run cmd_reconcile reconcile "${spec}" --dry-run --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.dry_run' <<< "$output")" = "true" ]
+  # No question, ever, from a preview (§4.3) — even though ask defaults to
+  # true and neither --accept-defaults nor a --field-value was given.
+  [ "$(jq -r '.status // "ok"' <<< "$output")" != "confirmation-pending" ]
+  [ "$(jq -r '[.actions[] | select(.role=="parent")][0].body.fields.customfield_40011' <<< "$output")" = "Platform Team" ]
+  [ "$(jq -r '[.actions[] | select(.role=="parent")][0].body.fields.customfield_40012' <<< "$output")" = "PI-2026-Q3" ]
+  [[ "$output" == *"sent from team-config"* ]]
+
+  run mock_calls
+  while IFS= read -r line; do
+    [ -z "${line}" ] && continue
+    [[ "${line}" == GET\ * ]]
+  done <<< "$output"
+}

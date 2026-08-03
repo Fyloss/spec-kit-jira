@@ -287,7 +287,12 @@ BINDING_MANDATORY='{
   mock_start "${MOCK}/configs/mandatory-field.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 
-  run cmd_reconcile reconcile "${work}/specs/001-reporting/spec.md" --json
+  # A bare invocation now stops at the consolidated field-defaults question
+  # (011, contract §3.3's second trigger) before reaching the gate at all —
+  # exit 0, confirmation-pending, zero writes. --accept-defaults declares
+  # this an unreachable-operator run (contract §3.10) and reaches the
+  # surviving refusal this test was written to prove.
+  run cmd_reconcile reconcile "${work}/specs/001-reporting/spec.md" --json --accept-defaults
   [ "$status" -eq 4 ]
   [[ "$output" == *"Deliverable"* ]]
   [[ "$output" == *"Business Owner"* ]]
@@ -400,4 +405,73 @@ SPEC_REF='{"repo":"acme/app","spec_slug":"001-checkout"}'
     \$r = Invoke-JiraRecognitionParentRun -MarkerInfoJson '${minfo}' -SpecRefJson '${SPEC_REF}' -ProjectKey 'COMP' -SpecPath 'specs/001-checkout/spec.md'
     [Console]::Out.Write(\$r.Json)")"
   [ "${b}" = "${p}" ]
+}
+
+# --- T021 [Phase 2, 011] — satisfiability, one predicate, defaults-aware ----
+# (contract §1). hierarchy_unsatisfiable_fields gains a third input: the
+# recorded-or-answered defaults for the type being checked, keyed by field_id.
+# A field with an entry there is satisfiable; without one it is not; a
+# required `parent` on the PARENT type stays unsatisfiable whatever is
+# recorded (contract §1.2); the bridge-supplied list is unchanged.
+
+@test "T021: a required field with a recorded default is satisfiable" {
+  local fields='[{"logical_name":"Business Owner","field_id":"customfield_40011"}]'
+  local defaults='{"customfield_40011":"Platform Team"}'
+  run hierarchy_unsatisfiable_fields "${fields}" "true" "${defaults}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+}
+
+@test "T021: without a recorded default the same field is still unsatisfiable" {
+  local fields='[{"logical_name":"Business Owner","field_id":"customfield_40011"}]'
+  run hierarchy_unsatisfiable_fields "${fields}" "true" "{}"
+  [ "$output" = '["Business Owner"]' ]
+}
+
+@test "T021: omitting the third argument entirely still works (backward compatible)" {
+  local fields='[{"logical_name":"Business Owner","field_id":"customfield_40011"}]'
+  run hierarchy_unsatisfiable_fields "${fields}" "true"
+  [ "$output" = '["Business Owner"]' ]
+}
+
+@test "T021: a required parent field on the PARENT type stays unsatisfiable regardless of any recorded default (contract §1.2)" {
+  local fields='[{"logical_name":"Parent","field_id":"parent"}]'
+  local defaults='{"parent":"whatever"}'
+  run hierarchy_unsatisfiable_fields "${fields}" "false" "${defaults}"
+  [ "$output" = '["Parent"]' ]
+}
+
+@test "T021: the bridge-supplied list is unchanged — those fields need no default to be satisfiable" {
+  local fields='[{"logical_name":"Summary","field_id":"summary"},{"logical_name":"Description","field_id":"description"}]'
+  run hierarchy_unsatisfiable_fields "${fields}" "false" "{}"
+  [ "$output" = "[]" ]
+}
+
+@test "T021: hierarchy_mandatory_gate accepts a per-type defaults map and clears the refusal once both fields are recorded" {
+  local defaults_by_type; defaults_by_type='{"10101":{"customfield_40011":"Platform Team","customfield_40012":"PI-2026-Q3"}}'
+  run hierarchy_mandatory_gate "${BINDING_MANDATORY}" "PM" "${defaults_by_type}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' <<< "$output")" = "ok" ]
+}
+
+@test "T021: hierarchy_mandatory_gate still refuses when only ONE of the two required fields is recorded" {
+  local defaults_by_type; defaults_by_type='{"10101":{"customfield_40011":"Platform Team"}}'
+  run hierarchy_mandatory_gate "${BINDING_MANDATORY}" "PM" "${defaults_by_type}"
+  [ "$(jq -r '.status' <<< "$output")" = "unsatisfiable" ]
+  [[ "$(jq -r '.message' <<< "$output")" == *"Program Increment"* ]]
+  [[ "$(jq -r '.message' <<< "$output")" != *"Business Owner"* ]]
+}
+
+@test "T021: hierarchy_mandatory_gate defaults the third argument to no recorded defaults (backward compatible)" {
+  run hierarchy_mandatory_gate "${BINDING_MANDATORY}" "PM"
+  [ "$(jq -r '.status' <<< "$output")" = "unsatisfiable" ]
+}
+
+# --- T077 [Phase 5, 011 US3] — a non-defaultable field is reported by label -
+@test "T077: a non-defaultable field is reported with its reason, by label, and the pre-existing refusal is unchanged" {
+  local fields='[{"logical_name":"Attachment","field_id":"attachment","required":true,"defaultable":false,"undefaultable_reason":"a list of values cannot be expressed as a single recorded value"}]'
+  run hierarchy_undefaultable_required_fields "${fields}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].logical_name' <<< "$output")" = "Attachment" ]
+  [ "$(jq -r '.[0].reason' <<< "$output")" = "a list of values cannot be expressed as a single recorded value" ]
 }

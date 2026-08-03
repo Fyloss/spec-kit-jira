@@ -210,4 +210,14 @@ Describe 'Degraded causes are told apart (T047, 003 US5)' {
         $null = Invoke-ConfigCaptured @('config', '--json')
         (Get-Content -Raw -LiteralPath $env:SPEC_KIT_JIRA_EXTENSIONS_YML) | Should -BeExactly $broken
     }
+
+    It 'T053 [011] — degraded mode asks no field-default question and writes nothing to config.yml (FR-009)' {
+        Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
+        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+        $before = Get-Content -Raw -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml')
+        $r = Invoke-ConfigCaptured @('config', '--field-default', 'TEAM=Epic=Business Owner=Platform Team', '--json')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Not -Match 'field_defaults'
+        (Get-Content -Raw -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml')) | Should -Be $before
+    }
 }

@@ -76,6 +76,13 @@ _jira_curl_path() {
 JIRA_LAST_STATUS=0
 export JIRA_LAST_STATUS
 
+# Raw response body of the most recent request, success or failure (011,
+# contract §3.7, FR-019). Never printed to a human directly — a caller
+# translates it (ticket_field_rejection_message) before it reaches the run
+# summary, so the raw API body itself never leaks into output.
+JIRA_LAST_ERROR_BODY=''
+export JIRA_LAST_ERROR_BODY
+
 # kcov-excl-start — jira_request suspends xtrace for its whole duration
 # (NFR-3 / SC-007: the credential must never be traced), so kcov's tracer
 # cannot observe this machinery; the transport suites exercise it end-to-end.
@@ -150,6 +157,7 @@ jira_request() {
     fi
 
     JIRA_LAST_STATUS="${http_code}"
+    JIRA_LAST_ERROR_BODY="$(cat "${respfile}" 2> /dev/null)"
     case "${http_code}" in
       2*)
         cat "${respfile}"

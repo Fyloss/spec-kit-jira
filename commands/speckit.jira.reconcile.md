@@ -214,6 +214,43 @@ A ticket carrying the Jira **Flagged** field is treated the same way as a
 halted ticket: surfaced, its write withheld, and the flag itself is never
 touched.
 
+## The consolidated field-defaults question (011)
+
+Before writing any creation, the bridge plans the run — the same computation
+`--dry-run` performs — and when that plan contains a creation for which
+either a recorded default is about to be sent, or a required field is
+unsatisfiable with nothing recorded for it, it stops before any write and
+emits one `confirmation-pending` object naming every such field once, with
+its recorded value where one exists. Ask the operator to keep or override
+each named field, then re-invoke:
+
+- keep the recorded values — re-invoke with `--accept-defaults`;
+- override one or more fields — re-invoke with
+  `--field-value <KEY>=<Type>=<Label>=<Value>` (repeatable), which takes
+  precedence over the recorded default for this run only;
+- both may be given together: an explicit `--field-value` overrides its own
+  field even under `--accept-defaults`.
+
+A **decline** — the operator dismisses the question, or the conversation
+ends before they answer — is resumed with `--accept-defaults`: re-invoke with `--accept-defaults`. There is no decline flag and none should be
+invented; the bridge receives one instruction, proceed with what is
+recorded, and the run summary names that reason.
+
+### Declaring an unreachable operator (research R4, contract §3.10)
+
+Whether an operator can be asked is **stated by the caller**, never inferred
+by the entry point — it never sniffs a TTY, because the bridge is invoked by
+an agent and so never has one even when the operator is very much reachable.
+A caller that cannot reach an operator — a continuous-integration pipeline,
+an unattended agent run, a direct script invocation — MUST pass
+`--accept-defaults` on its **first** invocation.
+
+An `after_*` lifecycle hook is not such a caller: it fires this very
+procedure, so the operator is reached through the conversation you are
+already conducting. A hook-fired run therefore stops at the question exactly
+as an ordinary run does, and step 4 keeps the host command green while it
+waits.
+
 ## Flags
 
 - `<SPEC-FILE>` — optional positional: the specification to mirror; defaults to
@@ -221,6 +258,10 @@ touched.
 - `--json` — emit the machine-readable run summary (`run-summary.schema.json`).
 - `--dry-run` — compute the full action set and report it, writing nothing to
   Jira. The dry-run action set equals the real run's exactly.
+- `--accept-defaults` — proceed with every recorded default, skipping the
+  consolidated question (011).
+- `--field-value <KEY>=<Type>=<Label>=<Value>` — repeatable; an answer for
+  this run only, taking precedence over a recorded default (011).
 - `--on-drift=abort|proceed` — drift handling (default `abort`).
 - `--verbose` — extra diagnostics (the token never appears, even here).
 - `--help` — usage; exits `0`.

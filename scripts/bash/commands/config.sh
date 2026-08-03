@@ -42,6 +42,8 @@ source "${_cmd_config_dir}/../sink/jira/discovery.sh"
 # shellcheck source=/dev/null
 source "${_cmd_config_dir}/../sink/jira/hierarchy.sh"
 # shellcheck source=/dev/null
+source "${_cmd_config_dir}/../sink/jira/plan_apply.sh" # plan_resolve_field_defaults — label->id resolution for the gate (011)
+# shellcheck source=/dev/null
 source "${_cmd_config_dir}/../hooks/readme_block.sh"
 # shellcheck source=/dev/null
 source "${_cmd_config_dir}/../hooks/register_hooks.sh"
@@ -112,9 +114,12 @@ config_resolved_ids_for() {
   # through — discovery already shapes them keyed by issue-type id — and are
   # omitted rather than emitted empty when discovery resolved neither type
   # (the ambiguous-child case), so an old-style call site building this
-  # object by hand does not have to know about them.
+  # object by hand does not have to know about them. defaultable_fields
+  # (011, T011) gets the same treatment: a binding written before this
+  # feature simply carries no such key, and keeps loading (data-model.md §2).
   + (if (.required_fields // {}) != {} then {required_fields: .required_fields} else {} end)
   + (if (.parent_link_available // {}) != {} then {parent_link_available: .parent_link_available} else {} end)
+  + (if (.defaultable_fields // {}) != {} then {defaultable_fields: .defaultable_fields} else {} end)
   ' <<< "$1" | json_canonical
 }
 
@@ -231,6 +236,137 @@ _config_operator_roles_for() {
   printf '%s' "${out}"
 }
 
+# _config_field_answers_for <project-key> <field-defaults-string> — this run's
+# --field-default answers for one project (011, contract §2.4), reduced to
+# `[{type, label, value}]` in argv order. `field_defaults` is cli_parse's
+# \x1f-joined stream (NOT space-joined like every other repeatable flag —
+# lib/cli.sh:cli_parse — a field VALUE may itself contain spaces).
+_config_field_answers_for() {
+  cli_field_answers_for "$1" "$2"
+}
+
+# _config_field_default_answer_problems <itypes-json> <defaultable-by-type-json>
+# <answers-json> — every §2.4 refusal a THIS-RUN answer produces: unknown
+# issue-type name (listing the discovered types), unknown field label
+# (listing that type's defaultable fields), a field whose shape cannot be
+# defaulted (naming its `undefaultable_reason`, US3 scenario 3), an empty
+# value, a value outside `allowed_values`, or a credential-shaped value
+# (Principle IV — the value itself is never in the problem). Batched, never
+# one refusal per answer, mirroring role_resolve's own "evaluate everything
+# before refusing". Prints a JSON array, empty when every answer is valid.
+_config_field_default_answer_problems() {
+  local itypes="${1:-}" defaultable="${2:-}" answers="${3:-}"
+  [[ -z "${itypes}" ]] && itypes='[]'
+  [[ -z "${defaultable}" ]] && defaultable='{}'
+  [[ -z "${answers}" ]] && answers='[]'
+  local structural
+  structural="$(jq -cn --argjson itypes "${itypes}" --argjson df "${defaultable}" --argjson ans "${answers}" '
+    def typeId($name): (first($itypes[] | select(.logical_name == $name)) // null) | .id;
+    def fieldFor($tid; $label): (first((($df[$tid]) // [])[] | select(.logical_name == $label)) // null);
+    [ $ans[]
+      | (.type) as $t | (.label) as $l | (.value) as $v | (typeId($t)) as $tid
+      | if $tid == null then
+          {kind: "unknown_type", type: $t, label: $l, candidates: [$itypes[].logical_name]}
+        else
+          (fieldFor($tid; $l)) as $f
+          | if $f == null then
+              {kind: "unknown_label", type: $t, label: $l, candidates: [(($df[$tid]) // [])[].logical_name]}
+            elif ($f.defaultable != true) then
+              {kind: "undefaultable", type: $t, label: $l, reason: $f.undefaultable_reason}
+            elif ($v == "") then
+              {kind: "empty_value", type: $t, label: $l}
+            elif ((($f.allowed_values // []) | length) > 0 and (($f.allowed_values) | index($v)) == null) then
+              {kind: "outside_allowed", type: $t, label: $l, candidates: $f.allowed_values}
+            else empty
+            end
+        end
+    ]
+  ')"
+  local credential
+  credential="$(jq -c '.[]' <<< "${answers}" | while IFS= read -r a; do
+    local type label value shape
+    type="$(jq -r '.type' <<< "${a}")"
+    label="$(jq -r '.label' <<< "${a}")"
+    value="$(jq -r '.value' <<< "${a}")"
+    shape="$(jq -cn --arg v "${value}" '{value: $v}' | _cfg_credential_errors)"
+    [[ -z "${shape}" ]] && continue
+    jq -cn --arg t "${type}" --arg l "${label}" --arg s "${shape#*: }" \
+      '{kind: "credential", type: $t, label: $l, shape: $s}'
+  done | jq -cs '.')"
+  jq -cn --argjson a "${structural}" --argjson b "${credential}" '$a + $b'
+}
+
+# _config_field_default_merge <recorded-json> <answers-json> — the union of
+# §2.6: the project's recorded entry (minus `ask`) re-emitted, with each
+# THIS-RUN answer overwriting the matching (type, label) entry; every other
+# entry carries forward unchanged. Pure structural merge — validation is
+# `_config_field_default_answer_problems`'s job, not this one's.
+_config_field_default_merge() {
+  local recorded="${1:-}" answers="${2:-}"
+  [[ -z "${recorded}" ]] && recorded='{}'
+  [[ -z "${answers}" ]] && answers='[]'
+  jq -cn --argjson rec "${recorded}" --argjson ans "${answers}" '
+    ($rec | del(.ask)) as $base
+    | reduce $ans[] as $a ($base; .[$a.type][$a.label] = $a.value)
+  '
+}
+
+# _config_field_default_report <itypes-json> <defaultable-by-type-json>
+# <ask-types-json> <merged-json> <bridge-written-type-ids-json> — three
+# non-blocking reports plus one refusal trigger, computed over the merged
+# (already-valid) field_defaults entry:
+#   - orphaned: a recorded type or field label the project no longer offers
+#     (contract §2.8, FR-008) — never blocks.
+#   - not_yet_consumed: a recorded type that exists but the bridge does not
+#     write (contract §2.8, FR-027) — never blocks.
+#   - undefaultable_required: a required field of an in-scope type whose
+#     shape cannot be defaulted, reported once (contract §2.3) — the
+#     pre-existing mandatory gate refuses it unchanged (US3 scenario 3).
+#   - pending: a required, DEFAULTABLE field of an in-scope type with
+#     neither a recorded value nor a this-run answer — the ceremony's own
+#     closed question (contract §2.1-§2.3); a non-empty result is this
+#     function's one refusal trigger.
+_config_field_default_report() {
+  local itypes="${1:-}" defaultable="${2:-}" ask_types="${3:-}" merged="${4:-}" bridge="${5:-}"
+  [[ -z "${itypes}" ]] && itypes='[]'
+  [[ -z "${defaultable}" ]] && defaultable='{}'
+  [[ -z "${ask_types}" ]] && ask_types='[]'
+  [[ -z "${merged}" ]] && merged='{}'
+  [[ -z "${bridge}" ]] && bridge='[]'
+  jq -cn --argjson itypes "${itypes}" --argjson df "${defaultable}" --argjson ask "${ask_types}" \
+      --argjson merged "${merged}" --argjson bridge "${bridge}" '
+    def typeId($name): (first($itypes[] | select(.logical_name == $name)) // null) | .id;
+    def labelOk($tid; $l): (($df[$tid]) // []) | any(.logical_name == $l);
+
+    ( [ ($merged | to_entries)[]
+        | (.key) as $tname | (.value) as $labels | (typeId($tname)) as $tid
+        | if $tid == null then
+            [{kind: "orphaned_type", type: $tname}]
+          else
+            ( [ $labels | keys[] | select(labelOk($tid; .) | not) ] | map({kind: "orphaned_label", type: $tname, label: .}) ) as $orph
+            | ( if ($tid | IN($bridge[])) then [] else [{kind: "not_yet_consumed", type: $tname}] end ) as $nyc
+            | ($orph + $nyc)
+          end
+      ] | flatten
+    ) as $reports
+    | {
+        orphaned: [ $reports[] | select(.kind == "orphaned_type" or .kind == "orphaned_label") ],
+        not_yet_consumed: [ $reports[] | select(.kind == "not_yet_consumed") ],
+        undefaultable_required: [
+          $ask[] as $tname | (typeId($tname)) as $tid | (($df[$tid]) // [])[]
+          | select(.required == true and .defaultable == false)
+          | {type: $tname, label: .logical_name, reason: .undefaultable_reason}
+        ],
+        pending: [
+          $ask[] as $tname | (typeId($tname)) as $tid | (($df[$tid]) // [])[]
+          | select(.required == true and .defaultable == true)
+          | select( ($merged[$tname][.logical_name] // null) == null )
+          | {type: $tname, label: .logical_name, allowed_values: (.allowed_values // [])}
+        ]
+      }
+  '
+}
+
 # _config_report_role_problems <project-key> <resolve-result-json> <json:true|false>
 # Render every problem role_resolve found (010, contract §6): one block per
 # unresolved role in role order, then unknown/duplicate/subtask-misuse/
@@ -285,6 +421,176 @@ _config_report_role_problems() {
     block="$(role_unresolved_json "${result}" "${key}")"
     printf '%s\n' "$(jq -cn --argjson u "${block}" '{unresolved_roles: $u}' | json_canonical)"
   fi
+}
+
+# _config_report_field_default_problems <pkey> <problems-json> <json> —
+# refuse this run's --field-default answers (contract §2.4): one message per
+# problem to stderr, plus a structured block on stdout in --json mode. Zero
+# writes — the caller returns EXIT_CONFIG right after calling this.
+_config_report_field_default_problems() {
+  local pkey="$1" problems="$2" json="$3" n i
+  n="$(jq -r 'length' <<< "${problems}")"
+  for ((i = 0; i < n; i++)); do
+    local p kind type label
+    p="$(jq -c ".[${i}]" <<< "${problems}")"
+    kind="$(jq -r '.kind' <<< "${p}")"
+    type="$(jq -r '.type' <<< "${p}")"
+    label="$(jq -r '.label' <<< "${p}")"
+    case "${kind}" in
+      unknown_type)
+        printf 'config: project %s: --field-default names an issue type this project does not offer: %s (discovered types: %s)\n' \
+          "${pkey}" "${type}" "$(jq -r '.candidates | join(", ")' <<< "${p}")" >&2
+        ;;
+      unknown_label)
+        printf 'config: project %s: issue type %s has no field named %s (defaultable fields: %s)\n' \
+          "${pkey}" "${type}" "${label}" "$(jq -r '.candidates | join(", ")' <<< "${p}")" >&2
+        ;;
+      undefaultable)
+        printf 'config: project %s: %s (%s) cannot be defaulted — %s\n' \
+          "${pkey}" "${label}" "${type}" "$(jq -r '.reason' <<< "${p}")" >&2
+        ;;
+      empty_value)
+        printf 'config: project %s: %s (%s) — a default may not be empty\n' "${pkey}" "${label}" "${type}" >&2
+        ;;
+      outside_allowed)
+        printf 'config: project %s: %s (%s) must be one of: %s\n' \
+          "${pkey}" "${label}" "${type}" "$(jq -r '.candidates | join(", ")' <<< "${p}")" >&2
+        ;;
+      credential)
+        printf 'config: project %s: %s (%s) looks like a %s and is refused — it never becomes a recorded default\n' \
+          "${pkey}" "${label}" "${type}" "$(jq -r '.shape' <<< "${p}")" >&2
+        ;;
+    esac
+    printf '\n' >&2
+  done
+  if [[ "${json}" == "true" ]]; then
+    printf '%s\n' "$(jq -cn --argjson p "${problems}" '{field_default_problems: $p}' | json_canonical)"
+  fi
+}
+
+# _config_field_default_notes <pkey> <report-json> — the three non-blocking
+# reports (contract §2.8, §2.3), newline-joined, empty when there is nothing
+# to report. Never a warning, never a refusal — mirrors role_notes.
+_config_field_default_notes() {
+  local pkey="$1" report="$2" out="" n i
+  n="$(jq -r '.orphaned | length' <<< "${report}")"
+  for ((i = 0; i < n; i++)); do
+    local o kind type label
+    o="$(jq -c ".orphaned[${i}]" <<< "${report}")"
+    kind="$(jq -r '.kind' <<< "${o}")"
+    type="$(jq -r '.type' <<< "${o}")"
+    if [[ "${kind}" == "orphaned_type" ]]; then
+      out="${out}${out:+$'\n'}config: project ${pkey}: field_defaults records issue type '${type}', which the project no longer offers — remove it (orphaned entry, FR-008)"
+    else
+      label="$(jq -r '.label' <<< "${o}")"
+      out="${out}${out:+$'\n'}config: project ${pkey}, type ${type}: field_defaults records '${label}', which the type no longer offers — remove it (orphaned entry, FR-008)"
+    fi
+  done
+  n="$(jq -r '.not_yet_consumed | length' <<< "${report}")"
+  for ((i = 0; i < n; i++)); do
+    local type
+    type="$(jq -r ".not_yet_consumed[${i}].type" <<< "${report}")"
+    out="${out}${out:+$'\n'}config: project ${pkey}: field_defaults records issue type '${type}', which the bridge does not write yet — recorded, not yet consumed (FR-027)"
+  done
+  n="$(jq -r '.undefaultable_required | length' <<< "${report}")"
+  for ((i = 0; i < n; i++)); do
+    local u type label reason
+    u="$(jq -c ".undefaultable_required[${i}]" <<< "${report}")"
+    type="$(jq -r '.type' <<< "${u}")"
+    label="$(jq -r '.label' <<< "${u}")"
+    reason="$(jq -r '.reason' <<< "${u}")"
+    out="${out}${out:+$'\n'}config: project ${pkey}, type ${type}: ${label} cannot be defaulted — ${reason} (the pre-existing mandatory-field refusal applies unchanged)"
+  done
+  n="$(jq -r '.pending | length' <<< "${report}")"
+  for ((i = 0; i < n; i++)); do
+    local q type label allowed
+    q="$(jq -c ".pending[${i}]" <<< "${report}")"
+    type="$(jq -r '.type' <<< "${q}")"
+    label="$(jq -r '.label' <<< "${q}")"
+    allowed="$(jq -r '.allowed_values | join(", ")' <<< "${q}")"
+    if [[ -n "${allowed}" ]]; then
+      out="${out}${out:+$'\n'}config: project ${pkey}, type ${type} requires a value for ${label} — choose one of: ${allowed} (answer with --field-default ${pkey}=${type}=${label}=<value>)"
+    else
+      out="${out}${out:+$'\n'}config: project ${pkey}, type ${type} requires a value for ${label} (answer with --field-default ${pkey}=${type}=${label}=<value>)"
+    fi
+  done
+  printf '%s' "${out}"
+}
+
+# Marker tokens for the field_defaults managed region (011, T044). Substrings,
+# not full lines — mirrors README_BLOCK_BEGIN_TOKEN's convention.
+_CONFIG_FIELD_DEFAULTS_BEGIN='# --- spec-kit-jira:field_defaults:begin ---'
+_CONFIG_FIELD_DEFAULTS_END='# --- spec-kit-jira:field_defaults:end ---'
+
+# _config_field_defaults_block <map-json> — the region's full text (markers
+# included), no trailing newline (mirrors readme_block_render).
+_config_field_defaults_block() {
+  local map="${1:-}"
+  [[ -z "${map}" ]] && map='{}'
+  local yaml
+  yaml="$(config_field_defaults_yaml "${map}")" || return $?
+  cat <<BLOCK
+${_CONFIG_FIELD_DEFAULTS_BEGIN}
+# Recorded defaults for custom fields on ticket creation (011), written by
+# \`/speckit.jira.config\`. Edit a value here by hand if you like — keep it
+# between these markers; an entry outside them is a duplicate top-level key
+# and the next read refuses it (exit 4).
+${yaml}
+${_CONFIG_FIELD_DEFAULTS_END}
+BLOCK
+}
+
+# _config_field_defaults_write <config.yml-path> <map-json> <dry_run> —
+# splice the resolved field_defaults map into the team config through the
+# existing managed_section_splice (research R1), mirroring readme_block_write.
+# Prints a status token (created|written|unchanged|refused|inert) and returns
+# 0, or EXIT_CONFIG (4) on malformed markers (zero writes). `inert` (research
+# R6, FR-028): an empty map and a file that has never carried the region are
+# left completely untouched — the key is never introduced for a team that has
+# recorded nothing.
+_config_field_defaults_write() {
+  local path="$1" map="${2:-}" dry="${3:-false}"
+  [[ -z "${map}" ]] && map='{}'
+
+  local current="" existed="false"
+  if [[ -f "${path}" ]]; then
+    existed="true"
+    current="$(cat "${path}"; printf x)"; current="${current%x}"
+  fi
+
+  if [[ "$(jq -r 'length' <<< "${map}")" -eq 0 && "${current}" != *"${_CONFIG_FIELD_DEFAULTS_BEGIN}"* ]]; then
+    printf 'inert'
+    return 0
+  fi
+
+  local block
+  block="$(_config_field_defaults_block "${map}")" || return $?
+
+  local tmp
+  tmp="$(mktemp)"
+  if ! printf '%s' "${current}" | managed_section_splice \
+      "${_CONFIG_FIELD_DEFAULTS_BEGIN}" "${_CONFIG_FIELD_DEFAULTS_END}" "${block}" > "${tmp}"; then
+    rm -f "${tmp}"
+    printf 'refused'
+    return "${EXIT_CONFIG}"
+  fi
+
+  local status
+  if [[ "${existed}" == "true" ]] && cmp -s "${tmp}" "${path}"; then
+    status="unchanged"
+  elif [[ "${existed}" == "false" ]]; then
+    status="created"
+  else
+    status="written"
+  fi
+
+  if [[ "${dry}" != "true" && "${status}" != "unchanged" ]]; then
+    mv "${tmp}" "${path}"
+  else
+    rm -f "${tmp}"
+  fi
+  printf '%s' "${status}"
+  return 0
 }
 
 # _config_gitignore_effect <repo-root> <dry_run> — enforce gitignore coverage of
@@ -437,6 +743,7 @@ cmd_config() {
   # Parse flags (config-read, no model judgement). The dispatcher already handled
   # --help; re-parse here so the command is runnable standalone.
   local parsed json="false" dry_run="false" exit_code="0" error="" styles="" args="" enable_hooks="" issue_types=""
+  local field_defaults=""
   parsed="$(cli_parse "$@")"
   while IFS='=' read -r key value; do
     case "${key}" in
@@ -445,6 +752,7 @@ cmd_config() {
       styles) styles="${value}" ;;
       issue_types) issue_types="${value}" ;;
       enable_hooks) enable_hooks="${value}" ;;
+      field_defaults) field_defaults="${value}" ;;
       args) args="${value}" ;;
       exit) exit_code="${value}" ;;
       error) error="${value}" ;;
@@ -535,7 +843,7 @@ cmd_config() {
   # bytes on every run (FR-003).
   local resolved nproj=0 pkey binding rids proj_styles='{}'
   local api_style committed style_flag style_resolved style style_source
-  local proj_roles='{}' role_notes=""
+  local proj_roles='{}' role_notes="" proj_field_defaults='{}' fd_notes=""
   resolved="$(jq -c '.resolved_ids // {}' <<< "${existing}")"
   while IFS= read -r pkey; do
     [[ -z "${pkey}" ]] && continue
@@ -579,9 +887,10 @@ cmd_config() {
     # resolver selected that the initial discovery did not already cover
     # (T050/T051) — the ordinary case once a mapping is declared or
     # answered rather than derived from a single-candidate level.
-    local rf_map pla_map role_key role_id type_meta
+    local rf_map pla_map df_map role_key role_id type_meta
     rf_map="$(jq -c '.required_fields // {}' <<< "${rids}")"
     pla_map="$(jq -c '.parent_link_available // {}' <<< "${rids}")"
+    df_map="$(jq -c '.defaultable_fields // {}' <<< "${rids}")"
     for role_key in "${JIRA_ROLE_NAMES[@]}"; do
       role_id="$(jq -r --arg r "${role_key}" '.[$r].id // empty' <<< "${roles}")"
       [[ -z "${role_id}" ]] && continue
@@ -589,20 +898,69 @@ cmd_config() {
       type_meta="$(discovery_type_metadata "${pkey}" "${role_id}")" || return $?
       rf_map="$(jq -c --arg t "${role_id}" --argjson m "$(jq -c '.required_fields' <<< "${type_meta}")" '. + {($t): $m}' <<< "${rf_map}")"
       pla_map="$(jq -c --arg t "${role_id}" --argjson h "$(jq -c '.parent_link_available' <<< "${type_meta}")" '. + {($t): $h}' <<< "${pla_map}")"
+      df_map="$(jq -c --arg t "${role_id}" --argjson m "$(jq -c '.defaultable_fields' <<< "${type_meta}")" '. + {($t): $m}' <<< "${df_map}")"
     done
 
-    rids="$(jq -c --argjson roles "${roles}" --argjson rf "${rf_map}" --argjson pla "${pla_map}" \
+    rids="$(jq -c --argjson roles "${roles}" --argjson rf "${rf_map}" --argjson pla "${pla_map}" --argjson df "${df_map}" \
       '. + {roles: $roles, required_fields: $rf, parent_link_available: $pla}
+       + (if ($df|length) > 0 then {defaultable_fields: $df} else {} end)
        + (if ($roles.story) then {child_type: ($roles.story | {logical_name, id, source})} else {} end)
        + (if ($roles.specification) then {parent_type: ($roles.specification | {logical_name, id, source})} else {} end)' \
       <<< "${rids}")"
 
+    # Field-defaults ceremony (011, contract §2): validate this run's
+    # --field-default answers for this project (§2.4), merge them with the
+    # project's recorded entry (§2.6), ask about any required+defaultable
+    # field of an in-scope type still unanswered (§2.1-§2.3, research R4 —
+    # the script refuses, the agent asks, the agent re-invokes), and collect
+    # the three non-blocking reports (§2.8). In scope: the specification and
+    # story roles, plus any type an answer names this run (FR-026).
+    local fd_answers fd_recorded fd_problems
+    fd_answers="$(_config_field_answers_for "${pkey}" "${field_defaults}")"
+    fd_recorded="$(config_field_defaults_for "${pkey}" "${cfg}")"
+    fd_problems="$(_config_field_default_answer_problems "${itypes}" "${df_map}" "${fd_answers}")"
+    if [[ "$(jq -r 'length' <<< "${fd_problems}")" -gt 0 ]]; then
+      _config_report_field_default_problems "${pkey}" "${fd_problems}" "${json}"
+      return "${EXIT_CONFIG}"
+    fi
+
+    local fd_merged fd_ask_types fd_bridge_ids fd_report
+    fd_merged="$(_config_field_default_merge "${fd_recorded}" "${fd_answers}")"
+    fd_ask_types="$(jq -cn --argjson roles "${roles}" --argjson ans "${fd_answers}" \
+      '([$roles.specification, $roles.story] | map(select(. != null) | .logical_name)) + [$ans[].type] | unique')"
+    fd_bridge_ids="$(jq -cn --argjson roles "${roles}" '[$roles.specification, $roles.story] | map(select(. != null) | .id)')"
+    fd_report="$(_config_field_default_report "${itypes}" "${df_map}" "${fd_ask_types}" "${fd_merged}" "${fd_bridge_ids}")"
+    # A pending question (contract §6: "consolidated question pending | 0 —
+    # not a failure") is NON-BLOCKING at config time: the ceremony's role is
+    # discovery and recording, not gating a creation. Whether the run can
+    # still be reached at all is what Phase 4's reconcile-time gate (US2/US3,
+    # contract §3.3/§3.6) judges, over the discovered defaultable_fields this
+    # run persists regardless of what remains unanswered — FR-013/FR-028
+    # would otherwise be unreachable, since reconcile could never see a
+    # modern binding with an unresolved required field if config refused
+    # before ever writing one. `_config_field_default_notes` reports every
+    # pending field by its remedy line, folded in below.
+    fd_notes="${fd_notes}${fd_notes:+$'\n'}$(_config_field_default_notes "${pkey}" "${fd_report}")"
+    # Absence is the off switch (research R6, FR-028): a project with
+    # nothing recorded and no this-run answer must never gain a bare
+    # {ask: true} entry it never had — that would introduce the key for
+    # every team that has not touched this feature. A project that ALREADY
+    # carries an entry is carried forward even if the merge is now empty
+    # (an operator's hand-edit removing the last field, §5.2).
+    if [[ "$(jq -r 'length' <<< "${fd_merged}")" -gt 0 || "$(jq -r --arg k "${pkey}" '(.field_defaults // {}) | has($k)' <<< "${cfg}")" == "true" ]]; then
+      proj_field_defaults="$(jq -c --arg k "${pkey}" --argjson ask "$(jq -c '.ask' <<< "${fd_recorded}")" --argjson m "${fd_merged}" \
+        '. + {($k): ({ask: $ask} + $m)}' <<< "${proj_field_defaults}")"
+    fi
+
     # Mandatory-field / parent-link gate, pulled to configuration time
     # (T050/T051, contract §4 checks 5/6): the same existing gate, run over
     # the roles this mapping just selected — including one derivation would
-    # never have chosen.
-    local gate_result gate_status
-    gate_result="$(hierarchy_mandatory_gate "${rids}" "${pkey}")"
+    # never have chosen. (011, research R5): a field with a recorded default
+    # or a this-run answer is now satisfiable; a required field whose shape
+    # cannot be defaulted still refuses here, unchanged (US3 scenario 3).
+    local fd_defaults_by_type gate_result gate_status
+    fd_defaults_by_type="$(plan_resolve_field_defaults "${itypes}" "${df_map}" "${fd_merged}" '[]' | jq -c '.field_defaults')"
+    gate_result="$(hierarchy_mandatory_gate "${rids}" "${pkey}" "${fd_defaults_by_type}")"
     gate_status="$(jq -r '.status' <<< "${gate_result}")"
     if [[ "${gate_status}" != "ok" ]]; then
       jq -r '.message' <<< "${gate_result}" >&2
@@ -643,6 +1001,21 @@ cmd_config() {
       '. + {($k): {style: $s, style_source: $src}}' <<< "${proj_styles}")"
     nproj=$((nproj + 1))
   done <<< "${keys}"
+
+  # The three non-blocking field-defaults reports (§2.8, §2.3): never a
+  # warning, never a refusal — printed alongside the role notes.
+  [[ -n "${fd_notes}" ]] && printf '%s\n' "${fd_notes}" >&2
+
+  # Field-defaults write (011, T042/T044): the union of every processed
+  # project's resolved entry, overlaid onto whatever the committed config
+  # already held for OTHER projects this run did not touch — a run over one
+  # project never erases another project's recorded defaults. Absence is the
+  # off switch (research R6, FR-028): `_config_field_defaults_write` never
+  # introduces the key when there is nothing to record and the region has
+  # never existed.
+  local fd_all fd_write_status
+  fd_all="$(jq -cn --argjson base "$(jq -c '.field_defaults // {}' <<< "${cfg}")" --argjson upd "${proj_field_defaults}" '$base + $upd')"
+  fd_write_status="$(_config_field_defaults_write "${configdir}/config.yml" "${fd_all}" "${dry_run}")" || return $?
 
   # Merge the resolved-id table into the machine-owned local layer, preserving
   # the operator's site_alias / overrides, and emit deterministic canonical YAML.
@@ -718,12 +1091,14 @@ cmd_config() {
     --argjson dp "${dp}" \
     --arg hs "${hooks_status}" --arg hd "${hooks_detail}" \
     --arg rs "${readme_status}" --arg rd "${readme_detail}" \
-    --arg gs "${gitignore_status}" '
+    --arg gs "${gitignore_status}" \
+    --arg fs "${fd_write_status}" '
     {
       discovery: {status: $ds, detail: $dd, projects: $dp},
       hooks:     {status: $hs, detail: $hd},
       readme:    {status: $rs, detail: $rd},
-      gitignore: {status: $gs, detail: "personal.yml gitignore coverage"}
+      gitignore: {status: $gs, detail: "personal.yml gitignore coverage"},
+      field_defaults: {status: $fs, detail: "recorded field defaults in config.yml"}
     }')"
 
   # §7.2/§7.3/§7.4 notes (supersession, promotion, task-recorded): never a
