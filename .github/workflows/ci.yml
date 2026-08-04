@@ -117,7 +117,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
       - name: shellcheck scripts/bash
-        run: shellcheck -x -P scripts/bash $(find scripts/bash -name '*.sh')
+        run: find scripts/bash -name '*.sh' -exec shellcheck -x -P scripts/bash {} +
 
       - name: Invoke-ScriptAnalyzer scripts/powershell
         shell: pwsh

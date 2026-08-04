@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-08-04
+
+### Fixed
+
+- A Jira label, option name, or other string value containing `"` or `\` no
+  longer refuses the whole configuration write with `EXIT_CONFIG`
+  (`specs/013-fix-yaml-string-escaping/`). The writer now escapes both
+  characters (`\"`, `\\`) inside the double-quoted scalars it already emits,
+  and the reader undoes exactly those two sequences on the next run — a
+  backslash forming no recognised escape is kept literally, so every
+  hand-maintained `config.yml` that loads today keeps loading. **Behaviour
+  change**: a double-quoted scalar containing a recognised escape sequence now
+  decodes to the text it denotes; a deployment that was reading such a value
+  with the backslash still in it will see it disappear on the next run. The
+  refusal itself narrows to the one case this dialect genuinely cannot
+  represent — a string value containing a line break — which previously wrote
+  successfully with `EXIT_SUCCESS` and produced a `config.local.yml` that
+  failed to parse on the next read.
+
 ## [0.10.0] - 2026-08-03
 
 ### Added
@@ -595,7 +614,8 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.7.0...v0.8.0

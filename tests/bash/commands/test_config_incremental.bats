@@ -108,6 +108,34 @@ boot() {
   [ "$(jq -r '(.resolved_ids.COMP.issue_types[] | select(.logical_name=="Story") | .id)' <<< "$json")" = "10102" ]
 }
 
+@test "a resolved label containing a double quote survives an incremental run untouched, not re-resolved (013 FR-005)" {
+  boot
+  # Pre-seed COMP as already resolved from a prior ceremony, with a logical_name
+  # containing a double quote — recorded escaped, as the writer would leave it.
+  cat > "${JIRA_CONFIG_DIR}/config.local.yml" <<'YAML'
+resolved_ids:
+  COMP:
+    issue_types:
+      - logical_name: "Platform \"legacy\""
+        id: "10199"
+        hierarchy_level: "0"
+        subtask: false
+YAML
+  # Only TEAM is configured this run — COMP is not touched.
+  cat > "${JIRA_CONFIG_DIR}/config.yml" <<'EOF'
+projects:
+  - key: TEAM
+    style: team_managed
+routing_default: "TEAM"
+EOF
+  run cmd_config config --child-type TEAM=Story --json
+  [ "$status" -eq 0 ]
+  local json
+  json="$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")"
+  [ "$(jq -r '.resolved_ids.COMP.issue_types[0].logical_name' <<< "$json")" = 'Platform "legacy"' ]
+  [ "$(jq -r '.resolved_ids.COMP.issue_types[0].id' <<< "$json")" = "10199" ]
+}
+
 @test "the PowerShell port binds incrementally byte-identically (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   boot powershell

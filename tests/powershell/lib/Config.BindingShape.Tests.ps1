@@ -88,12 +88,14 @@ Describe 'Get-JiraResolvedIdMap — binding shape' {
         ($roundtripped | & jq -cS .) | Should -Be ($json | & jq -cS .)
     }
 
-    It 'a logical_name the reader cannot unescape refuses, even nested (T014c/FR-003b)' {
+    It 'a logical_name containing a double quote is written escaped and round-trips, even nested (013 contract §1, was: T014c/FR-003b refusal)' {
         $json = '{"resolved_ids":{"COMP":{"issue_types":[{"logical_name":"Bad\"Name","id":"1","hierarchy_level":"0","subtask":false}]}}}'
-        $err = $null
-        try { ConvertTo-JiraConfigYaml -Json $json } catch { $err = $_.Exception.Message }
-        $err | Should -Not -BeNullOrEmpty
-        $err.Contains('resolved_ids.COMP.issue_types[0].logical_name') | Should -Be $true
+        $yaml = ConvertTo-JiraConfigYaml -Json $json
+        $yaml | Should -Match ([regex]::Escape('"logical_name": "Bad\"Name"'))
+        $tmpf = Join-Path $TestDrive 'roundtrip-badname.yml'
+        Set-Content -LiteralPath $tmpf -Value $yaml -NoNewline
+        $roundtripped = ConvertFrom-JiraConfigYaml -Path $tmpf | ConvertFrom-Json
+        $roundtripped.resolved_ids.COMP.issue_types[0].logical_name | Should -Be 'Bad"Name'
     }
 
     # --- T078 [Phase 9] — the `roles` shape (010, contract §5.1, §9.2) -----

@@ -1,0 +1,16 @@
+# Team config — quoted/backslash-label conformance fixture (013) —
+# company-managed project whose parent type's required custom field offers
+# allowed values containing a quote and a backslash (committable,
+# credential-free).
+projects:
+  - key: PM
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: PM
+routing_default: PM

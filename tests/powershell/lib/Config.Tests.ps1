@@ -169,14 +169,260 @@ Describe 'ConvertFrom-JiraConfigYaml' {
         $yaml | Should -Match ('"' + [char]0xC9 + 'lev' + [char]0xE9 + 'e": "1"')
     }
 
-    It 'a key containing a double quote is refused on write, and the key text never appears (007 research R3)' {
-        { ConvertTo-JiraConfigYaml -Json '{"a":{"say \"hi\"":"1"}}' } | Should -Throw
-        try { ConvertTo-JiraConfigYaml -Json '{"a":{"say \"hi\"":"1"}}' } catch { $_.Exception.Message | Should -Not -Match 'say "hi"' }
+    # --- Escape decoding (013, contracts/yaml-string-escaping.md §2) --------
+
+    It 'a quoted-legacy escaped sequence item decodes to the label with an embedded quote (013 contract §2.4)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'a.yml'
+        Set-Content -Path $f -Value "allowed:`n  - `"Platform \`"legacy\`"`"" -NoNewline
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.allowed[0] | Should -Be 'Platform "legacy"'
+        Remove-Item -Recurse -Force $d
     }
 
-    It 'a string value containing a double quote is refused on write, value never printed (007 research R3)' {
-        { ConvertTo-JiraConfigYaml -Json '{"a":{"k":"say \"hi\""}}' } | Should -Throw
-        try { ConvertTo-JiraConfigYaml -Json '{"a":{"k":"say \"hi\""}}' } catch { $_.Exception.Message | Should -Not -Match 'say "hi"' }
+    It 'a double backslash in a quoted scalar decodes to one backslash (013 contract §2.4)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'b.yml'
+        Set-Content -Path $f -Value 'k: "Delivery\\Platform"' -NoNewline
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.k | Should -Be 'Delivery\Platform'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'a trailing escaped backslash does not swallow the closing delimiter (013 contract §2.1 rule 2)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'c.yml'
+        Set-Content -Path $f -Value "allowed:`n  - `"trailing\\`"`n  - `"second`"" -NoNewline
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.allowed[0] | Should -Be 'trailing\'
+        $obj.allowed[1] | Should -Be 'second'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'an escaped backslash followed by an escaped quote decodes to backslash-quote, two characters (013 contract §2.4)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'd.yml'
+        Set-Content -Path $f -Value 'k: "\\\""' -NoNewline
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.k | Should -Be '\"'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'the escaped form decodes identically as a sequence item and as a mapping value (013 contract §2.4)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'e.yml'
+        Set-Content -Path $f -Value "seq:`n  - `"Platform \`"legacy\`"`"`nval: `"Platform \`"legacy\`"`"" -NoNewline
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.seq[0] | Should -Be $obj.val
+        $obj.val | Should -Be 'Platform "legacy"'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'an escaped quote inside a double-quoted scalar does not end the string at a following # (013 FR-011)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'tricky.yml'
+        Set-Content -Path $f -Value 'tricky: "a \" # b"' -NoNewline
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.tricky | Should -Be 'a " # b'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'an escaped quote inside a quoted key is decoded, not treated as the closing delimiter (013 FR-010, contract §2.3)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'key.yml'
+        Set-Content -Path $f -Value '"say \"x\"": v' -NoNewline
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.'say "x"' | Should -Be 'v'
+        Remove-Item -Recurse -Force $d
+    }
+
+    # --- Escape encoding (013, contracts/yaml-string-escaping.md §1) -----------
+
+    It 'a value with an embedded double quote is emitted with the exact escaped bytes (013 contract §1.3)' {
+        $yaml = ConvertTo-JiraConfigYaml -Json '{"k":"Platform \"legacy\""}'
+        $yaml | Should -Match ([regex]::Escape('"k": "Platform \"legacy\""'))
+    }
+
+    It 'a value with a single backslash is emitted doubled (013 contract §1.3)' {
+        $yaml = ConvertTo-JiraConfigYaml -Json '{"k":"Delivery\\Platform"}'
+        $yaml | Should -Match ([regex]::Escape('"k": "Delivery\\Platform"'))
+    }
+
+    It 'a value with both a quote and a backslash is emitted backslash-first (013 contract §1.1, §1.3)' {
+        $yaml = ConvertTo-JiraConfigYaml -Json '{"k":"Group \"A\\B\""}'
+        $yaml | Should -Match ([regex]::Escape('"k": "Group \"A\\B\""'))
+    }
+
+    It 'a value that is exactly backslash-quote round-trips without double-escaping (013 contract §1.3)' {
+        $yaml = ConvertTo-JiraConfigYaml -Json '{"k":"\\\""}'
+        $yaml | Should -Match ([regex]::Escape('"k": "\\\""'))
+    }
+
+    It 'a value with neither character is emitted byte-identically to before this feature (013 contract §1.3)' {
+        $yaml = ConvertTo-JiraConfigYaml -Json '{"k":"clean"}'
+        $yaml | Should -Match ([regex]::Escape('"k": "clean"'))
+    }
+
+    It 'a mapping key containing a double quote is emitted escaped and reads back identical (013 FR-010, FR-014)' {
+        $yaml = ConvertTo-JiraConfigYaml -Json '{"say \"hi\"":"1"}'
+        $yaml | Should -Match ([regex]::Escape('"say \"hi\""'))
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'qkey.yml'
+        [System.IO.File]::WriteAllText($f, $yaml)
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.PSObject.Properties.Name | Should -Be 'say "hi"'
+        Remove-Item -Recurse -Force $d
+    }
+
+    # --- Round-trip corpus (013, User Story 2, T031) --------------------------
+
+It 'a run of consecutive backslashes is preserved in count after a round trip (013 FR-006, edge case)' {
+    $raw = 'a\\\b'
+    $json = (@{k=$raw} | ConvertTo-Json -Compress)
+    $yaml = ConvertTo-JiraConfigYaml -Json $json
+    $tmpf = Join-Path $TestDrive 'backslashes.yml'
+    Set-Content -LiteralPath $tmpf -Value $yaml -NoNewline
+    $obj = (ConvertFrom-JiraConfigYaml -Path $tmpf) | ConvertFrom-Json
+    $obj.k | Should -Be $raw
+}
+
+It 'a quote adjacent to the delimiter round-trips as literal content (013 edge case)' {
+    $raw = '"quoted"'
+    $json = (@{k=$raw} | ConvertTo-Json -Compress)
+    $yaml = ConvertTo-JiraConfigYaml -Json $json
+    $tmpf = Join-Path $TestDrive 'adjacent.yml'
+    Set-Content -LiteralPath $tmpf -Value $yaml -NoNewline
+    $obj = (ConvertFrom-JiraConfigYaml -Path $tmpf) | ConvertFrom-Json
+    $obj.k | Should -Be $raw
+}
+
+It 'a quoted and an unquoted variant of a label stay distinct values after a round trip (013 FR-006 invariant I5)' {
+    $rawA = 'Platform "legacy"'
+    $rawB = 'Platform legacy'
+    $json = (@{a=$rawA; b=$rawB} | ConvertTo-Json -Compress)
+    $yaml = ConvertTo-JiraConfigYaml -Json $json
+    $tmpf = Join-Path $TestDrive 'distinct.yml'
+    Set-Content -LiteralPath $tmpf -Value $yaml -NoNewline
+    $obj = (ConvertFrom-JiraConfigYaml -Path $tmpf) | ConvertFrom-Json
+    $obj.a | Should -Be $rawA
+    $obj.b | Should -Be $rawB
+    $obj.a | Should -Not -Be $obj.b
+}
+
+# --- Wedged-configuration recovery (013 US3, quickstart Scenario 1, T037) --
+
+It 'a pre-seeded file already holding the escaped form loads and rewrites byte-identically (013 US3, quickstart Scenario 1)' {
+    $tmpf = Join-Path $TestDrive 'wedged.yml'
+    $wedged = "`"allowed`":`n  - `"Platform \`"legacy\`"`""
+    Set-Content -LiteralPath $tmpf -Value $wedged -NoNewline
+    $json = (ConvertFrom-JiraConfigYaml -Path $tmpf) | ConvertFrom-Json
+    $json.allowed[0] | Should -Be 'Platform "legacy"'
+    $rewritten = ConvertTo-JiraConfigYaml -Json (ConvertFrom-JiraConfigYaml -Path $tmpf)
+    $rewritten | Should -Be $wedged
+}
+
+# --- Line-break refusal (013 FR-020, contract §1.4, §4) ---------------------
+
+    It 'a string value containing a line break (LF) is refused, value never printed (013 FR-020)' {
+        { ConvertTo-JiraConfigYaml -Json '{"k":"before\nafter"}' } | Should -Throw
+        try { ConvertTo-JiraConfigYaml -Json '{"k":"before\nafter"}' }
+        catch {
+            $_.Exception.Message | Should -Match 'k'
+            $_.Exception.Message | Should -Not -Match 'before'
+            $_.Exception.Message | Should -Not -Match 'after'
+        }
+    }
+
+    It 'a string value containing a bare CR is refused (013 FR-020, contract §4)' {
+        { ConvertTo-JiraConfigYaml -Json '{"k":"before\rafter"}' } | Should -Throw
+        try { ConvertTo-JiraConfigYaml -Json '{"k":"before\rafter"}' }
+        catch {
+            $_.Exception.Message | Should -Match 'k'
+            $_.Exception.Message | Should -Not -Match 'before'
+            $_.Exception.Message | Should -Not -Match 'after'
+        }
+    }
+
+    It 'a document with two unrepresentable paths reports both, deduplicated and in the same order (013 US4, research R5)' {
+        { ConvertTo-JiraConfigYaml -Json '{"a":"before\nafter","b":"before\nafter"}' } | Should -Throw
+        try { ConvertTo-JiraConfigYaml -Json '{"a":"before\nafter","b":"before\nafter"}' }
+        catch {
+            $_.Exception.Message | Should -Be "config: a: a string value here contains a line break, which this writer cannot represent`nconfig: b: a string value here contains a line break, which this writer cannot represent"
+        }
+    }
+
+    It 'two-path refusal listing orders ordinally, not culture-sensitively (013 FR-023, contract §4)' {
+        $json = '{"Won''t Do":"before\nafter","Won-t Do":"before\nafter"}'
+        { ConvertTo-JiraConfigYaml -Json $json } | Should -Throw
+        try { ConvertTo-JiraConfigYaml -Json $json }
+        catch {
+            $_.Exception.Message | Should -Be "config: Won't Do: a string value here contains a line break, which this writer cannot represent`nconfig: Won-t Do: a string value here contains a line break, which this writer cannot represent"
+        }
+    }
+
+    # --- Compatibility guards: must stay green throughout (013 FR-012/013, 007 R1, research R2) -
+
+    It 'an unrecognised backslash escape stays literal, both backslashes kept (013 FR-012)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'path.yml'
+        Set-Content -Path $f -Value 'path: "C:\Users\shared"' -NoNewline
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.path | Should -Be 'C:\Users\shared'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'a single-quoted scalar is never decoded (013 FR-013, contract §2.2)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'single.yml'
+        Set-Content -Path $f -Value 'single: ''a\"b''' -NoNewline
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.single | Should -Be 'a\"b'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'a literal TAB inside a quoted scalar round-trips unchanged (013 research R2)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'tab.yml'
+        [System.IO.File]::WriteAllText($f, "k: `"a`tb`"")
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.k | Should -Be "a`tb"
+        Remove-Item -Recurse -Force $d
+    }
+
+    # --- Privacy guard: must stay green throughout (013 FR-024, Constitution IX) -
+
+    It 'a malformed line with an escaped quote before a credential-shaped token is still redacted (013 FR-024)' {
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'leak2.yml'
+        Set-Content -Path $f -Value "resolved_ids:`n  JET:`n    bad `"a \`" # ATATT3xFfGF0secrettoken" -NoNewline
+        $errMsg = $null
+        try { ConvertFrom-JiraConfigYaml -Path $f | Out-Null } catch { $errMsg = $_.Exception.Message }
+        $firstLine = ($errMsg -split "`n")[0]
+        $firstLine | Should -Not -Match 'ATATT3xFfGF0secrettoken'
+        $firstLine | Should -Match ([regex]::Escape('[redacted]'))
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'a key containing a double quote is written and round-trips (013 contract §1, was: refused on write, 007 research R3)' {
+        $yaml = ConvertTo-JiraConfigYaml -Json '{"a":{"say \"hi\"":"1"}}'
+        $yaml | Should -Match ([regex]::Escape('"say \"hi\""'))
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'key.yml'
+        [System.IO.File]::WriteAllText($f, $yaml)
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.a.PSObject.Properties.Name | Should -Be 'say "hi"'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'a string value containing a double quote is written and round-trips (013 contract §1, was: refused on write, 007 research R3)' {
+        $yaml = ConvertTo-JiraConfigYaml -Json '{"a":{"k":"say \"hi\""}}'
+        $yaml | Should -Match ([regex]::Escape('"say \"hi\""'))
+        $d = New-TempConfigDir
+        $f = Join-Path $d 'val.yml'
+        [System.IO.File]::WriteAllText($f, $yaml)
+        $obj = (ConvertFrom-JiraConfigYaml -Path $f) | ConvertFrom-Json
+        $obj.a.k | Should -Be 'say "hi"'
+        Remove-Item -Recurse -Force $d
     }
 
     # --- Fail-closed on a line that cannot be interpreted (007, contracts/parse-failure.md) -
