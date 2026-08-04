@@ -330,9 +330,14 @@ _config_field_default_merge() {
 #     MERGED entry — recorded or this-run, either can reach here — whose
 #     value is not one of its field's `allowed_values`. Examined only when
 #     the type name resolves (A1), the label resolves to a defaultable field
-#     of that type (A2), and that field's `allowed_values` is non-empty
-#     (A3) — an entry failing A1/A2 stays classified `orphaned` and never
-#     blocks (011 FR-008), and an absent list is not an empty one. A
+#     of that type (A2), that field's `allowed_values` is non-empty (A3),
+#     and the recorded value is a STRING (A4) — an entry failing A1/A2 stays
+#     classified `orphaned` and never blocks (011 FR-008), and an absent
+#     list is not an empty one. A4 keeps FR-006's escape hatch open: a value
+#     an operator wrote as an object or an array is the shape the bridge
+#     does not derive, obeyed literally, and it can never be a member of an
+#     `allowed_values` list that holds option labels — checking it would
+#     refuse exactly the value the spec promises to pass through. A
 #     non-empty result is a refusal trigger, like `pending`; the recorded
 #     value itself never appears in the entry, only the label, the type,
 #     and the candidates (Principle IV).
@@ -382,6 +387,7 @@ _config_field_default_report() {
           | (first((($df[$tid]) // [])[] | select(.logical_name == $lbl)) // null) as $meta
           | select($meta != null)
           | ($meta.allowed_values // []) as $av
+          | select(($val | type) == "string")
           | select(($av | length) > 0 and ($av | index($val)) == null)
           | {type: $tname, label: $lbl, candidates: $av}
         ]

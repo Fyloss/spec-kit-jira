@@ -168,16 +168,21 @@ The member reuses the `outside_allowed` problem kind, the `candidates` key, and 
 that the `--field-default` flag path already produces, so the two inputs are indistinguishable to the
 operator. It is a **refusal trigger**, like `pending`.
 
-**Admission rules** (all three must hold for an entry to be examined):
+**Admission rules** (all four must hold for an entry to be examined):
 
 | # | Rule | Why |
 | --- | --- | --- |
 | A1 | The recorded type name resolves to a discovered issue type. | An unresolvable type is `orphaned` and stays non-blocking (011 FR-008). |
 | A2 | The recorded label resolves to a defaultable field of that type. | Same. |
 | A3 | That field's `allowed_values` is non-empty. | An absent list is not an empty one (FR-015). |
+| A4 | The recorded value is a string. | `allowed_values` enumerates option *labels*, so a hand-written object or array can never be a member of it; checking it would refuse the very value FR-006 passes through untouched. A recorded number, boolean, or null is exempt for the same reason — the encoding rules apply to recorded text only. |
 
 A3 also makes degraded mode a no-op without a special case: with no Jira read there is no
 `defaultable_fields`, A1/A2 exclude every entry, and nothing is checked.
+
+A4 is what keeps the check from closing FR-006's expert escape hatch. The refusal exists to catch a
+*typo* in a recorded label-shaped value; an operator who wrote a structure did so deliberately, to reach
+a field shape the bridge does not derive, and the config ceremony has no business second-guessing it.
 
 **Never a refusal**: the value itself is not echoed into any structured output beyond the label and the
 candidate list — the credential-shaped refusal already in place suppresses values on purpose

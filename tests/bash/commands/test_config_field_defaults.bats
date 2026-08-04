@@ -469,6 +469,40 @@ teardown_e2e() {
   [ "$(jq -r '.outside_allowed | length' <<< "$output")" -eq 0 ]
 }
 
+@test "015 FR-006 — a hand-recorded structured value on an enumerated field is not outside_allowed (the escape hatch must survive the check)" {
+  # The escape hatch of US1 scenario 6 / FR-006: an operator states the shape
+  # the bridge does not derive, and the bridge obeys it literally. The
+  # allowed_values list holds option LABELS, so a structured value can never
+  # be a member of it — checking one against the other refuses a value the
+  # spec promises to pass through.
+  local merged='{"Epic":{"Program Increment":{"value":"PI-2026-Q3"}}}'
+  run _config_field_default_report "${ITYPES}" "${DEFAULTABLE}" '["Epic"]' "${merged}" '["10101"]'
+  [ "$(jq -r '.outside_allowed | length' <<< "$output")" -eq 0 ]
+}
+
+@test "015 FR-006 — an array, a number, a boolean and a null recorded value are never outside_allowed" {
+  local df='{"10101":[
+    {"logical_name":"A","field_id":"customfield_1","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]},
+    {"logical_name":"B","field_id":"customfield_2","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]},
+    {"logical_name":"C","field_id":"customfield_3","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]},
+    {"logical_name":"D","field_id":"customfield_4","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]}
+  ]}'
+  local merged='{"Epic":{"A":[{"value":"x"}],"B":7,"C":true,"D":null}}'
+  run _config_field_default_report "${ITYPES}" "${df}" '["Epic"]' "${merged}" '["10101"]'
+  [ "$(jq -r '.outside_allowed | length' <<< "$output")" -eq 0 ]
+}
+
+@test "015 FR-006 — a structured value passes while a genuinely wrong string beside it still refuses" {
+  local df='{"10101":[
+    {"logical_name":"Program Increment","field_id":"customfield_40012","schema_type":"option","required":true,"defaultable":true,"allowed_values":["PI-2026-Q2","PI-2026-Q3"]},
+    {"logical_name":"Region","field_id":"customfield_40014","schema_type":"option","required":false,"defaultable":true,"allowed_values":["EMEA","APAC"]}
+  ]}'
+  local merged='{"Epic":{"Program Increment":{"id":"10250"},"Region":"NotAllowed"}}'
+  run _config_field_default_report "${ITYPES}" "${df}" '["Epic"]' "${merged}" '["10101"]'
+  [ "$(jq -r '.outside_allowed | length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.outside_allowed[0].label' <<< "$output")" = "Region" ]
+}
+
 @test "015 — refusals are batched into one pass, never one refusal per entry" {
   local df='{"10101":[
     {"logical_name":"Program Increment","field_id":"customfield_40012","schema_type":"option","required":true,"defaultable":true,"allowed_values":["PI-2026-Q2","PI-2026-Q3"]},

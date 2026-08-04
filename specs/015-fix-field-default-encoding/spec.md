@@ -202,6 +202,11 @@ value itself, without writing the config.
    check happens at all — the list is a discovery result, never a guess.
 4. **Given** a config in which every recorded default is valid, **When** the ceremony runs, **Then** the
    written config is byte-for-byte unchanged and the run is silent about allowed values.
+5. **Given** a recorded default an operator wrote by hand as a structured value — the escape hatch of
+   User Story 1 scenario 6 — on a field whose allowed values Jira enumerates, **When** the ceremony runs,
+   **Then** no allowed-value check applies to it and it is accepted: the accepted values are option
+   labels, so a structure could never be among them, and refusing it would close the escape hatch this
+   same feature guarantees.
 
 ---
 
@@ -271,7 +276,10 @@ value itself, without writing the config.
   already does to the equivalent refusal on the `--field-default` flag path. The operator is looking at the
   file that holds the value; naming the field and the accepted values locates it unambiguously.
 - **FR-015**: The allowed-value check MUST apply only where discovery enumerated a non-empty list of allowed
-  values for that field, and MUST NOT apply in the ceremony's degraded mode where no Jira read happened.
+  values for that field, MUST apply only to a recorded value that is text — a hand-written structured value
+  is FR-006's escape hatch and MUST pass the check untouched, since the enumerated values are option labels
+  a structure could never match — and MUST NOT apply in the ceremony's degraded mode where no Jira read
+  happened.
 - **FR-016**: Both ports — Bash for macOS/Linux and PowerShell for Windows — MUST implement every requirement
   above and MUST produce byte-identical output, proven by the shared conformance corpus.
 - **FR-017**: A regression test MUST cover one issue type carrying both a select-list default and a free-text

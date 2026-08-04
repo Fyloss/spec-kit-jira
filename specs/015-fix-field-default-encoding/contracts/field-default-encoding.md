@@ -145,13 +145,22 @@ output as `{"created": []}`.
 
 ### §6.2 Admission
 
-An entry of the merged map is examined only when all three hold:
+An entry of the merged map is examined only when all four hold:
 
 1. its type name resolves to a discovered issue type;
 2. its label resolves to a defaultable field of that type;
-3. that field's `allowed_values` is non-empty.
+3. that field's `allowed_values` is non-empty;
+4. its recorded value is a string.
 
 An entry failing 1 or 2 MUST remain classified `orphaned` and MUST NOT block.
+
+Condition 4 is FR-006's escape hatch, enforced here rather than only on the wire:
+`allowed_values` enumerates option *labels*, so a value an operator wrote as an
+object or an array — the shape the bridge does not derive, obeyed literally — can
+never be a member of it, and checking one against the other would refuse exactly
+the value FR-006 promises to pass through untouched. The same exemption covers a
+recorded number, boolean, or null, per the edge case that the encoding rules apply
+to recorded text only.
 
 ### §6.3 Refusal
 

@@ -190,7 +190,7 @@ Story 4, and closing it means running the existing rule over the other input rat
 second rule. The message at `config.sh:455` (`… must be one of: …`) is reused verbatim, so an operator
 cannot tell — and should not have to — whether the refusal came from a flag or from the file.
 
-**Scoping rules**, all three load-bearing:
+**Scoping rules**, all four load-bearing:
 
 1. Only entries whose type name **and** label resolve are checked. An unresolvable entry is already
    classified `orphaned` and must stay non-blocking (FR-008 from feature 011) — funnelling the recorded
@@ -200,6 +200,12 @@ cannot tell — and should not have to — whether the refusal came from a flag 
    the existing flag-path condition already spells this exact test.
 3. Degraded mode is covered for free: with no Jira read there is no `defaultable_fields`, so no entry
    resolves, so rule 1 excludes everything (US4 scenario 3).
+4. Only where the recorded value is a **string**. The flag path never needed this rule — a
+   `--field-default` answer is a string by construction — but the recorded map can hold anything an
+   operator wrote, and FR-006 promises that a hand-written structure passes through untouched.
+   `allowed_values` enumerates option labels, so a structure can never be a member of it: without this
+   rule the check would refuse precisely the escape hatch the same feature guarantees. A recorded
+   number, boolean, or null is exempt on the same grounds.
 
 Checking the merged map rather than the recorded one means a `--field-default` answer is examined twice.
 That is harmless — the answer path refuses and returns before the report runs, so by the time the report

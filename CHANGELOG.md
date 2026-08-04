@@ -32,7 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   naming the field and the accepted values — the same rule the
   `--field-default` flag already enforced, now also applied to values
   already sitting in `config.yml`. The recorded value itself never appears
-  in the refusal.
+  in the refusal. The check applies to recorded *text* only: a value an
+  operator wrote by hand as a structure — the escape hatch for a field
+  shape the bridge does not derive — is still obeyed literally.
 
 ### Fixed (incidental)
 

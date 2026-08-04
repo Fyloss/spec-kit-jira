@@ -514,9 +514,11 @@ function Get-JiraFieldDefaultsReport {
       (015, research R5, contract §6, data-model.md §7 — a merged entry
       whose value is not one of its field's allowed_values, examined only
       when the type resolves, the label resolves to a defaultable field of
-      that type, and that field's allowed_values is non-empty; a refusal
-      trigger, like pending; the recorded value itself never appears in the
-      entry). Mirror of _config_field_default_report.
+      that type, that field's allowed_values is non-empty, and the recorded
+      value is a string — FR-006's escape hatch keeps a hand-written
+      structured value out of the check; a refusal trigger, like pending;
+      the recorded value itself never appears in the entry). Mirror of
+      _config_field_default_report.
     #>
     [CmdletBinding()]
     param(
@@ -573,7 +575,12 @@ function Get-JiraFieldDefaultsReport {
             # not a hypothetical one (it reproduces with a genuinely empty
             # allowed_values, e.g. a `user`-typed field).
             $allowed = if ($null -eq $match.allowed_values) { , @() } else { , @($match.allowed_values) }
-            if ($allowed.Count -gt 0 -and -not ($allowed -contains $fp.Value)) {
+            # A string recorded value only (FR-006's escape hatch): a value an
+            # operator wrote as an object or an array is the shape the bridge
+            # does not derive, obeyed literally, and it can never be a member
+            # of an allowed_values list that holds option labels — checking it
+            # would refuse exactly the value the spec promises to pass through.
+            if ($fp.Value -is [string] -and $allowed.Count -gt 0 -and -not ($allowed -contains $fp.Value)) {
                 $outsideAllowed.Add([ordered]@{ type = $tname; label = $fp.Name; candidates = $allowed })
             }
         }

@@ -355,6 +355,39 @@ Describe '015 T035 — a recorded value outside allowed_values (contract §6), m
         @($out.outside_allowed).Count | Should -Be 0
     }
 
+    It 'FR-006 — a hand-recorded structured value on an enumerated field is not outside_allowed (the escape hatch must survive the check)' {
+        # The escape hatch of US1 scenario 6 / FR-006: an operator states the
+        # shape the bridge does not derive, and the bridge obeys it literally.
+        # allowed_values holds option LABELS, so a structured value can never
+        # be a member of it.
+        $merged = '{"Epic":{"Program Increment":{"value":"PI-2026-Q3"}}}'
+        $out = Get-JiraFieldDefaultsReport -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $script:Defaultable -AskTypesJson '["Epic"]' -MergedJson $merged -BridgeTypeIdsJson '["10101"]' | ConvertFrom-Json
+        @($out.outside_allowed).Count | Should -Be 0
+    }
+
+    It 'FR-006 — an array, a number, a boolean and a null recorded value are never outside_allowed' {
+        $df = '{"10101":[' +
+            '{"logical_name":"A","field_id":"customfield_1","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]},' +
+            '{"logical_name":"B","field_id":"customfield_2","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]},' +
+            '{"logical_name":"C","field_id":"customfield_3","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]},' +
+            '{"logical_name":"D","field_id":"customfield_4","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]}' +
+            ']}'
+        $merged = '{"Epic":{"A":[{"value":"x"}],"B":7,"C":true,"D":null}}'
+        $out = Get-JiraFieldDefaultsReport -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $df -AskTypesJson '["Epic"]' -MergedJson $merged -BridgeTypeIdsJson '["10101"]' | ConvertFrom-Json
+        @($out.outside_allowed).Count | Should -Be 0
+    }
+
+    It 'FR-006 — a structured value passes while a genuinely wrong string beside it still refuses' {
+        $df = '{"10101":[' +
+            '{"logical_name":"Program Increment","field_id":"customfield_40012","schema_type":"option","required":true,"defaultable":true,"allowed_values":["PI-2026-Q2","PI-2026-Q3"]},' +
+            '{"logical_name":"Region","field_id":"customfield_40014","schema_type":"option","required":false,"defaultable":true,"allowed_values":["EMEA","APAC"]}' +
+            ']}'
+        $merged = '{"Epic":{"Program Increment":{"id":"10250"},"Region":"NotAllowed"}}'
+        $out = Get-JiraFieldDefaultsReport -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $df -AskTypesJson '["Epic"]' -MergedJson $merged -BridgeTypeIdsJson '["10101"]' | ConvertFrom-Json
+        @($out.outside_allowed).Count | Should -Be 1
+        $out.outside_allowed[0].label | Should -Be 'Region'
+    }
+
     It 'refusals are batched into one pass, never one refusal per entry' {
         $df = '{"10101":[' +
             '{"logical_name":"Program Increment","field_id":"customfield_40012","schema_type":"option","required":true,"defaultable":true,"allowed_values":["PI-2026-Q2","PI-2026-Q3"]},' +
