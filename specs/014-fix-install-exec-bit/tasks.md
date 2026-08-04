@@ -370,8 +370,9 @@ after US1/US2 land.
 - [P] tasks touch different files with no unresolved dependency between them.
 - [Story] labels map every Phase 3-6 task to spec.md's US1-US4 for traceability.
 - Verify each new/rewritten test fails before implementing the corresponding fix (Constitution XIII).
-- No task in this feature adds a file, a command, or a config key — every implementation task edits
-  an existing line (plan.md's Project Structure is the exhaustive blast radius).
+- No task in the exec-bit fix proper (T001-T035) adds a file, a command, or a config key — every
+  implementation task there edits an existing line. The two follow-up tasks T036-T037 each add one
+  CI guard file; plan.md's "Follow-up scope" block lists them.
 - Commit per phase where practical; Foundational should land as one commit per plan.md's
   Implementation sequence step 2 (supersede) followed by step 2's predicate fix, so the suite is red
   for exactly one reason at every intermediate point.
@@ -403,3 +404,26 @@ after US1/US2 land.
       and is green; only the hand-run expectation is stale, and as written it turns a compliant tree
       into a reported leftover. Do not change either `chmod 600` occurrence — neither is an
       instruction to make the bridge runnable, so FR-005 and SC-002 are already satisfied.
+
+### Follow-up: two Windows defects found while proving FR-006
+
+Neither concerns the executable bit. Both were uncovered by this feature's own cross-port parity
+work and ship on the same branch, so they are tracked here rather than left unmapped. See plan.md's
+"Follow-up scope" block for the file list, and `docs/10-windows-portability.md` quirks 7 and 8 for
+the root causes.
+
+- [X] T036 On Windows the MSYS runtime rewrites any argument that looks like a POSIX absolute path
+      when it spawns the native `jq`, so the `resume_with` command in the field-default confirmation
+      reached the operator as `C:/Program Files/Git/speckit.jira.reconcile …`. Build the leading
+      slash inside the jq filter, where nothing can rewrite it, in
+      `scripts/bash/commands/reconcile.sh`. Add the port-wide guard
+      `tests/bash/ci/test_no_msys_convertible_jq_arg.bats` (no `jq --arg`/`--argjson` value in the
+      bash port may start with a slash) plus a regression case in
+      `tests/bash/commands/test_reconcile_field_defaults.bats` and its PowerShell mirror. Restores
+      byte parity with the PowerShell port (FR-006).
+- [X] T037 On Windows the same confirmation-pending object was terminated with CRLF by the
+      PowerShell port and LF by the Bash port: three `[Console]::Out.WriteLine` calls used
+      `Environment.NewLine` instead of the explicit `` "`n" `` the rest of the port writes. The
+      payload was identical — only the terminator diverged, which is why it stayed hidden behind
+      T036 until that landed. Fix `scripts/powershell/commands/Reconcile.psm1` and add the port-wide
+      guard `tests/bash/ci/test_no_translating_stdout_write.bats` (FR-006).

@@ -4,10 +4,15 @@
 `specify` CLI `0.14.4.dev0`, bash `5.3.15(1)-release` (Homebrew), PowerShell `7.5.2`,
 Bats `1.13.0`, ShellCheck `0.11.0`, actionlint `1.7.12`.
 
-Every step of [quickstart.md](./quickstart.md) was walked against the fixed tree (commit
-`f917944`, `extension.yml` version `0.10.1`). Results below, in order. Where a step could not be
-exercised as specified, the reason is recorded rather than reported as a pass, per SC-001's own
-wording.
+Every step of [quickstart.md](./quickstart.md) was walked against the fixed tree — the branch's
+first commit, *"fix: run the Bash bridge through its interpreter, not its executable bit"*. Results
+below, in order. Where a step could not be exercised as specified, the reason is recorded rather
+than reported as a pass, per SC-001's own wording.
+
+**Release**: this fix ships in `extension.yml` version `0.10.2`. The walk-through was recorded when
+the branch still targeted `0.10.1`; that number went to feature 013 (`specs/013-fix-yaml-string-escaping/`),
+which merged to `main` first, so this branch was rebased onto it and renumbered. Nothing observed
+below depends on the version literal.
 
 ## SC-001 matrix — `{--dev copytree, --from zip} × {declared floor, current}`
 
@@ -16,7 +21,30 @@ wording.
 | `--dev` copytree | current (`specify 0.14.4.dev0`) | **PASS** — Step 0 below: install, `chmod a-x` the Bash entry point, `bash <path> --help` exits 0 |
 | `--dev` copytree | declared floor | **Not reproducible on this host** — no `specify` build at the declared floor version is available here. Carried instead by the install-harness tests (`tests/bash/conformance/test_us4_bridge_runnable.bats`, `Us4.BridgeRunnable.Tests.ps1`), confirmed **run, not skipped**, in Steps 1 and 6 |
 | `--from` zip | current (`specify 0.14.4.dev0`) | **Not reproducible** — `specify extension add --from https://github.com/Fyloss/spec-kit-jira/archive/refs/heads/main.zip` refuses the archive outright: `Validation Error: ZIP archive contains too many entries (876 > 512)`. This is a `specify`-CLI-side safety limit on the raw GitHub source archive (which is not filtered by `.extensionignore` the way `--dev` copytree is) — it fires before extraction, so it never reaches the file-mode question at all. Unrelated to this feature; not something 014 can or should fix |
-| `--from` zip | declared floor | **Not reproducible** — same entry-count block prevents reaching this cell regardless of host version. This is also the cell plan.md's own risk table flagged as unreproducible once a host restores modes from `>=0.14.3`, so a second, independent reason would have blocked it even without the entry-count limit |
+| `--from` zip | declared floor | **Not reproducible in this environment** — same entry-count block prevents reaching this cell regardless of host version. This is also the cell plan.md's own risk table flagged as unreproducible once a host restores modes from `>=0.14.3`, so a second, independent reason would have blocked it even without the entry-count limit. **But see the field observation below**: the defect it describes *was* observed on a real consumer project |
+
+### Field observation — the defect reproduces on a supported host (added 2026-08-04)
+
+Independent of the matrix above, the defect was observed on a real consumer project running
+`specify` **0.14.2**. On first use the coding agent working in that repository ran `chmod +x` on the
+Bash entry point unprompted, i.e. the entry point had landed non-executable and the documented
+invocation had failed.
+
+Why 0.14.2 makes this a supported-host failure rather than a curiosity: `extension.yml:30` declares
+`requires.speckit_version: ">=0.13.0"`, and the host's extension installer does not call
+`ensure_executable_scripts` at all until `0.14.3` (measured across tags: 0 calls at v0.13.0, v0.13.1,
+v0.14.0, v0.14.1, v0.14.2; 2 calls at v0.14.3). So 0.14.2 is inside the declared support range *and*
+below the version that restores modes — exactly the population FR-001 and FR-007 are written for.
+
+**Not recorded as a matrix pass.** The install route was not captured at the time, and the two routes
+diverge below 0.14.3: `--dev` uses `shutil.copytree`/`copy2` and **preserves** the mode (0755, since
+the git index carries `100755`), while `--from` zip uses `zf.extractall` and **drops** it (0644). A
+needed `chmod +x` therefore implies the zip route, but implication is not measurement. To close the
+`zip × floor` cell properly, capture `ls -l .specify/extensions/jira/scripts/bash/spec-kit-jira.sh`
+immediately after a fresh install on that host, before running any command, and record the route.
+
+What this observation does establish is the premise the whole feature rests on: a supported host
+ships the bridge non-executable, and something has to work around it on every fresh install.
 
 ## Step 0 — Reproduce the defect before fixing anything
 

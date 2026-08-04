@@ -88,7 +88,10 @@ specs/014-fix-install-exec-bit/
 
 ### Source Code (repository root)
 
-The blast radius, exhaustively. Nothing outside this list changes.
+The blast radius of the exec-bit fix itself, exhaustively. Two Windows defects surfaced *during*
+this feature's quickstart walk-through and were fixed on the same branch; the files they add are
+listed separately under "Follow-up scope" below, so this list stays the exhaustive answer to "what
+does the exec-bit fix touch?".
 
 ```text
 scripts/bash/
@@ -129,6 +132,22 @@ tests/powershell/                    # the four mirrors, edited in the same comm
 
 docs/03-lifecycle-hooks.md           # sequence-diagram label at l.91 (dev-only, excluded from the install)
 specs/003-install-hook-activation/contracts/reconcile-command.md   # one-line supersession pointer (R5)
+```
+
+### Follow-up scope — two Windows defects found by this feature's own walk-through
+
+Neither is about the executable bit. Both were uncovered while proving FR-006 (byte parity between
+the ports) and are recorded here because they ship on this branch, in this release. They are tracked
+as T036 and T037.
+
+```text
+scripts/bash/commands/reconcile.sh          # the resume command's leading slash, built inside the jq filter
+scripts/powershell/commands/Reconcile.psm1  # the confirmation object terminated with LF, not Environment.NewLine
+docs/10-windows-portability.md              # quirks 7 and 8 — the catalog entries for both (dev-only)
+tests/bash/ci/test_no_msys_convertible_jq_arg.bats    # NEW — port-wide guard for quirk 7
+tests/bash/ci/test_no_translating_stdout_write.bats   # NEW — port-wide guard for quirk 8
+tests/bash/commands/test_reconcile_field_defaults.bats         # regression case for quirk 7
+tests/powershell/commands/Reconcile.FieldDefaults.Tests.ps1    # its PowerShell mirror
 ```
 
 **Structure Decision**: no new module, no new directory. The feature lives entirely in the two ports'
