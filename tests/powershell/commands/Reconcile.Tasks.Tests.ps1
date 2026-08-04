@@ -38,6 +38,13 @@ Describe 'Invoke-JiraReconcile — the task tier' {
         Copy-Item -Recurse $Fixture $script:Work
         $script:Spec = Join-Path $script:Work 'specs/001-feature/spec.md'
         $script:Tasks = Join-Path $script:Work 'specs/001-feature/tasks.md'
+        # The spelling the bridge REPORTS, as opposed to the one it opens: the
+        # task notes quote the path with '/', the way the Bash twin does and
+        # the way the operator spelled it (Reconcile.psm1, T099). Join-Path
+        # above answers with the platform separator, so on Windows the two
+        # differ — assert against this one wherever a note text is compared.
+        # A no-op on POSIX, where both are already '/'.
+        $script:TasksRef = $script:Tasks -replace '\\', '/'
         $env:JIRA_CONFIG_DIR = Join-Path $script:Work '.specify/jira'
         $cfgPath = Write-JiraMockConfig -Json '{"projects":{"TASKP":"t"}}'
         $script:M = Start-JiraMock -ConfigPath $cfgPath
@@ -126,7 +133,7 @@ Describe 'Invoke-JiraReconcile — the task tier' {
         $r = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
         $notes = @($r.notes | Where-Object { $_ -match 'TASKP-3' })
         $notes.Count | Should -Be 1
-        $notes[0] | Should -Be "TASKP-3 is recorded in Jira as a sub-task of TASKP-2, but $script:Tasks no longer attributes any task to it; nothing was changed in Jira."
+        $notes[0] | Should -Be "TASKP-3 is recorded in Jira as a sub-task of TASKP-2, but $script:TasksRef no longer attributes any task to it; nothing was changed in Jira."
         # No write of any kind touched the sub-task — status, fields, and
         # parent were all left exactly as Jira already recorded them.
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match 'TASKP-3' }).Count | Should -Be 0
@@ -168,7 +175,7 @@ Describe 'Invoke-JiraReconcile — the task tier' {
         $r = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
         $reattributionNote = @($r.notes | Where-Object { $_ -match '^TASKP-3 is attributed to' })
         $reattributionNote.Count | Should -Be 1
-        $reattributionNote[0] | Should -Be "TASKP-3 is attributed to TASKP-4 in $script:Tasks, but is recorded in Jira under TASKP-2; nothing was re-parented."
+        $reattributionNote[0] | Should -Be "TASKP-3 is attributed to TASKP-4 in $script:TasksRef, but is recorded in Jira under TASKP-2; nothing was re-parented."
         # The description resync (the rendered "Attribution:" line) is a
         # legitimate, unrelated write — what matters is that no action ever
         # carries a "parent" field for this sub-task.

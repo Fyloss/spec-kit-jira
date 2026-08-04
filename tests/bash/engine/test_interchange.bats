@@ -124,10 +124,38 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-@test "story.tasks must be an array" {
+# `has("tasks") and ((.tasks | type) != "array")` — once the key is present,
+# EVERY non-array type is refused and the per-task rules never run. The twin
+# (Interchange.psm1) once tested only for an object here, so null and scalars
+# reached its per-task loop and reported task-level errors instead of this one
+# (Copilot review, PR #17); each type is pinned so the ports cannot drift again.
+@test "story.tasks must be an array — a string" {
   run bash -c "jq '.stories[0].tasks=\"not-an-array\"' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"story.tasks"* ]]
+  [[ "$output" == *"story.tasks must be an array"* ]]
+  [[ "$output" != *"task.title is required"* ]]
+}
+
+@test "story.tasks must be an array — null" {
+  run bash -c "jq '.stories[0].tasks=null' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"story.tasks must be an array"* ]]
+  [[ "$output" != *"task.title is required"* ]]
+}
+
+@test "story.tasks must be an array — a number" {
+  run bash -c "jq '.stories[0].tasks=7' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"story.tasks must be an array"* ]]
+  [[ "$output" != *"task.title is required"* ]]
+}
+
+@test "story.tasks must be an array — an object" {
+  local obj='{"nope":true}'
+  run bash -c "jq --argjson o '${obj}' '.stories[0].tasks=\$o' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"story.tasks must be an array"* ]]
+  [[ "$output" != *"task.title is required"* ]]
 }
 
 @test "task.local_id is required unless the marker state is absent" {
@@ -172,7 +200,10 @@ setup() {
   [[ "$output" == *"share a local_id"* ]]
 }
 
-@test "the task-tier rules do not fire for a story that carries no tasks key" {
+# The FR-011 off switch itself is covered above ("a story with no tasks key
+# validates unchanged"); this one sets a populated tasks array, so it proves
+# the opposite: a well-formed task tier passes every rule (Copilot review).
+@test "a story with a valid tasks array validates" {
   run bash -c "jq '.stories[0].tasks=[{\"local_id\":\"1111111111111111\",\"title\":\"T\",\"description\":{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"x\"}]},\"done\":false,\"marker\":{\"state\":\"assigned\",\"id\":\"1111111111111111\",\"lines\":[1]}}]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
   [ "$status" -eq 0 ]
 }

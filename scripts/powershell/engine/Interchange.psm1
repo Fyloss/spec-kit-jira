@@ -107,7 +107,15 @@ function Test-JiraInterchange {
         # avoid), which would turn a genuine one-task array into a scalar
         # PSCustomObject and misreport it as "not an array".
         $tasksVal = $s.tasks
-        if ($tasksVal -is [System.Management.Automation.PSCustomObject]) {
+        # Twin of the Bash rule `has("tasks") and ((.tasks | type) != "array")`
+        # (interchange.sh): once the key is present, EVERY non-array type is
+        # refused. Testing only for PSCustomObject let `null` and scalars reach
+        # the per-task loop below, where `@($null)` yields a ONE-element array
+        # holding $null — the story-level error went missing and three bogus
+        # task-level ones took its place, while a numeric value threw outright
+        # (Copilot review, PR #17). $null is already caught by -isnot, but is
+        # named explicitly because it is the case that actually shipped.
+        if ($null -eq $tasksVal -or $tasksVal -isnot [System.Array]) {
             $errors.Add('story.tasks must be an array')
             continue
         }

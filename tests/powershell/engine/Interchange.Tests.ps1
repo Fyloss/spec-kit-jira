@@ -71,6 +71,37 @@ Describe 'Test-JiraInterchange — the task tier (Phase 2, T026/T028, data-model
         Test-JiraInterchange ($doc | ConvertTo-Json -Depth 100) | Should -BeTrue
     }
 
+    # Twin of test_interchange.bats "story.tasks must be an array". The Bash
+    # rule is `has("tasks") and ((.tasks | type) != "array")` — once the key is
+    # present, EVERY non-array type is refused, and the per-task rules never
+    # run. A guard that only caught PSCustomObject let `null` and scalars
+    # through to `foreach ($tk in @($tasksVal))`, where @($null) yields a
+    # one-element array holding $null: the story-level error went missing and
+    # four bogus task-level errors took its place (Copilot review, PR #17).
+    It 'rejects a non-array story.tasks: <case>' -ForEach @(
+        @{ case = 'null'; value = $null }
+        @{ case = 'a string'; value = 'not-an-array' }
+        @{ case = 'a number'; value = 7 }
+        @{ case = 'an object'; value = ([pscustomobject]@{ nope = $true }) }
+    ) {
+        $doc = ($script:Valid | ConvertFrom-Json)
+        $doc.stories[0] | Add-Member -NotePropertyName tasks -NotePropertyValue $value -Force
+        # The module reports through [Console]::Error directly, which `2>&1`
+        # does not intercept — capture the console writer itself.
+        $sw = [System.IO.StringWriter]::new()
+        $orig = [Console]::Error
+        [Console]::SetError($sw)
+        try { $result = Test-JiraInterchange ($doc | ConvertTo-Json -Depth 100) }
+        finally { [Console]::SetError($orig) }
+        $errText = $sw.ToString()
+        $result | Should -BeFalse
+        # The story-level refusal, and NOT the per-task rules it short-circuits.
+        # Asserting only -BeFalse would pass even with the defect: `null` still
+        # returned false, just for four wrong reasons.
+        $errText | Should -BeLike '*story.tasks must be an array*'
+        $errText | Should -Not -BeLike '*task.title is required*'
+    }
+
     It 'rejects task.local_id missing when the marker state is not absent' {
         $doc = ($script:Valid | ConvertFrom-Json)
         $task = [ordered]@{
