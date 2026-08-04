@@ -401,8 +401,11 @@ function Get-JiraReconcilePlanContextFromBinding {
     $fdDfJson = if ($null -ne $fdDfRaw) { ConvertTo-JiraJsonValue $fdDfRaw } else { '{}' }
     $fdRecordedJson = Get-JiraFieldDefaultsFor -ProjectKey $ProjectKey -ConfigJson $ConfigJson
     $fdAnswersJson = Get-JiraFieldAnswersFor -ProjectKey $ProjectKey -FieldFlags $FieldValues
+    # 015, research R1/R2, contract §2: the plan context is the SENDING side —
+    # it reads the encoded map, shaped for the wire, while every display-facing
+    # consumer elsewhere in this file keeps reading the recorded map unchanged.
     $fieldDefaultsJson = (Get-JiraPlanResolveFieldDefault -IssueTypesJson $fdItypesJson -DefaultableFieldsByTypeJson $fdDfJson `
-            -RecordedJson $fdRecordedJson -AnswersJson $fdAnswersJson | ConvertFrom-Json -Depth 100).field_defaults
+            -RecordedJson $fdRecordedJson -AnswersJson $fdAnswersJson | ConvertFrom-Json -Depth 100).field_defaults_encoded
 
     # Two-step priority resolution (FR-008): level -> logical name (team
     # config) -> identifier (persisted binding). Either step yielding nothing
@@ -1009,7 +1012,17 @@ function Invoke-JiraReconcile {
         if ($null -ne $parentAction -and $parentAction.method -eq 'POST') {
             $fdPendingTypes.Add([string]$parentAction.body.fields.issuetype.id)
         }
-        $fdPendingTypesJson = ConvertTo-JiraJsonValue (@($fdPendingTypes | Select-Object -Unique))
+        # 015 (regression, NFR-1): jq's `unique` (bash's twin, reconcile.sh)
+        # sorts its result ordinally — Select-Object -Unique only dedupes,
+        # preserving first-seen order, which diverges whenever more than one
+        # type is pending in the same run (first exposed by an option-typed
+        # default required on both the specification and story roles at
+        # once). Sort with the same comparer ConvertTo-JiraJsonValue already
+        # uses for key order, so both ports agree byte for byte.
+        $fdPendingUnique = [System.Collections.Generic.List[string]]::new()
+        foreach ($t in @($fdPendingTypes | Select-Object -Unique)) { $fdPendingUnique.Add($t) }
+        $fdPendingUnique.Sort([System.StringComparer]::Ordinal)
+        $fdPendingTypesJson = ConvertTo-JiraJsonValue (@($fdPendingUnique))
         $fdFieldsJson = Get-JiraPlanConfirmationField -IssueTypesJson $fdItypesJson -DefaultableFieldsByTypeJson $fdDfJson `
             -FieldDefaultsByTypeJson $fdDefaultsByTypeJson -PendingTypeIdsJson $fdPendingTypesJson
         $fdFields = @($fdFieldsJson | ConvertFrom-Json -Depth 100)
@@ -1060,7 +1073,11 @@ function Invoke-JiraReconcile {
         # ticket's key IMMEDIATELY, per ticket.
         $applyPlanJson = ConvertTo-JiraJsonValue ([ordered]@{ parent = $parentAction; stories = @($actionsJson | ConvertFrom-Json -Depth 100) })
         $knownParentKey = if ($parentState -eq 'bound') { [string]$recogParent.key } else { '' }
-        $rc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $applyPlanJson -SpecRefJson $specRefJson -SpecFile $specFile -KnownParentKey $knownParentKey -DefaultableFieldsByTypeJson $fdDfJson
+        $applyOutcome = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $applyPlanJson -SpecRefJson $specRefJson -SpecFile $specFile -KnownParentKey $knownParentKey -DefaultableFieldsByTypeJson $fdDfJson
+        $rc = [int]$applyOutcome.ExitCode
+        # 015, research R4, contract §4.3/§5: `created` now reports what Jira
+        # actually confirmed, not what was merely planned.
+        $created = @($applyOutcome.Created).Count
     }
 
     # T079/parent-marker.md `parent-recreated`: a summary note, not a

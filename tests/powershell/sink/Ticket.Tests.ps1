@@ -3,6 +3,15 @@
 
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
+    # Import order is load-bearing: PlanApply.psm1 -Force-imports Ticket.psm1
+    # internally, and Ticket.psm1 -Force-imports PrivacyGuard.psm1 internally
+    # (Import-Module -Force is Remove-Module + Import-Module, which tears an
+    # earlier copy out of THIS scope and reattaches it wherever the -Force
+    # call itself runs). Each module is therefore reimported here, directly,
+    # in dependency order, so every function this file calls is bound back
+    # into the test scope last (see memory:
+    # powershell-import-force-clobbers-caller-scope).
+    Import-Module (Join-Path $Root 'scripts/powershell/sink/jira/PlanApply.psm1') -Force
     Import-Module (Join-Path $Root 'scripts/powershell/sink/jira/Ticket.psm1') -Force
     Import-Module (Join-Path $Root 'scripts/powershell/sink/jira/PrivacyGuard.psm1') -Force
     Import-Module (Join-Path $Root 'tests/conformance/mock-jira/Mock.psm1') -Force
@@ -131,5 +140,38 @@ Describe 'Get-JiraCreateFieldsBase — field defaults (011, T030/T030a)' {
         $guardedBody = '{"fields":' + $merged + '}'
         $code = Test-JiraPrivacyBlock -Payload $guardedBody -KnownCoordinatesJson '[]' -AllowlistJson '["support.example.atlassian.net"]'
         $code | Should -Be 0
+    }
+}
+
+# --- 015 FR-017 regression, mirror of tests/bash/sink/test_ticket.bats ------
+
+Describe '015 field-default encoding, end to end through Get-JiraCreateFieldsBase' {
+    It 'FR-017 — a select-list default reaches Get-JiraCreateFieldsBase as {value: v}, a string default unchanged' {
+        $itypes = '[{"logical_name":"Story","id":"10102"}]'
+        $df = '{"10102":[
+            {"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA"]},
+            {"logical_name":"Team","field_id":"customfield_2","schema_type":"string","required":true,"defaultable":true,"allowed_values":[]}
+        ]}'
+        $recorded = '{"Story":{"Region":"EMEA","Team":"Payments"}}'
+        $resolved = Get-JiraPlanResolveFieldDefault -IssueTypesJson $itypes -DefaultableFieldsByTypeJson $df -RecordedJson $recorded -AnswersJson '[]' | ConvertFrom-Json -Depth 100
+        $encoded = $resolved.field_defaults_encoded | ConvertTo-Json -Compress -Depth 100
+        $base = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'a story' -IssueTypeId '10102' -FieldDefaultsByTypeJson $encoded | ConvertFrom-Json -Depth 100
+        $base.customfield_1.value | Should -Be 'EMEA'
+        $base.customfield_2 | Should -Be 'Payments'
+    }
+
+    It 'FR-008 — the story CREATE branch and the parent CREATE branch encode the same recorded default identically' {
+        $itypes = '[{"logical_name":"Story","id":"10102"},{"logical_name":"Epic","id":"10101"}]'
+        $df = '{"10102":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA"]}],
+                 "10101":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA"]}]}'
+        $recorded = '{"Story":{"Region":"EMEA"},"Epic":{"Region":"EMEA"}}'
+        $resolved = Get-JiraPlanResolveFieldDefault -IssueTypesJson $itypes -DefaultableFieldsByTypeJson $df -RecordedJson $recorded -AnswersJson '[]' | ConvertFrom-Json -Depth 100
+        $encoded = $resolved.field_defaults_encoded | ConvertTo-Json -Compress -Depth 100
+
+        $doc = '{"routing":{"project_key":"CONSUMER"},"epic":{"local_id":"E1","title":"New epic","description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},"stories":[{"local_id":"S1","title":"New story","priority_logical":null,"estimation":null}]}'
+        $ctx = '{"base_url":"https://example.atlassian.net","story_type_id":"10102","parent_type_id":"10101","field_defaults":' + $encoded + '}'
+        $out = Get-JiraPlanWriteSet -NeutralDocJson $doc -PlanContextJson $ctx | ConvertFrom-Json -Depth 100
+        $out.stories[0].body.fields.customfield_1.value | Should -Be 'EMEA'
+        $out.parent.body.fields.customfield_1.value | Should -Be 'EMEA'
     }
 }

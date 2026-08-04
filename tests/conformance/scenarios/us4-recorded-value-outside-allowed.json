@@ -1,0 +1,15 @@
+{
+  "name": "us4-recorded-value-outside-allowed",
+  "description": "015, US4 (contract §6): a recorded field default outside its field's enumerated allowed_values refuses the configuration ceremony, naming the label, the type, and the accepted values — never the recorded value — and writes nothing. Uses the same option-typed fixture as US1/US2, with the specification role's Region default hand-edited to a value the mock's createmeta never lists.",
+  "mock": { "projects": { "FD": "company" }, "createmetaFields": { "10101": "fd-option", "10102": "fd-option" } },
+  "fixture": "tests/conformance/fixtures/repo-with-option-field-outside-allowed",
+  "argv": ["config", "FD", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-reporting",
+    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111"
+  }
+}

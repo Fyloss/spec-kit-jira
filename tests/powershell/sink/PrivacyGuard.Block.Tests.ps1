@@ -89,7 +89,13 @@ Describe 'T058 [Phase 5, US2] — the parent payload passes the SAME pre-write g
         $specRef = '{"repo":"acme/app","spec_slug":"001-x","folder":"specs/001-x"}'
         $specFile = Join-Path $TestDrive 'spec.md'
         Set-Content -LiteralPath $specFile -Value '# Title' -NoNewline
-        Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $specRef -SpecFile $specFile | Should -Be 9
+        # 015: the function now returns [ordered]@{ ExitCode; Created } rather
+        # than a bare exit code (contract §4.2/data-model.md §5 — the
+        # structured mirror of the bash port's stdout outcome). O4: Created
+        # stays empty on this pre-write privacy-guard return.
+        $result = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $specRef -SpecFile $specFile
+        $result.ExitCode | Should -Be 9
+        @($result.Created).Count | Should -Be 0
         @(Get-JiraMockCallLog -Mock $M).Count | Should -Be 0
     }
 
@@ -98,7 +104,20 @@ Describe 'T058 [Phase 5, US2] — the parent payload passes the SAME pre-write g
         $specRef = '{"repo":"acme/app","spec_slug":"001-x","folder":"specs/001-x"}'
         $specFile = Join-Path $TestDrive 'spec2.md'
         Set-Content -LiteralPath $specFile -Value '# Title' -NoNewline
-        Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $specRef -SpecFile $specFile | Should -Be 0
+        $result = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $specRef -SpecFile $specFile
+        $result.ExitCode | Should -Be 0
+        @($result.Created).Count | Should -Be 2
         @([regex]::Matches((Get-JiraMockCallLog -Mock $M) -join "`n", 'POST /rest/api/3/issue')).Count | Should -Be 2
+    }
+
+    It '015 T027 (rule O4) — a blocked STORY payload (clean parent) also reports zero Created' {
+        $plan = '{"parent":{"method":"POST","url":"' + $M.BaseUrl + '/rest/api/3/issue","body":{"fields":{"summary":"The Epic"}},"local_id":"aaaaaaaaaaaaaaaa","role":"parent"},"stories":[{"method":"POST","url":"' + $M.BaseUrl + '/rest/api/3/issue","body":{"fields":{"summary":"leak acme-corp.atlassian.net"}},"local_id":"1111111111111111","role":"story"}]}'
+        $specRef = '{"repo":"acme/app","spec_slug":"001-x","folder":"specs/001-x"}'
+        $specFile = Join-Path $TestDrive 'spec_story_block.md'
+        Set-Content -LiteralPath $specFile -Value '# Title' -NoNewline
+        $result = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $specRef -SpecFile $specFile
+        $result.ExitCode | Should -Be 9
+        @($result.Created).Count | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $M).Count | Should -Be 0
     }
 }

@@ -313,7 +313,10 @@ _reconcile_plan_context() {
   fd_df="$(jq -c '.defaultable_fields // {}' <<< "${binding}")"
   fd_recorded="$(config_field_defaults_for "${key}" "${cfg}")"
   fd_answers="$(cli_field_answers_for "${key}" "${field_values}")"
-  field_defaults="$(plan_resolve_field_defaults "${fd_itypes}" "${fd_df}" "${fd_recorded}" "${fd_answers}" | jq -c '.field_defaults')"
+  # 015, research R1/R2, contract §2: the plan context is the SENDING side —
+  # it reads the encoded map, shaped for the wire, while every display-facing
+  # consumer elsewhere in this file keeps reading the recorded map unchanged.
+  field_defaults="$(plan_resolve_field_defaults "${fd_itypes}" "${fd_df}" "${fd_recorded}" "${fd_answers}" | jq -c '.field_defaults_encoded')"
 
   # Two-step priority resolution (FR-008): level -> logical name (team config)
   # -> identifier (persisted binding). Either step yielding nothing omits the
@@ -885,10 +888,18 @@ cmd_reconcile() {
     # the parent first, marks every planned creation `creating` before the
     # first create, and stamps + records each created ticket's key
     # IMMEDIATELY, per ticket — never batched.
-    local apply_plan known_parent_key=""
+    local apply_plan known_parent_key="" apply_outcome=""
     apply_plan="$(jq -cn --argjson p "${parent_action}" --argjson s "${actions}" '{parent:$p, stories:$s}')"
     [[ "${parent_state}" == "bound" ]] && known_parent_key="$(jq -r '.key' <<< "${recog_parent}")"
-    apply_writes_with_recognition "${apply_plan}" "${spec_ref}" "${spec_file}" "${known_parent_key}" "[]" "${fd_df}" || rc=$?
+    apply_outcome="$(apply_writes_with_recognition "${apply_plan}" "${spec_ref}" "${spec_file}" "${known_parent_key}" "[]" "${fd_df}")" || rc=$?
+    # 015, research R4, contract §4.3/§5: `created` now reports what Jira
+    # actually confirmed, not what was merely planned — empty stdout (the
+    # two pre-write privacy-guard returns) reads as zero created.
+    if [[ -z "${apply_outcome}" ]]; then
+      created=0
+    else
+      created="$(jq '(.created // []) | length' <<< "${apply_outcome}")"
+    fi
   fi
 
   # T071: the catalogued `re-routed` notice, once the new key is recorded.

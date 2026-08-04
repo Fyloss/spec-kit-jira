@@ -40,6 +40,8 @@ source "${_plan_apply_dir}/../../engine/idempotency.sh"
 # shellcheck source=/dev/null
 source "${_plan_apply_dir}/../../engine/story_marker.sh" # R5 steps 4/6 — mark `creating`, stamp + record per ticket
 # shellcheck source=/dev/null
+source "${_plan_apply_dir}/../../engine/spec_marker.sh" # the parent's own `creating` mark + key record (regression: apply_writes_with_recognition calls spec_marker_mark_creating/spec_marker_record_ticket but no caller sourced this module, so a parent creation silently printed "command not found" onto this function's stdout)
+# shellcheck source=/dev/null
 source "${_plan_apply_dir}/identity.sh" # stamp the identity marker on each created ticket (R5 step 6)
 
 # plan_resolve_field_defaults <issue_types_json> <defaultable_fields_by_type_json>
@@ -66,8 +68,17 @@ source "${_plan_apply_dir}/identity.sh" # stamp the identity marker on each crea
 # name or field label is reported in `unresolved`, never silently dropped
 # (FR-008/FR-026).
 #
+# 015, research R1/R2/R3, contract §1.3, data-model.md §2: alongside the
+# recorded map, emit `field_defaults_encoded` — the same map with each value
+# shaped for the field's declared `schema_type` (an `option` field as
+# `{"value": v}`, a named-entity field as `{"name": v}`, everything else,
+# including `user` and a non-string value, unchanged). Only the plan
+# context's assignment reads the encoded map; every other consumer keeps
+# reading `field_defaults` untouched (research R2).
+#
 # Prints one canonical object:
 #   {"field_defaults": {type_id: {field_id: value}},
+#    "field_defaults_encoded": {type_id: {field_id: value shaped for the wire}},
 #    "field_default_sources": {type_id: {field_id: "team-config"|"operator-answer"}},
 #    "unresolved": [{type, label, reason}, ...]}
 plan_resolve_field_defaults() {
@@ -79,23 +90,30 @@ plan_resolve_field_defaults() {
   # kcov-excl-start — jq literal (string lines are not statements)
   jq -cn --argjson itypes "${itypes}" --argjson df "${defaultable}" --argjson rec "${recorded}" --argjson ans "${answers}" '
     def typeId($name): (first($itypes[] | select(.logical_name == $name)) // null) | .id;
-    def fieldIdFor($tid; $label): (first((($df[$tid]) // [])[] | select(.logical_name == $label)) // null) | .field_id;
+    def fieldMetaFor($tid; $label): (first((($df[$tid]) // [])[] | select(.logical_name == $label)) // null);
+    def encodeValue($meta; $v):
+      if ($v | type) != "string" then $v
+      elif ($meta.schema_type // "") == "option" then {value: $v}
+      elif ((["priority","resolution","version","component","group"]) | index($meta.schema_type // "")) != null then {name: $v}
+      else $v end;
     ( [ ($rec | to_entries[] | select(.key != "ask")) as $te
         | ($te.key) as $type | ($te.value | to_entries[]) as $fe
         | {type: $type, label: $fe.key, value: $fe.value, source: "team-config"} ]
       + [ $ans[] | {type: .type, label: .label, value: .value, source: "operator-answer"} ]
     ) as $entries
     | reduce $entries[] as $e
-        ( {field_defaults: {}, field_default_sources: {}, unresolved: []}
+        ( {field_defaults: {}, field_defaults_encoded: {}, field_default_sources: {}, unresolved: []}
         ; (typeId($e.type)) as $tid
           | if $tid == null then
               . + {unresolved: (.unresolved + [{type: $e.type, label: $e.label, reason: "unknown issue type"}])}
             else
-              (fieldIdFor($tid; $e.label)) as $fid
-              | if $fid == null then
+              (fieldMetaFor($tid; $e.label)) as $meta
+              | if $meta == null then
                   . + {unresolved: (.unresolved + [{type: $e.type, label: $e.label, reason: "unknown field label"}])}
                 else
-                  .field_defaults[$tid][$fid] = $e.value
+                  ($meta.field_id) as $fid
+                  | .field_defaults[$tid][$fid] = $e.value
+                  | .field_defaults_encoded[$tid][$fid] = encodeValue($meta; $e.value)
                   | .field_default_sources[$tid][$fid] = $e.source
                 end
             end
@@ -565,6 +583,15 @@ apply_writes() {
 #   binding's defaultable_fields map, {type_id: [{logical_name, field_id,
 #   ...}]}. Omitted or empty ⇒ a rejected creation falls through to the
 #   existing generic failure path unchanged (FR-028).
+#
+#   015, research R4, contract §4.2, data-model.md §5: prints one canonical
+#   outcome on stdout, {"created": [{key, role, local_id}, ...]} — an entry
+#   only after Jira returned a key for that creation, the parent first when
+#   present — before returning on each of the three post-write exits (normal
+#   completion, parent rejection, story rejection). NOT printed on the two
+#   pre-write privacy-guard returns above (rule O4): the caller reads empty
+#   output as zero created. Nothing else is written to this function's stdout;
+#   the rejection message stays on stderr.
 apply_writes_with_recognition() {
   local plan="$1" spec_ref="$2" spec_file="$3" known_parent_key="${4:-}" extra="${5:-[]}"
   local defaultable_by_type="${6:-}"
@@ -572,6 +599,7 @@ apply_writes_with_recognition() {
   local coords allow
   coords="$(_apply_known_coords "${extra}")"
   allow="${SPEC_KIT_JIRA_ALLOWLIST:-[]}"
+  local created_out='[]'
 
   local parent stories
   parent="$(jq -c '.parent' <<< "${plan}")"
@@ -625,6 +653,7 @@ apply_writes_with_recognition() {
     if ((rc >= 2)); then
       _plan_apply_report_rejection "${method}" "${url}" "${parent}" "${defaultable_by_type}"
       rm -f "${resp}"
+      jq -cn --argjson c "${created_out}" '{created:$c}' | json_canonical
       return "${worst}"
     fi
     if [[ "${method}" == "POST" ]]; then
@@ -635,6 +664,8 @@ apply_writes_with_recognition() {
         cur="$(cat "${spec_file}" 2> /dev/null; printf x)"; cur="${cur%x}"
         new="$(printf '%s' "${cur}" | spec_marker_record_ticket "${parent_local_id}" "${parent_key}"; printf x)"; new="${new%x}"
         marker_splice_write_file "${spec_file}" "${new}" > /dev/null
+        created_out="$(jq -cn --argjson c "${created_out}" --arg k "${parent_key}" --arg lid "${parent_local_id}" \
+          '$c + [{key:$k, role:"parent", local_id:$lid}]')"
       fi
     fi
     rm -f "${resp}"
@@ -666,6 +697,7 @@ apply_writes_with_recognition() {
     if ((rc >= 2)); then
       _plan_apply_report_rejection "${method}" "${url}" "${action}" "${defaultable_by_type}"
       rm -f "${resp}"
+      jq -cn --argjson c "${created_out}" '{created:$c}' | json_canonical
       return "${worst}"
     fi
 
@@ -679,9 +711,12 @@ apply_writes_with_recognition() {
         cur="$(cat "${spec_file}" 2> /dev/null; printf x)"; cur="${cur%x}"
         new="$(printf '%s' "${cur}" | story_marker_record_ticket "${local_id}" "${key}"; printf x)"; new="${new%x}"
         marker_splice_write_file "${spec_file}" "${new}" > /dev/null
+        created_out="$(jq -cn --argjson c "${created_out}" --arg k "${key}" --arg lid "${local_id}" \
+          '$c + [{key:$k, role:"story", local_id:$lid}]')"
       fi
     fi
     rm -f "${resp}"
   done
+  jq -cn --argjson c "${created_out}" '{created:$c}' | json_canonical
   return "${worst}"
 }

@@ -197,7 +197,9 @@ _disc_required_fields() {
 # recorded scalar at all — an array-shaped field (multi-select, checkbox
 # group, attachment, labels) or an issue link — carrying an
 # `undefaultable_reason` a human can read (FR-010). Every other shape,
-# including `user`, is defaultable: the bridge sends exactly what was
+# including `user`, is defaultable: `schema_type` is captured here and
+# consumed at plan-resolve time (015, contract §1.3) to shape the recorded
+# value for the wire — the bridge no longer sends exactly what was
 # recorded, and a shape Jira itself then rejects is FR-019's concern, not
 # discovery's. Prints the canonical array.
 _disc_defaultable_fields() {

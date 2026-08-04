@@ -236,3 +236,19 @@ run_in_work() {
   [[ "$output" != *"field_defaults"* ]]
   [ "$(cat "${JIRA_CONFIG_DIR}/config.yml")" = "${before}" ]
 }
+
+@test "015 T034 — a degraded-mode ceremony with no Jira read performs no allowed-value check at all, and stays silent about it" {
+  # No Jira read means no defaultable_fields is ever discovered, so rule A3
+  # (contract §6.2) excludes every entry from examination — a recorded value
+  # that WOULD be outside_allowed against a real project's metadata is not
+  # checked here, and the run neither refuses nor mentions the field.
+  unset SPEC_KIT_JIRA_BASE_URL
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  printf 'field_defaults:\n  TEAM:\n    ask: true\n    Epic:\n      Region: NotAnAllowedValue\n' >> "${JIRA_CONFIG_DIR}/config.yml"
+  local before; before="$(cat "${JIRA_CONFIG_DIR}/config.yml")"
+  run run_in_work config --json
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"must be one of"* ]]
+  [[ "$output" != *"NotAnAllowedValue"* ]]
+  [ "$(cat "${JIRA_CONFIG_DIR}/config.yml")" = "${before}" ]
+}

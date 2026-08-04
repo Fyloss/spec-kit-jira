@@ -8,6 +8,8 @@
 # generic email/UUID shapes (those are the P3 WARN tier). The offending value is
 # never echoed (only the reason). The PowerShell port blocks identically (NFR-1).
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
   SINK_DIR="${ROOT}/scripts/bash/sink/jira"
@@ -116,8 +118,32 @@ teardown() {
   local spec_ref='{"repo":"acme/app","spec_slug":"001-x","folder":"specs/001-x"}'
   local spec_file="${BATS_TEST_TMPDIR}/spec.md"
   printf '# Title\n' > "${spec_file}"
-  run apply_writes_with_recognition "${plan}" "${spec_ref}" "${spec_file}"
+  # 015 T025, rule O4 (contract §4.2/data-model.md §5): the confirmed-creation
+  # outcome is NOT printed on this pre-write privacy-guard return — separate
+  # stdout/stderr so the guard's own reason (stderr) is never mistaken for the
+  # outcome's absence (stdout).
+  run --separate-stderr apply_writes_with_recognition "${plan}" "${spec_ref}" "${spec_file}"
   [ "$status" -eq 9 ]
+  [ -z "$output" ]
+  run mock_calls
+  [ -z "$output" ]
+}
+
+@test "015 T025 (rule O4) — a blocked STORY payload (clean parent) also prints no outcome on stdout" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local plan='{
+    "parent": {"method":"POST","url":"'"${MOCK_BASE_URL}"'/rest/api/3/issue",
+               "body":{"fields":{"summary":"The Epic"}}, "local_id":"aaaaaaaaaaaaaaaa", "role":"parent"},
+    "stories": [{"method":"POST","url":"'"${MOCK_BASE_URL}"'/rest/api/3/issue",
+                 "body":{"fields":{"summary":"leak acme-corp.atlassian.net"}}, "local_id":"1111111111111111", "role":"story"}]
+  }'
+  local spec_ref='{"repo":"acme/app","spec_slug":"001-x","folder":"specs/001-x"}'
+  local spec_file="${BATS_TEST_TMPDIR}/spec_story_block.md"
+  printf '# Title\n' > "${spec_file}"
+  run --separate-stderr apply_writes_with_recognition "${plan}" "${spec_ref}" "${spec_file}"
+  [ "$status" -eq 9 ]
+  [ -z "$output" ]
   run mock_calls
   [ -z "$output" ]
 }

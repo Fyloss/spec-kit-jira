@@ -439,6 +439,111 @@ teardown_e2e() {
   teardown_e2e
 }
 
+# --- 015 T033 [US4] — a recorded value outside allowed_values (contract §6) -
+
+@test "015 — a recorded value outside allowed_values is a refusal trigger (contract §6.1/§6.2)" {
+  local merged='{"Epic":{"Program Increment":"PI-2020-Q1"}}'
+  run _config_field_default_report "${ITYPES}" "${DEFAULTABLE}" '["Epic"]' "${merged}" '["10101"]'
+  [ "$(jq -r '.outside_allowed | length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.outside_allowed[0].type' <<< "$output")" = "Epic" ]
+  [ "$(jq -r '.outside_allowed[0].label' <<< "$output")" = "Program Increment" ]
+  [ "$(jq -r '.outside_allowed[0].candidates | join(",")' <<< "$output")" = "PI-2026-Q2,PI-2026-Q3" ]
+}
+
+@test "015 — a recorded value inside allowed_values is not outside_allowed" {
+  local merged='{"Epic":{"Program Increment":"PI-2026-Q3"}}'
+  run _config_field_default_report "${ITYPES}" "${DEFAULTABLE}" '["Epic"]' "${merged}" '["10101"]'
+  [ "$(jq -r '.outside_allowed | length' <<< "$output")" -eq 0 ]
+}
+
+@test "015 (contract §6.2 A1/A2) — an unresolvable type or label stays orphaned, never outside_allowed (011 FR-008 must not regress)" {
+  local merged='{"Retired Type":{"Program Increment":"NotAValue"},"Epic":{"Retired Field":"NotAValue"}}'
+  run _config_field_default_report "${ITYPES}" "${DEFAULTABLE}" '["Epic"]' "${merged}" '["10101"]'
+  [ "$(jq -r '.outside_allowed | length' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.orphaned | length' <<< "$output")" -eq 2 ]
+}
+
+@test "015 (contract §6.2 A3) — a field with no enumerated allowed_values is never outside_allowed, whatever its recorded value" {
+  local merged='{"Epic":{"Business Owner":"Anything At All"}}'
+  run _config_field_default_report "${ITYPES}" "${DEFAULTABLE}" '["Epic"]' "${merged}" '["10101"]'
+  [ "$(jq -r '.outside_allowed | length' <<< "$output")" -eq 0 ]
+}
+
+@test "015 FR-006 — a hand-recorded structured value on an enumerated field is not outside_allowed (the escape hatch must survive the check)" {
+  # The escape hatch of US1 scenario 6 / FR-006: an operator states the shape
+  # the bridge does not derive, and the bridge obeys it literally. The
+  # allowed_values list holds option LABELS, so a structured value can never
+  # be a member of it — checking one against the other refuses a value the
+  # spec promises to pass through.
+  local merged='{"Epic":{"Program Increment":{"value":"PI-2026-Q3"}}}'
+  run _config_field_default_report "${ITYPES}" "${DEFAULTABLE}" '["Epic"]' "${merged}" '["10101"]'
+  [ "$(jq -r '.outside_allowed | length' <<< "$output")" -eq 0 ]
+}
+
+@test "015 FR-006 — an array, a number, a boolean and a null recorded value are never outside_allowed" {
+  local df='{"10101":[
+    {"logical_name":"A","field_id":"customfield_1","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]},
+    {"logical_name":"B","field_id":"customfield_2","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]},
+    {"logical_name":"C","field_id":"customfield_3","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]},
+    {"logical_name":"D","field_id":"customfield_4","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]}
+  ]}'
+  local merged='{"Epic":{"A":[{"value":"x"}],"B":7,"C":true,"D":null}}'
+  run _config_field_default_report "${ITYPES}" "${df}" '["Epic"]' "${merged}" '["10101"]'
+  [ "$(jq -r '.outside_allowed | length' <<< "$output")" -eq 0 ]
+}
+
+@test "015 FR-006 — a structured value passes while a genuinely wrong string beside it still refuses" {
+  local df='{"10101":[
+    {"logical_name":"Program Increment","field_id":"customfield_40012","schema_type":"option","required":true,"defaultable":true,"allowed_values":["PI-2026-Q2","PI-2026-Q3"]},
+    {"logical_name":"Region","field_id":"customfield_40014","schema_type":"option","required":false,"defaultable":true,"allowed_values":["EMEA","APAC"]}
+  ]}'
+  local merged='{"Epic":{"Program Increment":{"id":"10250"},"Region":"NotAllowed"}}'
+  run _config_field_default_report "${ITYPES}" "${df}" '["Epic"]' "${merged}" '["10101"]'
+  [ "$(jq -r '.outside_allowed | length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.outside_allowed[0].label' <<< "$output")" = "Region" ]
+}
+
+@test "015 — refusals are batched into one pass, never one refusal per entry" {
+  local df='{"10101":[
+    {"logical_name":"Program Increment","field_id":"customfield_40012","schema_type":"option","required":true,"defaultable":true,"allowed_values":["PI-2026-Q2","PI-2026-Q3"]},
+    {"logical_name":"Region","field_id":"customfield_40014","schema_type":"option","required":false,"defaultable":true,"allowed_values":["EMEA","APAC"]}
+  ]}'
+  local merged='{"Epic":{"Program Increment":"PI-2020-Q1","Region":"NotAllowed"}}'
+  run _config_field_default_report "${ITYPES}" "${df}" '["Epic"]' "${merged}" '["10101"]'
+  [ "$(jq -r '.outside_allowed | length' <<< "$output")" -eq 2 ]
+}
+
+@test "015 FR-014 — the refusal names the label and the candidates; the recorded value appears in neither the message nor the structured output" {
+  local merged='{"Epic":{"Program Increment":"A Secret Recorded Value"}}'
+  local report; report="$(_config_field_default_report "${ITYPES}" "${DEFAULTABLE}" '["Epic"]' "${merged}" '["10101"]')"
+  local problems; problems="$(jq -cn --argjson r "${report}" '[$r.outside_allowed[] | . + {kind:"outside_allowed"}]')"
+  run --separate-stderr _config_report_field_default_problems "PM" "${problems}" "false"
+  [[ "${stderr}" == *"Program Increment"* ]]
+  [[ "${stderr}" == *"PI-2026-Q2, PI-2026-Q3"* ]]
+  [[ "${stderr}" != *"A Secret Recorded Value"* ]]
+  [[ "$output" != *"A Secret Recorded Value"* ]]
+}
+
+@test "015 — a recorded value outside allowed_values refuses the whole ceremony (exit 4) and writes nothing" {
+  setup_e2e
+  cmd_config config FD \
+    --field-default 'FD=Deliverable=Business Owner=Platform Team' \
+    --field-default 'FD=Deliverable=Program Increment=PI-2026-Q3' \
+    --json > /dev/null
+  # Hand-edit the recorded default to a value outside the enumerated list.
+  local path="${JIRA_CONFIG_DIR}/config.yml"
+  local hand_edited_map='{"FD":{"ask":true,"Deliverable":{"Business Owner":"Platform Team","Program Increment":"PI-2020-Q1"}}}'
+  _config_field_defaults_write "${path}" "${hand_edited_map}" "false" > /dev/null
+  local before; before="$(cat "${path}")"
+  run --separate-stderr cmd_config config FD --json
+  [ "$status" -eq 4 ]
+  [[ "${stderr}" == *"Program Increment"* ]]
+  [[ "${stderr}" == *"must be one of"* ]]
+  [ "$(cat "${path}")" = "${before}" ]
+  [ ! -f "${JIRA_CONFIG_DIR}/config.local.yml.new" ]
+  teardown_e2e
+}
+
 @test "E2E — with nothing recorded and no answer, the ceremony still refuses — via the pre-existing, unchanged mandatory-field/parent-link gate (plan.md Summary), not field_defaults' own pending report" {
   # field_defaults' own "pending question" report is non-blocking (contract
   # §6). The OLDER structural gate (T050/T051, "pulled to configuration

@@ -510,7 +510,14 @@ function Get-JiraFieldDefaultsReport {
       be defaulted, reported once, §2.3 — the pre-existing mandatory gate
       still refuses it, US3 scenario 3); pending (a required, defaultable
       field of an in-scope type with neither a recorded value nor a
-      this-run answer — the ceremony's own refusal trigger). Mirror of
+      this-run answer — the ceremony's own refusal trigger); outside_allowed
+      (015, research R5, contract §6, data-model.md §7 — a merged entry
+      whose value is not one of its field's allowed_values, examined only
+      when the type resolves, the label resolves to a defaultable field of
+      that type, that field's allowed_values is non-empty, and the recorded
+      value is a string — FR-006's escape hatch keeps a hand-written
+      structured value out of the check; a refusal trigger, like pending;
+      the recorded value itself never appears in the entry). Mirror of
       _config_field_default_report.
     #>
     [CmdletBinding()]
@@ -545,6 +552,7 @@ function Get-JiraFieldDefaultsReport {
 
     $orphaned = [System.Collections.Generic.List[object]]::new()
     $notYetConsumed = [System.Collections.Generic.List[object]]::new()
+    $outsideAllowed = [System.Collections.Generic.List[object]]::new()
     foreach ($p in $merged.PSObject.Properties) {
         $tname = $p.Name
         $tid = Resolve-RepTypeId $tname
@@ -554,9 +562,27 @@ function Get-JiraFieldDefaultsReport {
         }
         $fields = Get-DfdFieldsFor $tid
         foreach ($fp in $p.Value.PSObject.Properties) {
-            $ok = $false
-            foreach ($f in $fields) { if ([string]$f.logical_name -eq $fp.Name) { $ok = $true; break } }
-            if (-not $ok) { $orphaned.Add([ordered]@{ kind = 'orphaned_label'; type = $tname; label = $fp.Name }) }
+            $match = $null
+            foreach ($f in $fields) { if ([string]$f.logical_name -eq $fp.Name) { $match = $f; break } }
+            if ($null -eq $match) {
+                $orphaned.Add([ordered]@{ kind = 'orphaned_label'; type = $tname; label = $fp.Name })
+                continue
+            }
+            # The leading comma is load-bearing: without it, an `if/else`
+            # expression whose chosen branch is an empty array enumerates
+            # zero objects into the assignment, collapsing $allowed to $null
+            # rather than @() — a real PowerShell array-unwrapping gotcha,
+            # not a hypothetical one (it reproduces with a genuinely empty
+            # allowed_values, e.g. a `user`-typed field).
+            $allowed = if ($null -eq $match.allowed_values) { , @() } else { , @($match.allowed_values) }
+            # A string recorded value only (FR-006's escape hatch): a value an
+            # operator wrote as an object or an array is the shape the bridge
+            # does not derive, obeyed literally, and it can never be a member
+            # of an allowed_values list that holds option labels — checking it
+            # would refuse exactly the value the spec promises to pass through.
+            if ($fp.Value -is [string] -and $allowed.Count -gt 0 -and -not ($allowed -contains $fp.Value)) {
+                $outsideAllowed.Add([ordered]@{ type = $tname; label = $fp.Name; candidates = $allowed })
+            }
         }
         if (-not ($bridge -contains $tid)) { $notYetConsumed.Add([ordered]@{ kind = 'not_yet_consumed'; type = $tname }) }
     }
@@ -589,6 +615,7 @@ function Get-JiraFieldDefaultsReport {
         not_yet_consumed       = $notYetConsumed
         undefaultable_required = $undefaultableRequired
         pending                = $pending
+        outside_allowed        = $outsideAllowed
     }))
 }
 
@@ -1070,6 +1097,24 @@ function Invoke-JiraConfig {
         $fdBridgeIdsJson = ConvertTo-JiraJsonValue (@($bridgeIds))
         $fdReportJson = Get-JiraFieldDefaultsReport -IssueTypesJson $itypesJson -DefaultableFieldsByTypeJson $dfMapJson `
             -AskTypesJson $fdAskTypesJson -MergedJson $fdMergedJson -BridgeTypeIdsJson $fdBridgeIdsJson
+        # 015, research R5, contract §6.3: a recorded value outside its
+        # field's allowed_values refuses HERE, at configuration time — the
+        # whole point of US4 is that this check no longer waits for a hook
+        # to fire mid-task. Reuses the flag path's own "outside_allowed"
+        # message and exit code (Write-JiraFieldDefaultProblemsReport), so a
+        # refusal from the file is indistinguishable from one from a flag;
+        # the recorded value itself never reaches the message or any
+        # structured output. Zero writes: this runs before this loop's own
+        # config.yml/local.yml write, below.
+        $fdReport = $fdReportJson | ConvertFrom-Json -Depth 100
+        $fdOutsideAllowed = [System.Collections.Generic.List[object]]::new()
+        foreach ($oa in @($fdReport.outside_allowed)) {
+            $fdOutsideAllowed.Add([ordered]@{ kind = 'outside_allowed'; type = $oa.type; label = $oa.label; candidates = @($oa.candidates) })
+        }
+        if ($fdOutsideAllowed.Count -gt 0) {
+            Write-JiraFieldDefaultProblemsReport -ProjectKey $pkey -ProblemsJson (ConvertTo-JiraJsonValue $fdOutsideAllowed) -Json $json
+            return $script:ExitConfig
+        }
         # A pending question (contract §6: "consolidated question pending | 0
         # — not a failure") is NON-BLOCKING at config time — see the mirror
         # comment on the same change in commands/config.sh. Reconcile's own

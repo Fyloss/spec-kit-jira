@@ -82,6 +82,10 @@ Describe 'Hook health reporting' {
     }
     AfterEach {
         Remove-Item Env:\SPEC_KIT_JIRA_PLAN_CONTEXT -ErrorAction SilentlyContinue
+        # 015 (regression): SPEC_KIT_JIRA_PROJECT_KEY set in BeforeEach above
+        # was never cleared, leaking into whichever test file's session
+        # happens to run next and overriding ITS OWN project-key routing.
+        Remove-Item Env:\SPEC_KIT_JIRA_PROJECT_KEY -ErrorAction SilentlyContinue
         Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
     }
 

@@ -1,0 +1,60 @@
+# Baseline record — 015 Fix Field Default Encoding
+
+Note on timing: T001-T003 are written retrospectively, after the fix (T004-T046)
+was already implemented and verified green in the same working session. No
+regression was introduced by that ordering — the fix landed purely additively
+(see T002) — but this file documents the findings T001-T003 ask for, using the
+now-final state of the tree rather than a true pre-change snapshot.
+
+## T001 — gate summary (current, post-fix)
+
+- `tests/run-bash.sh`: 1267 tests / 129 files / 0 failures.
+- `Invoke-Pester tests/powershell`: Passed=977 Failed=0 Total=977.
+- `bash tests/conformance/ci-conformance.sh`: exit 0, zero "conformance
+  divergence" lines, 74/74 scenarios byte-identical across ports (success is
+  silent — see memory `conformance-success-is-silent`).
+
+## T002 — inventory of pre-existing bare-string assertions for in-scope schema
+types (`option` and the five named-entity types: priority, resolution,
+version, component, group)
+
+`git diff main -- tests/bash tests/powershell tests/conformance` contains
+**zero removed lines** across the whole test/conformance tree for this
+feature: every one of the ~1489 added lines is a net-new test or fixture: no
+pre-existing assertion had to move from "bare string" to "encoded". Finding:
+this feature's fix had no test-suite blast radius beyond its own new
+coverage — there was no prior test anywhere in the corpus that asserted a
+bare-string payload for an `option` or named-entity field.
+
+The one schema-typed field already present before this feature —
+`customfield_40011` "Business Owner" (`schema.type: user`) in
+`tests/conformance/mock-jira/fixtures/createmeta-fields-parent-mandatory.json`
+— is confirmed out of scope per FR-004 (`user` is not in the encoding table,
+so its recorded default keeps flowing unchanged) and required no test change.
+This is the deliberate finding the task calls out: a later reader must not
+"fix" that field's bare-string assertion, because there is nothing to fix.
+
+## T003 — project-keyed fault path matching
+
+`tests/conformance/mock-jira/curl-shim.sh:361-366` (mirrored in
+`mock-server.ps1:217`) computes `fault_path` as follows:
+- For `POST /rest/api/3/issue`, `fault_path` is rewritten to
+  `/<projectKey>` read from the request body's `fields.project.key` — the
+  fault therefore targets exactly that create, regardless of the raw URL.
+- For every other request (GET createmeta, GET issue-by-key reads, property
+  GETs used by the identity/recognition guard, etc.), `fault_path` is left as
+  the raw request path. Because the match pattern is `/<key>(/|-|$)`, any read
+  whose path contains the project key as a path segment — e.g.
+  `/rest/api/3/issue/PM-1` or `/rest/api/3/issue/PM-1/properties/...` — is
+  ALSO faulted by a fault configured for project `PM`, since `PM-1` begins
+  with `PM-`.
+
+Consequence for T029 (and for `test_plan_apply_outcome.bats` /
+`PlanApply.Outcome.Tests.ps1`, which use project-keyed faults on synthetic
+`AAA`/`BBB` projects to distinguish parent- vs story-rejection): those tests
+only ever issue `POST` creates against the faulted project, never a
+follow-up `GET` against an already-created `AAA-N`/`BBB-N` key, so no
+collateral faulting occurs in practice. A scenario that DID need to read back
+an issue in a project under an active fault (e.g. a recognition/backfill read)
+would be collaterally faulted by this same rule — worth flagging to a future
+scenario author, but no such scenario exists in this feature's corpus.

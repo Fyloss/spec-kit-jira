@@ -61,8 +61,16 @@ function Get-JiraPlanResolveFieldDefault {
       for the same (type, label). An unresolvable type name or field label
       is reported in Unresolved, never silently dropped.
 
-      Returns one canonical object: {field_defaults; field_default_sources;
-      unresolved}.
+      015, research R1/R2/R3, contract §1.3, data-model.md §2: alongside the
+      recorded map, emits field_defaults_encoded — the same map with each
+      value shaped for the field's declared schema_type (an `option` field
+      as {"value": v}, a named-entity field as {"name": v}, everything
+      else, including `user` and a non-string value, unchanged). Only the
+      plan context's assignment reads the encoded map; every other consumer
+      keeps reading field_defaults untouched (research R2).
+
+      Returns one canonical object: {field_defaults; field_defaults_encoded;
+      field_default_sources; unresolved}.
     #>
     [CmdletBinding()]
     param(
@@ -85,11 +93,19 @@ function Get-JiraPlanResolveFieldDefault {
         foreach ($t in $itypes) { if ([string]$t.logical_name -eq $Name) { return [string]$t.id } }
         return $null
     }
-    function Resolve-FieldId([string] $TypeId, [string] $Label) {
+    function Resolve-FieldMeta([string] $TypeId, [string] $Label) {
         $listProp = $df.PSObject.Properties[$TypeId]
         if ($null -eq $listProp) { return $null }
-        foreach ($f in @($listProp.Value)) { if ([string]$f.logical_name -eq $Label) { return [string]$f.field_id } }
+        foreach ($f in @($listProp.Value)) { if ([string]$f.logical_name -eq $Label) { return $f } }
         return $null
+    }
+    $namedEntityTypes = @('priority', 'resolution', 'version', 'component', 'group')
+    function Get-JiraEncodedFieldDefault($Meta, $Value) {
+        if ($Value -isnot [string]) { return $Value }
+        $schemaType = [string](Get-JiraPlanProp $Meta 'schema_type')
+        if ($schemaType -eq 'option') { return [ordered]@{ value = $Value } }
+        if ($namedEntityTypes -contains $schemaType) { return [ordered]@{ name = $Value } }
+        return $Value
     }
 
     $entries = [System.Collections.Generic.List[object]]::new()
@@ -104,6 +120,7 @@ function Get-JiraPlanResolveFieldDefault {
     }
 
     $fieldDefaults = [ordered]@{}
+    $fieldDefaultsEncoded = [ordered]@{}
     $sources = [ordered]@{}
     $unresolved = [System.Collections.Generic.List[object]]::new()
     foreach ($e in $entries) {
@@ -112,19 +129,23 @@ function Get-JiraPlanResolveFieldDefault {
             $unresolved.Add([ordered]@{ type = $e.type; label = $e.label; reason = 'unknown issue type' })
             continue
         }
-        $fid = Resolve-FieldId $tid $e.label
-        if ($null -eq $fid) {
+        $meta = Resolve-FieldMeta $tid $e.label
+        if ($null -eq $meta) {
             $unresolved.Add([ordered]@{ type = $e.type; label = $e.label; reason = 'unknown field label' })
             continue
         }
+        $fid = [string]$meta.field_id
         if (-not $fieldDefaults.Contains($tid)) { $fieldDefaults[$tid] = [ordered]@{} }
         $fieldDefaults[$tid][$fid] = $e.value
+        if (-not $fieldDefaultsEncoded.Contains($tid)) { $fieldDefaultsEncoded[$tid] = [ordered]@{} }
+        $fieldDefaultsEncoded[$tid][$fid] = Get-JiraEncodedFieldDefault $meta $e.value
         if (-not $sources.Contains($tid)) { $sources[$tid] = [ordered]@{} }
         $sources[$tid][$fid] = $e.source
     }
 
     return (ConvertTo-JiraJsonValue ([ordered]@{
         field_defaults = $fieldDefaults
+        field_defaults_encoded = $fieldDefaultsEncoded
         field_default_sources = $sources
         unresolved = $unresolved
     }))
@@ -630,6 +651,15 @@ function Invoke-JiraApplyWriteSetWithRecognition {
       defaultable_fields map, {type_id: [{logical_name, field_id, ...}]}.
       Omitted or empty ⇒ a rejected creation falls through to the existing
       generic failure path unchanged (FR-028).
+
+      015, research R4, contract §4.2, data-model.md §5: returns
+      [ordered]@{ ExitCode; Created } rather than a bare exit code — the
+      structured mirror of the bash port's stdout outcome
+      {"created":[{key, role, local_id}, ...]}. Created holds an entry only
+      after Jira returned a key for that creation, the parent first when
+      present. On the two pre-write privacy-guard returns Created is empty
+      (rule O4) — the object-shaped equivalent of the bash port's "empty
+      stdout reads as zero created".
     #>
     [CmdletBinding()]
     param(
@@ -648,6 +678,7 @@ function Invoke-JiraApplyWriteSetWithRecognition {
     $stories = @()
     $storiesProp = Get-JiraPlanProp $plan 'stories'
     if ($null -ne $storiesProp) { $stories = @($storiesProp) }
+    $createdOut = [System.Collections.Generic.List[object]]::new()
 
     # (1) Pre-write gate — scan every payload, parent then stories, before
     # writing anything.
@@ -655,13 +686,13 @@ function Invoke-JiraApplyWriteSetWithRecognition {
         $bodyObj = Get-JiraPlanProp $parent 'body'
         $bodyText = if ($null -eq $bodyObj) { '{}' } else { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 }
         $code = Test-JiraPrivacyBlock -Payload $bodyText -KnownCoordinatesJson $coords -AllowlistJson $allow
-        if ($code -ne 0) { return [int]$code }
+        if ($code -ne 0) { return [ordered]@{ ExitCode = [int]$code; Created = @() } }
     }
     foreach ($a in $stories) {
         $bodyObj = if ($a.PSObject.Properties.Name -contains 'body') { $a.body } else { $null }
         $bodyText = if ($null -eq $bodyObj) { '{}' } else { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 }
         $code = Test-JiraPrivacyBlock -Payload $bodyText -KnownCoordinatesJson $coords -AllowlistJson $allow
-        if ($code -ne 0) { return [int]$code }
+        if ($code -ne 0) { return [ordered]@{ ExitCode = [int]$code; Created = @() } }
     }
 
     # (2) R5 step 4 / contract step 9 — mark the parent (when it is a
@@ -704,7 +735,7 @@ function Invoke-JiraApplyWriteSetWithRecognition {
         if ([int]$r.ExitCode -gt $worst) { $worst = [int]$r.ExitCode }
         if ([int]$r.ExitCode -ge 2) {
             Write-JiraApplyRejectionReport -Method $parent.method -Url $parent.url -Action $parent -DefaultableFieldsByTypeJson $DefaultableFieldsByTypeJson -Result $r
-            return $worst
+            return [ordered]@{ ExitCode = $worst; Created = @($createdOut) }
         }
         if ($parent.method -eq 'POST') {
             $respObj = $null
@@ -718,6 +749,7 @@ function Invoke-JiraApplyWriteSetWithRecognition {
                 if ($null -eq $cur) { $cur = '' }
                 $new = Set-JiraSpecMarkerRecordTicket -Text $cur -Id $parentLocalId -Key $parentKey
                 Write-JiraMarkerSpliceFile -Path $SpecFile -NewContent $new | Out-Null
+                $createdOut.Add([ordered]@{ key = $parentKey; role = 'parent'; local_id = $parentLocalId })
             }
         }
     }
@@ -745,7 +777,7 @@ function Invoke-JiraApplyWriteSetWithRecognition {
         if ([int]$r.ExitCode -gt $worst) { $worst = [int]$r.ExitCode }
         if ([int]$r.ExitCode -ge 2) {
             Write-JiraApplyRejectionReport -Method $action.method -Url $action.url -Action $action -DefaultableFieldsByTypeJson $DefaultableFieldsByTypeJson -Result $r
-            return $worst
+            return [ordered]@{ ExitCode = $worst; Created = @($createdOut) }
         }
 
         if ($action.method -eq 'POST' -and ([string]$action.url).EndsWith('/issue')) {
@@ -761,10 +793,11 @@ function Invoke-JiraApplyWriteSetWithRecognition {
                 if ($null -eq $cur) { $cur = '' }
                 $new = Set-JiraStoryMarkerRecordTicket -Text $cur -Id $localId -Key $key
                 Write-JiraMarkerSpliceFile -Path $SpecFile -NewContent $new | Out-Null
+                $createdOut.Add([ordered]@{ key = $key; role = 'story'; local_id = $localId })
             }
         }
     }
-    return $worst
+    return [ordered]@{ ExitCode = $worst; Created = @($createdOut) }
 }
 
 Export-ModuleMember -Function Get-JiraApplyKnownCoordinate, Invoke-JiraApplyWriteSet, Get-JiraPlanWriteSet, Get-JiraLifecyclePlan, `
