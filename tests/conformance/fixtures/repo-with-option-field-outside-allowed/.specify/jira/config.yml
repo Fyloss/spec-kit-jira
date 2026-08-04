@@ -1,0 +1,30 @@
+# Team config for the option-field US4 conformance fixture (015) — a copy of
+# repo-with-option-field's config.yml with both recorded "Region" defaults
+# hand-edited to a value the mock's createmeta (fd-option) never lists in
+# allowedValues, proving the configuration-time refusal of contract §6.
+projects:
+  - key: FD
+    style: company_managed
+    hierarchy:
+      specification: Deliverable
+      story: Story
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: FD
+routing_default: FD
+
+# --- spec-kit-jira:field_defaults:begin ---
+# Recorded defaults for custom fields on ticket creation (011), written by
+# `/speckit.jira.config`. Edit a value here by hand if you like — keep it
+# between these markers; an entry outside them is a duplicate top-level key
+# and the next read refuses it (exit 4).
+"field_defaults":
+  "FD":
+    "Deliverable":
+      "Region": "NotAValidRegion"
+      "Team Nickname": "Falcons"
+    "Story":
+      "Region": "NotAValidRegion"
+    "ask": true
+# --- spec-kit-jira:field_defaults:end ---

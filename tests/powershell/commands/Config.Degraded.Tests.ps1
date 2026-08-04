@@ -220,4 +220,22 @@ Describe 'Degraded causes are told apart (T047, 003 US5)' {
         $r.Out | Should -Not -Match 'field_defaults'
         (Get-Content -Raw -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml')) | Should -Be $before
     }
+
+    It '015 T034 — a degraded-mode ceremony with no Jira read performs no allowed-value check at all, and stays silent about it' {
+        # No Jira read means no defaultable_fields is ever discovered, so rule
+        # A3 (contract §6.2) excludes every entry from examination — a
+        # recorded value that WOULD be outside_allowed against a real
+        # project's metadata is not checked here, and the run neither
+        # refuses nor mentions the field.
+        Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
+        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+        $path = Join-Path $env:JIRA_CONFIG_DIR 'config.yml'
+        Add-Content -LiteralPath $path -Value "field_defaults:`n  TEAM:`n    ask: true`n    Epic:`n      Region: NotAnAllowedValue"
+        $before = Get-Content -Raw -LiteralPath $path
+        $r = Invoke-ConfigCaptured @('config', '--json')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Not -Match 'must be one of'
+        $r.Out | Should -Not -Match 'NotAnAllowedValue'
+        (Get-Content -Raw -LiteralPath $path) | Should -Be $before
+    }
 }

@@ -1,0 +1,15 @@
+{
+  "name": "us2-field-defaults-option-question",
+  "description": "015, US2 (contract §3, data-model.md §4): the same option-typed default fixture as us1-field-defaults-option-encoded, but with no --accept-defaults — the consolidated confirmation question fires (ask: true), and the corpus proves both ports render the recorded value as the plain operator-typed string, with no trace of the {\"value\": ...} wire shape.",
+  "mock": { "projects": { "FD": "company" }, "createmetaFields": { "10101": "fd-option", "10102": "fd-option" } },
+  "fixture": "tests/conformance/fixtures/repo-with-option-field",
+  "argv": ["reconcile", "specs/001-reporting/spec.md", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-reporting",
+    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111"
+  }
+}

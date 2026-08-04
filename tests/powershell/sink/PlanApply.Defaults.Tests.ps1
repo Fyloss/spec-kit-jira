@@ -130,3 +130,98 @@ Describe 'Get-JiraPlanWriteSet — field defaults (T027/T033)' {
         (@($out.stories[0].body.fields.PSObject.Properties.Name) | Sort-Object) -join ',' | Should -Be 'description,issuetype,parent,project,summary'
     }
 }
+
+# --- 015, T010 [US1] — the encoding table (contract §1.3, data-model.md §2),
+# mirror of tests/bash/sink/test_plan_apply_defaults.bats' 015 T008 cases.
+# Each case builds its own tree — Pester discovery order differs between hosts.
+
+Describe 'Get-JiraPlanResolveFieldDefault — field_defaults_encoded (015)' {
+    BeforeEach {
+        $script:ITypes015 = '[{"logical_name":"Epic","id":"10101"}]'
+    }
+
+    It 'a select-list (option) default is encoded as {value: v}' {
+        $df = '{"10101":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA"]}]}'
+        $recorded = '{"Epic":{"Region":"EMEA"}}'
+        $out = Get-JiraPlanResolveFieldDefault -IssueTypesJson $script:ITypes015 -DefaultableFieldsByTypeJson $df -RecordedJson $recorded -AnswersJson '[]' | ConvertFrom-Json -Depth 100
+        $out.field_defaults_encoded.'10101'.customfield_1.value | Should -Be 'EMEA'
+        $out.field_defaults.'10101'.customfield_1 | Should -Be 'EMEA'
+    }
+
+    It 'each named-entity schema_type is encoded as {name: v}' {
+        foreach ($st in @('priority', 'resolution', 'version', 'component', 'group')) {
+            $df = '{"10101":[{"logical_name":"F","field_id":"customfield_2","schema_type":"' + $st + '","required":true,"defaultable":true,"allowed_values":[]}]}'
+            $recorded = '{"Epic":{"F":"Val"}}'
+            $out = Get-JiraPlanResolveFieldDefault -IssueTypesJson $script:ITypes015 -DefaultableFieldsByTypeJson $df -RecordedJson $recorded -AnswersJson '[]' | ConvertFrom-Json -Depth 100
+            $out.field_defaults_encoded.'10101'.customfield_2.name | Should -Be 'Val'
+        }
+    }
+
+    It 'a string-typed default falls through unencoded' {
+        $df = '{"10101":[{"logical_name":"F","field_id":"customfield_3","schema_type":"string","required":true,"defaultable":true,"allowed_values":[]}]}'
+        $recorded = '{"Epic":{"F":"Plain text"}}'
+        $out = Get-JiraPlanResolveFieldDefault -IssueTypesJson $script:ITypes015 -DefaultableFieldsByTypeJson $df -RecordedJson $recorded -AnswersJson '[]' | ConvertFrom-Json -Depth 100
+        $out.field_defaults_encoded.'10101'.customfield_3 | Should -Be 'Plain text'
+    }
+
+    It 'FR-004 — a user-typed default falls through unencoded, deliberately excluded from the table' {
+        $df = '{"10101":[{"logical_name":"Business Owner","field_id":"customfield_40011","schema_type":"user","required":true,"defaultable":true,"allowed_values":[]}]}'
+        $recorded = '{"Epic":{"Business Owner":"Platform Team"}}'
+        $out = Get-JiraPlanResolveFieldDefault -IssueTypesJson $script:ITypes015 -DefaultableFieldsByTypeJson $df -RecordedJson $recorded -AnswersJson '[]' | ConvertFrom-Json -Depth 100
+        $out.field_defaults_encoded.'10101'.customfield_40011 | Should -Be 'Platform Team'
+    }
+
+    It 'a cascading select (option-with-child) falls through unencoded' {
+        $df = '{"10101":[{"logical_name":"Cascade","field_id":"customfield_4","schema_type":"option-with-child","required":true,"defaultable":true,"allowed_values":[]}]}'
+        $recorded = '{"Epic":{"Cascade":"Parent Value"}}'
+        $out = Get-JiraPlanResolveFieldDefault -IssueTypesJson $script:ITypes015 -DefaultableFieldsByTypeJson $df -RecordedJson $recorded -AnswersJson '[]' | ConvertFrom-Json -Depth 100
+        $out.field_defaults_encoded.'10101'.customfield_4 | Should -Be 'Parent Value'
+    }
+
+    It 'FR-006 — the non-string guard: a non-string recorded value passes through unchanged even for an option field' {
+        $df = '{"10101":[{"logical_name":"Flag","field_id":"customfield_5","schema_type":"option","required":false,"defaultable":true,"allowed_values":[]}]}'
+        $answers = '[{"type":"Epic","label":"Flag","value":true}]'
+        $out = Get-JiraPlanResolveFieldDefault -IssueTypesJson $script:ITypes015 -DefaultableFieldsByTypeJson $df -RecordedJson '{}' -AnswersJson $answers | ConvertFrom-Json -Depth 100
+        $out.field_defaults_encoded.'10101'.customfield_5 | Should -Be $true
+        $out.field_defaults.'10101'.customfield_5 | Should -Be $true
+    }
+
+    It 'T050 (US2/AC4) — a this-run answer on an option-typed field encodes identically to the same text recorded' {
+        $df = '{"10101":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA"]}]}'
+        $answers = '[{"type":"Epic","label":"Region","value":"EMEA"}]'
+        $out = Get-JiraPlanResolveFieldDefault -IssueTypesJson $script:ITypes015 -DefaultableFieldsByTypeJson $df -RecordedJson '{}' -AnswersJson $answers | ConvertFrom-Json -Depth 100
+        $out.field_defaults_encoded.'10101'.customfield_1.value | Should -Be 'EMEA'
+
+        $recorded = '{"Epic":{"Region":"EMEA"}}'
+        $out2 = Get-JiraPlanResolveFieldDefault -IssueTypesJson $script:ITypes015 -DefaultableFieldsByTypeJson $df -RecordedJson $recorded -AnswersJson '[]' | ConvertFrom-Json -Depth 100
+        $out2.field_defaults_encoded.'10101'.customfield_1.value | Should -Be 'EMEA'
+    }
+
+    It 'FR-007 — a label resolving to no field falls through as recorded, and unresolved is unaffected' {
+        $df = '{"10101":[]}'
+        $recorded = '{"Epic":{"Nonexistent":"X"}}'
+        $out = Get-JiraPlanResolveFieldDefault -IssueTypesJson $script:ITypes015 -DefaultableFieldsByTypeJson $df -RecordedJson $recorded -AnswersJson '[]' | ConvertFrom-Json -Depth 100
+        @($out.field_defaults.PSObject.Properties).Count | Should -Be 0
+        @($out.field_defaults_encoded.PSObject.Properties).Count | Should -Be 0
+        $out.unresolved[0].reason | Should -Be 'unknown field label'
+    }
+
+    It 'data-model §2 I1/I2 — field_defaults is unchanged and both maps share an identical key set' {
+        $df = '{"10101":[
+            {"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA"]},
+            {"logical_name":"F","field_id":"customfield_3","schema_type":"string","required":true,"defaultable":true,"allowed_values":[]}
+        ]}'
+        $recorded = '{"Epic":{"Region":"EMEA","F":"Plain"}}'
+        $out = Get-JiraPlanResolveFieldDefault -IssueTypesJson $script:ITypes015 -DefaultableFieldsByTypeJson $df -RecordedJson $recorded -AnswersJson '[]' | ConvertFrom-Json -Depth 100
+        (@($out.field_defaults.'10101'.PSObject.Properties.Name) | Sort-Object) -join ',' | Should -Be 'customfield_1,customfield_3'
+        (@($out.field_defaults_encoded.'10101'.PSObject.Properties.Name) | Sort-Object) -join ',' | Should -Be 'customfield_1,customfield_3'
+    }
+
+    It 'data-model §2 I4 — nothing recorded and no answer: both maps are empty' {
+        $df = '{"10101":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":false,"defaultable":true,"allowed_values":[]}]}'
+        $out = Get-JiraPlanResolveFieldDefault -IssueTypesJson $script:ITypes015 -DefaultableFieldsByTypeJson $df -RecordedJson '{}' -AnswersJson '[]' | ConvertFrom-Json -Depth 100
+        @($out.field_defaults.PSObject.Properties).Count | Should -Be 0
+        @($out.field_defaults_encoded.PSObject.Properties).Count | Should -Be 0
+        @($out.unresolved).Count | Should -Be 0
+    }
+}

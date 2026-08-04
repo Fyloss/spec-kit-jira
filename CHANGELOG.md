@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-08-04
+
+### Fixed
+
+- A recorded field default on a select-list (or other non-free-text) custom
+  field is now sent in the shape its field accepts, instead of the bare
+  string the operator typed. Jira's `createmeta` reports a field's declared
+  type at discovery time; the resolver that joins a recorded default to its
+  field id now reads that type too, and shapes the value for the wire — an
+  `option` field as `{"value": ...}`, a `priority`/`resolution`/`version`/
+  `component`/`group` field as `{"name": ...}`. Previously the bare string
+  made Jira refuse the very first creation, so a project with one mandatory
+  single-select field mirrored nothing at all
+  (`specs/015-fix-field-default-encoding/`). Every operator-facing surface —
+  the confirmation question, the provenance note, and the `--field-default`
+  promotion command — keeps showing the plain recorded value; only the
+  payload sent to Jira changes.
+- The run summary's `counts.created` now reports the number of tickets Jira
+  actually confirmed, never the number merely planned: a refused creation no
+  longer inflates the count, and a fully successful run is unaffected.
+- `/speckit.jira.config` now refuses a recorded field default that falls
+  outside its field's enumerated allowed values at configuration time,
+  naming the field and the accepted values — the same rule the
+  `--field-default` flag already enforced, now also applied to values
+  already sitting in `config.yml`. The recorded value itself never appears
+  in the refusal.
+
+### Fixed (incidental)
+
+- A parent (epic) creation's `creating`/bound marker write, in the Bash
+  port's `apply_writes_with_recognition`, called two functions
+  (`spec_marker_mark_creating`, `spec_marker_record_ticket`) from a module no
+  caller ever sourced — silently swallowed until now, since nothing
+  previously depended on this function's stdout being clean JSON. Fixed by
+  sourcing `engine/spec_marker.sh` from `sink/jira/plan_apply.sh`, alongside
+  the sibling `engine/story_marker.sh` it already sources.
+- The PowerShell port's confirmation-question type ordering (`Invoke-JiraReconcile`)
+  diverged from the Bash port whenever more than one issue type had a
+  creation pending in the same run: the Bash port's `jq unique` sorts, while
+  `Select-Object -Unique` only deduplicates, preserving first-seen order.
+  Both ports now sort ordinally.
+
 ## [0.10.1] - 2026-08-04
 
 ### Fixed

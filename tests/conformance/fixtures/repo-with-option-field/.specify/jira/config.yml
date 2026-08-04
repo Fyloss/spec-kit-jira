@@ -1,0 +1,33 @@
+# Team config for the option-field conformance fixture (015, US1) — a
+# company-managed project whose specification role AND story role each
+# require the SAME single-select custom field (schema.type "option") the
+# bridge cannot supply on its own; the specification role additionally
+# records a free-text default. The two-role shape is load-bearing (T006):
+# the reported defect had one mandatory option field on both roles, which is
+# what made the run create zero tickets rather than degrade.
+projects:
+  - key: FD
+    style: company_managed
+    hierarchy:
+      specification: Deliverable
+      story: Story
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: FD
+routing_default: FD
+
+# --- spec-kit-jira:field_defaults:begin ---
+# Recorded defaults for custom fields on ticket creation (011), written by
+# `/speckit.jira.config`. Edit a value here by hand if you like — keep it
+# between these markers; an entry outside them is a duplicate top-level key
+# and the next read refuses it (exit 4).
+"field_defaults":
+  "FD":
+    "Deliverable":
+      "Region": "EMEA"
+      "Team Nickname": "Falcons"
+    "Story":
+      "Region": "EMEA"
+    "ask": true
+# --- spec-kit-jira:field_defaults:end ---

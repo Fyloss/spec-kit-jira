@@ -1,0 +1,15 @@
+{
+  "name": "us3-created-count-refused",
+  "description": "015, US3 (contract §4.2/§5, data-model.md §5/§6, research R4): injecting a 400 fault with a field-validation errors body on the create — the corpus's first use of `faults` — proves counts.created reports what Jira actually confirmed. The parent's create is refused before any story is attempted (parent-first ordering), so the apply outcome is empty and counts.created is zero, alongside the fail-closed exit code; no other Jira read is collaterally faulted by the project-keyed fault (T003's finding: this fixture's reconcile issues no project-keyed GET at all).",
+  "mock": { "projects": { "FD": "company" }, "createmetaFields": { "10101": "fd-option", "10102": "fd-option" }, "faults": { "FD": { "status": 400, "errors": { "customfield_50021": "invalid option" } } } },
+  "fixture": "tests/conformance/fixtures/repo-with-option-field",
+  "argv": ["reconcile", "specs/001-reporting/spec.md", "--accept-defaults", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-reporting",
+    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111"
+  }
+}

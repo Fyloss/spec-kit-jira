@@ -1,0 +1,15 @@
+{
+  "name": "us1-field-defaults-option-encoded",
+  "description": "015, US1 (contract §1.3, §2, data-model.md §2/§3): a mandatory single-select field is required on BOTH the specification role and the story role, exactly the shape of the reported defect — one option-typed default recorded on both types, plus a free-text default on the specification role. Reconciling with --accept-defaults mirrors both tickets end to end: the option field reaches Jira encoded as {\"value\": ...} on BOTH creations (parent and story), never as a bare string, and the string-typed field's payload stays byte-identical to before this feature. Before the fix, the option field's bare string made the FIRST creation fail closed, leaving the run with zero tickets rather than the second one degrading — this scenario proves both.",
+  "mock": { "projects": { "FD": "company" }, "createmetaFields": { "10101": "fd-option", "10102": "fd-option" } },
+  "fixture": "tests/conformance/fixtures/repo-with-option-field",
+  "argv": ["reconcile", "specs/001-reporting/spec.md", "--accept-defaults", "--json"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-reporting",
+    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111"
+  }
+}

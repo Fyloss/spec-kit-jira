@@ -17,6 +17,8 @@ setup() {
   source "${MOCK}/lib.sh"
   # shellcheck source=/dev/null
   source "${SINK_DIR}/ticket.sh"
+  # shellcheck source=/dev/null
+  source "${SINK_DIR}/plan_apply.sh"
   export JIRA_EMAIL="user@example.com"
   export JIRA_API_TOKEN="RAWSECRETXYZ"
   export JIRA_NO_SLEEP=1
@@ -164,4 +166,51 @@ boot() {
   local guarded_body; guarded_body="$(jq -cn --argjson f "${merged}" '{fields:$f}')"
   run privacy_guard_scan "${guarded_body}" "[]" '["support.example.atlassian.net"]'
   [ "$status" -eq 0 ]
+}
+
+# --- 015 FR-017 regression: a recorded field default is sent in the shape --
+# its field accepts. Written first, red against today's code (a select-list
+# field carried as a bare string): a mandatory single-select default must
+# reach jira_create_fields_base as {"value": v}, and a plain string default
+# must reach it unchanged — the exact payload both creation paths build.
+
+@test "015 FR-017 — a select-list default reaches jira_create_fields_base as {value: v}, a string default unchanged" {
+  local itypes='[{"logical_name":"Story","id":"10102"}]'
+  local df='{"10102":[
+    {"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA"]},
+    {"logical_name":"Team","field_id":"customfield_2","schema_type":"string","required":true,"defaultable":true,"allowed_values":[]}
+  ]}'
+  local recorded='{"Story":{"Region":"EMEA","Team":"Payments"}}'
+  local resolved; resolved="$(plan_resolve_field_defaults "${itypes}" "${df}" "${recorded}" "[]")"
+  local encoded; encoded="$(jq -c '.field_defaults_encoded' <<< "${resolved}")"
+  local base; base="$(jira_create_fields_base "IJT" "a story" "10102" "${encoded}")"
+  [ "$(jq -c '.customfield_1' <<< "${base}")" = '{"value":"EMEA"}' ]
+  [ "$(jq -r '.customfield_2' <<< "${base}")" = "Payments" ]
+}
+
+# --- 015 FR-008: the same recorded default, through both creation paths — --
+# the hook-driven reconcile (plan_writes' CREATE branch) and the planned
+# write for the parent (_plan_writes_parent) — produces a byte-identical
+# payload for the defaulted field, because both read the SAME
+# field_defaults_encoded map from the plan context (data-model.md §3).
+
+@test "015 FR-008 — the story CREATE branch and the parent CREATE branch encode the same recorded default identically" {
+  local itypes='[{"logical_name":"Story","id":"10102"},{"logical_name":"Epic","id":"10101"}]'
+  local df='{"10102":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA"]}],
+             "10101":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA"]}]}'
+  local recorded='{"Story":{"Region":"EMEA"},"Epic":{"Region":"EMEA"}}'
+  local resolved; resolved="$(plan_resolve_field_defaults "${itypes}" "${df}" "${recorded}" "[]")"
+  local encoded; encoded="$(jq -c '.field_defaults_encoded' <<< "${resolved}")"
+
+  local doc='{
+    "routing": {"project_key": "CONSUMER"},
+    "epic": {"local_id":"E1","title":"New epic","description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},
+    "stories": [ {"local_id":"S1","title":"New story","priority_logical":null,"estimation":null} ]
+  }'
+  local ctx; ctx="$(jq -cn --argjson fd "${encoded}" \
+    '{base_url:"https://example.atlassian.net","story_type_id":"10102","parent_type_id":"10101",field_defaults:$fd}')"
+  run plan_writes "${doc}" "${ctx}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.stories[0].body.fields.customfield_1' <<< "$output")" = '{"value":"EMEA"}' ]
+  [ "$(jq -c '.parent.body.fields.customfield_1' <<< "$output")" = '{"value":"EMEA"}' ]
 }

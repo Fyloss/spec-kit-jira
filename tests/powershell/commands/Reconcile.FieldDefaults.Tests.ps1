@@ -11,6 +11,11 @@ BeforeAll {
     Import-Module (Join-Path $Mock 'Mock.psm1') -Force
     Import-Module (Join-Path $CmdDir 'Config.psm1') -Force
     Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
+    # Reconcile.psm1 -Force-imports sink/jira/PlanApply.psm1 internally, which
+    # rebinds Get-JiraPlanConfirmationField into Reconcile.psm1's own scope —
+    # reimport here so this test file keeps direct access to it too (see
+    # memory: powershell-import-force-clobbers-caller-scope).
+    Import-Module (Join-Path $PSScriptRoot '../../../scripts/powershell/sink/jira/PlanApply.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot '../../../scripts/powershell/lib/Config.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot '../../../scripts/powershell/lib/Output.psm1') -Force
 
@@ -370,5 +375,51 @@ Describe 'Invoke-JiraReconcile — the consolidated question (011)' {
         $r.Out | Should -Match ([regex]::Escape("speckit.jira.config PM --field-default 'PM=Deliverable=Program Increment=<value>'"))
         $r.Out | Should -Not -Match ([regex]::Escape("speckit.jira.config PM --field-default 'PM=Deliverable=Business Owner="))
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
+    }
+}
+
+# --- 015 T021 [US2] — mirror of the 015 T019/T020 bash guard tests. Decision
+# R2 makes this hold BY CONSTRUCTION: the three display sites keep reading
+# the recorded map, never the encoded one.
+
+Describe '015 T021 — operator-facing surfaces keep speaking the operator''s own words' {
+    BeforeAll {
+        $script:ITypes015 = '[{"logical_name":"Deliverable","id":"10101"}]'
+        $script:Df015 = '{"10101":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA","APAC"]}]}'
+    }
+
+    It 'Get-JiraPlanConfirmationField''s recorded_value for an option-typed field is the plain recorded string' {
+        $defaults = '{"10101":{"customfield_1":"EMEA"}}'
+        $out = @(Get-JiraPlanConfirmationField -IssueTypesJson $script:ITypes015 -DefaultableFieldsByTypeJson $script:Df015 -FieldDefaultsByTypeJson $defaults -PendingTypeIdsJson '["10101"]' | ConvertFrom-Json -Depth 100)
+        $out[0].recorded_value | Should -Be 'EMEA'
+    }
+
+    It 'FR-010 — a required option-typed field with nothing to send is still listed, with a null value' {
+        $out = @(Get-JiraPlanConfirmationField -IssueTypesJson $script:ITypes015 -DefaultableFieldsByTypeJson $script:Df015 -FieldDefaultsByTypeJson '{}' -PendingTypeIdsJson '["10101"]' | ConvertFrom-Json -Depth 100)
+        $out.Count | Should -Be 1
+        $out[0].recorded_value | Should -Be $null
+    }
+
+    It 'the provenance line reads the plain recorded value for an option-typed field, never its wire shape' {
+        # Get-JiraReconcileFieldDefaultNote is Reconcile.psm1-internal (not
+        # exported) — reach it the way Pester reaches any private module
+        # function, via InModuleScope.
+        $resolved = '{"field_defaults":{"10101":{"customfield_1":"EMEA"}},"field_default_sources":{"10101":{"customfield_1":"team-config"}},"unresolved":[]}'
+        $actions = '[{"method":"POST","url":"https://example.atlassian.net/rest/api/3/issue","body":{"fields":{"issuetype":{"id":"10101"},"customfield_1":"EMEA"}}}]'
+        $out = InModuleScope Reconcile -Parameters @{ ITypes = $script:ITypes015; Df = $script:Df015; Resolved = $resolved; Actions = $actions } {
+            (Get-JiraReconcileFieldDefaultNote -ProjectKey 'PM' -IssueTypesJson $ITypes -DefaultableFieldsByTypeJson $Df -ResolvedJson $Resolved -ActionsJson $Actions -ParentActionJson 'null' -Ask $true -AcceptDefaults $false -DryRun $false) -join "`n"
+        }
+        $out | Should -Match ([regex]::Escape('Region (Deliverable) = "EMEA" — sent from team-config'))
+        $out | Should -Not -Match ([regex]::Escape('"value"'))
+    }
+
+    It 'the --field-default promotion command embeds the recorded value verbatim' {
+        $resolved = '{"field_defaults":{"10101":{"customfield_1":"EMEA"}},"field_default_sources":{"10101":{"customfield_1":"operator-answer"}},"unresolved":[]}'
+        $actions = '[{"method":"POST","url":"https://example.atlassian.net/rest/api/3/issue","body":{"fields":{"issuetype":{"id":"10101"},"customfield_1":"EMEA"}}}]'
+        $out = InModuleScope Reconcile -Parameters @{ ITypes = $script:ITypes015; Df = $script:Df015; Resolved = $resolved; Actions = $actions } {
+            (Get-JiraReconcileFieldDefaultNote -ProjectKey 'PM' -IssueTypesJson $ITypes -DefaultableFieldsByTypeJson $Df -ResolvedJson $Resolved -ActionsJson $Actions -ParentActionJson 'null' -Ask $true -AcceptDefaults $false -DryRun $false) -join "`n"
+        }
+        $out | Should -Match ([regex]::Escape("--field-default 'PM=Deliverable=Region=EMEA'"))
+        $out | Should -Not -Match ([regex]::Escape('{"value"'))
     }
 }
