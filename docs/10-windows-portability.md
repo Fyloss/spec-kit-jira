@@ -68,6 +68,26 @@ runner despite `core.autocrlf=true` (measured: `eol: lf` attribute, 0 CR bytes
 in fixtures). If bytes diverge on Windows, suspect the toolchain above — not
 the checkout.
 
+### 7. MSYS rewrites a `jq` argument that starts with `/`
+
+`jq.exe` is a native, non-MSYS binary, so MSYS's fork/exec layer applies its
+POSIX-to-Windows path heuristic to every argument handed to it — including a
+`--arg` value that merely *looks* like a path. `reconcile`'s confirmation-
+pending `resume_with` hint is a literal slash command
+(`/speckit.jira.reconcile …`), never a filesystem path, but MSYS rewrote its
+leading `/` to the runner's Git install root before jq ever saw the argument.
+
+Measured (`us2-field-defaults-question`, 012 regression): the diverging
+`resume_with` value grew by exactly 20 bytes on `windows-latest` bash versus
+the same run's macOS/Linux bash and Windows PowerShell output — the byte cost
+of replacing a single `/` with `C:/Program Files/Git`.
+
+Rule: same seam as quirk 2 — the `jq` wrapper in `scripts/bash/lib/output.sh`
+now runs every call under `MSYS_NO_PATHCONV=1`. No call in this port passes a
+filesystem path for jq itself to read, so disabling the rewrite is safe
+everywhere; a future call that ever needs MSYS to resolve a real path for a
+*different* native binary must set the variable back locally for that call.
+
 ## The probe loop — how to ask Windows a question
 
 `.github/workflows/windows-conformance.yml` runs the conformance corpus alone
