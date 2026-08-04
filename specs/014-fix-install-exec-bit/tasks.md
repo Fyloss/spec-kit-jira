@@ -375,3 +375,31 @@ after US1/US2 land.
 - Commit per phase where practical; Foundational should land as one commit per plan.md's
   Implementation sequence step 2 (supersede) followed by step 2's predicate fix, so the suite is red
   for exactly one reason at every intermediate point.
+
+---
+
+## Phase 8: Convergence
+
+- [X] T034 Create `specs/014-fix-install-exec-bit/quickstart-results.md` recording the outcome of
+      every quickstart step, following the convention set by
+      `specs/003-install-hook-activation/quickstart-results.md` (header naming the host and tool
+      versions, then one section per step with an assertion/result table) per SC-001 (missing).
+      SC-001 requires a result for each cell of `{--dev copytree, --from zip} × {declared floor,
+      current}`; nothing in the tree records any of them today, so T025 and T033 are ticked with no
+      artifact behind them. The `--dev × current` cell is carried by the install-harness tests
+      (`tests/bash/conformance/test_us4_bridge_runnable.bats`, `Us4.BridgeRunnable.Tests.ps1`), which
+      were confirmed **run, not skipped**. The zip × floor cell — the one that produced the defect —
+      is **not reproducible on the available host**: `specify` here is `0.14.4.dev0`, and the host
+      restores file modes from `0.14.3`, so an archive install lands `0755` and proves nothing.
+      Record that cell as not reproducible, naming the host version that makes it so, rather than as
+      a pass (SC-001's own wording, and the risk plan.md flags). Also record Steps 0, 2, 3, 4, 7
+      and 8 with the result actually observed.
+- [X] T035 In `specs/014-fix-install-exec-bit/quickstart.md` Step 4 (line ~76), correct the stated
+      expectation from "exactly one hit — `README.md`'s `chmod 600 .specify/jira/.env`" to the two
+      hits the shipped tree actually carries — `README.md:184` and
+      `templates/readme-block.template:88` — both being the same credentials-secrecy control FR-005
+      exempts by name (partial). The automated sweep at
+      `tests/bash/ci/test_message_command_literals.bats:145` already exempts `chmod 600` generally
+      and is green; only the hand-run expectation is stale, and as written it turns a compliant tree
+      into a reported leftover. Do not change either `chmod 600` occurrence — neither is an
+      instruction to make the bridge runnable, so FR-005 and SC-002 are already satisfied.

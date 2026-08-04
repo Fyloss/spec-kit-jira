@@ -73,8 +73,9 @@ grep -rniE 'chmod|not executable|executable bit' \
   commands/ scripts/ templates/ README.md INSTALL.md
 ```
 
-**Expected**: exactly one hit — `README.md`'s `chmod 600 .specify/jira/.env`, which is the
-credential-secrecy control FR-005 exempts by name. Anything else is a leftover.
+**Expected**: exactly two hits — `README.md`'s `chmod 600 .specify/jira/.env` and
+`templates/readme-block.template`'s `` `chmod 600` `` note — both the same credentials-secrecy
+control FR-005 exempts by name. Anything else is a leftover.
 
 ## Step 5 — Cross-port byte equivalence (FR-006)
 
