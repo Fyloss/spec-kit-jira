@@ -872,7 +872,21 @@ function Invoke-JiraReconcile {
     # stamps a key into tasksFile.
     $pendingCreateCompleteIds = [System.Collections.Generic.List[string]]::new()
     if (-not [string]::IsNullOrEmpty($taskTypeIdCandidate)) {
-        $candidateTasksFile = Join-Path (Split-Path -Parent $specFile) 'tasks.md'
+        # Twin of the Bash port's `"$(dirname "${spec_file}")/tasks.md"`
+        # (reconcile.sh). Spelled with '/', NEVER through Join-Path: this path is
+        # operator-facing — the four task notes below embed it verbatim — so on
+        # Windows Join-Path's '\' made every task-tier scenario diverge from the
+        # Bash capture, and JSON-escaping it to '\\' made the captures differ in
+        # size too (T099: 8 divergences, all bash=2f pwsh=5c). The I/O uses below
+        # are unaffected; PowerShell's file cmdlets accept '/' on Windows.
+        # Split-Path -Parent yields '' for a bare filename and for a root-level
+        # path, where dirname yields '.' and '/' — mapped the same way as the
+        # spec file's own parent above (NFR-1).
+        $tasksParent = (Split-Path -Parent $specFile) -replace '\\', '/'
+        if ([string]::IsNullOrEmpty($tasksParent)) {
+            $tasksParent = if ($specFile.StartsWith('/')) { '/' } else { '.' }
+        }
+        $candidateTasksFile = "$tasksParent/tasks.md"
         if (Test-Path -LiteralPath $candidateTasksFile) {
             $taskRoleActive = $true
             $tasksFile = $candidateTasksFile
