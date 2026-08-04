@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-04
+
+### Added
+
+- Every checked and unchecked line in `tasks.md` mirrors as a Jira sub-task
+  nested under its user story's issue (`specs/012-jira-task-subtasks/`). A
+  durable task identifier is spliced into `tasks.md` the same way a story
+  identifier is spliced into `spec.md`, story attribution follows the
+  enclosing `## Phase … User Story <N>` heading (or an explicit `[US<N>]`
+  tag, which wins over the heading), and the sub-task's description carries
+  the task's own text, referenced files, and `depends-on` list.
+- Checking a task off in `tasks.md` transitions its recognised sub-task to a
+  done-category status on the next reconcile run — never guessed: the run
+  reports when no destination transition exists, or more than one does
+  (FR-033). A sub-task already completed in Jira never re-checks the box the
+  other direction.
+- The sub-task type joins the field-defaults mechanism feature 011 scoped to
+  `specification` and `story` (FR-025/FR-026): a project whose sub-task type
+  requires a custom field beyond what the bridge supplies now records a
+  default for it through the same config-ceremony question and the same
+  `--field-default` / `--field-value` / `--accept-defaults` flags, rather
+  than being refused or silently skipped.
+- `counts.tasks` (created, updated, transitioned, unchanged, skipped,
+  withheld) appears in the run summary only when a `task` role is declared —
+  its absence keeps a run with no task tier byte-for-byte identical to
+  before this feature (FR-011). A completed transition is never folded into
+  `counts.updated`.
+
+### Changed
+
+- `commands/speckit.jira.config.md` and `commands/speckit.jira.reconcile.md`
+  document the task tier: sub-task creation, completion transitions, and the
+  sub-task's own field-default questions.
+
 ## [0.10.1] - 2026-08-04
 
 ### Fixed
@@ -614,7 +648,8 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.8.0...v0.9.0

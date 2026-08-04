@@ -120,11 +120,13 @@ Describe 'Config role mapping (010)' {
         $r.Out | Should -Match '"role":"story"'
     }
 
-    It 'T064/T065 — a declared task role validates, persists, reports §7.4, and creates zero sub-tasks' {
+    It 'T064/T065 — a declared task role validates, persists, and no longer reports §7.4 (012, FR-012)' {
         Write-RoleMappingConfig "    hierarchy:`n      specification: Epic`n      story: Story`n      task: `"Sous-tâche`""
         $r = Invoke-ConfigCaptured @('config', '--json')
         $r.ExitCode | Should -Be 0
-        $r.Out | Should -Match 'task is recorded as "Sous-tâche" but is not mirrored yet'
+        # §7.4's "recorded, not mirrored yet" note stopped firing once the
+        # task tier shipped (012, FR-012) — the task role is now mirrored.
+        $r.Out | Should -Not -Match 'is not mirrored yet'
         $local = Read-LocalBinding
         $local.resolved_ids.CONSUMER.roles.task.logical_name | Should -Be 'Sous-tâche'
         $local.resolved_ids.CONSUMER.roles.task.source | Should -Be 'declared'

@@ -25,6 +25,7 @@ Import-Module (Join-Path $PSScriptRoot 'Ticket.psm1') -Force # Get-JiraCreateFie
 Import-Module (Join-Path $PSScriptRoot '../../engine/MarkerSplice.psm1') -Force # Write-JiraMarkerSpliceFile — a nested import inside StoryMarker.psm1 is not enough
 Import-Module (Join-Path $PSScriptRoot '../../engine/StoryMarker.psm1') -Force -Global # R5 steps 4/6 — mark `creating`, stamp + record per ticket
 Import-Module (Join-Path $PSScriptRoot '../../engine/SpecMarker.psm1') -Force # the parent marker's same splice (Phase 5, US2)
+Import-Module (Join-Path $PSScriptRoot '../../engine/TaskMarker.psm1') -Force -Global # Phase 3, US1 — the task tier's own marker grammar, same seam (bare -Force here strips a caller's -Global load — see StoryMarker.psm1's import above)
 Import-Module (Join-Path $PSScriptRoot 'Identity.psm1') -Force # stamp the identity marker on each created ticket (R5 step 6)
 
 function Get-JiraPlanProp {
@@ -383,6 +384,102 @@ function Get-JiraPlanWriteSetParent {
     return [ordered]@{ method = 'PUT'; url = "$Base/rest/api/3/issue/$parentKey"; body = [ordered]@{ fields = $desiredFields }; role = 'parent' }
 }
 
+function Get-JiraPlanTaskWriteSet {
+    <#
+    .SYNOPSIS
+      Resolve the task tier of the validated neutral document into an
+      ordered array of write actions. Mirror of plan_writes_tasks (Phase 3,
+      US1, T039; contract §4). Iterates stories[].tasks[]: a task is never
+      planned under anything but its own story (FR-007) because that is the
+      only place it is nested. A PUT carries only the fields that differ
+      (FR-019), with a `warning` naming the ticket and the divergent
+      field(s) attached to that same action (FR-020).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $DocJson, [Parameter(Mandatory)] [string] $ContextJson)
+    $doc = $DocJson | ConvertFrom-Json -Depth 100
+    $ctx = $ContextJson | ConvertFrom-Json -Depth 100
+
+    $base = [string](Get-JiraPlanProp $ctx 'base_url')
+    $taskType = [string](Get-JiraPlanProp $ctx 'task_type_id')
+    $fieldDefaultsProp = Get-JiraPlanProp $ctx 'field_defaults'
+    $fieldDefaultsJson = if ($null -eq $fieldDefaultsProp) { '' } else { ConvertTo-JiraJsonValue $fieldDefaultsProp }
+    $project = [string](Get-JiraPlanProp (Get-JiraPlanProp $doc 'routing') 'project_key')
+    $tickets = Get-JiraPlanProp $ctx 'tickets'
+    $ticketCurrent = Get-JiraPlanProp $ctx 'ticket_current'
+
+    $stories = @()
+    $storyProp = Get-JiraPlanProp $doc 'stories'
+    if ($null -ne $storyProp) { $stories = @($storyProp) }
+
+    $actions = [System.Collections.Generic.List[object]]::new()
+    foreach ($story in $stories) {
+        $storyLocalId = [string]$story.local_id
+        $tasksProp = Get-JiraPlanProp $story 'tasks'
+        if ($null -eq $tasksProp) { continue }
+        foreach ($task in @($tasksProp)) {
+            $tid = [string]$task.local_id
+            $title = [string]$task.title
+            $ticket = [string](Get-JiraPlanProp $tickets $tid)
+            $taskJson = ConvertTo-JiraJsonValue $task
+            $summary = Get-JiraAdfTaskSummary -Title $title
+            $adf = ConvertTo-JiraAdfTaskDescription -TaskJson $taskJson | ConvertFrom-Json -Depth 100
+
+            if ($ticket -eq '') {
+                if ($project -eq '' -or $taskType -eq '') {
+                    throw "plan_writes_tasks: refusing to assemble a creation for `"$tid`" with no project or issue type (zero writes)"
+                }
+                $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $summary -IssueTypeId $taskType -FieldDefaultsByTypeJson $fieldDefaultsJson | ConvertFrom-Json
+                $fields = [ordered]@{}
+                foreach ($p in $baseFields.PSObject.Properties) { $fields[$p.Name] = $p.Value }
+                $fields['description'] = $adf
+                $fields['parent'] = [ordered]@{ key = '<resolved at apply time>' }
+                $actions.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue"; body = [ordered]@{ fields = $fields }; local_id = $tid; parent_local_id = $storyLocalId; role = 'task' })
+            }
+            else {
+                $current = Get-JiraPlanProp $ticketCurrent $tid
+                $desired = [ordered]@{ summary = $summary; description = $adf }
+                if ($null -eq $current) {
+                    $st = 'changed'
+                }
+                else {
+                    $st = Get-JiraIdempotentFieldStatus -CurrentFieldsJson (ConvertTo-JiraJsonValue $current) -DesiredFieldsJson (ConvertTo-JiraJsonValue $desired)
+                }
+                if ($st -eq 'unchanged') { continue }
+
+                # FR-019: only the fields that differ are written. FR-020: the same
+                # comparison names the divergent field(s) in a warning before the
+                # overwrite — $current -eq $null means no prior state was read at
+                # all, so nothing narrower than the full desired set can be sent,
+                # and there is no known field to name.
+                $filtered = $desired
+                $warning = ''
+                if ($null -ne $current) {
+                    $filtered = [ordered]@{}
+                    $diverged = [System.Collections.Generic.List[string]]::new()
+                    foreach ($key in $desired.Keys) {
+                        $curMember = if ($current -is [System.Management.Automation.PSCustomObject]) { $current.PSObject.Properties[$key] } else { $null }
+                        $curVal = if ($null -eq $curMember) { $null } else { $curMember.Value }
+                        $desCanon = ConvertTo-JiraJsonValue $desired[$key]
+                        $curCanon = if ($null -eq $curVal) { 'null' } else { ConvertTo-JiraJsonValue $curVal }
+                        if (-not [System.String]::Equals($desCanon, $curCanon, [System.StringComparison]::Ordinal)) {
+                            $filtered[$key] = $desired[$key]
+                            $diverged.Add($key)
+                        }
+                    }
+                    $warning = "$ticket diverges from the specification on `"$($diverged -join ', ')`"; only the differing field(s) will be written"
+                }
+
+                $action = [ordered]@{ method = 'PUT'; url = "$base/rest/api/3/issue/$ticket"; body = [ordered]@{ fields = $filtered }; role = 'task' }
+                if ($warning -ne '') { $action['warning'] = $warning }
+                $actions.Add($action)
+            }
+        }
+    }
+
+    return (ConvertTo-JiraJsonValue $actions)
+}
+
 function Get-JiraManagedDescriptionStatus {
     <#
     .SYNOPSIS
@@ -407,6 +504,31 @@ function Get-JiraManagedDescriptionStatus {
     $nmJson = ConvertTo-JiraJsonValue @($nm)
     if ([System.String]::Equals($cmJson, $nmJson, [System.StringComparison]::Ordinal)) { return 'unchanged' }
     return 'changed'
+}
+
+function Get-JiraTransitionAction {
+    <#
+    .SYNOPSIS
+      The single transition-POST emission site (012, T092), shared by
+      Get-JiraLifecyclePlan (story tier) and Get-JiraTaskLifecyclePlan (task
+      tier) rather than each building its own. Mirror of
+      _plan_transition_action. Returns [ordered]@{ Action; Note } — Note is
+      $null when the ticket carries no open blocking link.
+    #>
+    param(
+        [string] $BaseUrl, [string] $Key, [string] $TransitionId,
+        [object[]] $Blockers, [string] $Label
+    )
+    $action = [ordered]@{
+        method = 'POST'; url = "$BaseUrl/rest/api/3/issue/$Key/transitions"
+        body   = [ordered]@{ transition = [ordered]@{ id = $TransitionId } }
+    }
+    $note = $null
+    if ($Blockers -and $Blockers.Count -gt 0) {
+        $blist = ($Blockers -join ', ')
+        $note = "transition of `"$Label`" proceeds with open blocking links ($blist); human-created links are left unchanged"
+    }
+    return [ordered]@{ Action = $action; Note = $note }
 }
 
 function Get-JiraLifecyclePlan {
@@ -507,13 +629,91 @@ function Get-JiraLifecyclePlan {
         if (-not $dropContent) { $kept.Add($action) }
 
         if ($doTransition -and $transitionId -ne '' -and $key -ne '') {
-            $kept.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue/$key/transitions"; body = [ordered]@{ transition = [ordered]@{ id = $transitionId } } })
             $blockersVal = Get-JiraPlanProp $tk 'blockers'
             $blockers = [System.Collections.Generic.List[string]]::new()
             if ($null -ne $blockersVal) { foreach ($b in @($blockersVal)) { $blockers.Add([string]$b) } }
-            if ($blockers.Count -gt 0) {
-                $blist = ($blockers -join ', ')
-                $notes.Add("transition of `"$sid`" proceeds with open blocking links ($blist); human-created links are left unchanged")
+            $tres = Get-JiraTransitionAction -BaseUrl $base -Key $key -TransitionId $transitionId -Blockers $blockers.ToArray() -Label $sid
+            $kept.Add($tres.Action)
+            if ($tres.Note) { $notes.Add($tres.Note) }
+        }
+    }
+
+    $out = [ordered]@{ actions = $kept; warnings = $warns; notes = $notes }
+    return (ConvertTo-JiraJsonValue $out)
+}
+
+function Get-JiraTaskLifecyclePlan {
+    <#
+    .SYNOPSIS
+      The task tier's own completion pass (012, US5, contract §6). Mirror of
+      plan_lifecycle_tasks — a sibling of Get-JiraLifecyclePlan, never routed
+      through it: task completion is a binary done/not-done model, not a
+      named multi-status order, and every divergence is reported by ticket
+      key, never by a status name (FR-030/FR-032). PURE: the candidates, the
+      chosen transition (if any) and the withheld field arrive already
+      resolved by the caller's discovery read (research R5). Only ever ADDS
+      transition actions to content-actions; content zero-churn is
+      Get-JiraTaskWriteSet's own concern (FR-015).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ContentActionsJson,
+        [Parameter(Mandatory)] [string] $CompletionContextJson
+    )
+    $kept = [System.Collections.Generic.List[object]]::new()
+    foreach ($x in @($ContentActionsJson | ConvertFrom-Json -Depth 100)) { $kept.Add($x) }
+    $cc = $CompletionContextJson | ConvertFrom-Json -Depth 100
+    $base = [string](Get-JiraPlanProp $cc 'base_url')
+    $tasks = Get-JiraPlanProp $cc 'tasks'
+
+    $warns = [System.Collections.Generic.List[string]]::new()
+    $notes = [System.Collections.Generic.List[string]]::new()
+
+    $taskEntries = @()
+    if ($null -ne $tasks) { $taskEntries = @($tasks.PSObject.Properties) }
+    foreach ($entry in $taskEntries) {
+        $t = $entry.Value
+        $key = [string](Get-JiraPlanProp $t 'key')
+        if ($key -eq '') { continue }
+        $blockersVal = Get-JiraPlanProp $t 'blockers'
+        $blockers = [System.Collections.Generic.List[string]]::new()
+        if ($null -ne $blockersVal) { foreach ($b in @($blockersVal)) { $blockers.Add([string]$b) } }
+
+        $divergedVal = Get-JiraPlanProp $t 'already_done_diverged'
+        if ($divergedVal -eq $true) {
+            $warns.Add("sub-task $key is already at a done status while its task is unchecked in tasks.md; it is left as is unless this run is authorised to pull it backward")
+        }
+
+        $fwd = Get-JiraPlanProp $t 'forward'
+        if ($null -ne $fwd) {
+            $tidF = [string](Get-JiraPlanProp $fwd 'transition_id')
+            $cands = @(Get-JiraPlanProp $fwd 'candidates')
+            $withheld = Get-JiraPlanProp $fwd 'withheld_field'
+            if ($tidF -ne '') {
+                $tres = Get-JiraTransitionAction -BaseUrl $base -Key $key -TransitionId $tidF -Blockers $blockers.ToArray() -Label $key
+                $kept.Add($tres.Action)
+                if ($tres.Note) { $notes.Add($tres.Note) }
+            }
+            elseif ($null -ne $withheld) {
+                $fname = [string](Get-JiraPlanProp $withheld 'logical_name')
+                $warns.Add("sub-task $key reaches a done status only through a transition that requires `"$fname`"; the transition is withheld — set it directly in Jira, or record a default for that field")
+            }
+            elseif ($cands.Count -eq 0) {
+                $warns.Add("sub-task $key has no transition to a status this project classifies as done; nothing was transitioned")
+            }
+            else {
+                $names = ($cands | ForEach-Object { [string](Get-JiraPlanProp $_ 'name') }) -join ', '
+                $warns.Add("sub-task $key offers more than one transition to a status this project classifies as done ($names); the bridge does not choose one")
+            }
+        }
+
+        $bwd = Get-JiraPlanProp $t 'backward'
+        if ($null -ne $bwd) {
+            $tidB = [string](Get-JiraPlanProp $bwd 'transition_id')
+            if ($tidB -ne '') {
+                $tres = Get-JiraTransitionAction -BaseUrl $base -Key $key -TransitionId $tidB -Blockers $blockers.ToArray() -Label $key
+                $kept.Add($tres.Action)
+                if ($tres.Note) { $notes.Add($tres.Note) }
             }
         }
     }
@@ -630,6 +830,15 @@ function Invoke-JiraApplyWriteSetWithRecognition {
       defaultable_fields map, {type_id: [{logical_name, field_id, ...}]}.
       Omitted or empty ⇒ a rejected creation falls through to the existing
       generic failure path unchanged (FR-028).
+
+      TasksActionsJson (Phase 3, US1, T041; contract §5): Get-JiraPlanTaskWriteSet'
+      output. Every task body joins the SAME pre-write guard sweep as the
+      parent and every story, before the first write of the run (FR-025).
+      Tasks are applied LAST, after every story. Each task creation's
+      parent-key placeholder is resolved from KnownStoryKeysJson merged with
+      the keys created earlier in THIS run. TasksFile is where the task
+      marker is spliced (tasks.md); empty means no task action is applied
+      and no file is touched (FR-011).
     #>
     [CmdletBinding()]
     param(
@@ -638,9 +847,14 @@ function Invoke-JiraApplyWriteSetWithRecognition {
         [Parameter(Mandatory)] [string] $SpecFile,
         [string] $KnownParentKey = '',
         [string] $ExtraKnownCoordinatesJson = '[]',
-        [string] $DefaultableFieldsByTypeJson = '{}'
+        [string] $DefaultableFieldsByTypeJson = '{}',
+        [string] $TasksActionsJson = '[]',
+        [string] $TasksFile = '',
+        [string] $KnownStoryKeysJson = '{}'
     )
     if ([string]::IsNullOrEmpty($DefaultableFieldsByTypeJson)) { $DefaultableFieldsByTypeJson = '{}' }
+    if ([string]::IsNullOrEmpty($TasksActionsJson)) { $TasksActionsJson = '[]' }
+    if ([string]::IsNullOrEmpty($KnownStoryKeysJson)) { $KnownStoryKeysJson = '{}' }
     $coords = Get-JiraApplyKnownCoordinate -ExtraJson $ExtraKnownCoordinatesJson
     $allow = if ($env:SPEC_KIT_JIRA_ALLOWLIST) { $env:SPEC_KIT_JIRA_ALLOWLIST } else { '[]' }
     $plan = $PlanJson | ConvertFrom-Json -Depth 100
@@ -648,9 +862,10 @@ function Invoke-JiraApplyWriteSetWithRecognition {
     $stories = @()
     $storiesProp = Get-JiraPlanProp $plan 'stories'
     if ($null -ne $storiesProp) { $stories = @($storiesProp) }
+    $taskActions = @($TasksActionsJson | ConvertFrom-Json -Depth 100)
 
-    # (1) Pre-write gate — scan every payload, parent then stories, before
-    # writing anything.
+    # (1) Pre-write gate — scan every payload, parent then stories then
+    # tasks, before writing anything.
     if ($null -ne $parent) {
         $bodyObj = Get-JiraPlanProp $parent 'body'
         $bodyText = if ($null -eq $bodyObj) { '{}' } else { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 }
@@ -658,6 +873,12 @@ function Invoke-JiraApplyWriteSetWithRecognition {
         if ($code -ne 0) { return [int]$code }
     }
     foreach ($a in $stories) {
+        $bodyObj = if ($a.PSObject.Properties.Name -contains 'body') { $a.body } else { $null }
+        $bodyText = if ($null -eq $bodyObj) { '{}' } else { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 }
+        $code = Test-JiraPrivacyBlock -Payload $bodyText -KnownCoordinatesJson $coords -AllowlistJson $allow
+        if ($code -ne 0) { return [int]$code }
+    }
+    foreach ($a in $taskActions) {
         $bodyObj = if ($a.PSObject.Properties.Name -contains 'body') { $a.body } else { $null }
         $bodyText = if ($null -eq $bodyObj) { '{}' } else { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 }
         $code = Test-JiraPrivacyBlock -Payload $bodyText -KnownCoordinatesJson $coords -AllowlistJson $allow
@@ -686,6 +907,25 @@ function Invoke-JiraApplyWriteSetWithRecognition {
     }
     if ($newContent -ne $current) {
         Write-JiraMarkerSpliceFile -Path $SpecFile -NewContent $newContent | Out-Null
+    }
+
+    # (2b) Same step, for the task tier's OWN file: mark every planned task
+    # creation `creating` in TasksFile. A no-op when TasksFile is empty.
+    if ($TasksFile -ne '') {
+        $tCurrent = if (Test-Path -LiteralPath $TasksFile) { Get-Content -Raw -LiteralPath $TasksFile } else { '' }
+        if ($null -eq $tCurrent) { $tCurrent = '' }
+        $tNewContent = $tCurrent
+        $taskCreatingIds = [System.Collections.Generic.List[string]]::new()
+        foreach ($a in $taskActions) {
+            $lid = [string](Get-JiraPlanProp $a 'local_id')
+            if ($a.method -eq 'POST' -and ([string]$a.url).EndsWith('/issue') -and $lid -ne '') { $taskCreatingIds.Add($lid) }
+        }
+        if ($taskCreatingIds.Count -gt 0) {
+            $tNewContent = Set-JiraTaskMarkerMarkCreating -Text $tNewContent -IdsJson (ConvertTo-JiraJsonValue $taskCreatingIds)
+        }
+        if ($tNewContent -ne $tCurrent) {
+            Write-JiraMarkerSpliceFile -Path $TasksFile -NewContent $tNewContent | Out-Null
+        }
     }
 
     # (3) Write pass — the parent FIRST (step 10): its response key is read
@@ -725,6 +965,15 @@ function Invoke-JiraApplyWriteSetWithRecognition {
     # (4) Story writes (step 11) — the parent-key placeholder resolved to
     # the key just created, or the already-known parent_key when the
     # parent was recognised (unchanged or updated) rather than created.
+    # $storyKeyMap is seeded from KnownStoryKeysJson (the caller's
+    # already-recognised story keys) so a task's own parent resolution
+    # (step 5) can find a story that was recognised rather than created
+    # this run.
+    $storyKeyMap = [ordered]@{}
+    $knownStoryKeysObj = $KnownStoryKeysJson | ConvertFrom-Json -Depth 100
+    if ($knownStoryKeysObj -is [System.Management.Automation.PSCustomObject]) {
+        foreach ($p in $knownStoryKeysObj.PSObject.Properties) { $storyKeyMap[$p.Name] = [string]$p.Value }
+    }
     foreach ($a in $stories) {
         $action = $a
         if ($parentKey -ne '') {
@@ -761,6 +1010,53 @@ function Invoke-JiraApplyWriteSetWithRecognition {
                 if ($null -eq $cur) { $cur = '' }
                 $new = Set-JiraStoryMarkerRecordTicket -Text $cur -Id $localId -Key $key
                 Write-JiraMarkerSpliceFile -Path $SpecFile -NewContent $new | Out-Null
+                $storyKeyMap[$localId] = $key
+            }
+        }
+    }
+
+    # (5) Task writes (Phase 3, US1, T041; contract §5) — LAST, after every
+    # story. A task attributed to a story with no entry in $storyKeyMap
+    # (not created and not recognised this run) is left unresolved and its
+    # write is skipped — it reconciles on the next run once the story
+    # exists (contract §4 rule 5).
+    foreach ($a in $taskActions) {
+        $taction = $a
+        $tParentLocalId = [string](Get-JiraPlanProp $taction 'parent_local_id')
+        if ($tParentLocalId -ne '') {
+            if (-not $storyKeyMap.Contains($tParentLocalId)) { continue }
+            $tParentKey = [string]$storyKeyMap[$tParentLocalId]
+            $fields = Get-JiraPlanProp (Get-JiraPlanProp $taction 'body') 'fields'
+            $parentField = Get-JiraPlanProp $fields 'parent'
+            if ($null -ne $parentField -and [string](Get-JiraPlanProp $parentField 'key') -eq '<resolved at apply time>') {
+                $parentField.key = $tParentKey
+            }
+        }
+        $bodyObj = if ($taction.PSObject.Properties.Name -contains 'body') { $taction.body } else { $null }
+        if ($null -ne $bodyObj) {
+            $bodyText = ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100
+            $r = Invoke-JiraRequest -Method $taction.method -Url $taction.url -Body $bodyText
+        }
+        else {
+            $r = Invoke-JiraRequest -Method $taction.method -Url $taction.url
+        }
+        if ([int]$r.ExitCode -gt $worst) { $worst = [int]$r.ExitCode }
+        if ([int]$r.ExitCode -ge 2) {
+            Write-JiraApplyRejectionReport -Method $taction.method -Url $taction.url -Action $taction -DefaultableFieldsByTypeJson $DefaultableFieldsByTypeJson -Result $r
+            return $worst
+        }
+
+        if ($taction.method -eq 'POST' -and ([string]$taction.url).EndsWith('/issue') -and $TasksFile -ne '') {
+            $respObj = $null
+            try { $respObj = $r.Body | ConvertFrom-Json -Depth 100 } catch { $null = $_ }
+            $tKey = if ($respObj) { [string](Get-JiraPlanProp $respObj 'key') } else { '' }
+            $tLocalId = [string](Get-JiraPlanProp $taction 'local_id')
+            if ($tKey -ne '' -and $tLocalId -ne '') {
+                Set-JiraIdentity -IssueKey $tKey -SpecRefJson $SpecRefJson -Origin 'bridge' -Story $tLocalId -Role 'task' | Out-Null
+                $tCur = if (Test-Path -LiteralPath $TasksFile) { Get-Content -Raw -LiteralPath $TasksFile } else { '' }
+                if ($null -eq $tCur) { $tCur = '' }
+                $tNew = Set-JiraTaskMarkerRecordTicket -Text $tCur -Id $tLocalId -Key $tKey
+                Write-JiraMarkerSpliceFile -Path $TasksFile -NewContent $tNew | Out-Null
             }
         }
     }
@@ -769,4 +1065,4 @@ function Invoke-JiraApplyWriteSetWithRecognition {
 
 Export-ModuleMember -Function Get-JiraApplyKnownCoordinate, Invoke-JiraApplyWriteSet, Get-JiraPlanWriteSet, Get-JiraLifecyclePlan, `
     Get-JiraManagedDescriptionStatus, Invoke-JiraApplyWriteSetWithRecognition, Get-JiraPlanResolveFieldDefault, `
-    Get-JiraPlanConfirmationField
+    Get-JiraPlanConfirmationField, Get-JiraPlanTaskWriteSet, Get-JiraTaskLifecyclePlan

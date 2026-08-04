@@ -180,6 +180,49 @@ identity marker, a duplicate identifier, or a ticket claimed by another
 specification) is reported in `warnings` and left untouched; it never blocks
 its siblings.
 
+## The task tier (012)
+
+When `tasks.md` sits beside the mirrored specification and the project's
+binding declares a `task` role, every recognisable task line becomes one
+sub-task under the story its `[US<N>]` tag or enclosing `## Phase …: User
+Story <N>` heading names. A task with no such attribution — and a task
+attributed to a story the specification does not contain — mirrors nothing
+and is reported once, by its reference; every other task still mirrors. A
+story that carries no task mirrors exactly as it did before this tier
+existed.
+
+Each sub-task carries its own durable identifier, written back into
+`tasks.md` on the same line-insertion discipline as the story marker.
+Completion:
+
+- **checking a task off** transitions its already-recognised sub-task to
+  whichever status the project's workflow classifies as done — never a
+  named status, in either port, in any language;
+- a run over a sub-task already in that status issues neither a read nor a
+  transition (FR-031);
+- a task reverting from checked to unchecked never pulls its sub-task
+  backward on its own — the divergence is reported by key and only moves
+  under `--on-drift=proceed` (FR-032);
+- completion is never read back: a sub-task a person finishes in Jira never
+  checks its task off in `tasks.md` (FR-033).
+
+The run summary reports the tier under `counts.tasks` — present only when a
+`task` role is declared — with its own `created`, `updated`, `transitioned`,
+`unchanged`, `skipped` and `withheld` counts, alongside (never folded into)
+the specification and story counts above.
+
+### The withheld tier and its remedy
+
+A sub-task type whose Jira project requires a field the bridge cannot
+supply — no recorded default, no answer this run — withholds the **whole**
+task tier: the specification and its stories still mirror exactly as they
+would with no `task` role declared, zero sub-task writes happen, and the
+summary names the tier `withheld` rather than reading as a complete mirror.
+The remedy is the same consolidated field-defaults question every other
+tier answers (see below) — once the operator records a default or answers
+with `--field-value`, the very next run creates exactly the sub-tasks that
+were withheld. There is no cleanup step, no flag, and no repair command.
+
 ## Configuring lifecycle safety: `phase_status_map` and `halted_statuses`
 
 Two optional, hand-edited keys under a project entry in `config.yml` let

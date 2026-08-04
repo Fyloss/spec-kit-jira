@@ -926,9 +926,15 @@ cmd_config() {
 
     local fd_merged fd_ask_types fd_bridge_ids fd_report
     fd_merged="$(_config_field_default_merge "${fd_recorded}" "${fd_answers}")"
+    # 012: the task role joins the specification and story types on the
+    # same closed-question terms — a declared sub-task role's own required
+    # field is asked about too (FR-035).
     fd_ask_types="$(jq -cn --argjson roles "${roles}" --argjson ans "${fd_answers}" \
-      '([$roles.specification, $roles.story] | map(select(. != null) | .logical_name)) + [$ans[].type] | unique')"
-    fd_bridge_ids="$(jq -cn --argjson roles "${roles}" '[$roles.specification, $roles.story] | map(select(. != null) | .id)')"
+      '([$roles.specification, $roles.story, $roles.task] | map(select(. != null) | .logical_name)) + [$ans[].type] | unique')"
+    # 012: the task role joins the bridge-written set now that the tier
+    # ships — a recorded field default for the sub-task type is consumed,
+    # not merely recorded (FR-012).
+    fd_bridge_ids="$(jq -cn --argjson roles "${roles}" '[$roles.specification, $roles.story, $roles.task] | map(select(. != null) | .id)')"
     fd_report="$(_config_field_default_report "${itypes}" "${df_map}" "${fd_ask_types}" "${fd_merged}" "${fd_bridge_ids}")"
     # A pending question (contract §6: "consolidated question pending | 0 —
     # not a failure") is NON-BLOCKING at config time: the ceremony's role is
@@ -967,10 +973,10 @@ cmd_config() {
       return "${EXIT_CONFIG}"
     fi
 
-    # §7.2/§7.3/§7.4 notes: supersession (a committed declaration overriding
-    # a recorded operator answer), promotion (any role resolved from an
-    # operator answer this run) and the task role's "recorded, not yet
-    # mirrored" status line.
+    # §7.2/§7.3 notes: supersession (a committed declaration overriding a
+    # recorded operator answer) and promotion (any role resolved from an
+    # operator answer this run). §7.4's "task recorded, not yet mirrored"
+    # status line stopped firing (012, FR-012): the task tier ships now.
     local prior_roles
     prior_roles="$(jq -c --arg k "${pkey}" '.resolved_ids[$k].roles // {}' <<< "${existing}")"
     for role_key in "${JIRA_ROLE_NAMES[@]}"; do
@@ -989,9 +995,6 @@ cmd_config() {
       fi
       if [[ "${new_source}" == "operator" ]]; then
         role_notes="${role_notes}${role_notes:+$'\n'}$(role_promotion_note "${pkey}" "${role_key}" "${new_name}")"
-      fi
-      if [[ "${role_key}" == "task" ]]; then
-        role_notes="${role_notes}${role_notes:+$'\n'}$(role_task_recorded_note "${pkey}" "${new_name}")"
       fi
     done
     proj_roles="$(jq -c --arg k "${pkey}" --argjson r "${roles}" '. + {($k): $r}' <<< "${proj_roles}")"
@@ -1101,8 +1104,8 @@ cmd_config() {
       field_defaults: {status: $fs, detail: "recorded field defaults in config.yml"}
     }')"
 
-  # §7.2/§7.3/§7.4 notes (supersession, promotion, task-recorded): never a
-  # warning, never a non-zero exit — the run succeeded.
+  # §7.2/§7.3 notes (supersession, promotion): never a warning, never a
+  # non-zero exit — the run succeeded.
   [[ -n "${role_notes}" ]] && printf '%s\n' "${role_notes}" >&2
 
   local summary

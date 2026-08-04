@@ -450,3 +450,49 @@ fetch_mentioned() {
       }' | json_canonical
   # kcov-excl-stop
 }
+
+# discovery_task_transition <issue_key> <direction> — the task tier's only new
+# read (012, research R5, contract §6). direction is "forward" (select
+# destinations the project classifies as done — FR-029/FR-030) or "backward"
+# (select destinations it does NOT classify as done — FR-032's operator-
+# authorised pull back). Classification is by the destination's own
+# statusCategory, never a status name (Constitution VII; contract §8).
+#
+# Prints {candidates:[{id,name}], transition_id, withheld_field}:
+#   - zero matching candidates  -> transition_id null, candidates []
+#   - exactly one, ungated      -> transition_id set to it
+#   - exactly one, but its own transition screen requires a field value
+#     (expand=transitions.fields) -> transition_id null, withheld_field names
+#     it (FR-041) — a recorded creation-time default is never sent here
+#   - two or more                -> transition_id null, candidates lists them
+#     (the caller reports the issue and the candidates; the bridge invents no
+#     preference, Edge Cases)
+discovery_task_transition() {
+  local key="$1" direction="${2:-forward}"
+  local base="${SPEC_KIT_JIRA_BASE_URL:-}"
+  if [[ -z "${base}" ]]; then
+    printf 'discovery: SPEC_KIT_JIRA_BASE_URL is not set\n' >&2
+    return "$(cli_exit_code fail_closed)"
+  fi
+  local api="${base}/rest/api/3"
+  local resp
+  resp="$(jira_request GET "${api}/issue/${key}/transitions?expand=transitions.fields")" || return $?
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -cn --argjson r "${resp}" --arg dir "${direction}" '
+    ($r.transitions // []) as $t
+    | [ $t[] | select((((.to.statusCategory.key // "") == "done")) == ($dir == "forward")) ] as $done
+    | ($done | map({id, name})) as $cands
+    | (if ($cands | length) == 1 then
+         (($done[0].fields // {}) | to_entries | map(select(.value.required == true)) | first) as $req
+         | if $req == null then
+             {candidates: $cands, transition_id: $cands[0].id, withheld_field: null}
+           else
+             {candidates: $cands, transition_id: null,
+              withheld_field: {logical_name: ($req.value.name // $req.key), field_id: $req.key}}
+           end
+       else
+         {candidates: $cands, transition_id: null, withheld_field: null}
+       end)
+  ' | json_canonical
+  # kcov-excl-stop
+}

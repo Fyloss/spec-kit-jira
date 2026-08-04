@@ -49,6 +49,35 @@ Describe 'Invoke-JiraRecognitionRun — marker verification decision table' {
         @($out.blocked).Count | Should -Be 0
     }
 
+    It 'a story-kind read carries its Jira-side sub-tasks (key, issuetype_id) — T073, FR-021' {
+        $path = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        @'
+{"issues": {
+  "COMP-1": {"summary": "S", "properties": {"spec-kit-jira": {"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111"}}},
+  "COMP-2": {"summary": "orphan sub-task", "parent": {"key": "COMP-1"}, "issuetype": {"id": "10099"}}
+}}
+'@ | Set-Content -NoNewline -Path $path
+        $script:M = Start-JiraMock -ConfigPath $path
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $stories = '[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+        $r = Invoke-JiraRecognitionRun -StoriesJson $stories -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath 'spec.md'
+        $r.ExitCode | Should -Be 0
+        $out = $r.Json | ConvertFrom-Json
+        @($out.bound.'1111111111111111'.subtasks).Count | Should -Be 1
+        $out.bound.'1111111111111111'.subtasks[0].key | Should -Be 'COMP-2'
+        $out.bound.'1111111111111111'.subtasks[0].issuetype_id | Should -Be '10099'
+    }
+
+    It 'a task-kind read carries no sub-tasks — the extra fetch is story-only' {
+        $cfg = New-JiraRecognitionSeedConfig '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111"}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $tasks = '[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+        $r = Invoke-JiraRecognitionRun -StoriesJson $tasks -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath 'spec.md' -Kind 'task'
+        $r.ExitCode | Should -Be 0
+        @(($r.Json | ConvertFrom-Json).bound.'1111111111111111'.subtasks).Count | Should -Be 0
+    }
+
     It 'marker-mismatch: story present, matches a SIBLING story of this same spec, not this one' {
         $cfg = New-JiraRecognitionSeedConfig '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"9999999999999999"}'
         $script:M = Start-JiraMock -ConfigPath $cfg
@@ -134,6 +163,50 @@ Describe 'Invoke-JiraRecognitionRun — marker verification decision table' {
         $r = Invoke-JiraRecognitionRun -StoriesJson $stories -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath 'spec.md'
         $r.ExitCode | Should -Be 0
         ($r.Json | ConvertFrom-Json).blocked[0].reason | Should -Be 'key-unrecorded'
+    }
+}
+
+Describe 'Invoke-JiraRecognitionRun — the task tier (Phase 2, T029/T030), on the same terms as a story' {
+    AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
+
+    It 'a recorded sub-task key is read back with its identity, status_category, and origin' {
+        $cfg = New-JiraRecognitionSeedConfig '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111","role":"task"}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $tasks = '[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+        $r = Invoke-JiraRecognitionRun -StoriesJson $tasks -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath 'tasks.md' -Kind 'task'
+        $r.ExitCode | Should -Be 0
+        $out = $r.Json | ConvertFrom-Json
+        $out.bound.'1111111111111111'.key | Should -Be 'COMP-1'
+        $out.bound.'1111111111111111'.PSObject.Properties.Name | Should -Contain 'status_category'
+        $out.bound.'1111111111111111'.origin | Should -Be 'bridge'
+    }
+
+    It 'a recorded key that 404s blocks that task alone (reported as new)' {
+        $cfg = New-JiraRecognitionFaultConfig '{"issue/COMP-404": {"status": 404}}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $tasks = '[{"local_id":"9999999999999999","marker":{"state":"bound","id":"9999999999999999","ticket":"COMP-404"}}]'
+        $r = Invoke-JiraRecognitionRun -StoriesJson $tasks -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath 'tasks.md' -Kind 'task'
+        $r.ExitCode | Should -Be 0
+        ($r.Json | ConvertFrom-Json).new[0] | Should -Be '9999999999999999'
+    }
+
+    It "diagnostics say 'task' and the task= grammar, not 'story'" {
+        $tasks = '[{"local_id":"3333333333333333","marker":{"state":"malformed","id":"3333333333333333","lines":[9]}}]'
+        $r = Invoke-JiraRecognitionRun -StoriesJson $tasks -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath 'tasks.md' -Kind 'task'
+        $r.ExitCode | Should -Be 0
+        $detail = ($r.Json | ConvertFrom-Json).blocked[0].detail
+        $detail | Should -BeLike '*for that task*'
+        $detail | Should -BeLike '*speckit-jira task=<16 hex>*'
+        $detail | Should -Not -BeLike '*story*'
+    }
+
+    It "defaults Kind to 'story' — existing call sites are unaffected" {
+        $stories = '[{"local_id":"3333333333333333","marker":{"state":"malformed","id":"3333333333333333","lines":[9]}}]'
+        $r = Invoke-JiraRecognitionRun -StoriesJson $stories -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath 'spec.md'
+        $detail = ($r.Json | ConvertFrom-Json).blocked[0].detail
+        $detail | Should -BeLike '*speckit-jira story=<16 hex>*'
     }
 }
 

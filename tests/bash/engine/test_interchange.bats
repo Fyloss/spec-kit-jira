@@ -112,6 +112,71 @@ setup() {
   [[ "$output" == *"project_key"* ]]
 }
 
+# --- Phase 2, T025/T027: the task tier (data-model.md §3) -------------------
+
+@test "a story with no tasks key validates unchanged (FR-011 off switch)" {
+  run interchange_validate < "${VALID}"
+  [ "$status" -eq 0 ]
+}
+
+@test "a story with tasks:[] validates (an empty array is a valid array)" {
+  run bash -c "jq '.stories[0].tasks=[]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -eq 0 ]
+}
+
+@test "story.tasks must be an array" {
+  run bash -c "jq '.stories[0].tasks=\"not-an-array\"' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"story.tasks"* ]]
+}
+
+@test "task.local_id is required unless the marker state is absent" {
+  local task='{"local_id":"","title":"T","description":{"blocks":[{"type":"paragraph","text":"x"}]},"done":false,"marker":{"state":"assigned","id":"","lines":[]}}'
+  run bash -c "jq --argjson t '${task}' '.stories[0].tasks=[\$t]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"task.local_id"* ]]
+}
+
+@test "task.local_id absent is fine when the marker state is absent" {
+  local task='{"local_id":"","title":"T","description":{"blocks":[{"type":"paragraph","text":"x"}]},"done":false,"marker":{"state":"absent","id":"","lines":[]}}'
+  run bash -c "jq --argjson t '${task}' '.stories[0].tasks=[\$t]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -eq 0 ]
+}
+
+@test "task.title is required" {
+  local task='{"local_id":"1111111111111111","title":"","description":{"blocks":[{"type":"paragraph","text":"x"}]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
+  run bash -c "jq --argjson t '${task}' '.stories[0].tasks=[\$t]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"task.title"* ]]
+}
+
+@test "task.description.blocks must be non-empty" {
+  local task='{"local_id":"1111111111111111","title":"T","description":{"blocks":[]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
+  run bash -c "jq --argjson t '${task}' '.stories[0].tasks=[\$t]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"task.description.blocks"* ]]
+}
+
+@test "task.done must be a boolean" {
+  local task='{"local_id":"1111111111111111","title":"T","description":{"blocks":[{"type":"paragraph","text":"x"}]},"done":"false","marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
+  run bash -c "jq --argjson t '${task}' '.stories[0].tasks=[\$t]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"task.done"* ]]
+}
+
+@test "no two tasks in the document share a local_id, even across different stories" {
+  local t1='{"local_id":"1111111111111111","title":"T1","description":{"blocks":[{"type":"paragraph","text":"x"}]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
+  local t2='{"local_id":"1111111111111111","title":"T2","description":{"blocks":[{"type":"paragraph","text":"y"}]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[2]}}'
+  run bash -c "jq --argjson t1 '${t1}' --argjson t2 '${t2}' '.stories[0].tasks=[\$t1] | .stories[1].tasks=[\$t2]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"share a local_id"* ]]
+}
+
+@test "the task-tier rules do not fire for a story that carries no tasks key" {
+  run bash -c "jq '.stories[0].tasks=[{\"local_id\":\"1111111111111111\",\"title\":\"T\",\"description\":{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"x\"}]},\"done\":false,\"marker\":{\"state\":\"assigned\",\"id\":\"1111111111111111\",\"lines\":[1]}}]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -eq 0 ]
+}
+
 @test "interchange_build is byte-identical across ports (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local parse ctx b p

@@ -16,9 +16,12 @@ Import-Module (Join-Path $PSScriptRoot '../engine/Parse.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../engine/Interchange.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../engine/MarkerSplice.psm1') -Force # Write-JiraMarkerSpliceFile — a nested import inside StoryMarker.psm1 is not enough (module-scope, not session)
 Import-Module (Join-Path $PSScriptRoot '../engine/SpecMarker.psm1') -Force # the parent marker's same splice (Phase 5, US2) — a nested import inside PlanApply.psm1 is not enough
+Import-Module (Join-Path $PSScriptRoot '../engine/TaskMarker.psm1') -Force -Global # Phase 3, US1 — the task tier's own marker grammar
+Import-Module (Join-Path $PSScriptRoot '../engine/TasksParse.psm1') -Force # Phase 3, US1 — reading tasks.md
 Import-Module (Join-Path $PSScriptRoot '../engine/StoryMarker.psm1') -Force -Global # R5 step 1 — assign identifiers
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Recognition.psm1') -Force # R5 step 2 — recognise recorded tickets
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/PlanApply.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force # Phase 8, US5 — the completion pass's transitions read
 Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force # hook health — READ ONLY (003 FR-022)
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force          # the operator disable record
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Hierarchy.psm1') -Force -Global # the mandatory-field gate — a nested import inside lib/Config.psm1 is not enough
@@ -356,7 +359,8 @@ function Get-JiraReconcilePlanContextFromBinding {
         [Parameter(Mandatory)] [string] $ConfigDir,
         [Parameter(Mandatory)] [string] $ConfigJson,
         [string] $RecognitionJson = '{}',
-        [string] $FieldValues = ''
+        [string] $FieldValues = '',
+        [string] $TasksRecognitionJson = '{}'
     )
     if ($env:SPEC_KIT_JIRA_PLAN_CONTEXT) {
         return [pscustomobject]@{ ExitCode = 0; Json = (Get-JiraReconcilePlanContext -BaseUrl $BaseUrl) }
@@ -445,6 +449,25 @@ function Get-JiraReconcilePlanContextFromBinding {
         }
     }
 
+    # Phase 3, US1: the task tier's own type id and the recognised
+    # sub-tasks' keys/current content, merged into the SAME tickets map
+    # (safe — task and story local_ids are disjoint by construction) plus
+    # a task-only ticket_current map that Get-JiraPlanTaskWriteSet compares
+    # against for zero churn (contract §4 rule 3). Both are empty, and
+    # task_type_id absent, when no `task` role resolved — leaving this
+    # function's output byte-identical to before this feature (FR-011).
+    $rolesVal = Get-JiraPlanPropSafe $binding 'roles'
+    $taskTypeId = [string](Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $rolesVal 'task') 'id')
+    $tasksRecog = $TasksRecognitionJson | ConvertFrom-Json -Depth 100
+    $tasksBoundVal = Get-JiraPlanPropSafe $tasksRecog 'bound'
+    $ticketCurrent = [ordered]@{}
+    if ($tasksBoundVal) {
+        foreach ($p in $tasksBoundVal.PSObject.Properties) {
+            $tickets[$p.Name] = [string](Get-JiraPlanPropSafe $p.Value 'key')
+            $ticketCurrent[$p.Name] = Get-JiraPlanPropSafe $p.Value 'current'
+        }
+    }
+
     $result = [ordered]@{ base_url = $BaseUrl }
     if (-not [string]::IsNullOrEmpty($storyType)) { $result['story_type_id'] = $storyType }
     if (-not [string]::IsNullOrEmpty($parentTypeId)) { $result['parent_type_id'] = $parentTypeId }
@@ -456,6 +479,8 @@ function Get-JiraReconcilePlanContextFromBinding {
     if ($ticketDescriptions.Count -gt 0) { $result['ticket_descriptions'] = $ticketDescriptions }
     if ($ticketParents.Count -gt 0) { $result['ticket_parents'] = $ticketParents }
     if (@($fieldDefaultsJson.PSObject.Properties).Count -gt 0) { $result['field_defaults'] = $fieldDefaultsJson }
+    if (-not [string]::IsNullOrEmpty($taskTypeId)) { $result['task_type_id'] = $taskTypeId }
+    if ($ticketCurrent.Count -gt 0) { $result['ticket_current'] = $ticketCurrent }
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-Json -InputObject $result -Compress -Depth 20) }
 }
 
@@ -642,9 +667,16 @@ function Invoke-JiraReconcile {
     $gateResult = $null
     $gateResolved = $null
     $gateAsk = $true
+    # Phase 3, US1: the task tier's own type id, read from the SAME
+    # binding — its presence is what "a task role is declared" means
+    # (FR-011). Reading tasks.md is gated on this, further down, never on
+    # the file's mere existence.
+    $taskTypeIdCandidate = ''
     $gateBindingResult = Get-JiraReconcileLocalBindingFor -ProjectKey $projectKey -ConfigDir $cfgDir
     if ($gateBindingResult.ExitCode -eq 0) {
         $gateBinding = $gateBindingResult.Json | ConvertFrom-Json -Depth 100
+        $gateRolesForTask = Get-JiraPlanPropSafe $gateBinding 'roles'
+        $taskTypeIdCandidate = [string](Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $gateRolesForTask 'task') 'id')
         $gateChildType = [string](Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $gateBinding 'child_type') 'id')
         if (-not [string]::IsNullOrEmpty($gateChildType)) {
             # Recorded field defaults (011, research R2/R5, contract §3.3/
@@ -820,12 +852,223 @@ function Invoke-JiraReconcile {
     $docForWriteObj.stories = $filteredStories
     $docForWriteJson = ConvertTo-JiraJsonValue $docForWriteObj
 
+    # Phase 3, US1 (contract 1-3): the task tier. tasks.md is read ONLY when
+    # a `task` role resolved in the binding ($taskTypeIdCandidate) — its
+    # mere presence on disk is never enough (FR-011). Its absence, once
+    # the role IS declared, is a silent no-op (FR-001).
+    $tasksFile = ''
+    $tasksActionsJson = '[]'
+    $tasksRecogJson = '{"bound":{},"new":[],"blocked":[]}'
+    $taskRoleActive = $false
+    $taskWarns = [System.Collections.Generic.List[string]]::new()
+    $taskWithheldCount = 0
+    $taskSkipNotes = [System.Collections.Generic.List[string]]::new()
+    # Edge Cases, T084: a task checked before its sub-task has ever been
+    # created — the completion pass below has no key to read transitions for
+    # yet, so it defers here; resolved once the create below (if it completes)
+    # stamps a key into tasksFile.
+    $pendingCreateCompleteIds = [System.Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrEmpty($taskTypeIdCandidate)) {
+        $candidateTasksFile = Join-Path (Split-Path -Parent $specFile) 'tasks.md'
+        if (Test-Path -LiteralPath $candidateTasksFile) {
+            $taskRoleActive = $true
+            $tasksFile = $candidateTasksFile
+            $tasksRaw = Get-Content -Raw -LiteralPath $tasksFile
+            if ($null -eq $tasksRaw) { $tasksRaw = '' }
+
+            # Task-tier verdict (Phase 5, US6, T066; data-model.md 5): a
+            # THIRD gate, separate from Get-JiraHierarchyMandatoryGate, over
+            # the single type carrying the `task` role alone. Run BEFORE any
+            # marker is assigned or spliced into tasks.md, so a withheld
+            # task is never given a durable identifier (FR-039) — and
+            # before the lifecycle filter, so the whole tier is dropped by
+            # construction (FR-038) rather than by omission further down.
+            $taskGateResult = Get-JiraHierarchyTaskGate -Binding $gateBinding -ProjectKey $projectKey -DefaultsByType ($fdDefaultsByTypeJson | ConvertFrom-Json -Depth 100)
+            $taskGateStatus = [string]$taskGateResult.status
+
+            if ($taskGateStatus -ne 'ok') {
+                # Attribute against the RAW, unmarked text — purely to
+                # learn whether any task would actually have been written
+                # this run. A tier with nothing to mirror in the first
+                # place is not "withheld": the note, and the per-field
+                # detail below, fire only when at least one task is
+                # attributed.
+                $tasksParsedRaw = ConvertTo-JiraTasksParseDocument -Text $tasksRaw | ConvertFrom-Json -Depth 100
+                $storyCountRaw = @($docForWriteObj.stories).Count
+                $withheldAttributed = @(@($tasksParsedRaw.tasks) | Where-Object {
+                        $ord = Get-JiraPlanPropSafe $_.attribution 'story_ordinal'
+                        ($null -ne $ord) -and ($ord -ge 1) -and ($ord -le $storyCountRaw)
+                    })
+                $taskWithheldCount = $withheldAttributed.Count
+                if ($taskWithheldCount -gt 0) {
+                    $taskTypeName = [string](Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $gateBinding.roles 'task') 'logical_name')
+                    foreach ($fieldEntry in @($taskGateResult.fields)) {
+                        $fieldName = [string]$fieldEntry.logical_name
+                        if ($fieldEntry.PSObject.Properties.Match('reason').Count -gt 0) {
+                            $line = Get-JiraHierarchyTaskFieldUndefaultableLine -LogicalName $fieldName -Reason ([string]$fieldEntry.reason) -TypeName $taskTypeName
+                        }
+                        else {
+                            $line = Get-JiraHierarchyTaskFieldUnsatisfiableLine -LogicalName $fieldName -ProjectKey $projectKey -TypeName $taskTypeName
+                        }
+                        $taskWarns.Add($line)
+                    }
+                    $taskWarns.Add('reconcile: the task tier was withheld this run — a required field of its issue type could not be satisfied; the specification and story tiers still reconciled')
+                }
+            }
+            else {
+                $tasksAssigned = Set-JiraTaskMarkerAssign -Text $tasksRaw
+                if ($tasksAssigned -ne $tasksRaw -and -not $dryRun) {
+                    # Mirror of reconcile.sh's `|| true`: an unwritable tasks.md
+                    # withholds identifier assignment for THIS run (the next run
+                    # retries) rather than failing the whole reconcile — unlike
+                    # spec.md's assign-write above, which fails closed, because
+                    # the task tier must never make the mirror worse than not
+                    # declaring the role at all (FR-011).
+                    try { Write-JiraMarkerSpliceFile -Path $tasksFile -NewContent $tasksAssigned | Out-Null }
+                    catch { $null = $_ }
+                }
+                $tasksForDoc = if ($dryRun) { $tasksRaw } else { $tasksAssigned }
+
+                $tasksParsed = ConvertTo-JiraTasksParseDocument -Text $tasksForDoc | ConvertFrom-Json -Depth 100
+
+                # Attribution resolves against the specification's OWN stories,
+                # in document order (contract 3): an ordinal outside that range
+                # is dangling (FR-004), no ordinal at all is unattributed
+                # (FR-028) — neither ever reaches the document. Nesting a task
+                # under its story's own `tasks` array is what makes "attributed
+                # to a story this specification does not contain"
+                # unrepresentable downstream.
+                $allTasks = @($tasksParsed.tasks)
+                $storyCount = @($docForWriteObj.stories).Count
+                $attributed = @($allTasks | Where-Object {
+                        $ord = Get-JiraPlanPropSafe $_.attribution 'story_ordinal'
+                        ($null -ne $ord) -and ($ord -ge 1) -and ($ord -le $storyCount)
+                    })
+                $ord = 0
+                foreach ($s in @($docForWriteObj.stories)) {
+                    $ord++
+                    $ts = @($attributed | Where-Object { (Get-JiraPlanPropSafe $_.attribution 'story_ordinal') -eq $ord })
+                    if ($ts.Count -gt 0) {
+                        $s | Add-Member -MemberType NoteProperty -Name 'tasks' -Value $ts -Force
+                    }
+                }
+                $docForWriteJson = ConvertTo-JiraJsonValue $docForWriteObj
+
+                # Neither an unattributed nor a dangling task ever reaches the
+                # document (contract 3): this is the only place either can
+                # still be named, by task_ref, with its reason (FR-004,
+                # FR-028).
+                foreach ($t in $allTasks) {
+                    $tOrd = Get-JiraPlanPropSafe $t.attribution 'story_ordinal'
+                    $taskRef = [string]$t.task_ref
+                    if ($null -eq $tOrd) {
+                        $taskSkipNotes.Add("$taskRef in $candidateTasksFile carries no story attribution and was not mirrored.")
+                    }
+                    elseif ($tOrd -lt 1 -or $tOrd -gt $storyCount) {
+                        $taskSkipNotes.Add("$taskRef in $candidateTasksFile is attributed to User Story $tOrd, which $specFile does not contain, and was not mirrored.")
+                    }
+                }
+
+                # A task-tier schema violation (FR-018's duplicate identifier,
+                # most commonly) withholds the WHOLE tier rather than the whole
+                # run — declaring a `task` role must never make the mirror
+                # worse than not declaring one. The specification and story
+                # tiers keep reconciling.
+                if (-not (Test-JiraInterchange -Json $docForWriteJson)) {
+                    foreach ($s in @($docForWriteObj.stories)) { $s.PSObject.Properties.Remove('tasks') }
+                    $docForWriteJson = ConvertTo-JiraJsonValue $docForWriteObj
+                    $taskWarns.Add('reconcile: the task tier could not be validated (a malformed or duplicate task identifier) and was withheld this run; the specification and story tiers still reconciled')
+                    $taskRoleActive = $false
+                }
+                else {
+                    # R5 step 2c — recognise the tasks, on the SAME terms as a
+                    # story: one read per recorded key, verified against the
+                    # SAME identity marker the read returns.
+                    $tasksSlim = [System.Collections.Generic.List[object]]::new()
+                    foreach ($s in @($docForWriteObj.stories)) {
+                        $sTasksForSlim = Get-JiraPlanPropSafe $s 'tasks'
+                        if ($null -eq $sTasksForSlim) { continue }
+                        foreach ($t in @($sTasksForSlim)) {
+                            $tasksSlim.Add([ordered]@{ local_id = $t.local_id; marker = (Get-JiraPlanPropSafe $t 'marker') })
+                        }
+                    }
+                    if ($tasksSlim.Count -gt 0) {
+                        $tasksSlimJson = ConvertTo-JiraJsonValue $tasksSlim
+                        $tasksRecogResult = Invoke-JiraRecognitionRun -StoriesJson $tasksSlimJson -SpecRefJson $specRefJson -ProjectKey $projectKey -SpecPath $tasksFile -Kind 'task'
+                        if ($tasksRecogResult.ExitCode -ne 0) {
+                            return (Get-JiraReconcileFaultCode -Code $tasksRecogResult.ExitCode -Message 'reconcile: a sub-task could not be recognised (zero writes)')
+                        }
+                        $tasksRecogJson = $tasksRecogResult.Json
+                        $tasksRecogObj = $tasksRecogJson | ConvertFrom-Json -Depth 100
+                        $tasksBlockedIds = @(($tasksRecogObj.blocked) | ForEach-Object { [string]$_.story })
+                        foreach ($s in @($docForWriteObj.stories)) {
+                            $sTasks = Get-JiraPlanPropSafe $s 'tasks'
+                            if ($null -ne $sTasks) {
+                                $keptTasks = @($sTasks | Where-Object { $tasksBlockedIds -notcontains [string]$_.local_id })
+                                $s.tasks = $keptTasks
+                            }
+                        }
+                        $docForWriteJson = ConvertTo-JiraJsonValue $docForWriteObj
+                        foreach ($bw in @($tasksRecogObj.blocked)) { $taskWarns.Add([string]$bw.detail) }
+                    }
+                }
+            }
+        }
+    }
+
+    # US3 (T073): orphan (FR-021) and re-attribution (FR-022) reporting —
+    # both pure notes, never a write. Mirror of reconcile.sh's own block; see
+    # there for the full rationale.
+    $taskNotes = [System.Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrEmpty($taskTypeIdCandidate)) {
+        $tasksRecogForNotes = $tasksRecogJson | ConvertFrom-Json -Depth 100
+        $tasksRecogBoundForNotes = Get-JiraPlanPropSafe $tasksRecogForNotes 'bound'
+        $recogBoundForNotes = Get-JiraPlanPropSafe $recog 'bound'
+        foreach ($s in @($docForWriteObj.stories)) {
+            $sid = [string]$s.local_id
+            $storyEntry = if ($recogBoundForNotes) { Get-JiraPlanPropSafe $recogBoundForNotes $sid } else { $null }
+            $skey = if ($storyEntry) { [string](Get-JiraPlanPropSafe $storyEntry 'key') } else { $null }
+            if ([string]::IsNullOrEmpty($skey)) { continue }
+
+            $subs = @(Get-JiraPlanPropSafe $storyEntry 'subtasks')
+            $sTasksRaw = Get-JiraPlanPropSafe $s 'tasks'
+            $sTasks = if ($null -eq $sTasksRaw) { @() } else { @($sTasksRaw) }
+            $expected = [System.Collections.Generic.List[string]]::new()
+            foreach ($t in $sTasks) {
+                $tEntry = if ($tasksRecogBoundForNotes) { Get-JiraPlanPropSafe $tasksRecogBoundForNotes ([string]$t.local_id) } else { $null }
+                $tkey = if ($tEntry) { [string](Get-JiraPlanPropSafe $tEntry 'key') } else { $null }
+                if (-not [string]::IsNullOrEmpty($tkey)) { $expected.Add($tkey) }
+            }
+            foreach ($sub in $subs) {
+                $subItId = [string](Get-JiraPlanPropSafe $sub 'issuetype_id')
+                if ($subItId -ne $taskTypeIdCandidate) { continue }
+                $subKey = [string](Get-JiraPlanPropSafe $sub 'key')
+                if ($expected -notcontains $subKey) {
+                    $taskNotes.Add("$subKey is recorded in Jira as a sub-task of $skey, but $candidateTasksFile no longer attributes any task to it; nothing was changed in Jira.")
+                }
+            }
+
+            foreach ($t in $sTasks) {
+                $tEntry = if ($tasksRecogBoundForNotes) { Get-JiraPlanPropSafe $tasksRecogBoundForNotes ([string]$t.local_id) } else { $null }
+                if ($null -eq $tEntry) { continue }
+                $tkey = [string](Get-JiraPlanPropSafe $tEntry 'key')
+                $tCurrent = Get-JiraPlanPropSafe $tEntry 'current'
+                $curParent = if ($tCurrent) { Get-JiraPlanPropSafe $tCurrent 'parent' } else { $null }
+                if ([string]::IsNullOrEmpty($curParent)) { continue }
+                if ([string]$curParent -ne $skey) {
+                    $taskNotes.Add("$tkey is attributed to $skey in $candidateTasksFile, but is recorded in Jira under $curParent; nothing was re-parented.")
+                }
+            }
+        }
+    }
+    foreach ($n in $taskSkipNotes) { $taskNotes.Add($n) }
+
     # SINK: the plan context (US2, FR-007–FR-011; Phase 3, US1: tickets/
     # ticket_origins/ticket_descriptions now come from recognition's `bound`
     # map). An explicit SPEC_KIT_JIRA_PLAN_CONTEXT overrides the derived
     # object wholesale; otherwise it is built from the resolved project's
     # persisted binding.
-    $planCtxResult = Get-JiraReconcilePlanContextFromBinding -BaseUrl $base -ProjectKey $projectKey -ConfigDir $cfgDir -ConfigJson $cfg -RecognitionJson $recogJson -FieldValues $fieldValues
+    $planCtxResult = Get-JiraReconcilePlanContextFromBinding -BaseUrl $base -ProjectKey $projectKey -ConfigDir $cfgDir -ConfigJson $cfg -RecognitionJson $recogJson -FieldValues $fieldValues -TasksRecognitionJson $tasksRecogJson
     if ($planCtxResult.ExitCode -eq 2) {
         Write-JiraReconcileNotice -Lines @(
             'Jira mirror skipped: this repository is not bound to a Jira project yet.',
@@ -869,6 +1112,86 @@ function Invoke-JiraReconcile {
     $planObj = $planJson | ConvertFrom-Json -Depth 100
     $parentAction = Get-JiraPlanPropSafe $planObj 'parent'
     $actionsJson = ConvertTo-JiraJsonValue @(Get-JiraPlanPropSafe $planObj 'stories')
+
+    # Phase 3, US1 (contract 4): the task tier's own plan, over the SAME
+    # document and context — never through Get-JiraLifecyclePlan, which
+    # only knows the two existing tiers. Skipped whenever the tier is
+    # inactive, so $tasksActionsJson stays the '[]' it was initialised to
+    # and every downstream read of it is a no-op (FR-011).
+    if ($taskRoleActive) {
+        try { $tasksActionsJson = Get-JiraPlanTaskWriteSet -DocJson $docForWriteJson -ContextJson $planCtx }
+        catch {
+            $taskWarns.Add("reconcile: the task tier's write plan could not be assembled and was withheld this run")
+            $tasksActionsJson = '[]'
+        }
+    }
+
+    # Phase 8, US5 (contract §6; research R5): the task tier's own completion
+    # pass. Scoped to a task ALREADY bound this run (tasksRecogJson.bound) — a
+    # task whose sub-task does not yet exist is skipped entirely (a future run
+    # completes it once it does; T084 is the same-run case, not yet resolved).
+    # A task whose `done` bit already agrees with its sub-task's classification
+    # contributes no entry at all, so this loop issues zero reads for it
+    # (FR-031's "an unchanged re-run issues none"). The backward pull is
+    # resolved here, never inside the PURE Get-JiraTaskLifecyclePlan: only the
+    # command layer knows --on-drift. Mirror of reconcile.sh.
+    if ($taskRoleActive) {
+        $tasksRecogForCompletion = $tasksRecogJson | ConvertFrom-Json -Depth 100
+        $tasksRecogBoundForCompletion = Get-JiraPlanPropSafe $tasksRecogForCompletion 'bound'
+        $completionTasks = [ordered]@{}
+        foreach ($s in @($docForWriteObj.stories)) {
+            $sTasksForCompletion = Get-JiraPlanPropSafe $s 'tasks'
+            if ($null -eq $sTasksForCompletion) { continue }
+            foreach ($t in @($sTasksForCompletion)) {
+                $cId = [string]$t.local_id
+                # An in-memory dry-run parse (no marker splice, contract 1) carries
+                # no local_id at all — never a real recognition key, so this is a
+                # skip, not a lookup miss. Mirror of reconcile.sh's `[[ -z "${completion_id}" ]] && continue`.
+                if ([string]::IsNullOrEmpty($cId)) { continue }
+                $cBound = if ($tasksRecogBoundForCompletion) { Get-JiraPlanPropSafe $tasksRecogBoundForCompletion $cId } else { $null }
+                if ($null -eq $cBound) {
+                    if ([bool](Get-JiraPlanPropSafe $t 'done')) { $pendingCreateCompleteIds.Add($cId) }
+                    continue
+                }
+                $cKey = [string](Get-JiraPlanPropSafe $cBound 'key')
+                $cStatusCategory = [string](Get-JiraPlanPropSafe $cBound 'status_category')
+                $cBlockersRaw = Get-JiraPlanPropSafe $cBound 'blockers'
+                $cBlockers = if ($null -eq $cBlockersRaw) { @() } else { @($cBlockersRaw) }
+                $cDone = [bool](Get-JiraPlanPropSafe $t 'done')
+                $cEntry = $null
+
+                if ($cDone -and $cStatusCategory -ne 'done') {
+                    $fwdResult = Get-JiraDiscoveryTaskTransitionResult -IssueKey $cKey -Direction 'forward'
+                    if ($fwdResult.ExitCode -ne 0) {
+                        return (Get-JiraReconcileFaultCode -Code $fwdResult.ExitCode -Message "reconcile: sub-task ${cKey}'s available transitions could not be read (zero writes)")
+                    }
+                    $cEntry = [ordered]@{ key = $cKey; blockers = $cBlockers; forward = ($fwdResult.Transition | ConvertFrom-Json -Depth 100) }
+                }
+                elseif ((-not $cDone) -and $cStatusCategory -eq 'done') {
+                    $cBwd = $null
+                    if ($onDrift -eq 'proceed') {
+                        $bwdResult = Get-JiraDiscoveryTaskTransitionResult -IssueKey $cKey -Direction 'backward'
+                        if ($bwdResult.ExitCode -ne 0) {
+                            return (Get-JiraReconcileFaultCode -Code $bwdResult.ExitCode -Message "reconcile: sub-task ${cKey}'s available transitions could not be read (zero writes)")
+                        }
+                        $cBwd = $bwdResult.Transition | ConvertFrom-Json -Depth 100
+                    }
+                    $cEntry = [ordered]@{ key = $cKey; blockers = $cBlockers; already_done_diverged = $true; backward = $cBwd }
+                }
+
+                if ($null -ne $cEntry) { $completionTasks[$cId] = $cEntry }
+            }
+        }
+
+        if ($completionTasks.Count -gt 0) {
+            $completionCtxJson = ConvertTo-JiraJsonValue ([ordered]@{ base_url = $base; tasks = $completionTasks })
+            $completionResultJson = Get-JiraTaskLifecyclePlan -ContentActionsJson $tasksActionsJson -CompletionContextJson $completionCtxJson
+            $completionResult = $completionResultJson | ConvertFrom-Json -Depth 100
+            $tasksActionsJson = ConvertTo-JiraJsonValue @(Get-JiraPlanPropSafe $completionResult 'actions')
+            foreach ($w in @(Get-JiraPlanPropSafe $completionResult 'warnings')) { $taskWarns.Add([string]$w) }
+            foreach ($n in @(Get-JiraPlanPropSafe $completionResult 'notes')) { $taskNotes.Add([string]$n) }
+        }
+    }
 
     # US6 lifecycle safety: when the current-Jira facts are supplied (the seam the
     # config/discovery integration fills from a fail-closed read), fold in
@@ -966,7 +1289,17 @@ function Invoke-JiraReconcile {
     $warnsList = [System.Collections.Generic.List[string]]::new()
     foreach ($w in @($warnsJson | ConvertFrom-Json -Depth 100)) { $warnsList.Add([string]$w) }
     foreach ($b in @($recog.blocked)) { $warnsList.Add([string]$b.detail) }
+    # Phase 3, US1: the task tier's own warnings — a withheld tier, a
+    # recognition block, or a plan failure — join the same channel.
+    foreach ($tw in $taskWarns) { $warnsList.Add($tw) }
     $warnsJson = ConvertTo-JiraJsonValue $warnsList
+
+# T073 (FR-021, FR-022): orphan and re-attribution reports join the notes
+# channel — reported once, never acted on.
+$notesListTaskNotes = [System.Collections.Generic.List[string]]::new()
+foreach ($n in @($notesJson | ConvertFrom-Json -Depth 100)) { $notesListTaskNotes.Add([string]$n) }
+foreach ($tn in $taskNotes) { $notesListTaskNotes.Add($tn) }
+$notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
 
     # A List keeps a single-element action set an ARRAY (a bare @() unwraps to an
     # object under ConvertTo-JiraJsonValue, diverging from the Bash port).
@@ -985,11 +1318,12 @@ function Invoke-JiraReconcile {
         elseif ($parentAction.method -eq 'PUT') { $updated++ }
     }
     $warnCount = @($warnsJson | ConvertFrom-Json -Depth 100).Count
+    $noteCount = @($notesJson | ConvertFrom-Json -Depth 100).Count
     $recognisedCount = @($recog.bound.PSObject.Properties).Count
     $skippedCount = $recognisedCount - $updated
     if ($skippedCount -lt 0) { $skippedCount = 0 }
     $hasLifecycle = $hasOverrideLifecycle
-    if ($warnCount -gt 0) { $hasLifecycle = $true }
+    if ($warnCount -gt 0 -or $noteCount -gt 0) { $hasLifecycle = $true }
 
     # The consolidated question (Phase 4, US2, T066/T068; contract §3.3/
     # §3.4; data-model.md §4): fired only now that recognition and planning
@@ -999,7 +1333,11 @@ function Invoke-JiraReconcile {
     # run (never a type the project merely offers — FR-028). Zero writes on
     # this path: neither the marker file (deferred above) nor any Jira call
     # has happened yet.
-    if ($fdAskPending -and $created -gt 0) {
+    # T066a (FR-040): the task tier's own pending creations join the SAME
+    # gate and the SAME set of pending types — a run creating all three
+    # tiers still asks exactly one question, naming every tier's field.
+    $fdTaskCreatesPending = @(@($tasksActionsJson | ConvertFrom-Json -Depth 100) | Where-Object { $_.method -eq 'POST' -and ([string]$_.url).EndsWith('/issue') }).Count
+    if ($fdAskPending -and ($created -gt 0 -or $fdTaskCreatesPending -gt 0)) {
         $fdPendingTypes = [System.Collections.Generic.List[string]]::new()
         foreach ($x in $actions) {
             if ($x.method -eq 'POST' -and ([string]$x.url).EndsWith('/issue')) {
@@ -1009,16 +1347,22 @@ function Invoke-JiraReconcile {
         if ($null -ne $parentAction -and $parentAction.method -eq 'POST') {
             $fdPendingTypes.Add([string]$parentAction.body.fields.issuetype.id)
         }
+        foreach ($x in @($tasksActionsJson | ConvertFrom-Json -Depth 100)) {
+            if ($x.method -eq 'POST' -and ([string]$x.url).EndsWith('/issue')) {
+                $fdPendingTypes.Add([string]$x.body.fields.issuetype.id)
+            }
+        }
         $fdPendingTypesJson = ConvertTo-JiraJsonValue (@($fdPendingTypes | Select-Object -Unique))
         $fdFieldsJson = Get-JiraPlanConfirmationField -IssueTypesJson $fdItypesJson -DefaultableFieldsByTypeJson $fdDfJson `
             -FieldDefaultsByTypeJson $fdDefaultsByTypeJson -PendingTypeIdsJson $fdPendingTypesJson
         $fdFields = @($fdFieldsJson | ConvertFrom-Json -Depth 100)
         if ($fdFields.Count -gt 0) {
+            $fdCreationsPending = $created + $fdTaskCreatesPending
             $fdConfirmation = [ordered]@{
                 status            = 'confirmation-pending'
                 project           = $projectKey
                 fields            = $fdFields
-                creations_pending = $created
+                creations_pending = $fdCreationsPending
                 resume_with       = "/speckit.jira.reconcile $specFile --accept-defaults"
             }
             $fdConfirmationJson = ConvertTo-JiraJsonValue $fdConfirmation
@@ -1027,7 +1371,7 @@ function Invoke-JiraReconcile {
             }
             else {
                 $fdLabels = ($fdFields | ForEach-Object { [string]$_.label }) -join ', '
-                [Console]::Out.WriteLine("Jira mirror paused: confirm $fdLabels before $created creation(s) are written.")
+                [Console]::Out.WriteLine("Jira mirror paused: confirm $fdLabels before $fdCreationsPending creation(s) are written.")
                 [Console]::Out.WriteLine("Resume with: $($fdConfirmation.resume_with)")
             }
             return 0
@@ -1060,7 +1404,78 @@ function Invoke-JiraReconcile {
         # ticket's key IMMEDIATELY, per ticket.
         $applyPlanJson = ConvertTo-JiraJsonValue ([ordered]@{ parent = $parentAction; stories = @($actionsJson | ConvertFrom-Json -Depth 100) })
         $knownParentKey = if ($parentState -eq 'bound') { [string]$recogParent.key } else { '' }
-        $rc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $applyPlanJson -SpecRefJson $specRefJson -SpecFile $specFile -KnownParentKey $knownParentKey -DefaultableFieldsByTypeJson $fdDfJson
+        # Phase 3, US1: the task tier's own writes join the SAME apply call —
+        # the pre-write privacy sweep must cover every payload of the run
+        # before any of them is written (FR-025) — never a second call.
+        # $knownStoryKeys seeds the parent-key resolution with every story
+        # ALREADY recognised; a story created in this same run is added to
+        # the map as the apply pass reaches it.
+        $knownStoryKeysJson = '{}'
+        if ($taskRoleActive) {
+            $ksk = [ordered]@{}
+            $boundForKsk = Get-JiraPlanPropSafe $recog 'bound'
+            if ($boundForKsk) {
+                foreach ($p in $boundForKsk.PSObject.Properties) { $ksk[$p.Name] = [string](Get-JiraPlanPropSafe $p.Value 'key') }
+            }
+            $knownStoryKeysJson = ConvertTo-JiraJsonValue $ksk
+        }
+        $rc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $applyPlanJson -SpecRefJson $specRefJson -SpecFile $specFile -KnownParentKey $knownParentKey -DefaultableFieldsByTypeJson $fdDfJson `
+            -TasksActionsJson $tasksActionsJson -TasksFile $tasksFile -KnownStoryKeysJson $knownStoryKeysJson
+    }
+
+    # Edge Cases (contract §6, final line; T084): a task checked before its
+    # sub-task ever existed is created and transitioned in this SAME run. The
+    # completion pass above deferred it — no key existed yet to read
+    # transitions for. Resolved now that the create above (if it completed)
+    # stamped a key into tasksFile; pendingCreateCompleteIds stays empty
+    # whenever nothing qualifies, so this block is a no-op otherwise.
+    if (-not $dryRun -and $pendingCreateCompleteIds.Count -gt 0) {
+        $pccDoc = ConvertTo-JiraTasksParseDocument -Text (Get-Content -Raw -LiteralPath $tasksFile) | ConvertFrom-Json -Depth 100
+        $pccCtxTasks = [ordered]@{}
+        foreach ($pccId in $pendingCreateCompleteIds) {
+            $pccTaskEntry = @($pccDoc.tasks) | Where-Object { [string]$_.local_id -eq $pccId } | Select-Object -First 1
+            $pccKey = if ($pccTaskEntry) { [string](Get-JiraPlanPropSafe $pccTaskEntry.marker 'ticket') } else { '' }
+            if ([string]::IsNullOrEmpty($pccKey)) { continue }
+            $pccFwdResult = Get-JiraDiscoveryTaskTransitionResult -IssueKey $pccKey -Direction 'forward'
+            if ($pccFwdResult.ExitCode -ne 0) {
+                if ([int]$pccFwdResult.ExitCode -gt $rc) { $rc = [int]$pccFwdResult.ExitCode }
+                continue
+            }
+            $pccCtxTasks[$pccId] = [ordered]@{ key = $pccKey; blockers = @(); forward = ($pccFwdResult.Transition | ConvertFrom-Json -Depth 100) }
+        }
+
+        if ($pccCtxTasks.Count -gt 0) {
+            $pccCtxJson = ConvertTo-JiraJsonValue ([ordered]@{ base_url = $base; tasks = $pccCtxTasks })
+            $pccResultJson = Get-JiraTaskLifecyclePlan -ContentActionsJson '[]' -CompletionContextJson $pccCtxJson
+            $pccResult = $pccResultJson | ConvertFrom-Json -Depth 100
+            $pccActions = @(Get-JiraPlanPropSafe $pccResult 'actions')
+            if ($pccActions.Count -gt 0) {
+                $pccActionsJson = ConvertTo-JiraJsonValue $pccActions
+                $pccRc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson '{"parent":null,"stories":[]}' -SpecRefJson $specRefJson -SpecFile $specFile -KnownParentKey '' -DefaultableFieldsByTypeJson $fdDfJson `
+                    -TasksActionsJson $pccActionsJson -TasksFile $tasksFile -KnownStoryKeysJson '{}'
+                if ($pccRc -eq 0) {
+                    $tasksActionsListPcc = [System.Collections.Generic.List[object]]::new()
+                    foreach ($x in @($tasksActionsJson | ConvertFrom-Json -Depth 100)) { $tasksActionsListPcc.Add($x) }
+                    foreach ($x in $pccActions) { $tasksActionsListPcc.Add($x) }
+                    $tasksActionsJson = ConvertTo-JiraJsonValue $tasksActionsListPcc
+                }
+                elseif ([int]$pccRc -gt $rc) { $rc = [int]$pccRc }
+            }
+
+            $warnsListPcc = [System.Collections.Generic.List[string]]::new()
+            foreach ($w in @($warnsJson | ConvertFrom-Json -Depth 100)) { $warnsListPcc.Add([string]$w) }
+            foreach ($w in @(Get-JiraPlanPropSafe $pccResult 'warnings')) { $warnsListPcc.Add([string]$w) }
+            $warnsJson = ConvertTo-JiraJsonValue $warnsListPcc
+
+            $notesListPcc = [System.Collections.Generic.List[string]]::new()
+            foreach ($n in @($notesJson | ConvertFrom-Json -Depth 100)) { $notesListPcc.Add([string]$n) }
+            foreach ($n in @(Get-JiraPlanPropSafe $pccResult 'notes')) { $notesListPcc.Add([string]$n) }
+            $notesJson = ConvertTo-JiraJsonValue $notesListPcc
+
+            $warnCount = @($warnsJson | ConvertFrom-Json -Depth 100).Count
+            $noteCount = @($notesJson | ConvertFrom-Json -Depth 100).Count
+            if ($warnCount -gt 0 -or $noteCount -gt 0) { $hasLifecycle = $true }
+        }
     }
 
     # T079/parent-marker.md `parent-recreated`: a summary note, not a
@@ -1149,6 +1564,15 @@ function Invoke-JiraReconcile {
         $rc = 0
     }
 
+    # FR-026: an unattributed or dangling task is never a fault ($rc stays
+    # 0), so it is invisible to the block above — but a lifecycle hook still
+    # gets only ONE warning, not one per task. The run summary's own notes
+    # (above) keep naming each one individually; only the stderr side
+    # collapses.
+    if ($env:SPEC_KIT_JIRA_HOOK_CONTEXT -and $rc -eq 0 -and $taskSkipNotes.Count -gt 0) {
+        [Console]::Error.WriteLine("WARNING: $($taskSkipNotes.Count) task(s) could not be mirrored (no story attribution, or attributed to a story the specification does not contain); see the run summary for detail. This spec-kit command completed normally.")
+    }
+
     # Field-default provenance (011, T074, contract §4.1/§4.2): every field
     # this run actually sent that came from a recorded default or a this-run
     # answer, attributed to its source, plus the promotion command for an
@@ -1158,9 +1582,18 @@ function Invoke-JiraReconcile {
     # (§4.3). Empty when nothing was defaulted this run (FR-028 — the off
     # switch).
     $gateResolvedJsonForNotes = if ($null -ne $gateResolved) { ConvertTo-JiraJsonValue $gateResolved } else { '{}' }
+    # Phase 3, US1 (FR-042): a sub-task creation's field values are attributed
+    # to their source through this SAME reporting surface — never a
+    # sub-task-specific one — so the action list handed to it must include
+    # the task tier's own actions.
+    $fdNotesActions = [System.Collections.Generic.List[object]]::new()
+    foreach ($x in $actions) { $fdNotesActions.Add($x) }
+    if ($taskRoleActive) {
+        foreach ($x in @($tasksActionsJson | ConvertFrom-Json -Depth 100)) { $fdNotesActions.Add($x) }
+    }
     $fdNoteLines = @(Get-JiraReconcileFieldDefaultNote -ProjectKey $projectKey -IssueTypesJson $fdItypesJson `
             -DefaultableFieldsByTypeJson $fdDfJson -ResolvedJson $gateResolvedJsonForNotes `
-            -ActionsJson (ConvertTo-JiraJsonValue $actions) -ParentActionJson (ConvertTo-JiraJsonValue $parentAction) `
+            -ActionsJson (ConvertTo-JiraJsonValue $fdNotesActions) -ParentActionJson (ConvertTo-JiraJsonValue $parentAction) `
             -Ask $gateAsk -AcceptDefaults $acceptDefaults -DryRun $dryRun)
     if ($fdNoteLines.Count -gt 0) {
         $notesList3 = [System.Collections.Generic.List[string]]::new()
@@ -1174,7 +1607,12 @@ function Invoke-JiraReconcile {
     # the site host is a coordinate that must never appear in output
     # (Constitution IV), and it keeps the summary stable across the mock port.
     # `local_id` is internal bookkeeping (which story a creation stamps) and
-    # is never part of the published action shape.
+    # is never part of the published action shape — UNLESS a task role is
+    # active, when a story's own local_id is the only way a --dry-run
+    # preview names WHICH story a sub-task belongs to (FR-024), since
+    # `fields.parent.key` stays the "<resolved at apply time>" placeholder
+    # for a same-run story creation. Never kept for a no-task-role run, so
+    # FR-011's byte-identical guarantee is unaffected.
     # The reported action list stays FLAT (T080a): the parent — when
     # present — is reported first, exactly like any other action,
     # host-relative and stripped of its internal local_id bookkeeping.
@@ -1190,8 +1628,46 @@ function Invoke-JiraReconcile {
         $u = [string]$x.url
         if ($u.StartsWith($base)) { $x.url = $u.Substring($base.Length) }
         $copy = [ordered]@{}
-        foreach ($p in $x.PSObject.Properties) { if ($p.Name -ne 'local_id') { $copy[$p.Name] = $p.Value } }
+        foreach ($p in $x.PSObject.Properties) { if ($p.Name -ne 'local_id' -or $taskRoleActive) { $copy[$p.Name] = $p.Value } }
         $disp.Add($copy)
+    }
+    # Phase 3, US1 (Constitution XI): task actions join the SAME displayed
+    # list, last — a --dry-run preview that reports counts.tasks but never
+    # shows what it counted would not be an honest preview. `parent_local_id`
+    # is kept (only the task's own local_id is stripped) so it can be
+    # matched against the story action's local_id kept above.
+    if ($taskRoleActive) {
+        foreach ($x in @($tasksActionsJson | ConvertFrom-Json -Depth 100)) {
+            $u = [string]$x.url
+            if ($u.StartsWith($base)) { $x.url = $u.Substring($base.Length) }
+            $copy = [ordered]@{}
+            foreach ($p in $x.PSObject.Properties) { if ($p.Name -ne 'local_id') { $copy[$p.Name] = $p.Value } }
+            $disp.Add($copy)
+        }
+    }
+
+    # Phase 3, US1 (data-model.md 6, SC-006): the task tier's own nested
+    # counts, emitted ONLY when a `task` role is declared (research R8) —
+    # absence, not a zeroed-out object, is the off switch that keeps a run
+    # with no `task` role byte-for-byte identical to before this feature
+    # (FR-011). created/updated read straight off the plan actions actually
+    # applied; unchanged is every other attributed task.
+    $taskCounts = $null
+    if ($taskRoleActive) {
+        $tasksActionsForCount = @($tasksActionsJson | ConvertFrom-Json -Depth 100)
+        $taskCreated = @($tasksActionsForCount | Where-Object { $_.method -eq 'POST' -and ([string]$_.url).EndsWith('/issue') }).Count
+        $taskUpdated = @($tasksActionsForCount | Where-Object { $_.method -eq 'PUT' }).Count
+        # Phase 8, US5: a transition is also a POST, so it is named separately from
+        # `/issue` creations here exactly as it is excluded from `created` above.
+        $taskTransitioned = @($tasksActionsForCount | Where-Object { $_.method -eq 'POST' -and ([string]$_.url).EndsWith('/transitions') }).Count
+        $taskTotal = 0
+        foreach ($s in @($docForWriteObj.stories)) {
+            $sTasksForCount = Get-JiraPlanPropSafe $s 'tasks'
+            if ($null -ne $sTasksForCount) { $taskTotal += @($sTasksForCount).Count }
+        }
+        $taskUnchanged = $taskTotal - $taskCreated - $taskUpdated
+        if ($taskUnchanged -lt 0) { $taskUnchanged = 0 }
+        $taskCounts = [ordered]@{ created = $taskCreated; updated = $taskUpdated; transitioned = $taskTransitioned; unchanged = $taskUnchanged; skipped = $taskSkipNotes.Count; withheld = $taskWithheldCount }
     }
 
     # The warnings/notes keys appear when the lifecycle facts were supplied OR
@@ -1204,6 +1680,7 @@ function Invoke-JiraReconcile {
         counts         = [ordered]@{ created = $created; updated = $updated; skipped = $skippedCount; warnings = $warnCount; errors = 0; recognised = $recognisedCount; assigned = $assignedCount }
         actions        = $disp
     }
+    if ($null -ne $taskCounts) { $summaryObj.counts['tasks'] = $taskCounts }
     if ($hasLifecycle) {
         $summaryObj['warnings'] = @($warnsJson | ConvertFrom-Json -Depth 100)
         $summaryObj['notes'] = @($notesJson | ConvertFrom-Json -Depth 100)

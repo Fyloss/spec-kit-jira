@@ -378,12 +378,6 @@ function Get-JiraRolePromotionNote {
     return "config: project $ProjectKey`: commit this so your team mirrors identically —`n  hierarchy:`n    $Role`: `"$Name`""
 }
 
-function Get-JiraRoleTaskRecordedNote {
-    [CmdletBinding()]
-    param([string]$ProjectKey, [string]$Name)
-    return "config: project $ProjectKey`: task is recorded as `"$Name`" but is not mirrored yet — this release creates no sub-tasks."
-}
-
 #endregion
 
 function Get-JiraHierarchyChildTypeUnresolvedMessage {
@@ -478,7 +472,11 @@ function Get-JiraHierarchyUndefaultableRequiredFields {
     $out = [System.Collections.Generic.List[object]]::new()
     foreach ($f in @($Fields)) {
         if ([bool] $f.required -and -not [bool] $f.defaultable) {
-            $out.Add([ordered]@{ logical_name = $f.logical_name; reason = $f.undefaultable_reason })
+            # A raw [ordered]@{} hashtable does not expose its keys as
+            # PSObject properties — a caller distinguishing this shape from
+            # the plain-unsatisfiable one via .PSObject.Properties.Match
+            # would silently never see 'reason'. Must be a pscustomobject.
+            $out.Add([pscustomobject]@{ logical_name = $f.logical_name; reason = $f.undefaultable_reason })
         }
     }
     return $out
@@ -556,14 +554,153 @@ function Get-JiraHierarchyMandatoryGate {
     return [pscustomobject]@{ status = 'unsatisfiable'; reason = 'mandatory-fields-unsatisfiable'; message = $msg }
 }
 
+function Get-JiraHierarchyTaskUnsatisfiableMessage {
+    <#
+    .SYNOPSIS
+      The task-tier twin of Get-JiraHierarchyMandatoryFieldsMessage, scoped
+      to the single type carrying the `task` role. Mirror of
+      hierarchy_task_unsatisfiable_message.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Fields, [string] $ProjectKey = '', [string] $TypeName = '')
+    $quoted = (@($Fields) | ForEach-Object { "`"$_`"" }) -join ', '
+    $refusal = "Issue type `"$TypeName`" requires fields this bridge cannot supply: $quoted. Nothing was written (zero writes)."
+    if ([string]::IsNullOrEmpty($ProjectKey)) { return $refusal }
+
+    $remedies = foreach ($label in @($Fields)) {
+        "  speckit.jira.config $ProjectKey --field-default '$ProjectKey=$TypeName=$label=<value>'"
+    }
+    return (@($refusal, 'Record a default for each to fix this permanently:') + @($remedies)) -join "`n"
+}
+
+function Get-JiraHierarchyTaskUndefaultableMessage {
+    <#
+    .SYNOPSIS
+      Names each field whose shape can never be a recorded value, with its
+      reason, and offers no --field-default remedy (there is none to offer).
+      Mirror of hierarchy_task_undefaultable_message.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Fields, [string] $TypeName = '')
+    $list = (@($Fields) | ForEach-Object { "`"$($_.logical_name)`" ($($_.reason))" }) -join ', '
+    return "Issue type `"$TypeName`" requires a field whose value can never be recorded: $list. Nothing was written (zero writes)."
+}
+
+function Get-JiraHierarchyTaskFieldUnsatisfiableLine {
+    <#
+    .SYNOPSIS
+      One field, one line, never wrapping onto a second — the form
+      reconcile uses when it withholds the task tier with more than one
+      unmet field, so each field is counted exactly once by a line-based
+      count over the run's warnings. Mirror of
+      hierarchy_task_field_unsatisfiable_line.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $LogicalName, [string] $ProjectKey = '', [string] $TypeName = '')
+    $line = "Issue type `"$TypeName`" requires `"$LogicalName`", which has no recorded default."
+    if (-not [string]::IsNullOrEmpty($ProjectKey)) {
+        $line += " Record one to fix this permanently: speckit.jira.config $ProjectKey --field-default '$ProjectKey=$TypeName=$LogicalName=<value>'."
+    }
+    $line += ' Nothing was written for this task (zero writes).'
+    return $line
+}
+
+function Get-JiraHierarchyTaskFieldUndefaultableLine {
+    <#
+    .SYNOPSIS
+      The undefaultable twin, carrying the reason and never a remedy.
+      Mirror of hierarchy_task_field_undefaultable_line.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $LogicalName, [string] $Reason = '', [string] $TypeName = '')
+    return "Issue type `"$TypeName`" requires `"$LogicalName`", whose value can never be recorded ($Reason). Nothing was written for this task (zero writes)."
+}
+
+function Get-JiraHierarchyTaskGate {
+    <#
+    .SYNOPSIS
+      data-model.md §5: a THIRD, SEPARATE gate from
+      Get-JiraHierarchyMandatoryGate, over the single type carrying the
+      `task` role alone. Unlike the two-type gate, this one distinguishes a
+      field that is merely unanswered so far (fixable with a recorded
+      default) from a field whose shape can never be a recorded value at
+      all (fixable only by making the field optional in Jira) — and,
+      unlike the two-type gate, a single type can carry both kinds of
+      unmet field at once, so BOTH are collected into `fields` together;
+      the status is 'undefaultable' whenever at least one field of that
+      harsher kind is present, 'unsatisfiable' otherwise. No task role at
+      all, or a task role with no such field, passes clean (FR-036).
+      Mirror of hierarchy_task_gate.
+
+      Returns one canonical pscustomobject:
+        @{ status = 'ok' }
+        @{ status = 'unsatisfiable'; fields = @(@{logical_name='…'}); message = '...' }
+        @{ status = 'undefaultable';
+           fields = @(@{logical_name='…'}, @{logical_name='…';reason='…'}); message = '...' }
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Binding, [string] $ProjectKey = '', $DefaultsByType = $null)
+
+    $roles = $null
+    if ($Binding.PSObject.Properties.Match('roles').Count -gt 0) { $roles = $Binding.roles }
+    $hasTask = ($null -ne $roles -and $roles.PSObject.Properties.Match('task').Count -gt 0 -and $null -ne $roles.task)
+    if (-not $hasTask) {
+        return [pscustomobject]@{ status = 'ok' }
+    }
+
+    $taskId = [string]$roles.task.id
+    $taskName = [string]$roles.task.logical_name
+
+    $rf = $null
+    if ($Binding.PSObject.Properties.Match('required_fields').Count -gt 0) { $rf = $Binding.required_fields }
+    $taskFields = @()
+    if ($null -ne $rf -and $rf.PSObject.Properties.Match($taskId).Count -gt 0) { $taskFields = @($rf.$taskId) }
+
+    $df = $null
+    if ($Binding.PSObject.Properties.Match('defaultable_fields').Count -gt 0) { $df = $Binding.defaultable_fields }
+    $taskDefaultable = @()
+    if ($null -ne $df -and $df.PSObject.Properties.Match($taskId).Count -gt 0) { $taskDefaultable = @($df.$taskId) }
+
+    $taskDefaults = $null
+    if ($null -ne $DefaultsByType -and $DefaultsByType.PSObject.Properties.Match($taskId).Count -gt 0) {
+        $taskDefaults = $DefaultsByType.$taskId
+    }
+
+    $undef = @(Get-JiraHierarchyUndefaultableRequiredFields -Fields $taskDefaultable)
+    $undefNames = @($undef | ForEach-Object { $_.logical_name })
+
+    $unsatRaw = @(Get-JiraHierarchyUnsatisfiableFields -Fields $taskFields -HasParentLink $true -Defaults $taskDefaults)
+    # An undefaultable-required field is also structurally unsatisfiable (no
+    # default can ever cover it) — drop it here so it is reported once, by
+    # the sharper reason, not twice.
+    $unsat = @($unsatRaw | Where-Object { $undefNames -notcontains $_ })
+
+    if ($undef.Count -eq 0 -and $unsat.Count -eq 0) {
+        return [pscustomobject]@{ status = 'ok' }
+    }
+
+    $fields = @(@($unsat | ForEach-Object { [pscustomobject]@{ logical_name = $_ } }) + $undef)
+
+    if ($undef.Count -gt 0) {
+        $msg = "reconcile: $(Get-JiraHierarchyTaskUndefaultableMessage -Fields $undef -TypeName $taskName)"
+        return [pscustomobject]@{ status = 'undefaultable'; fields = $fields; message = $msg }
+    }
+
+    $msg = "reconcile: $(Get-JiraHierarchyTaskUnsatisfiableMessage -Fields $unsat -ProjectKey $ProjectKey -TypeName $taskName)"
+    return [pscustomobject]@{ status = 'unsatisfiable'; fields = $fields; message = $msg }
+}
+
 Export-ModuleMember -Function Get-JiraHierarchyChildLevel, Get-JiraHierarchyDerivation, `
     Get-JiraHierarchyChildTypeUnresolvedMessage, Get-JiraHierarchyParentLinkUnavailableMessage, `
     Get-JiraHierarchyBindingShapeStaleMessage, Get-JiraHierarchyMandatoryFieldsMessage, `
     Get-JiraHierarchyUnsatisfiableFields, Get-JiraHierarchyMandatoryGate, `
     Get-JiraHierarchyUndefaultableRequiredFields, `
+    Get-JiraHierarchyTaskUnsatisfiableMessage, Get-JiraHierarchyTaskUndefaultableMessage, `
+    Get-JiraHierarchyTaskFieldUnsatisfiableLine, Get-JiraHierarchyTaskFieldUndefaultableLine, `
+    Get-JiraHierarchyTaskGate, `
     Get-JiraRoleCandidates, Resolve-JiraRoleMapping, Test-JiraRoleMappingHasProblems, `
     Get-JiraRoleUnresolvedMessage, ConvertTo-JiraRoleUnresolvedJson, Get-JiraRoleUnknownTypeMessage, `
     Get-JiraRoleDuplicateMessage, Get-JiraRoleSubtaskMisuseMessage, Get-JiraRoleTaskMisuseMessage, `
     Get-JiraRoleOrderingMessage, Test-JiraRoleMapping, Get-JiraRoleSupersessionNote, `
-    Get-JiraRolePromotionNote, Get-JiraRoleTaskRecordedNote, Get-JiraRoleReconcileOrderingMessage, `
+    Get-JiraRolePromotionNote, Get-JiraRoleReconcileOrderingMessage, `
     Test-JiraRoleMappingReconcile

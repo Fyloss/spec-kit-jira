@@ -124,6 +124,72 @@ _adf_marker_nodes() {
     '[ {type:"paragraph", content:[{type:"text", text:$m, marks:[{type:"strong"}]}]} ]'
 }
 
+# --- The task tier (Phase 3, US1, T036; contracts/task-tier.md §4) ----------
+# The summary and description of a mirrored sub-task, derived from the task
+# ALONE — never restating the story or the specification (FR-009).
+
+: "${_ADF_TASK_SUMMARY_MAX:=255}"
+
+# adf_task_summary <title> — the sub-task's summary: the task's own text,
+# shortened DETERMINISTICALLY when it exceeds what the sink accepts (the
+# same text always yielding the same summary). The untruncated text is
+# never lost — it is the description's job to carry it (FR-008).
+adf_task_summary() {
+  local title="$1" max="${_ADF_TASK_SUMMARY_MAX}" len
+  len="${#title}"
+  if ((len <= max)); then
+    printf '%s' "${title}"
+  else
+    printf '%s…' "${title:0:$((max - 1))}"
+  fi
+}
+
+# adf_render_task_description <task-json> — the sub-task's description
+# (contract §4, data-model.md §2): the task's own full (untruncated) text,
+# then its identifier, phase, attribution, parallel-safety, files and
+# dependencies as a bullet list. Nothing about the story or the
+# specification is restated (FR-009).
+adf_render_task_description() {
+  local task="$1" title task_ref phase parallel files deps ordinal
+  title="$(jq -r '.title' <<< "${task}")"
+  task_ref="$(jq -r '.task_ref' <<< "${task}")"
+  phase="$(jq -r '.phase // ""' <<< "${task}")"
+  parallel="$(jq -r '.parallel' <<< "${task}")"
+  files="$(jq -c '.files // []' <<< "${task}")"
+  deps="$(jq -c '.depends_on // []' <<< "${task}")"
+  ordinal="$(jq -r '.attribution.story_ordinal // empty' <<< "${task}")"
+
+  local meta="[]"
+  meta="$(jq -c --arg v "Identifier: ${task_ref}" '. + [$v]' <<< "${meta}")"
+  [[ -n "${phase}" ]] && meta="$(jq -c --arg v "Phase: ${phase}" '. + [$v]' <<< "${meta}")"
+  if [[ -n "${ordinal}" ]]; then
+    meta="$(jq -c --arg v "Attribution: User Story ${ordinal}" '. + [$v]' <<< "${meta}")"
+  else
+    meta="$(jq -c --arg v "Attribution: none" '. + [$v]' <<< "${meta}")"
+  fi
+  if [[ "${parallel}" == "true" ]]; then
+    meta="$(jq -c --arg v "Parallel-safe: yes" '. + [$v]' <<< "${meta}")"
+  else
+    meta="$(jq -c --arg v "Parallel-safe: no" '. + [$v]' <<< "${meta}")"
+  fi
+  if [[ "$(jq 'length' <<< "${files}")" -gt 0 ]]; then
+    local files_csv; files_csv="$(jq -r 'join(", ")' <<< "${files}")"
+    meta="$(jq -c --arg v "Files: ${files_csv}" '. + [$v]' <<< "${meta}")"
+  fi
+  if [[ "$(jq 'length' <<< "${deps}")" -gt 0 ]]; then
+    local deps_csv; deps_csv="$(jq -r 'join(", ")' <<< "${deps}")"
+    meta="$(jq -c --arg v "Depends on: ${deps_csv}" '. + [$v]' <<< "${meta}")"
+  fi
+
+  # kcov-excl-start — jq literal (string lines are not statements)
+  local body
+  body="$(jq -cn --arg t "${title}" --argjson meta "${meta}" '
+    [ {type:"paragraph", content:[{type:"text", text:$t}]},
+      {type:"bulletList", content:[ $meta[] | {type:"listItem", content:[{type:"paragraph", content:[{type:"text", text:.}]}]} ]} ]')"
+  jq -cn --argjson c "${body}" '{type:"doc", version:1, content:$c}' | json_canonical
+  # kcov-excl-stop
+}
+
 # adf_render_managed_description <content-json> <origin> [existing-desc-json]
 #   Origin-discriminated description rendering (US7, T075). On a bridge-created
 #   ticket the whole description IS the managed section, with no delimiter (FR-040).

@@ -197,11 +197,13 @@ function Invoke-JiraRecognitionRun {
         [Parameter(Mandatory)] [string] $StoriesJson,
         [Parameter(Mandatory)] [string] $SpecRefJson,
         [Parameter(Mandatory)] [string] $ProjectKey,
-        [Parameter(Mandatory)] [string] $SpecPath
+        [Parameter(Mandatory)] [string] $SpecPath,
+        [string] $Kind = 'story'
     )
     $stories = @($StoriesJson | ConvertFrom-Json -Depth 100)
     $specRef = $SpecRefJson | ConvertFrom-Json -Depth 100
     $repo = [string](Get-JiraRecognitionSafe $specRef 'repo')
+    $kindCap = (Get-Culture).TextInfo.ToTitleCase($Kind)
 
     $bound = [ordered]@{}
     $new = [System.Collections.Generic.List[string]]::new()
@@ -216,13 +218,13 @@ function Invoke-JiraRecognitionRun {
         if ($state -eq 'malformed') {
             $lines = @(Get-JiraRecognitionSafe $marker 'lines')
             $ln = if ($lines.Count -gt 0) { $lines[0] } else { 0 }
-            $detail = "$SpecPath line ${ln}: malformed speckit-jira marker; nothing was written for that story. Expected ``<!-- speckit-jira story=<16 hex> ticket=<KEY> -->``."
+            $detail = "$SpecPath line ${ln}: malformed speckit-jira marker; nothing was written for that $Kind. Expected ``<!-- speckit-jira $Kind=<16 hex> ticket=<KEY> -->``."
             $blocked.Add([ordered]@{ story = $id; reason = 'marker-malformed'; detail = $detail })
         }
         elseif ($state -eq 'duplicate') {
             $lines = @(Get-JiraRecognitionSafe $marker 'lines')
             $linesCsv = ($lines -join ', ')
-            $detail = "Story identifier $id appears on 2 user stories in $SpecPath (lines $linesCsv); nothing was written for any of them. Give each story its own marker line, or delete the duplicates to have them mirrored as new tickets."
+            $detail = "$kindCap identifier $id appears on 2 ${Kind}s in $SpecPath (lines $linesCsv); nothing was written for any of them. Give each $Kind its own marker line, or delete the duplicates to have them mirrored as new tickets."
             $blocked.Add([ordered]@{ story = $id; reason = 'duplicate-claim'; detail = $detail })
         }
     }
@@ -235,7 +237,7 @@ function Invoke-JiraRecognitionRun {
             $new.Add($id)
         }
         elseif ($state -eq 'creating') {
-            $detail = "Story $id in $SpecPath is marked ``creating``: a previous run was interrupted after creating its ticket and before recording the key, so whether a ticket exists cannot be determined. Check the project for a ticket carrying that identifier and record it as ``<!-- speckit-jira story=$id ticket=<KEY> -->``, or replace ``creating`` with nothing to mirror the story as a new ticket."
+            $detail = "$kindCap $id in $SpecPath is marked ``creating``: a previous run was interrupted after creating its ticket and before recording the key, so whether a ticket exists cannot be determined. Check the project for a ticket carrying that identifier and record it as ``<!-- speckit-jira $Kind=$id ticket=<KEY> -->``, or replace ``creating`` with nothing to mirror the $Kind as a new ticket."
             $blocked.Add([ordered]@{ story = $id; reason = 'key-unrecorded'; detail = $detail })
         }
     }
@@ -249,7 +251,7 @@ function Invoke-JiraRecognitionRun {
         $key = [string](Get-JiraRecognitionSafe $marker 'ticket')
 
         if ($dupKeys -contains $key) {
-            $detail = "Ticket $key is recorded for more than one story in $SpecPath; nothing was written for any of them. Give each story its own ticket, or correct the ticket= value."
+            $detail = "Ticket $key is recorded for more than one $Kind in $SpecPath; nothing was written for any of them. Give each $Kind its own ticket, or correct the ticket= value."
             $blocked.Add([ordered]@{ story = $id; reason = 'duplicate-claim'; detail = $detail })
             continue
         }
@@ -260,7 +262,12 @@ function Invoke-JiraRecognitionRun {
             continue
         }
 
-        $result = Get-JiraRecognitionRead -Key $key
+        # subtasks (T073, FR-021): fetched only for story-kind reads — the
+        # orphan/re-attribution check reconcile.ps1 runs against a story's
+        # Jira-side children needs this; the task tier itself has no children
+        # of its own to compare against.
+        $readExtra = if ($Kind -eq 'story') { 'subtasks' } else { '' }
+        $result = Get-JiraRecognitionRead -Key $key -Extra $readExtra
         if ([int]$result.ExitCode -ne 0) {
             return [pscustomobject]@{ ExitCode = [int]$result.ExitCode; Json = '' }
         }
@@ -271,7 +278,7 @@ function Invoke-JiraRecognitionRun {
 
         $rmarker = $result.Marker
         if ($null -eq $rmarker) {
-            $detail = "Ticket $key recorded for story $id in $SpecPath does not carry that story's identity marker; nothing was written to it. Correct the ticket= value in $SpecPath, or delete the marker line to mirror the story as a new ticket."
+            $detail = "Ticket $key recorded for $Kind $id in $SpecPath does not carry that ${Kind}'s identity marker; nothing was written to it. Correct the ticket= value in $SpecPath, or delete the marker line to mirror the $Kind as a new ticket."
             $blocked.Add([ordered]@{ story = $id; reason = 'marker-mismatch'; detail = $detail })
             continue
         }
@@ -281,7 +288,7 @@ function Invoke-JiraRecognitionRun {
         $mSlug = [string](Get-JiraRecognitionSafe $rmarker 'spec_slug')
 
         if ([string]::IsNullOrEmpty($mStory)) {
-            $detail = "Ticket $key recorded for story $id in $SpecPath does not carry that story's identity marker; nothing was written to it. Correct the ticket= value in $SpecPath, or delete the marker line to mirror the story as a new ticket."
+            $detail = "Ticket $key recorded for $Kind $id in $SpecPath does not carry that ${Kind}'s identity marker; nothing was written to it. Correct the ticket= value in $SpecPath, or delete the marker line to mirror the $Kind as a new ticket."
             $blocked.Add([ordered]@{ story = $id; reason = 'marker-mismatch'; detail = $detail })
             continue
         }
@@ -298,17 +305,17 @@ function Invoke-JiraRecognitionRun {
         # unique per specification by construction, is what protects
         # against cross-specification collision without breaking on rename.
         if ($mRepo -ne $repo) {
-            $detail = "Ticket $key recorded for story $id in $SpecPath is claimed by specification $mSlug; nothing was written to it. Correct the ticket= value in $SpecPath, or reconcile that specification instead."
+            $detail = "Ticket $key recorded for $Kind $id in $SpecPath is claimed by specification $mSlug; nothing was written to it. Correct the ticket= value in $SpecPath, or reconcile that specification instead."
             $blocked.Add([ordered]@{ story = $id; reason = 'claimed-by-other'; detail = $detail })
             continue
         }
         if ($mStory -ne $id) {
             if ($allIds -notcontains $mStory) {
-                $detail = "Ticket $key recorded in $SpecPath carries story identifier $mStory, which no user story in $SpecPath claims; nothing was written to it. Restore $mStory as that story's identifier with ``<!-- speckit-jira story=$mStory ticket=$key -->``, or delete the marker line to mirror the story as a new ticket and close $key in Jira."
+                $detail = "Ticket $key recorded in $SpecPath carries $Kind identifier $mStory, which no $Kind in $SpecPath claims; nothing was written to it. Restore $mStory as that ${Kind}'s identifier with ``<!-- speckit-jira $Kind=$mStory ticket=$key -->``, or delete the marker line to mirror the $Kind as a new ticket and close $key in Jira."
                 $blocked.Add([ordered]@{ story = $id; reason = 'orphan'; detail = $detail })
             }
             else {
-                $detail = "Ticket $key recorded for story $id in $SpecPath does not carry that story's identity marker; nothing was written to it. Correct the ticket= value in $SpecPath, or delete the marker line to mirror the story as a new ticket."
+                $detail = "Ticket $key recorded for $Kind $id in $SpecPath does not carry that ${Kind}'s identity marker; nothing was written to it. Correct the ticket= value in $SpecPath, or delete the marker line to mirror the $Kind as a new ticket."
                 $blocked.Add([ordered]@{ story = $id; reason = 'marker-mismatch'; detail = $detail })
             }
             continue
@@ -348,6 +355,21 @@ function Invoke-JiraRecognitionRun {
             }
         }
 
+        # subtasks (T073, FR-021): the story's current Jira-side sub-tasks,
+        # {key, issuetype_id} each — empty for a task-kind read, which never
+        # requests this extra field. Reconcile.psm1 diffs this against
+        # tasks.md's attributed tasks to report (never act on) orphans and
+        # re-attribution.
+        $subtasksVal = Get-JiraRecognitionSafe $fields 'subtasks'
+        $subtasksRaw = if ($null -eq $subtasksVal) { @() } else { @($subtasksVal) }
+        $subtasks = [System.Collections.Generic.List[object]]::new()
+        foreach ($sub in $subtasksRaw) {
+            $subIt = Get-JiraRecognitionSafe $sub 'fields'
+            $subItType = if ($subIt) { Get-JiraRecognitionSafe $subIt 'issuetype' } else { $null }
+            $subItId = if ($subItType) { Get-JiraRecognitionSafe $subItType 'id' } else { $null }
+            $subtasks.Add([ordered]@{ key = [string](Get-JiraRecognitionSafe $sub 'key'); issuetype_id = $subItId })
+        }
+
         $bound[$id] = [ordered]@{
             key             = $key
             origin          = $origin
@@ -356,6 +378,7 @@ function Invoke-JiraRecognitionRun {
             status_category = $statusCategory
             flagged         = $flagged
             blockers        = $blockers
+            subtasks        = $subtasks
         }
     }
 

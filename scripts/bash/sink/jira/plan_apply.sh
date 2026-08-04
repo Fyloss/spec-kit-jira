@@ -40,6 +40,8 @@ source "${_plan_apply_dir}/../../engine/idempotency.sh"
 # shellcheck source=/dev/null
 source "${_plan_apply_dir}/../../engine/story_marker.sh" # R5 steps 4/6 — mark `creating`, stamp + record per ticket
 # shellcheck source=/dev/null
+source "${_plan_apply_dir}/../../engine/task_marker.sh" # Phase 3, US1 — the task tier's own marker grammar, same seam
+# shellcheck source=/dev/null
 source "${_plan_apply_dir}/identity.sh" # stamp the identity marker on each created ticket (R5 step 6)
 
 # plan_resolve_field_defaults <issue_types_json> <defaultable_fields_by_type_json>
@@ -355,6 +357,120 @@ plan_managed_description_status() {
   fi
 }
 
+# plan_writes_tasks <neutral-doc-json> <plan-context-json> — resolve the
+# task tier of the validated neutral document into an ordered array of
+# write actions (Phase 3, US1, T038; contract §4). Iterates
+# `stories[].tasks[]`: a task is never planned under anything but its own
+# story (FR-007) because that is the only place it is nested.
+#
+# plan-context additionally carries:
+#   { task_type_id, tickets:{<task local_id>: <existing key>},
+#     ticket_current:{<task local_id>: {summary, description}},
+#     field_defaults:{type_id:{field_id:value}} }
+#
+# Returns the `tasks` array of data-model.md §4: a CREATE for a task with no
+# recorded ticket, carrying `local_id`, `parent_local_id` (its story's own
+# local_id — read directly off the document's nesting) and the
+# `<resolved at apply time>` parent placeholder; a PUT carrying only the
+# fields that differ for a task whose content changed (FR-019), with a
+# `warning` naming the ticket and the divergent field(s) attached to that
+# same action (FR-020); nothing for an unchanged task (FR-015).
+plan_writes_tasks() {
+  local doc="$1" ctx="$2"
+  local base task_type project field_defaults
+  base="$(jq -r '.base_url // ""' <<< "${ctx}")"
+  task_type="$(jq -r '.task_type_id // ""' <<< "${ctx}")"
+  field_defaults="$(jq -c '.field_defaults // {}' <<< "${ctx}")"
+  project="$(jq -r '.routing.project_key // ""' <<< "${doc}")"
+
+  local actions="[]" sn si
+  sn="$(jq '.stories | length' <<< "${doc}")"
+  for ((si = 0; si < sn; si++)); do
+    local story story_local_id tn ti
+    story="$(jq -c ".stories[${si}]" <<< "${doc}")"
+    story_local_id="$(jq -r '.local_id' <<< "${story}")"
+    tn="$(jq '(.tasks // []) | length' <<< "${story}")"
+    for ((ti = 0; ti < tn; ti++)); do
+      local task tid title ticket summary adf fields action base_fields
+      task="$(jq -c ".tasks[${ti}]" <<< "${story}")"
+      tid="$(jq -r '.local_id' <<< "${task}")"
+      title="$(jq -r '.title' <<< "${task}")"
+      ticket="$(jq -r --arg t "${tid}" '.tickets[$t] // ""' <<< "${ctx}")"
+      summary="$(adf_task_summary "${title}")"
+      adf="$(adf_render_task_description "${task}")"
+
+      if [[ -z "${ticket}" ]]; then
+        if [[ -z "${project}" || -z "${task_type}" ]]; then
+          printf 'plan_writes_tasks: refusing to assemble a creation for "%s" with no project or issue type (zero writes)\n' "${tid}" >&2
+          return 1
+        fi
+        base_fields="$(jira_create_fields_base "${project}" "${summary}" "${task_type}" "${field_defaults}")"
+        fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${adf}" \
+          '$base + {description:$d, parent:{key:"<resolved at apply time>"}}')"
+        action="$(jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" \
+          --arg lid "${tid}" --arg pid "${story_local_id}" \
+          '{method:"POST", url:$u, body:{fields:$f}, local_id:$lid, parent_local_id:$pid, role:"task"}')"
+      else
+        local current desired st
+        current="$(jq -c --arg t "${tid}" '.ticket_current[$t] // null' <<< "${ctx}")"
+        desired="$(jq -cn --arg s "${summary}" --argjson d "${adf}" '{summary:$s, description:$d}')"
+        if [[ "${current}" == "null" ]]; then
+          st="changed"
+        else
+          st="$(idempotency_field_status "${current}" "${desired}")"
+        fi
+        [[ "${st}" == "unchanged" ]] && continue
+
+        # FR-019: only the fields that differ are written. FR-020: the same
+        # comparison names the divergent field(s) in a warning before the
+        # overwrite — current == null means no prior state was read at all,
+        # so nothing narrower than the full desired set can be sent, and
+        # there is no known field to name.
+        local filtered diverged warning=""
+        if [[ "${current}" == "null" ]]; then
+          filtered="${desired}"
+        else
+          filtered="$(jq -cn --argjson cur "${current}" --argjson des "${desired}" \
+            '[ $des | to_entries[] | select(.value != ($cur[.key])) ] | from_entries')"
+          diverged="$(jq -rn --argjson cur "${current}" --argjson des "${desired}" \
+            '[ $des | to_entries[] | select(.value != ($cur[.key])) | .key ] | join(", ")')"
+          warning="${ticket} diverges from the specification on \"${diverged}\"; only the differing field(s) will be written"
+        fi
+
+        if [[ -n "${warning}" ]]; then
+          action="$(jq -cn --arg u "${base}/rest/api/3/issue/${ticket}" --argjson f "${filtered}" --arg w "${warning}" \
+            '{method:"PUT", url:$u, body:{fields:$f}, role:"task", warning:$w}')"
+        else
+          action="$(jq -cn --arg u "${base}/rest/api/3/issue/${ticket}" --argjson f "${filtered}" \
+            '{method:"PUT", url:$u, body:{fields:$f}, role:"task"}')"
+        fi
+      fi
+      actions="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${actions}")"
+    done
+  done
+  json_canonical <<< "${actions}"
+}
+
+# _plan_transition_action <base_url> <key> <transition_id> <blockers-json> <label>
+#   The single transition-POST emission site (012, T091), shared by
+#   plan_lifecycle (story tier) and plan_lifecycle_tasks (task tier) rather
+#   than each building its own. Returns {action, note} — note is empty when
+#   the ticket carries no open blocking link.
+_plan_transition_action() {
+  local base="$1" key="$2" transition_id="$3" blockers="$4" label="$5"
+  local taction
+  taction="$(jq -cn --arg u "${base}/rest/api/3/issue/${key}/transitions" --arg tid "${transition_id}" \
+    '{method:"POST", url:$u, body:{transition:{id:$tid}}}')"
+  local note=""
+  local bcount; bcount="$(jq 'length' <<< "${blockers}")"
+  if [[ "${bcount}" -gt 0 ]]; then
+    local blist
+    blist="$(jq -r 'join(", ")' <<< "${blockers}")"
+    note="transition of \"${label}\" proceeds with open blocking links (${blist}); human-created links are left unchanged"
+  fi
+  jq -cn --argjson a "${taction}" --arg n "${note}" '{action:$a, note:(if $n == "" then null else $n end)}'
+}
+
 # plan_lifecycle <content-actions-json> <neutral-doc-json> <lifecycle-ctx-json>
 #   Fold the US6 lifecycle-safety rules over the planned content actions and emit
 #   the final action set plus the human-facing warnings/notes. PURE: no Jira reads
@@ -452,23 +568,106 @@ plan_lifecycle() {
     [[ "${drop_content}" == "false" ]] && kept="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${kept}")"
 
     if [[ "${do_transition}" == "true" && -n "${transition_id}" && -n "${key}" ]]; then
-      local base taction
+      local base tres note
       base="$(jq -r '.base_url // ""' <<< "${lc}")"
-      taction="$(jq -cn --arg u "${base}/rest/api/3/issue/${key}/transitions" --arg tid "${transition_id}" \
-        '{method:"POST", url:$u, body:{transition:{id:$tid}}}')"
-      kept="$(jq -c --argjson a "${taction}" '. + [$a]' <<< "${kept}")"
-
-      local blockers bcount
-      blockers="$(jq -c '.blockers // []' <<< "${tk}")"
-      bcount="$(jq 'length' <<< "${blockers}")"
-      if [[ "${bcount}" -gt 0 ]]; then
-        local blist note
-        blist="$(jq -r 'join(", ")' <<< "${blockers}")"
-        note="transition of \"${sid}\" proceeds with open blocking links (${blist}); human-created links are left unchanged"
-        notes="$(jq -c --arg n "${note}" '. + [$n]' <<< "${notes}")"
-      fi
+      tres="$(_plan_transition_action "${base}" "${key}" "${transition_id}" "$(jq -c '.blockers // []' <<< "${tk}")" "${sid}")"
+      kept="$(jq -c --argjson a "$(jq -c '.action' <<< "${tres}")" '. + [$a]' <<< "${kept}")"
+      note="$(jq -r '.note // empty' <<< "${tres}")"
+      [[ -n "${note}" ]] && notes="$(jq -c --arg n "${note}" '. + [$n]' <<< "${notes}")"
     fi
   done
+
+  jq -cn --argjson a "${kept}" --argjson w "${warns}" --argjson no "${notes}" \
+    '{actions:$a, warnings:$w, notes:$no}' | json_canonical
+}
+
+# plan_lifecycle_tasks <content-actions-json> <completion-ctx-json>
+#   The task tier's own completion pass (012, US5, contract §6) — a sibling of
+#   plan_lifecycle, never routed through it: task completion is a binary
+#   done/not-done model, not a named multi-status order, and every divergence
+#   is reported by ticket key, never by a status name (FR-030/FR-032). PURE:
+#   this function decides nothing about Jira — the candidates, the chosen
+#   transition (if any) and the withheld field arrive already resolved by the
+#   caller's discovery_task_transition read (research R5). It only ever ADDS
+#   transition actions to content-actions; content zero-churn is
+#   plan_writes_tasks's own concern (FR-015), so a reworded-and-checked task
+#   in the same run keeps both its content PUT and its transition POST,
+#   neither suppressing the other (Edge Cases).
+#
+# completion-ctx: { base_url, tasks:{ <task local_id>: {
+#   key, blockers:[...],
+#   already_done_diverged: bool,
+#   forward: {transition_id, candidates:[{id,name}], withheld_field} | null,
+#   backward: {transition_id, candidates:[{id,name}], withheld_field} | null
+# } } }. `forward` is present only for a checked task whose sub-task is not
+# already done-category (FR-031 — an unchanged re-run supplies no entry at
+# all, so this loop issues nothing for it). `backward` is present only when
+# the caller already resolved the operator's backward-pull authorisation
+# (FR-032) — this function never consults --on-drift itself.
+#
+# Returns { actions, warnings, notes } (canonical).
+plan_lifecycle_tasks() {
+  local actions="$1" cc="$2"
+  local base; base="$(jq -r '.base_url // ""' <<< "${cc}")"
+
+  local kept="${actions}" warns="[]" notes="[]"
+  local ids; ids="$(jq -r '.tasks | keys[]' <<< "${cc}")"
+  while IFS= read -r tid; do
+    [[ -z "${tid}" ]] && continue
+    local t key blockers
+    t="$(jq -c --arg t "${tid}" '.tasks[$t]' <<< "${cc}")"
+    key="$(jq -r '.key // ""' <<< "${t}")"
+    [[ -z "${key}" ]] && continue
+    blockers="$(jq -c '.blockers // []' <<< "${t}")"
+
+    local diverged; diverged="$(jq -r '.already_done_diverged // false' <<< "${t}")"
+    if [[ "${diverged}" == "true" ]]; then
+      warns="$(jq -c --arg w "sub-task ${key} is already at a done status while its task is unchecked in tasks.md; it is left as is unless this run is authorised to pull it backward" \
+        '. + [$w]' <<< "${warns}")"
+    fi
+
+    local fwd; fwd="$(jq -c '.forward // null' <<< "${t}")"
+    if [[ "${fwd}" != "null" ]]; then
+      local tid_f cands n withheld
+      tid_f="$(jq -r '.transition_id // ""' <<< "${fwd}")"
+      cands="$(jq -c '.candidates // []' <<< "${fwd}")"
+      n="$(jq 'length' <<< "${cands}")"
+      withheld="$(jq -c '.withheld_field // null' <<< "${fwd}")"
+      if [[ -n "${tid_f}" ]]; then
+        local tres note
+        tres="$(_plan_transition_action "${base}" "${key}" "${tid_f}" "${blockers}" "${key}")"
+        kept="$(jq -c --argjson a "$(jq -c '.action' <<< "${tres}")" '. + [$a]' <<< "${kept}")"
+        note="$(jq -r '.note // empty' <<< "${tres}")"
+        [[ -n "${note}" ]] && notes="$(jq -c --arg n "${note}" '. + [$n]' <<< "${notes}")"
+      elif [[ "${withheld}" != "null" ]]; then
+        local fname
+        fname="$(jq -r '.logical_name' <<< "${withheld}")"
+        warns="$(jq -c --arg w "sub-task ${key} reaches a done status only through a transition that requires \"${fname}\"; the transition is withheld — set it directly in Jira, or record a default for that field" \
+          '. + [$w]' <<< "${warns}")"
+      elif [[ "${n}" -eq 0 ]]; then
+        warns="$(jq -c --arg w "sub-task ${key} has no transition to a status this project classifies as done; nothing was transitioned" \
+          '. + [$w]' <<< "${warns}")"
+      else
+        local names
+        names="$(jq -r '[.[].name] | join(", ")' <<< "${cands}")"
+        warns="$(jq -c --arg w "sub-task ${key} offers more than one transition to a status this project classifies as done (${names}); the bridge does not choose one" \
+          '. + [$w]' <<< "${warns}")"
+      fi
+    fi
+
+    local bwd; bwd="$(jq -c '.backward // null' <<< "${t}")"
+    if [[ "${bwd}" != "null" ]]; then
+      local tid_b
+      tid_b="$(jq -r '.transition_id // ""' <<< "${bwd}")"
+      if [[ -n "${tid_b}" ]]; then
+        local tres note
+        tres="$(_plan_transition_action "${base}" "${key}" "${tid_b}" "${blockers}" "${key}")"
+        kept="$(jq -c --argjson a "$(jq -c '.action' <<< "${tres}")" '. + [$a]' <<< "${kept}")"
+        note="$(jq -r '.note // empty' <<< "${tres}")"
+        [[ -n "${note}" ]] && notes="$(jq -c --arg n "${note}" '. + [$n]' <<< "${notes}")"
+      fi
+    fi
+  done <<< "${ids}"
 
   jq -cn --argjson a "${kept}" --argjson w "${warns}" --argjson no "${notes}" \
     '{actions:$a, warnings:$w, notes:$no}' | json_canonical
@@ -542,6 +741,7 @@ apply_writes() {
 
 # apply_writes_with_recognition <plan-json> <spec-ref-json> <spec-file>
 #   [known-parent-key] [extra-known-coords-json] [defaultable-fields-by-type-json]
+#   [tasks-actions-json] [tasks-file] [known-story-keys-json]
 #   Mirror of apply_writes's guard-then-write discipline (US11), extended
 #   with R5 steps 4 and 6, and with Phase 5/US2's parent-first ordering
 #   (contracts/parent-marker.md "Ordering within one run", steps 8-11).
@@ -565,10 +765,35 @@ apply_writes() {
 #   binding's defaultable_fields map, {type_id: [{logical_name, field_id,
 #   ...}]}. Omitted or empty ⇒ a rejected creation falls through to the
 #   existing generic failure path unchanged (FR-028).
+#
+#   tasks-actions-json (Phase 3, US1, T040; contract §5): plan_writes_tasks'
+#   output — {method, url, body, local_id?, parent_local_id?, role:"task"}
+#   per action. Every task body joins the SAME pre-write guard sweep as the
+#   parent and every story, before the first write of the run (FR-025).
+#   Tasks are applied LAST, after every story (contract "Order within one
+#   run: epic -> stories -> tasks"). Each task creation's parent-key
+#   placeholder is resolved from known-story-keys-json (the caller's
+#   already-recognised story keys — the plan context's own `tickets` map)
+#   merged with the keys created earlier in THIS run, so a story created in
+#   the same run parents its tasks without a second reconcile (Edge Cases).
+#   tasks-file is where the task marker is spliced (tasks.md — the SECOND
+#   tracked file the bridge writes into), separate from spec-file; omitted
+#   or empty means no task action is applied and no file is touched, which
+#   is what keeps a run with no `task` role byte-for-byte identical
+#   (FR-011). Each created sub-task's key is recorded into tasks-file
+#   IMMEDIATELY, never batched (FR-013), on the same terms as a story.
 apply_writes_with_recognition() {
   local plan="$1" spec_ref="$2" spec_file="$3" known_parent_key="${4:-}" extra="${5:-[]}"
   local defaultable_by_type="${6:-}"
+  # NOT "${9:-{}}" inline: bash's brace-matching for a `${...}` parameter
+  # expansion misparses a `{}`-shaped default value, corrupting how the
+  # REST OF THE FUNCTION is parsed (the exact, previously-reproduced
+  # failure documented on _reconcile_plan_context). Default it in a
+  # separate, brace-free statement instead.
+  local tasks_actions="${7:-[]}" tasks_file="${8:-}" known_story_keys="${9:-}"
   [[ -z "${defaultable_by_type}" ]] && defaultable_by_type='{}'
+  [[ -z "${tasks_actions}" ]] && tasks_actions='[]'
+  [[ -z "${known_story_keys}" ]] && known_story_keys='{}'
   local coords allow
   coords="$(_apply_known_coords "${extra}")"
   allow="${SPEC_KIT_JIRA_ALLOWLIST:-[]}"
@@ -577,8 +802,8 @@ apply_writes_with_recognition() {
   parent="$(jq -c '.parent' <<< "${plan}")"
   stories="$(jq -c '.stories' <<< "${plan}")"
 
-  # (1) Pre-write gate -- scan every payload, parent then stories, before
-  # writing anything.
+  # (1) Pre-write gate -- scan every payload, parent then stories then
+  # tasks, before writing anything.
   local body
   if [[ "${parent}" != "null" ]]; then
     body="$(jq -c '.body // {}' <<< "${parent}")"
@@ -588,6 +813,12 @@ apply_writes_with_recognition() {
   n="$(jq 'length' <<< "${stories}")"
   for ((i = 0; i < n; i++)); do
     body="$(jq -c ".[${i}].body // {}" <<< "${stories}")"
+    privacy_guard_scan "${body}" "${coords}" "${allow}" || return $?
+  done
+  local tn
+  tn="$(jq 'length' <<< "${tasks_actions}")"
+  for ((i = 0; i < tn; i++)); do
+    body="$(jq -c ".[${i}].body // {}" <<< "${tasks_actions}")"
     privacy_guard_scan "${body}" "${coords}" "${allow}" || return $?
   done
 
@@ -609,6 +840,22 @@ apply_writes_with_recognition() {
   fi
   if [[ "${new_content}" != "${current}" ]]; then
     marker_splice_write_file "${spec_file}" "${new_content}" > /dev/null
+  fi
+
+  # (2b) Same step, for the task tier's OWN file: mark every planned task
+  # creation `creating` in tasks-file. A no-op when tasks-file is empty
+  # (no `task` role declared).
+  if [[ -n "${tasks_file}" ]]; then
+    local tcurrent tnew_content task_creating_ids
+    tcurrent="$(cat "${tasks_file}" 2> /dev/null; printf x)"; tcurrent="${tcurrent%x}"
+    tnew_content="${tcurrent}"
+    task_creating_ids="$(jq -c '[.[] | select(.method=="POST" and (.url|endswith("/issue")) and (.local_id // "") != "") | .local_id]' <<< "${tasks_actions}")"
+    if [[ "$(jq 'length' <<< "${task_creating_ids}")" -gt 0 ]]; then
+      tnew_content="$(printf '%s' "${tnew_content}" | task_marker_mark_creating "${task_creating_ids}"; printf x)"; tnew_content="${tnew_content%x}"
+    fi
+    if [[ "${tnew_content}" != "${tcurrent}" ]]; then
+      marker_splice_write_file "${tasks_file}" "${tnew_content}" > /dev/null
+    fi
   fi
 
   # (3) Write pass -- the parent FIRST (step 10): its response key is read
@@ -642,7 +889,11 @@ apply_writes_with_recognition() {
 
   # (4) Story writes (step 11) -- the parent-key placeholder resolved to
   # the key just created, or the already-known parent_key when the parent
-  # was recognised (unchanged or updated) rather than created.
+  # was recognised (unchanged or updated) rather than created. Seeded from
+  # known_story_keys (the plan context's already-recognised story keys) so
+  # a task's own parent resolution (step 5) can find a story that was
+  # recognised rather than created this run.
+  local story_key_map="${known_story_keys}"
   n="$(jq 'length' <<< "${stories}")"
   for ((i = 0; i < n; i++)); do
     local action
@@ -679,6 +930,61 @@ apply_writes_with_recognition() {
         cur="$(cat "${spec_file}" 2> /dev/null; printf x)"; cur="${cur%x}"
         new="$(printf '%s' "${cur}" | story_marker_record_ticket "${local_id}" "${key}"; printf x)"; new="${new%x}"
         marker_splice_write_file "${spec_file}" "${new}" > /dev/null
+        story_key_map="$(jq -c --arg id "${local_id}" --arg k "${key}" '. + {($id): $k}' <<< "${story_key_map}")"
+      fi
+    fi
+    rm -f "${resp}"
+  done
+
+  # (5) Task writes (Phase 3, US1, T040; contract §5) -- LAST, after every
+  # story. Each creation's parent-key placeholder resolves from
+  # story_key_map, which by now carries both keys created this run and the
+  # caller's already-known ones. A task attributed to a story whose issue
+  # does not exist yet and is not being created this run has no entry in
+  # story_key_map; it is left unresolved and its write is skipped, exactly
+  # as contract §4 rule 5 requires — it reconciles on the next run once the
+  # story exists.
+  tn="$(jq 'length' <<< "${tasks_actions}")"
+  for ((i = 0; i < tn; i++)); do
+    local taction tparent_local_id tparent_key
+    taction="$(jq -c ".[${i}]" <<< "${tasks_actions}")"
+    tparent_local_id="$(jq -r '.parent_local_id // empty' <<< "${taction}")"
+    if [[ -n "${tparent_local_id}" ]]; then
+      tparent_key="$(jq -r --arg id "${tparent_local_id}" '.[$id] // empty' <<< "${story_key_map}")"
+      if [[ -z "${tparent_key}" ]]; then
+        continue
+      fi
+      taction="$(jq -c --arg k "${tparent_key}" \
+        'if (.body.fields.parent.key? == "<resolved at apply time>") then .body.fields.parent.key = $k else . end' \
+        <<< "${taction}")"
+    fi
+    method="$(jq -r '.method' <<< "${taction}")"
+    url="$(jq -r '.url' <<< "${taction}")"
+    body="$(jq -c '.body // empty' <<< "${taction}")"
+    resp="$(mktemp)"
+    if [[ -n "${body}" ]]; then
+      jira_request "${method}" "${url}" "${body}" > "${resp}"
+    else
+      jira_request "${method}" "${url}" > "${resp}"
+    fi
+    rc=$?
+    ((rc > worst)) && worst=${rc}
+    if ((rc >= 2)); then
+      _plan_apply_report_rejection "${method}" "${url}" "${taction}" "${defaultable_by_type}"
+      rm -f "${resp}"
+      return "${worst}"
+    fi
+
+    if [[ "${method}" == "POST" && "${url}" == */issue && -n "${tasks_file}" ]]; then
+      local tkey tlocal_id
+      tkey="$(jq -r '.key // empty' < "${resp}")"
+      tlocal_id="$(jq -r '.local_id // empty' <<< "${taction}")"
+      if [[ -n "${tkey}" && -n "${tlocal_id}" ]]; then
+        identity_write "${tkey}" "${spec_ref}" "bridge" "${tlocal_id}" "task" || true
+        local tcur tnew
+        tcur="$(cat "${tasks_file}" 2> /dev/null; printf x)"; tcur="${tcur%x}"
+        tnew="$(printf '%s' "${tcur}" | task_marker_record_ticket "${tlocal_id}" "${tkey}"; printf x)"; tnew="${tnew%x}"
+        marker_splice_write_file "${tasks_file}" "${tnew}" > /dev/null
       fi
     fi
     rm -f "${resp}"

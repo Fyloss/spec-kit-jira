@@ -199,4 +199,69 @@ function ConvertTo-JiraManagedAdfDocument {
     return (ConvertTo-JiraJsonValue ([ordered]@{ type = 'doc'; version = 1; content = $docContent }))
 }
 
-Export-ModuleMember -Function ConvertTo-JiraAdfDocument, ConvertTo-JiraManagedAdfDocument, Get-JiraManagedMarker
+# --- The task tier (Phase 3, US1, T037; contracts/task-tier.md §4) ----------
+
+$script:JiraAdfTaskSummaryMax = 255
+
+function Get-JiraAdfTaskSummary {
+    <#
+    .SYNOPSIS
+      The sub-task's summary: the task's own text, shortened
+      DETERMINISTICALLY when it exceeds what the sink accepts. Mirror of
+      adf_task_summary.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Title)
+    $max = $script:JiraAdfTaskSummaryMax
+    if ($Title.Length -le $max) { return $Title }
+    return $Title.Substring(0, $max - 1) + '…'
+}
+
+function ConvertTo-JiraAdfTaskDescription {
+    <#
+    .SYNOPSIS
+      The sub-task's description: the task's own full (untruncated) text,
+      then its identifier, phase, attribution, parallel-safety, files and
+      dependencies as a bullet list. Mirror of adf_render_task_description.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $TaskJson)
+    $task = $TaskJson | ConvertFrom-Json -Depth 100
+
+    $title = [string]$task.title
+    $taskRef = [string]$task.task_ref
+    $phase = if ($task.PSObject.Properties.Name -contains 'phase' -and $null -ne $task.phase) { [string]$task.phase } else { '' }
+    $parallel = [bool]$task.parallel
+    # @(if(){}else{}) wraps the WHOLE conditional's result, not just one
+    # branch: PowerShell unwraps a single-element array the same way through
+    # an if-expression's output as it does through a function's return, so
+    # wrapping only inside the true branch is not enough (a real, reproduced
+    # defect — see test_adf_task.bats "the PowerShell port renders
+    # byte-identical task description ADF").
+    $files = @(if ($task.PSObject.Properties.Name -contains 'files' -and $null -ne $task.files) { $task.files } else { @() })
+    $deps = @(if ($task.PSObject.Properties.Name -contains 'depends_on' -and $null -ne $task.depends_on) { $task.depends_on } else { @() })
+    $ordinal = $null
+    if ($task.PSObject.Properties.Name -contains 'attribution' -and $null -ne $task.attribution -and
+        $task.attribution.PSObject.Properties.Name -contains 'story_ordinal' -and $null -ne $task.attribution.story_ordinal) {
+        $ordinal = $task.attribution.story_ordinal
+    }
+
+    $meta = [System.Collections.Generic.List[string]]::new()
+    $meta.Add("Identifier: $taskRef")
+    if ($phase) { $meta.Add("Phase: $phase") }
+    if ($null -ne $ordinal) { $meta.Add("Attribution: User Story $ordinal") } else { $meta.Add('Attribution: none') }
+    if ($parallel) { $meta.Add('Parallel-safe: yes') } else { $meta.Add('Parallel-safe: no') }
+    if ($files.Count -gt 0) { $meta.Add("Files: $($files -join ', ')") }
+    if ($deps.Count -gt 0) { $meta.Add("Depends on: $($deps -join ', ')") }
+
+    $docContent = [System.Collections.Generic.List[object]]::new()
+    $docContent.Add((New-JiraAdfParagraph $title))
+    $items = [System.Collections.Generic.List[object]]::new()
+    foreach ($m in $meta) { $items.Add((New-JiraAdfListItem $m)) }
+    $docContent.Add([ordered]@{ type = 'bulletList'; content = $items })
+
+    return (ConvertTo-JiraJsonValue ([ordered]@{ type = 'doc'; version = 1; content = $docContent }))
+}
+
+Export-ModuleMember -Function ConvertTo-JiraAdfDocument, ConvertTo-JiraManagedAdfDocument, Get-JiraManagedMarker, `
+    Get-JiraAdfTaskSummary, ConvertTo-JiraAdfTaskDescription

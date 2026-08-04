@@ -318,12 +318,6 @@ role_promotion_note() {
     "$1" "$2" "$3"
 }
 
-# role_task_recorded_note <project_key> <name> — contract §7.4.
-role_task_recorded_note() {
-  printf 'config: project %s: task is recorded as "%s" but is not mirrored yet — this release creates no sub-tasks.' \
-    "$1" "$2"
-}
-
 # hierarchy_child_type_unresolved_message <project_key> — contract §6.
 hierarchy_child_type_unresolved_message() {
   printf 'reconcile: project %s has no recorded issue type for user stories. Run /speckit.jira.config to record it (zero writes)' "$1"
@@ -488,4 +482,137 @@ hierarchy_mandatory_gate() {
   local msg; msg="$(hierarchy_mandatory_fields_message "${unsat}" "${project}")"
   jq -cn --arg m "reconcile: ${msg}" \
     '{status:"unsatisfiable", reason:"mandatory-fields-unsatisfiable", message:$m}'
+}
+
+# hierarchy_task_unsatisfiable_message <fields_json> <project_key> <type_name>
+# — the task-tier twin of hierarchy_mandatory_fields_message, scoped to the
+# single type carrying the `task` role.
+hierarchy_task_unsatisfiable_message() {
+  local fields="$1" project="${2:-}" type_name="${3:-}"
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -rn --argjson f "${fields}" --arg p "${project}" --arg t "${type_name}" '
+    ("Issue type \"\($t)\" requires fields this bridge cannot supply: "
+      + ($f | map("\"" + . + "\"") | join(", ")) + ". Nothing was written (zero writes)."
+    ) as $refusal
+    | if $p == "" then $refusal
+      else
+        ($f | map("  speckit.jira.config \($p) --field-default '\''\($p)=\($t)=\(.)=<value>'\''")) as $remedies
+        | ([$refusal, "Record a default for each to fix this permanently:"] + $remedies) | join("\n")
+      end
+  '
+  # kcov-excl-stop
+}
+
+# hierarchy_task_undefaultable_message <fields_json> <type_name> — names each
+# field whose shape can never be a recorded value, with its reason, and
+# offers no --field-default remedy (there is none to offer).
+hierarchy_task_undefaultable_message() {
+  local fields="$1" type_name="${2:-}"
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -rn --argjson f "${fields}" --arg t "${type_name}" '
+    ($f | map("\"\(.logical_name)\" (\(.reason))") | join(", ")) as $list
+    | "Issue type \"\($t)\" requires a field whose value can never be recorded: " + $list + ". Nothing was written (zero writes)."
+  '
+  # kcov-excl-stop
+}
+
+# hierarchy_task_field_unsatisfiable_line <logical_name> <project_key>
+# <type_name> — one field, one line, never wrapping onto a second — the form
+# reconcile uses when it withholds the task tier with more than one unmet
+# field, so each field is counted exactly once by a `grep -c` over the run's
+# warnings (the gate's own batched `.message` below deliberately puts a
+# field's name on two lines — a refusal line and a remedy line — which is
+# fine for a single-field verdict but would double-count in a combined one).
+hierarchy_task_field_unsatisfiable_line() {
+  local logical_name="$1" project="${2:-}" type_name="${3:-}"
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -rn --arg n "${logical_name}" --arg p "${project}" --arg t "${type_name}" '
+    "Issue type \"\($t)\" requires \"\($n)\", which has no recorded default."
+    + (if $p == "" then "" else " Record one to fix this permanently: speckit.jira.config \($p) --field-default '\''\($p)=\($t)=\($n)=<value>'\''." end)
+    + " Nothing was written for this task (zero writes)."
+  '
+  # kcov-excl-stop
+}
+
+# hierarchy_task_field_undefaultable_line <logical_name> <reason> <type_name>
+# — the undefaultable twin, carrying the reason and never a remedy.
+hierarchy_task_field_undefaultable_line() {
+  local logical_name="$1" reason="$2" type_name="${3:-}"
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -rn --arg n "${logical_name}" --arg r "${reason}" --arg t "${type_name}" '
+    "Issue type \"\($t)\" requires \"\($n)\", whose value can never be recorded (\($r)). Nothing was written for this task (zero writes)."
+  '
+  # kcov-excl-stop
+}
+
+# hierarchy_task_gate <binding_json> [project_key] [defaults_by_type_json] —
+# data-model.md §5: a THIRD, SEPARATE gate from hierarchy_mandatory_gate,
+# over the single type carrying the `task` role alone. Unlike the two-type
+# gate, this one distinguishes a field that is merely unanswered so far
+# (fixable with a recorded default) from a field whose shape can never be a
+# recorded value at all (fixable only by making the field optional in
+# Jira) — and, unlike the two-type gate, a single type can carry both kinds
+# of unmet field at once, so BOTH are collected into `fields` together; the
+# status is "undefaultable" whenever at least one field of that harsher kind
+# is present, "unsatisfiable" otherwise. No task role at all, or a task role
+# with no such field, passes clean (FR-036).
+#
+# Prints one canonical JSON object:
+#   {"status":"ok"}
+#   {"status":"unsatisfiable", "fields":[{"logical_name":"…"}], "message":".."}
+#   {"status":"undefaultable",
+#    "fields":[{"logical_name":"…"}, {"logical_name":"…","reason":"…"}], "message":".."}
+hierarchy_task_gate() {
+  local binding="$1" project="${2:-}"
+  local defaults_by_type="${3:-}"
+  [[ -z "${defaults_by_type}" ]] && defaults_by_type='{}'
+
+  local has_task
+  has_task="$(jq -r '(.roles.task // null) != null' <<< "${binding}")"
+  if [[ "${has_task}" != "true" ]]; then
+    jq -cn '{status:"ok"}'
+    return 0
+  fi
+
+  local task_id task_name
+  task_id="$(jq -r '.roles.task.id' <<< "${binding}")"
+  task_name="$(jq -r '.roles.task.logical_name' <<< "${binding}")"
+
+  local task_fields task_defaultable task_defaults
+  task_fields="$(jq -c --arg t "${task_id}" '.required_fields[$t] // []' <<< "${binding}")"
+  task_defaultable="$(jq -c --arg t "${task_id}" '.defaultable_fields[$t] // []' <<< "${binding}")"
+  task_defaults="$(jq -c --arg t "${task_id}" '.[$t] // {}' <<< "${defaults_by_type}")"
+
+  local undef
+  undef="$(hierarchy_undefaultable_required_fields "${task_defaultable}")"
+
+  local unsat_raw unsat
+  unsat_raw="$(hierarchy_unsatisfiable_fields "${task_fields}" "true" "${task_defaults}")"
+  # An undefaultable-required field is also structurally unsatisfiable (no
+  # default can ever cover it) — drop it here so it is reported once, by
+  # the sharper reason, not twice.
+  unsat="$(jq -c --argjson undef "${undef}" \
+    '($undef | map(.logical_name)) as $skip | [ .[] | select(. as $n | ($skip | index($n)) | not) ]' <<< "${unsat_raw}")"
+
+  local undef_count unsat_count
+  undef_count="$(jq 'length' <<< "${undef}")"
+  unsat_count="$(jq 'length' <<< "${unsat}")"
+  if [[ "${undef_count}" -eq 0 && "${unsat_count}" -eq 0 ]]; then
+    jq -cn '{status:"ok"}'
+    return 0
+  fi
+
+  local fields
+  fields="$(jq -cn --argjson u "${unsat}" --argjson d "${undef}" '($u | map({logical_name: .})) + $d')"
+
+  if [[ "${undef_count}" -gt 0 ]]; then
+    local msg; msg="$(hierarchy_task_undefaultable_message "${undef}" "${task_name}")"
+    jq -cn --arg m "reconcile: ${msg}" --argjson f "${fields}" \
+      '{status:"undefaultable", fields:$f, message:$m}'
+    return 0
+  fi
+
+  local msg; msg="$(hierarchy_task_unsatisfiable_message "${unsat}" "${project}" "${task_name}")"
+  jq -cn --arg m "reconcile: ${msg}" --argjson f "${fields}" \
+    '{status:"unsatisfiable", fields:$f, message:$m}'
 }

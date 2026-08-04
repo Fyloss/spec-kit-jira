@@ -1,0 +1,263 @@
+{
+  "name": "sc010-tasks-nonenglish-status",
+  "description": "012, Phase 8, SC-010: the completion behaviour holds on a project whose statuses are named in a language other than English (T006a's French substrate), with no configuration naming a status — the sub-task's not-done default comes entirely from the project's own status style, proving no status name is assumed in either port (FR-030).",
+  "fixture": "tests/conformance/fixtures/repo-with-french-project-completed",
+  "argv": [
+    "reconcile",
+    "specs/001-checkout/spec.md",
+    "--json"
+  ],
+  "mock": {
+    "projects": {
+      "FR": "company"
+    },
+    "issueTypeStyle": {
+      "FR": "french"
+    },
+    "transitions": {
+      "FR-3": [
+        {
+          "id": "31",
+          "name": "Terminé",
+          "to": {
+            "statusCategory": {
+              "key": "done"
+            }
+          },
+          "fields": {}
+        }
+      ]
+    },
+    "issues": {
+      "FR-1": {
+        "summary": "Checkout",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "We need customers to complete checkout without leaving the cart page.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "text": "As a returning customer, I want to pay with a saved card.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10301"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-checkout",
+            "role": "parent"
+          }
+        }
+      },
+      "FR-2": {
+        "summary": "Pay with a saved card",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a returning customer, I want to pay with a saved card.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "text": "**Given** a signed-in customer with a saved card **When** they confirm the order **Then** the payment is captured without re-entering card details",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "attrs": {
+                "level": 3
+              },
+              "content": [
+                {
+                  "text": "Acceptance Criteria",
+                  "type": "text"
+                }
+              ],
+              "type": "heading"
+            },
+            {
+              "attrs": {
+                "panelType": "info"
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Given a signed-in customer with a saved card",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "When they confirm the order",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "Then the payment is captured without re-entering card details",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "panel"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10302"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-checkout",
+            "role": "story",
+            "story": "1111111111111111"
+          }
+        }
+      },
+      "FR-3": {
+        "summary": "Implement saved-card payment capture",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Implement saved-card payment capture",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Identifier: T002",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Phase: Phase 2: User Story 1",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Attribution: User Story 1",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Parallel-safe: no",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                }
+              ],
+              "type": "bulletList"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10304"
+        },
+        "parent": {
+          "key": "FR-2"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-checkout",
+            "role": "task",
+            "story": "4444444444444444"
+          }
+        }
+      }
+    }
+  },
+  "env": {
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "9999999999999999",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-checkout"
+  }
+}

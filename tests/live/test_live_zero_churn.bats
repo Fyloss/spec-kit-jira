@@ -13,7 +13,9 @@
 #   bats tests/live/test_live_zero_churn.bats
 #
 # SC-001: a second reconcile of an unchanged corpus performs zero writes of every
-# kind. SC-008: a forced reinstall (a second config run) preserves the team config
+# kind, including the task tier's transition write kind (012, Constitution II —
+# the assertion list is extended in the same change that adds a write kind).
+# SC-008: a forced reinstall (a second config run) preserves the team config
 # and the registered hooks, with self-repair on the next run and no operator step.
 
 require_live() {
@@ -45,6 +47,17 @@ teardown() {
   # shellcheck source=/dev/null
   source "${CMD_DIR}/reconcile.sh"
 
+  # Phase 8, US5 (012, Constitution II): a task checked before its sub-task
+  # ever exists is created AND transitioned in the very first run (Edge
+  # Cases, T084) — proving the transition write kind against a REAL Jira
+  # workflow, not a mock's canned transition list, before the idempotency
+  # of that same write kind is asserted below.
+  local tasks_file="${WORK}/tasks.md"
+  printf '%s\n' \
+    '# Tasks: Live Zero-Churn' '' '## Phase 1: User Story 1' '' \
+    '- [x] T001 [US1] Do the thing' \
+    > "${tasks_file}"
+
   # Phase 3-4, US1/US2: the reported defect happened between two lifecycle
   # commands seconds apart, so it is the FIRST-to-SECOND transition that
   # must be proven live — a mocked Jira's search index has no lag to hide
@@ -54,6 +67,8 @@ teardown() {
   local first
   first="$(cmd_reconcile reconcile --json "${SPEC}")"
   [ "$(jq -r '.counts.created' <<< "${first}")" -eq 2 ]
+  [ "$(jq -r '.counts.tasks.created' <<< "${first}")" -eq 1 ]
+  [ "$(jq -r '.counts.tasks.transitioned' <<< "${first}")" -eq 1 ]
   local parent_marker_line; parent_marker_line="$(grep -o 'speckit-jira spec=[0-9a-f]\{16\} ticket=[A-Z][A-Z0-9_]*-[1-9][0-9]*' "${SPEC}")"
   [ -n "${parent_marker_line}" ]
   local parent_key; parent_key="$(printf '%s' "${parent_marker_line}" | grep -o '[A-Z][A-Z0-9_]*-[1-9][0-9]*')"
@@ -66,7 +81,9 @@ teardown() {
 
   # The second run must recognise that SAME parent and that SAME ticket by
   # their recorded keys — never search — and issue zero writes of any kind,
-  # for the parent as well as the story.
+  # for the parent as well as the story AND the task tier's sub-task: the
+  # already-done-category status read back from real Jira must never fire a
+  # second transition (FR-031's idempotency, proven live rather than mocked).
   run cmd_reconcile reconcile --json "${SPEC}"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.counts.created' <<< "$output")" -eq 0 ]
@@ -74,19 +91,24 @@ teardown() {
   [ "$(jq -r '.counts.recognised' <<< "$output")" -eq 1 ]
   [ "$(jq -r '.counts.skipped' <<< "$output")" -eq 1 ]
   [ "$(jq -r '.actions | length' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.counts.tasks.created' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.counts.tasks.updated' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.counts.tasks.transitioned' <<< "$output")" -eq 0 ]
   # spec.md still names the SAME parent and the SAME ticket — neither
   # identifier was ever reassigned.
   grep -qF "${parent_key}" "${SPEC}"
   grep -qF "${ticket_key}" "${SPEC}"
 
   # A THIRD run, ten times over (SC-002), never drifts from that signature —
-  # an unchanged corpus stays a permanent no-op, not a one-time recognition.
+  # an unchanged corpus stays a permanent no-op, not a one-time recognition,
+  # for the transition write kind as much as for created/updated.
   local i
   for i in 1 2 3 4 5 6 7 8 9 10; do
     run cmd_reconcile reconcile --json "${SPEC}"
     [ "$status" -eq 0 ]
     [ "$(jq -r '.counts.created' <<< "$output")" -eq 0 ]
     [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
+    [ "$(jq -r '.counts.tasks.transitioned' <<< "$output")" -eq 0 ]
   done
 }
 

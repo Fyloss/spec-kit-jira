@@ -1,0 +1,893 @@
+{
+  "name": "us3-tasks-drift",
+  "description": "012, Phase 6, US3: a re-run against a fully-bound task-tier mirror detects a sub-task summary that changed on the Jira side and reports a named warning identifying the ticket and the diverged field, without overwriting it or touching any other ticket (FR-020).",
+  "fixture": "tests/conformance/fixtures/repo-with-tasks-drift",
+  "argv": [
+    "reconcile",
+    "specs/001-widget/spec.md",
+    "--json"
+  ],
+  "mock": {
+    "projects": {
+      "TASKS": "company"
+    },
+    "issues": {
+      "TASKS-1": {
+        "summary": "Widget Management",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "We need to let users manage widgets end to end.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "text": "As a user, I want to create a widget.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10101"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "parent"
+          }
+        }
+      },
+      "TASKS-2": {
+        "summary": "Create a widget",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want to create a widget.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "text": "**Given** no widget exists **When** I create one **Then** it appears in my list",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "attrs": {
+                "level": 3
+              },
+              "content": [
+                {
+                  "text": "Acceptance Criteria",
+                  "type": "text"
+                }
+              ],
+              "type": "heading"
+            },
+            {
+              "attrs": {
+                "panelType": "info"
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Given no widget exists",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "When I create one",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "Then it appears in my list",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "panel"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "aaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "TASKS-3": {
+        "summary": "Rename a widget",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want to rename a widget.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "text": "**Given** a widget exists **When** I rename it **Then** the new name is shown",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "attrs": {
+                "level": 3
+              },
+              "content": [
+                {
+                  "text": "Acceptance Criteria",
+                  "type": "text"
+                }
+              ],
+              "type": "heading"
+            },
+            {
+              "attrs": {
+                "panelType": "info"
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Given a widget exists",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "When I rename it",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "Then the new name is shown",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "panel"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "1111111111111111"
+          }
+        }
+      },
+      "TASKS-4": {
+        "summary": "Delete a widget",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want to delete a widget.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "text": "**Given** a widget exists **When** I delete it **Then** it no longer appears in my list",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "attrs": {
+                "level": 3
+              },
+              "content": [
+                {
+                  "text": "Acceptance Criteria",
+                  "type": "text"
+                }
+              ],
+              "type": "heading"
+            },
+            {
+              "attrs": {
+                "panelType": "info"
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Given a widget exists",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "When I delete it",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "Then it no longer appears in my list",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "panel"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "2222222222222222"
+          }
+        }
+      },
+      "TASKS-5": {
+        "summary": "Implement the widget creation endpoint, reworded directly in Jira",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Implement the widget creation endpoint",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Identifier: T003",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Phase: Phase 3: User Story 1",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Attribution: User Story 1",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Parallel-safe: no",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                }
+              ],
+              "type": "bulletList"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10104"
+        },
+        "parent": {
+          "key": "TASKS-2"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "task",
+            "story": "6666666666666666"
+          }
+        }
+      },
+      "TASKS-6": {
+        "summary": "Add validation for widget creation Reject empty names and duplicate slugs before persisting.",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Add validation for widget creation Reject empty names and duplicate slugs before persisting.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Identifier: T004",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Phase: Phase 3: User Story 1",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Attribution: User Story 1",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Parallel-safe: no",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                }
+              ],
+              "type": "bulletList"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10104"
+        },
+        "parent": {
+          "key": "TASKS-2"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "task",
+            "story": "7777777777777777"
+          }
+        }
+      },
+      "TASKS-7": {
+        "summary": "Implement the widget rename endpoint",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Implement the widget rename endpoint",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Identifier: T006",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Phase: Phase 4: User Story 2",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Attribution: User Story 2",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Parallel-safe: no",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                }
+              ],
+              "type": "bulletList"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10104"
+        },
+        "parent": {
+          "key": "TASKS-3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "task",
+            "story": "9999999999999999"
+          }
+        }
+      },
+      "TASKS-8": {
+        "summary": "Add rename validation",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Add rename validation",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Identifier: T007",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Phase: Phase 4: User Story 2",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Attribution: User Story 2",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Parallel-safe: no",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                }
+              ],
+              "type": "bulletList"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10104"
+        },
+        "parent": {
+          "key": "TASKS-3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "task",
+            "story": "bbbbbbbbbbbbbbbb"
+          }
+        }
+      },
+      "TASKS-9": {
+        "summary": "Implement the widget delete endpoint",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Implement the widget delete endpoint",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Identifier: T008",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Phase: Phase 5: User Story 3",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Attribution: User Story 3",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Parallel-safe: no",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                }
+              ],
+              "type": "bulletList"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10104"
+        },
+        "parent": {
+          "key": "TASKS-4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "task",
+            "story": "cccccccccccccccc"
+          }
+        }
+      },
+      "TASKS-10": {
+        "summary": "Implement the widget delete confirmation dialog with an extremely long descriptive title that keeps going well past the length any reasonable Jira summary field can hold so the sink is forced to shorten it deterministically while keeping the full text av…",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Implement the widget delete confirmation dialog with an extremely long descriptive title that keeps going well past the length any reasonable Jira summary field can hold so the sink is forced to shorten it deterministically while keeping the full text available in the description",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Identifier: T009",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Phase: Phase 5: User Story 3",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Attribution: User Story 3",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Parallel-safe: no",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                }
+              ],
+              "type": "bulletList"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10104"
+        },
+        "parent": {
+          "key": "TASKS-4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "task",
+            "story": "dddddddddddddddd"
+          }
+        }
+      }
+    }
+  },
+  "env": {
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-widget"
+  }
+}

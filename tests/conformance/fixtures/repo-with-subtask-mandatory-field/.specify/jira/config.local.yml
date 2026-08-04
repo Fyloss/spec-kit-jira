@@ -1,0 +1,90 @@
+# Machine-owned resolved identifiers for the sub-task mandatory-field
+# conformance fixture (012, T006, US6): a project whose binding carries all
+# three roles — specification, story and task — where the task role's type
+# (Sub-task, 40705) requires one recordable custom field (Definition of
+# Done) and one whose shape can never be a recorded value at all (Affected
+# Teams, an array; feature 011, FR-010, contract §2.3). The specification and
+# story tiers are deliberately left with nothing but Summary, so a run's
+# only withholding is the task tier's own (US6, FR-036/FR-037).
+resolved_ids:
+  TASKM:
+    style: company_managed
+    issue_types:
+      - logical_name: "Epic"
+        id: "40701"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "40704"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "Sub-task"
+        id: "40705"
+        hierarchy_level: "-1"
+        subtask: true
+    roles:
+      specification:
+        logical_name: "Epic"
+        id: "40701"
+        hierarchy_level: "1"
+        subtask: false
+        source: declared
+      story:
+        logical_name: "Story"
+        id: "40704"
+        hierarchy_level: "0"
+        subtask: false
+        source: declared
+      task:
+        logical_name: "Sub-task"
+        id: "40705"
+        hierarchy_level: "-1"
+        subtask: true
+        source: declared
+    child_type:
+      logical_name: "Story"
+      id: "40704"
+      source: declared
+    parent_type:
+      logical_name: "Epic"
+      id: "40701"
+      source: declared
+    required_fields:
+      "40701":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "40704":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "40705":
+        - logical_name: "Summary"
+          field_id: "summary"
+        - logical_name: "Definition of Done"
+          field_id: "customfield_50011"
+        - logical_name: "Affected Teams"
+          field_id: "customfield_50012"
+    defaultable_fields:
+      "40705":
+        - logical_name: "Definition of Done"
+          field_id: "customfield_50011"
+          schema_type: "string"
+          required: true
+          defaultable: true
+          allowed_values: []
+        - logical_name: "Affected Teams"
+          field_id: "customfield_50012"
+          schema_type: "array"
+          required: true
+          defaultable: false
+          allowed_values: []
+          undefaultable_reason: "a list of values cannot be expressed as a single recorded value"
+    parent_link_available:
+      "40704": true
+      "40705": true
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"
+    estimation_field_id: null

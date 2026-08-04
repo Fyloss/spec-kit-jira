@@ -181,11 +181,19 @@ recognition_parent_run() {
 }
 
 # recognition_run <stories-json> <spec-ref-json> <project-key> <spec-path>
+#   [kind]
 #   stories-json: [{local_id, marker:{state,id,ticket?,lines?}}, ...] — the
 #     slim per-story marker view sliced from the parsed document.
 #   spec-ref-json: {repo, spec_slug, folder}
 #   project-key: the routed project (US3, FR-019 scoping)
 #   spec-path: repository-relative path to spec.md, for diagnostics.
+#   kind: the noun (and marker grammar prefix) used in diagnostics — "story"
+#     by default, unchanged from every existing call site. Phase 2, T029/T030
+#     fold the task tier into this SAME function by calling it a second time
+#     with kind="task": recognition is on exactly the same terms as a story
+#     (contract §"Recognising a sub-task that already exists") — reusing the
+#     function rather than duplicating it is what makes that guarantee hold
+#     by construction rather than by two implementations staying in sync.
 #
 # Prints the recognition result on success:
 #   {"bound":{<id>:{key,origin,current,status,flagged,blockers}}, "new":[ids],
@@ -198,7 +206,7 @@ recognition_parent_run() {
 # inconclusive — the whole specification fails closed (research R2/R3,
 # contract "The read").
 recognition_run() {
-  local stories="$1" spec_ref="$2" project="$3" spec_path="$4"
+  local stories="$1" spec_ref="$2" project="$3" spec_path="$4" kind="${5:-story}"
   local repo
   repo="$(jq -r '.repo // ""' <<< "${spec_ref}")"
 
@@ -217,14 +225,14 @@ recognition_run() {
       malformed)
         local lines; lines="$(jq -r '.marker.lines[0] // 0' <<< "${st}")"
         blocked="$(jq -c --arg s "${id}" --arg r "marker-malformed" \
-          --arg d "${spec_path} line ${lines}: malformed speckit-jira marker; nothing was written for that story. Expected \`<!-- speckit-jira story=<16 hex> ticket=<KEY> -->\`." \
+          --arg d "${spec_path} line ${lines}: malformed speckit-jira marker; nothing was written for that ${kind}. Expected \`<!-- speckit-jira ${kind}=<16 hex> ticket=<KEY> -->\`." \
           '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
         ;;
       duplicate)
         local lines_csv; lines_csv="$(jq -r '.marker.lines | join(", ")' <<< "${st}")"
         local dup_id; dup_id="$(jq -r '.local_id' <<< "${st}")"
         blocked="$(jq -c --arg s "${dup_id}" --arg r "duplicate-claim" \
-          --arg d "Story identifier ${dup_id} appears on 2 user stories in ${spec_path} (lines ${lines_csv}); nothing was written for any of them. Give each story its own marker line, or delete the duplicates to have them mirrored as new tickets." \
+          --arg d "${kind^} identifier ${dup_id} appears on 2 ${kind}s in ${spec_path} (lines ${lines_csv}); nothing was written for any of them. Give each ${kind} its own marker line, or delete the duplicates to have them mirrored as new tickets." \
           '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
         ;;
     esac
@@ -242,7 +250,7 @@ recognition_run() {
         ;;
       creating)
         blocked="$(jq -c --arg s "${id}" --arg r "key-unrecorded" \
-          --arg d "Story ${id} in ${spec_path} is marked \`creating\`: a previous run was interrupted after creating its ticket and before recording the key, so whether a ticket exists cannot be determined. Check the project for a ticket carrying that identifier and record it as \`<!-- speckit-jira story=${id} ticket=<KEY> -->\`, or replace \`creating\` with nothing to mirror the story as a new ticket." \
+          --arg d "${kind^} ${id} in ${spec_path} is marked \`creating\`: a previous run was interrupted after creating its ticket and before recording the key, so whether a ticket exists cannot be determined. Check the project for a ticket carrying that identifier and record it as \`<!-- speckit-jira ${kind}=${id} ticket=<KEY> -->\`, or replace \`creating\` with nothing to mirror the ${kind} as a new ticket." \
           '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
         ;;
     esac
@@ -266,7 +274,7 @@ recognition_run() {
 
     if jq -e --arg k "${key}" 'index($k) != null' <<< "${dup_keys}" > /dev/null 2>&1; then
       blocked="$(jq -c --arg s "${id}" --arg r "duplicate-claim" \
-        --arg d "Ticket ${key} is recorded for more than one story in ${spec_path}; nothing was written for any of them. Give each story its own ticket, or correct the ticket= value." \
+        --arg d "Ticket ${key} is recorded for more than one ${kind} in ${spec_path}; nothing was written for any of them. Give each ${kind} its own ticket, or correct the ticket= value." \
         '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
       continue
     fi
@@ -282,8 +290,13 @@ recognition_run() {
       continue
     fi
 
-    local read_result rc=0
-    read_result="$(_recognition_read "${key}")" || rc=$?
+    local read_result rc=0 read_extra=""
+    # subtasks (T073, FR-021): fetched only for story-kind reads — the
+    # orphan/re-attribution check reconcile.sh runs against a story's
+    # Jira-side children needs this; the task tier itself has no children of
+    # its own to compare against.
+    [[ "${kind}" == "story" ]] && read_extra="subtasks"
+    read_result="$(_recognition_read "${key}" "${read_extra}")" || rc=$?
     if ((rc != 0)); then
       return "${rc}"
     fi
@@ -297,7 +310,7 @@ recognition_run() {
     local marker; marker="$(jq -c '.marker' <<< "${read_result}")"
     if [[ "${marker}" == "null" ]]; then
       blocked="$(jq -c --arg s "${id}" --arg k "${key}" --arg r "marker-mismatch" \
-        --arg d "Ticket ${key} recorded for story ${id} in ${spec_path} does not carry that story's identity marker; nothing was written to it. Correct the ticket= value in ${spec_path}, or delete the marker line to mirror the story as a new ticket." \
+        --arg d "Ticket ${key} recorded for ${kind} ${id} in ${spec_path} does not carry that ${kind}'s identity marker; nothing was written to it. Correct the ticket= value in ${spec_path}, or delete the marker line to mirror the ${kind} as a new ticket." \
         '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
       continue
     fi
@@ -322,14 +335,14 @@ recognition_run() {
     # marker-mismatch.
     if [[ -z "${m_story}" ]]; then
       blocked="$(jq -c --arg s "${id}" --arg k "${key}" --arg r "marker-mismatch" \
-        --arg d "Ticket ${key} recorded for story ${id} in ${spec_path} does not carry that story's identity marker; nothing was written to it. Correct the ticket= value in ${spec_path}, or delete the marker line to mirror the story as a new ticket." \
+        --arg d "Ticket ${key} recorded for ${kind} ${id} in ${spec_path} does not carry that ${kind}'s identity marker; nothing was written to it. Correct the ticket= value in ${spec_path}, or delete the marker line to mirror the ${kind} as a new ticket." \
         '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
       continue
     fi
 
     if [[ "${m_repo}" != "${repo}" ]]; then
       blocked="$(jq -c --arg s "${id}" --arg k "${key}" --arg other "${m_slug}" --arg r "claimed-by-other" \
-        --arg d "Ticket ${key} recorded for story ${id} in ${spec_path} is claimed by specification ${m_slug}; nothing was written to it. Correct the ticket= value in ${spec_path}, or reconcile that specification instead." \
+        --arg d "Ticket ${key} recorded for ${kind} ${id} in ${spec_path} is claimed by specification ${m_slug}; nothing was written to it. Correct the ticket= value in ${spec_path}, or reconcile that specification instead." \
         '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
       continue
     fi
@@ -337,7 +350,7 @@ recognition_run() {
     if [[ "${m_story}" != "${id}" ]]; then
       if ! jq -e --arg mid "${m_story}" 'index($mid) != null' <<< "${all_ids}" > /dev/null 2>&1; then
         blocked="$(jq -c --arg s "${id}" --arg k "${key}" --arg other "${m_story}" --arg r "orphan" \
-          --arg d "Ticket ${key} recorded in ${spec_path} carries story identifier ${m_story}, which no user story in ${spec_path} claims; nothing was written to it. Restore ${m_story} as that story's identifier with \`<!-- speckit-jira story=${m_story} ticket=${key} -->\`, or delete the marker line to mirror the story as a new ticket and close ${key} in Jira." \
+          --arg d "Ticket ${key} recorded in ${spec_path} carries ${kind} identifier ${m_story}, which no ${kind} in ${spec_path} claims; nothing was written to it. Restore ${m_story} as that ${kind}'s identifier with \`<!-- speckit-jira ${kind}=${m_story} ticket=${key} -->\`, or delete the marker line to mirror the ${kind} as a new ticket and close ${key} in Jira." \
           '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
       else
         blocked="$(jq -c --arg s "${id}" --arg k "${key}" --arg r "marker-mismatch" \
@@ -362,10 +375,16 @@ recognition_run() {
     status_category="$(jq -r '.status.statusCategory.key // ""' <<< "${fields}")"
     flagged="$(jq -r 'if (.["Flagged"]? // [] | length) > 0 then true else false end' <<< "${fields}")"
     blockers="$(jq -c '[(.issuelinks // [])[] | select(.type.inward? and .inwardIssue?) | .inwardIssue.key]' <<< "${fields}")"
+    # subtasks (T073, FR-021): the story's current Jira-side sub-tasks, {key,
+    # issuetype_id} each — empty for a task-kind read, which never requests
+    # this extra field. reconcile.sh diffs this against tasks.md's attributed
+    # tasks to report (never act on) orphans and re-attribution.
+    local subtasks; subtasks="$(jq -c '[(.subtasks // [])[] | {key, issuetype_id: (.fields.issuetype.id // null)}]' <<< "${fields}")"
 
     local entry; entry="$(jq -cn --arg k "${key}" --arg o "${origin}" --argjson c "${current}" \
       --arg st "${status}" --arg sc "${status_category}" --argjson fl "${flagged}" --argjson bl "${blockers}" \
-      '{key:$k, origin:$o, current:$c, status:$st, status_category:$sc, flagged:$fl, blockers:$bl}')"
+      --argjson sub "${subtasks}" \
+      '{key:$k, origin:$o, current:$c, status:$st, status_category:$sc, flagged:$fl, blockers:$bl, subtasks:$sub}')"
     bound="$(jq -c --arg id "${id}" --argjson e "${entry}" '. + {($id): $e}' <<< "${bound}")"
   done
 

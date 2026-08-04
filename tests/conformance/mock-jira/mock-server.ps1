@@ -54,6 +54,25 @@ $SearchPageSize = if ($cfg.ContainsKey('pageSize')) { [int]$cfg.pageSize } else 
 # Optional issue key returned by POST /rest/api/3/issue (feature-creation tests
 # derive the branch <ID> from the created key's number).
 $CreatedKey = if ($cfg.ContainsKey('createdKey')) { [string]$cfg.createdKey } else { '' }
+# Optional per-project issue-type-hierarchy override (T001/T004): a non-default
+# Jira (French, SAFe, non-Latin, flat, ambiguous) still answers GET
+# /project/{key} and .../statuses as an ordinary company- or team-managed
+# project — only its issue-type NAMES differ. This map lets the createmeta
+# issuetypes/fields routes select the dedicated hierarchy fixture without
+# inventing a parallel project/statuses fixture per hierarchy.
+$IssueTypeStyle = if ($cfg.ContainsKey('issueTypeStyle')) { $cfg.issueTypeStyle } else { @{} }
+
+# Optional per-project status-name style (012, T006a): a non-English Jira
+# reports its own status names rather than the Atlassian defaults "To Do" /
+# statusCategory "new". Keyed off the same $IssueTypeStyle map issue-type
+# names already use, since a French project's statuses are French for the
+# same reason its issue types are.
+function Get-DefaultStatus {
+    param([string]$ProjectKey)
+    $metaStyle = if ($IssueTypeStyle.ContainsKey($ProjectKey)) { $IssueTypeStyle[$ProjectKey] } else { $null }
+    if ($metaStyle -eq 'french') { return @{ name = 'À faire'; statusCategory = @{ key = 'new' } } }
+    return @{ name = 'To Do'; statusCategory = @{ key = 'new' } }
+}
 
 # --- Stateful issue store (Phase 1, T001-T004) -------------------------------
 #
@@ -74,9 +93,10 @@ if ($cfg.ContainsKey('issues')) {
             summary     = if ($seed.ContainsKey('summary')) { $seed.summary } else { '' }
             description = if ($seed.ContainsKey('description')) { $seed.description } else { $null }
             priority    = if ($seed.ContainsKey('priority')) { $seed.priority } else { $null }
-            status      = if ($seed.ContainsKey('status')) { $seed.status } else { @{ name = 'To Do'; statusCategory = @{ key = 'new' } } }
+            status      = if ($seed.ContainsKey('status')) { $seed.status } else { Get-DefaultStatus -ProjectKey ($k -replace '-[0-9]+$', '') }
             issuelinks  = if ($seed.ContainsKey('issuelinks')) { $seed.issuelinks } else { @() }
             parent      = if ($seed.ContainsKey('parent')) { $seed.parent } else { $null }
+            issuetype   = if ($seed.ContainsKey('issuetype')) { $seed.issuetype } else { $null }
         }
         if ($seed.ContainsKey('flagged') -and $seed.flagged) {
             $fields['Flagged'] = @(@{ value = 'Impediment' })
@@ -111,13 +131,11 @@ function New-MockIssueKey {
 # metadata declares `allowedValues` on its priority field, without touching
 # Get-Style/Get-MetaStyle or either of the two existing style-keyed fixtures.
 $CreateMetaFields = if ($cfg.ContainsKey('createmetaFields')) { $cfg.createmetaFields } else { @{} }
-# Optional per-project issue-type-hierarchy override (T001/T004): a non-default
-# Jira (French, SAFe, non-Latin, flat, ambiguous) still answers GET
-# /project/{key} and .../statuses as an ordinary company- or team-managed
-# project — only its issue-type NAMES differ. This map lets the createmeta
-# issuetypes/fields routes select the dedicated hierarchy fixture without
-# inventing a parallel project/statuses fixture per hierarchy.
-$IssueTypeStyle = if ($cfg.ContainsKey('issueTypeStyle')) { $cfg.issueTypeStyle } else { @{} }
+# Optional per-issue-key available-transitions override (012, T001): keyed by
+# exact issue key, the array of transition objects GET .../transitions
+# returns verbatim. Unconfigured means an empty list (the "none" case
+# contract §6 distinguishes) — nothing is assumed for a key not listed.
+$Transitions = if ($cfg.ContainsKey('transitions')) { $cfg.transitions } else { @{} }
 
 function Get-IssueTypeStyleName {
     param([string]$Path, [string]$DefaultStyle)
@@ -149,7 +167,7 @@ function Get-MetaStyle {
     # feature's parent-level-ambiguous hierarchy fixture. Reusing it would
     # silently reroute every style-ambiguity test onto a hierarchy fixture
     # that has nothing to do with what they exercise.
-    if ($Style -in @('company', 'team', 'french', 'safe', 'nonlatin', 'flat', 'hier-ambiguous', 'consumer', 'linebreak')) { return $Style }
+    if ($Style -in @('company', 'team', 'french', 'safe', 'nonlatin', 'flat', 'hier-ambiguous', 'consumer', 'linebreak', 'taskm')) { return $Style }
     return 'company'
 }
 
@@ -247,8 +265,13 @@ function Read-FixtureBody {
 function Resolve-Route {
     param([string]$Method, [string]$Path, [string]$Query = '', [string]$Body = '')
     $style = Get-Style -Path $Path
-    $statusStyle = Get-MetaStyle -Style $style
     $metaStyle = Get-MetaStyle -Style (Get-IssueTypeStyleName -Path $Path -DefaultStyle $style)
+    # 012, T006a: the same per-project override issue-type names use also
+    # picks the project statuses fixture, when a dedicated one exists — so a
+    # non-default Jira (French) is French in both places — falling back to
+    # the base style otherwise, so every pre-existing override without its
+    # own statuses fixture keeps behaving exactly as before.
+    $statusStyle = if (Test-Path -LiteralPath (Join-Path $FixtureDir "statuses-$metaStyle.json")) { $metaStyle } else { Get-MetaStyle -Style $style }
     switch -regex ($Path) {
         '^/__mock/health$'                                           { return @{ status = 200; body = '{"ok":true}' } }
         '^/rest/api/3/project/search$'                                { if ($Method -eq 'GET') { return (Get-ProjectSearchPage -Query $Query) } }
@@ -260,11 +283,11 @@ function Resolve-Route {
         '^/rest/api/3/field$'                                         { return (Read-FixtureBody 'field') }
         '^/rest/api/3/issue$'                                         {
             if ($Method -eq 'POST') {
+                $projKey = Get-MockRequestProjectKey -Body $Body
                 if ($CreatedKey) {
                     $key = $CreatedKey
                 }
                 else {
-                    $projKey = Get-MockRequestProjectKey -Body $Body
                     $key = New-MockIssueKey -ProjectKey $projKey
                 }
                 $suppliedFields = @{}
@@ -277,7 +300,7 @@ function Resolve-Route {
                     summary     = if ($suppliedFields.ContainsKey('summary')) { $suppliedFields.summary } else { '' }
                     description = if ($suppliedFields.ContainsKey('description')) { $suppliedFields.description } else { $null }
                     priority    = if ($suppliedFields.ContainsKey('priority')) { $suppliedFields.priority } else { $null }
-                    status      = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }
+                    status      = Get-DefaultStatus -ProjectKey $projKey
                     issuelinks  = @()
                     parent      = if ($suppliedFields.ContainsKey('parent')) { $suppliedFields.parent } else { $null }
                     issuetype   = if ($suppliedFields.ContainsKey('issuetype')) { $suppliedFields.issuetype } else { $null }
@@ -286,7 +309,19 @@ function Resolve-Route {
                 return @{ status = 201; body = "{`"id`":`"99001`",`"key`":`"$key`",`"self`":`"/rest/api/3/issue/99001`"}" }
             }
         }
-        '^/rest/api/3/issue/[^/]+/transitions$'                       { if ($Method -eq 'POST') { return @{ status = 204; body = '' } } }
+        '^/rest/api/3/issue/[^/]+/transitions$' {
+            if ($Method -eq 'POST') { return @{ status = 204; body = '' } }
+            if ($Method -eq 'GET') {
+                $ikey = ($Path -split '/')[-2]
+                # `$list = if (...) {...} else {@()}` unrolls a one-element
+                # array to a bare object on assignment (PowerShell flattens a
+                # script block's implicit output) — direct assignment inside
+                # each branch avoids that.
+                if ($Transitions.ContainsKey($ikey)) { $list = @($Transitions[$ikey]) } else { $list = @() }
+                $resp = @{ expand = 'transitions'; transitions = $list }
+                return @{ status = 200; body = ($resp | ConvertTo-Json -Depth 20 -Compress) }
+            }
+        }
         '^/rest/api/3/issue/[^/]+/remotelink$'                        { if ($Method -eq 'GET') { return (Read-FixtureBody 'remotelinks') } }
         '^/rest/api/3/(search|search/jql)$'                           { if ($Method -eq 'GET') { return (Read-FixtureBody 'search-siblings') } }
         '^/rest/api/3/issue/[^/]+/properties/[^/]+$' {
@@ -326,7 +361,20 @@ function Resolve-Route {
                 }
                 if ($script:Issues.ContainsKey($ikey)) {
                     $issue = $script:Issues[$ikey]
-                    $resp = @{ key = $ikey; fields = $issue.fields }
+                    $flds = $issue.fields
+                    if ($Query -match '(^|&)fields=([^&]+)' -and (",$($Matches[2])," -like '*,subtasks,*')) {
+                        $subtasks = @()
+                        foreach ($ck in $script:Issues.Keys) {
+                            $cf = $script:Issues[$ck].fields
+                            if ($cf.ContainsKey('parent') -and $cf.parent -and $cf.parent.key -eq $ikey) {
+                                $it = if ($cf.ContainsKey('issuetype') -and $cf.issuetype) { $cf.issuetype } else { @{ id = $null } }
+                                $subtasks += @{ key = $ck; fields = @{ issuetype = $it } }
+                            }
+                        }
+                        $flds = $flds.Clone()
+                        $flds['subtasks'] = $subtasks
+                    }
+                    $resp = @{ key = $ikey; fields = $flds }
                     if ($Query -match '(^|&)properties=([^&]+)') {
                         $propNames = $Matches[2] -split ','
                         $propsOut = @{}
