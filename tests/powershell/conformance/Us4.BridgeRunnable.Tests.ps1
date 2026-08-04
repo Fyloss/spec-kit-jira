@@ -97,4 +97,22 @@ Describe 'The bridge is runnable straight after install' {
         Install-HarnessExtension -Repo $script:Repo
         Get-Command spec-kit-jira -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
     }
+
+    It 'runs unaffected by the Bash entry point sibling losing its executable bit (FR-009, C7, R4)' {
+        # POSIX-only condition (research R4): the PowerShell port never reads a
+        # file mode at all, on either entry point, so a mode change to its
+        # sibling cannot affect it. On a host with no `chmod` (Windows) there is
+        # nothing to strip and the assertion holds trivially.
+        if (-not $script:Available) { Set-ItResult -Skipped -Because $script:Skip; return }
+        Install-HarnessExtension -Repo $script:Repo
+        if (Get-Command chmod -ErrorAction SilentlyContinue) {
+            & chmod a-x (Join-Path $script:Repo $script:BashEntry)
+        }
+        Push-Location $script:Repo
+        try {
+            $out = & pwsh -NoProfile -File $script:PwshEntry --help 2>&1 | Out-String
+            $out | Should -Match 'usage: spec-kit-jira'
+        }
+        finally { Pop-Location }
+    }
 }

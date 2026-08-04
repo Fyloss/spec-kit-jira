@@ -35,10 +35,6 @@ function Get-JiraMissingBridgeEntry {
       T090 require. The state where NEITHER port starts is covered by the
       verbatim fallback block in the command documents (FR-030), because there is
       no code of ours left running to say anything.
-
-      The executable bit is checked on the Bash entry point only, and only by the
-      Bash twin: NTFS carries no such bit, so asserting it here would report a
-      broken install on every healthy Windows repository.
     #>
     [CmdletBinding()]
     param([string] $ExtensionRoot = '')
@@ -91,7 +87,7 @@ function Test-JiraPrereq {
     # missing tool the operator should go and install.
     $bridge = Get-JiraMissingBridgeEntry
     if ($bridge) {
-        Write-Warning ("spec-kit-jira: the bridge entry point {0} was not found or is not executable — the extension install is incomplete. Restore it with: {1}" -f $bridge, 'specify extension add --dev <path-to-spec-kit-jira> --force')
+        Write-Warning ("spec-kit-jira: the bridge entry point {0} was not found — the extension install is incomplete. Restore it with: {1}" -f $bridge, 'specify extension add --dev <path-to-spec-kit-jira> --force')
         return $script:ExitPrereq
     }
 

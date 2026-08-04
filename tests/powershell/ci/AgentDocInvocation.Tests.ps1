@@ -66,4 +66,25 @@ Describe 'Command documents invoke a bridge that exists' {
             $text | Should -Not -Match '(brew install spec-kit|npm i(nstall)? -g|pip install spec-kit|add to your PATH|export PATH=)'
         }
     }
+
+    It 'carries the bash prefix on every invocation, never on a bare filename (C2)' {
+        # A path followed by a command or flag is an invocation and MUST be
+        # preceded by `bash `; a path followed by nothing is a filename and
+        # MUST NOT be — conflating the two produces "the bridge entry point
+        # bash …/… was not found".
+        $invocation = [regex]'\.specify/extensions/jira/scripts/bash/spec-kit-jira\.sh\s+(config|reconcile|mention|feature|--help)'
+        foreach ($doc in $script:Docs) {
+            $text = Get-Content -Raw -LiteralPath $doc.FullName
+            foreach ($line in ($text -split "`r?`n")) {
+                $isInvocation = $invocation.IsMatch($line)
+                $hasPrefix = $line.Contains('bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh')
+                if ($isInvocation -and -not $hasPrefix) {
+                    throw "$($doc.Name): invocation missing the bash prefix (C2): $($line.Trim())"
+                }
+                if ($hasPrefix -and -not $isInvocation) {
+                    throw "$($doc.Name): a bash-prefixed occurrence is not an invocation (C2): $($line.Trim())"
+                }
+            }
+        }
+    }
 }

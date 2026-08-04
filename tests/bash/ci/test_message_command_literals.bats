@@ -101,9 +101,65 @@ declared_commands() {
   # A message is only runnable as spelled if the path it spells is real.
   [ -f "${ROOT}/scripts/bash/spec-kit-jira.sh" ]
   [ -f "${ROOT}/scripts/powershell/spec-kit-jira.ps1" ]
-  # And the Bash entry point must be executable, or invoking it by path — which
-  # is what every command document instructs — cannot work after install.
-  [ -x "${ROOT}/scripts/bash/spec-kit-jira.sh" ]
+}
+
+# =============================================================================
+# (d) Path-as-filename versus path-as-invocation (C2)
+# =============================================================================
+
+@test "every bridge invocation in the shipped surface carries the bash prefix (C2)" {
+  local file line
+  for file in "${SCOPE[@]}"; do
+    while IFS= read -r line; do
+      [[ "${line}" =~ \.specify/extensions/jira/scripts/bash/spec-kit-jira\.sh[[:space:]]+(config|reconcile|mention|feature|--help) ]] || continue
+      [[ "${line}" == *"bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh"* ]] || {
+        printf '%s: invocation missing the bash prefix (C2):\n%s\n' "${file}" "${line}" >&2
+        return 1
+      }
+    done < "${file}"
+  done
+}
+
+@test "no filename-only reference to the Bash entry point carries the bash prefix (C2)" {
+  local file line
+  for file in "${SCOPE[@]}"; do
+    while IFS= read -r line; do
+      [[ "${line}" == *"bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh"* ]] || continue
+      [[ "${line}" =~ \.specify/extensions/jira/scripts/bash/spec-kit-jira\.sh[[:space:]]+(config|reconcile|mention|feature|--help) ]] || {
+        printf '%s: a bash-prefixed occurrence is not an invocation (C2):\n%s\n' "${file}" "${line}" >&2
+        return 1
+      }
+    done < "${file}"
+  done
+}
+
+# =============================================================================
+# (e) No permission wording, no mode-changing code (FR-005, FR-008, SC-002)
+# =============================================================================
+
+@test "no permission wording survives outside the credentials-secrecy exemption (FR-005, SC-002)" {
+  # The named exception is a chmod 600 on the local credentials file — a
+  # secrecy control, not an instruction to make the bridge runnable.
+  local file bad
+  for file in "${SCOPE[@]}"; do
+    bad="$(grep -inE 'chmod|not executable|executable bit' "${file}" | grep -viE 'chmod 600' || true)"
+    if [[ -n "${bad}" ]]; then
+      printf '%s: permission wording survives outside the FR-005 exemption:\n%s\n' "${file}" "${bad}" >&2
+      return 1
+    fi
+  done
+}
+
+@test "the Bash port never changes a file mode (FR-008)" {
+  local file bad
+  for file in "${SCOPE[@]}"; do
+    [[ "${file}" == *.sh ]] || continue
+    bad="$(grep -nE '\bchmod\b' "${file}" || true)"
+    if [[ -n "${bad}" ]]; then
+      printf '%s: changes a file mode, which FR-008 forbids:\n%s\n' "${file}" "${bad}" >&2
+      return 1
+    fi
+  done
 }
 
 @test "no message or documented flag names --repair-hooks — it no longer exists (T073)" {
@@ -137,7 +193,8 @@ declared_commands() {
   local bad
   bad="$(grep -nE 'specify extension add[[:space:]]+[^`]' "${SCOPE[@]}" \
     | grep -vE 'specify extension add --dev <path-to-spec-kit-jira> --force' \
-    | grep -vE 'specify extension add jira --from https://github\.com/Fyloss/spec-kit-jira/archive/refs/heads/main\.zip' || true)"
+    | grep -vE 'specify extension add jira --from https://github\.com/Fyloss/spec-kit-jira/archive/refs/heads/main\.zip' \
+    | grep -vE 'specify extension add --dev$' || true)"
   if [[ -n "${bad}" ]]; then
     printf 'host install command not in its runnable form:\n%s\n' "${bad}" >&2
     return 1

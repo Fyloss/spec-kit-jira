@@ -151,7 +151,7 @@ they are not migrated; see the CHANGELOG's Migration note.
   the install places nothing on your `PATH`, by design:
 
   ```sh
-  .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+  bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
   # on Windows:
   .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 --help
   ```

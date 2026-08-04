@@ -37,17 +37,17 @@ in a consuming repository, and assuming it does is what produced the reported
 
 ### When the entry point is missing — emit exactly as written
 
-When the entry point is not found or is not executable, emit the following text
+When the entry point is not found, emit the following text
 **exactly as written**. Do not paraphrase it, do not summarise it, and do not
 compose your own explanation of the situation:
 
 ```text
 Jira bridge not available: the entry point
 .specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found or
-is not executable. This spec-kit command completed normally and nothing was
-mirrored to Jira. To restore the bridge, reinstall the extension with
-`specify extension add --dev <path-to-spec-kit-jira> --force`.
+.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+This spec-kit command completed normally and nothing was mirrored to Jira. To
+restore the bridge, reinstall the extension with `specify extension add --dev
+<path-to-spec-kit-jira> --force`.
 ```
 
 ## Inputs (all deterministic)
@@ -64,7 +64,7 @@ mirrored to Jira. To restore the bridge, reinstall the extension with
 1. **Run the deterministic command** by its repository-relative path:
 
    ```text
-   .specify/extensions/jira/scripts/bash/spec-kit-jira.sh feature [TICKET-KEY] [--use-team <id>] [--json] [--dry-run] <description>
+   bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh feature [TICKET-KEY] [--use-team <id>] [--json] [--dry-run] <description>
    ```
 
    On Windows:

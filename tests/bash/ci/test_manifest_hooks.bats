@@ -125,6 +125,21 @@ hook_events() {
   [ "$status" -ne 0 ]
 }
 
+@test "requires.speckit_version stays >=0.13.0 — this feature does not raise the floor (FR-010, 014)" {
+  # Raising the floor would fix the defect only for hosts nobody currently
+  # runs and repair no existing tree (research R1) — forbidden outright by
+  # FR-010. This is a regression pin, not a red-first test: it is green from
+  # the day it is written, guarding the version bump in extension.yml.
+  run bash -c "cd '${ROOT}' && awk '
+    /^requires:/ { inblock = 1; next }
+    inblock && /^[^[:space:]#]/ { inblock = 0 }
+    inblock && /^[[:space:]]+speckit_version:/ { print; found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' extension.yml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'">=0.13.0"'* ]]
+}
+
 @test "the manifest's event set and the reader's classified set are identical" {
   # An event added to one and forgotten in the other would ship half-wired: the
   # install would register a hook nothing reports on, or the report would name an

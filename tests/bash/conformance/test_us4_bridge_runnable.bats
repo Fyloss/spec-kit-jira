@@ -48,22 +48,37 @@ snapshot_environment() {
   } | shasum -a 256 | awk '{print $1}'
 }
 
-@test "the Bash entry point runs by repository-relative path immediately after install (FR-012)" {
+@test "the Bash entry point runs through its interpreter with the mode stripped (FR-004, FR-012, C1)" {
+  # The archive install route drops file modes (research R1/R7); this is a
+  # deterministic reproduction of that outcome. `bash <path>` never depends on
+  # the entry point's own executable bit.
   harness_install "${REPO}"
-  [ -f "${REPO}/${BASH_ENTRY}" ]
-  # By PATH, from the repository root, with nothing done in between: no PATH
-  # edit, no chmod, no `bash` prefix. Exactly what the command documents instruct.
-  run bash -c "cd '${REPO}' && ./${BASH_ENTRY} --help"
+  chmod a-x "${REPO}/${BASH_ENTRY}"
+  run bash -c "cd '${REPO}' && bash ${BASH_ENTRY} --help"
   [ "$status" -eq 0 ]
   [[ "$output" == *"usage: spec-kit-jira"* ]]
 }
 
-@test "the entry point arrives EXECUTABLE — invoking it by path requires it (FR-012)" {
-  # Shipped as 0644, every documented invocation fails with "permission denied"
-  # in a freshly installed repository while the file plainly exists — a state
-  # indistinguishable, from the developer's side, from "not installed".
+@test "every declared subcommand is byte-identical between 0644 and 0755 (FR-009, C7)" {
+  # The point of the feature is that the mode stops meaning anything. Proved by
+  # comparison, not by inspection, over every subcommand the entry point
+  # declares — not just --help. Most exit on a degraded cause on this
+  # unconfigured scratch repository; that is fine and is the point (research R7).
   harness_install "${REPO}"
-  [ -x "${REPO}/${BASH_ENTRY}" ]
+  local sub
+  for sub in --help 'config --dry-run' 'feature --dry-run' 'reconcile --dry-run' 'mention --dry-run'; do
+    chmod 0755 "${REPO}/${BASH_ENTRY}"
+    run bash -c "cd '${REPO}' && bash ${BASH_ENTRY} ${sub} 2>&1; printf 'EXIT:%s' \$?"
+    local exec_output="$output"
+    chmod 0644 "${REPO}/${BASH_ENTRY}"
+    run bash -c "cd '${REPO}' && bash ${BASH_ENTRY} ${sub} 2>&1; printf 'EXIT:%s' \$?"
+    local noexec_output="$output"
+    [ "${exec_output}" = "${noexec_output}" ] || {
+      printf 'mode changed the output of "%s":\n0755: %s\n0644: %s\n' \
+        "${sub}" "${exec_output}" "${noexec_output}" >&2
+      return 1
+    }
+  done
 }
 
 @test "the PowerShell entry point is installed at the path the documents name (FR-013)" {

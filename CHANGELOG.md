@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-08-04
+
+### Fixed
+
+- A fresh install landed the Bash entry point at file mode `0644` on the route
+  the archive install actually uses, and the prerequisite gate then refused to
+  run it through its interpreter, so every documented command failed with "the
+  bridge entry point … was not found or is not executable" even though the
+  file was present and the reported "spec-kit-jira CLI not installed" symptom
+  never applied. Every published invocation now goes through `bash
+  <path> <args>` instead of relying on the entry point's own executable bit,
+  and `prereq_bridge_missing` (Bash) no longer consults the file mode at all —
+  it already matched the PowerShell twin, which never had this check. If you
+  were working around this by running `bash
+  .specify/extensions/jira/scripts/bash/spec-kit-jira.sh …` yourself, or by
+  `chmod +x`-ing the entry point after every install, neither is necessary
+  anymore; upgrading alone heals an already-broken tree.
+- The sixth degraded cause ("the bridge entry point is absent or not
+  executable") narrows to "absent" — a present-but-non-executable entry point
+  is no longer treated as broken, on either port.
+- On Windows, the `resume_with` command printed when a reconcile stops to
+  confirm recorded field defaults named a path that does not exist — the MSYS
+  runtime rewrites an argument that looks like a POSIX absolute path when it
+  spawns the native `jq`, so `/speckit.jira.reconcile <spec> --accept-defaults`
+  reached the operator as `C:/Program Files/Git/speckit.jira.reconcile <spec>
+  --accept-defaults`. The Bash port now builds that leading slash inside the jq
+  filter, where nothing can rewrite it, restoring byte parity with the
+  PowerShell port. Windows operators who could not copy-paste the resume
+  command no longer need to correct it by hand.
+- On Windows, the same confirmation-pending object was terminated with CRLF by
+  the PowerShell port and with LF by the Bash port: its three
+  `[Console]::Out.WriteLine` calls ended their line with `Environment.NewLine`
+  instead of the explicit `` "`n" `` the rest of the port writes. The payload
+  was identical; only the terminator diverged, which is why it stayed hidden
+  behind the defect above until that one was fixed. A consumer piping
+  `--json` output of a paused reconcile on Windows now receives the same bytes
+  as on macOS and Linux.
+
 ## [0.10.1] - 2026-08-04
 
 ### Fixed
@@ -614,7 +652,8 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.8.0...v0.9.0

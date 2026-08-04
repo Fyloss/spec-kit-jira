@@ -108,7 +108,7 @@ JIRA_BRIDGE_PWSH_ENTRY='.specify/extensions/jira/scripts/powershell/spec-kit-jir
 # as spelled (FR-018), which tests/bash/ci/test_message_command_literals.bats
 # asserts mechanically.
 output_bridge_invocation() {
-  printf '%s %s (on Windows: %s %s)' \
+  printf 'bash %s %s (on Windows: %s %s)' \
     "${JIRA_BRIDGE_BASH_ENTRY}" "$*" "${JIRA_BRIDGE_PWSH_ENTRY}" "$*"
 }
 

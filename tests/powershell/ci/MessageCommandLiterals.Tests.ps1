@@ -123,11 +123,57 @@ Describe '(c) Host commands' {
         )
         foreach ($row in (Select-ScopeLine)) {
             if ($row.Text -match 'specify extension add\s+[^`]') {
+                # The C4 fallback block wraps `--dev` and its placeholder across
+                # two lines; a line that IS that wrap point is not a third
+                # spelling, just this same runnable form split by the verbatim
+                # block's line width.
+                if ($row.Text.TrimEnd() -match 'specify extension add --dev$') { continue }
                 $ok = $false
                 foreach ($form in $runnable) { if ($row.Text.Contains($form)) { $ok = $true; break } }
                 if (-not $ok) {
                     throw "host install command not in a runnable form at $($row.File):$($row.Line): $($row.Text.Trim())"
                 }
+            }
+        }
+    }
+}
+
+Describe '(d) Path-as-filename versus path-as-invocation (C2)' {
+    It 'carries the bash prefix on every invocation, never on a bare filename' {
+        $invocation = [regex]'\.specify/extensions/jira/scripts/bash/spec-kit-jira\.sh\s+(config|reconcile|mention|feature|--help)'
+        foreach ($row in (Select-ScopeLine)) {
+            $isInvocation = $invocation.IsMatch($row.Text)
+            $hasPrefix = $row.Text.Contains('bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh')
+            if ($isInvocation -and -not $hasPrefix) {
+                throw "invocation missing the bash prefix (C2) at $($row.File):$($row.Line): $($row.Text.Trim())"
+            }
+            if ($hasPrefix -and -not $isInvocation) {
+                throw "a bash-prefixed occurrence is not an invocation (C2) at $($row.File):$($row.Line): $($row.Text.Trim())"
+            }
+        }
+    }
+}
+
+Describe '(e) No permission wording, no mode-changing code (FR-005, FR-008, SC-002)' {
+    It 'has no permission wording outside the credentials-secrecy exemption' {
+        # The named exception is a chmod 600 on the local credentials file — a
+        # secrecy control, not an instruction to make the bridge runnable.
+        foreach ($row in (Select-ScopeLine)) {
+            if ($row.Text -match '(?i)chmod|not executable|executable bit') {
+                if ($row.Text -notmatch '(?i)chmod 600') {
+                    throw "permission wording survives outside the FR-005 exemption at $($row.File):$($row.Line): $($row.Text.Trim())"
+                }
+            }
+        }
+    }
+
+    It 'never changes a file mode from the PowerShell port' {
+        foreach ($f in $script:Scope) {
+            if ($f.Extension -notin '.psm1', '.ps1') { continue }
+            if ($f.DirectoryName -notmatch 'scripts[\\/]powershell') { continue }
+            $text = Get-Content -Raw -LiteralPath $f.FullName
+            if ($text -match 'Set-ItemProperty|\[System\.IO\.UnixFileMode\]|UnixFileMode') {
+                throw "$($f.FullName) changes a file mode, which FR-008 forbids"
             }
         }
     }

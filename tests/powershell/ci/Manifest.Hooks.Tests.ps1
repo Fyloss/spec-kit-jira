@@ -52,6 +52,17 @@ BeforeAll {
     }
 }
 
+Describe 'Version floor (FR-010, 014)' {
+    It 'keeps requires.speckit_version at >=0.13.0 — this feature does not raise the floor' {
+        # Raising the floor would fix the defect only for hosts nobody currently
+        # runs and repair no existing tree (research R1) — forbidden outright by
+        # FR-010. This is a regression pin, not a red-first test: it is green
+        # from the day it is written, guarding the version bump in extension.yml.
+        $line = Get-ManifestBlock -Key 'requires' | Where-Object { $_ -match '^\s+speckit_version:' }
+        $line | Should -Match '">=0\.13\.0"'
+    }
+}
+
 Describe 'Placement (research R1)' {
     It 'declares hooks: as a TOP-LEVEL key' {
         @($script:ManifestLines | Where-Object { $_ -match '^hooks:\s*$' }).Count | Should -Be 1

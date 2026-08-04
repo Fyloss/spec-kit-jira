@@ -88,7 +88,7 @@ sequenceDiagram
     alt no active feature
         Agent-->>Dev: nothing at all — the step is inert
     else
-        Agent->>Bridge: .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile spec.md --json
+        Agent->>Bridge: bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile spec.md --json
         Bridge->>Jira: read, then write only what changed
         Jira-->>Bridge: responses
         Bridge-->>Agent: run summary JSON + exit code
