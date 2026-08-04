@@ -229,15 +229,6 @@ _cfg_raise_duplicate_key() {
     "${_cfg_file}" "${line}" "${redacted_key}" "${first_line}" "${_cfg_file}")"
 }
 
-# _cfg_map_entry_key <content> — locate a mapping entry's DELIMITER COLON by
-# structure, not by an enumerated key charset (contracts/yaml-key-grammar.md
-# §1): a key of any script and ordinary punctuation is recognised, while a bare
-# URL value (colon followed by a non-whitespace character) is not. On success,
-# sets _CFG_KEY (verbatim for a quoted key, right-trimmed for a bare one) and
-# _CFG_REST (the left-trimmed value text) and returns 0. On failure — no
-# delimiter colon found, or the key is empty after trimming (§1.2 step 4,
-# §1.1 by the same rule) — clears both and returns 1: "not a mapping entry",
-# not yet a verdict on whether that is fatal (§1.4 leaves that to the caller).
 # _cfg_decode_escapes <body> — undo the writer's escaping (contracts/
 # yaml-string-escaping.md §2.1): a left-to-right walk where `\"` becomes `"`
 # and `\\` becomes `\`; any other backslash, including one at the end of the
@@ -262,6 +253,15 @@ _cfg_decode_escapes() {
   printf '%s' "${out}"
 }
 
+# _cfg_map_entry_key <content> — locate a mapping entry's DELIMITER COLON by
+# structure, not by an enumerated key charset (contracts/yaml-key-grammar.md
+# §1): a key of any script and ordinary punctuation is recognised, while a bare
+# URL value (colon followed by a non-whitespace character) is not. On success,
+# sets _CFG_KEY (verbatim for a quoted key, right-trimmed for a bare one) and
+# _CFG_REST (the left-trimmed value text) and returns 0. On failure — no
+# delimiter colon found, or the key is empty after trimming (§1.2 step 4,
+# §1.1 by the same rule) — clears both and returns 1: "not a mapping entry",
+# not yet a verdict on whether that is fatal (§1.4 leaves that to the caller).
 _CFG_KEY=""
 _CFG_REST=""
 _cfg_map_entry_key() {
@@ -574,8 +574,8 @@ yemit("")'
 
 # config_to_yaml — read a JSON value on stdin, print its canonical YAML on stdout
 # (no trailing newline; the caller adds exactly one when writing the file).
-# Refuses (EXIT_CONFIG) a key or string value containing `"` or `\`, printing a
-# named error per offending path and nothing else — no partial YAML is ever
+# Refuses (EXIT_CONFIG) a key or string value containing a line break, printing
+# a named error per offending path and nothing else — no partial YAML is ever
 # emitted for a document this writer cannot faithfully represent.
 #
 # This is the port's largest MULTI-LINE jq read and the only one whose bytes land

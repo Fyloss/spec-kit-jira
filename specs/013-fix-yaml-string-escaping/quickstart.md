@@ -48,9 +48,13 @@ config: allowed[0]: a string value here contains " or \, ...   exit 4
 --- decoded ---
 {"allowed":["Platform \"legacy\""]}          <- the label, intact
 --- rewritten ---
-allowed:
-  - "Platform \"legacy\""                    <- byte-identical to the input
+"allowed":
+  - "Platform \"legacy\""                    <- value byte-identical to the input
 ```
+
+The key comes back double-quoted (`"allowed"` rather than the bare `allowed` of the input) —
+unrelated to this fix, the writer has quoted every key unconditionally since 007
+(yaml-key-grammar.md §2.1). Only the value is the byte-identical part this feature guards.
 
 > The `bash -c` wrapper is required: sourcing a port script at the top level of the tool's shell
 > corrupts its own `BASH_SOURCE` paths.
