@@ -182,3 +182,121 @@ setup() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.stories[0].body.fields | keys | sort | join(",")' <<< "$output")" = "description,issuetype,parent,project,summary" ]
 }
+
+# --- 015, T008 [US1] — the encoding table (contract §1.3, data-model.md §2) -
+# `plan_resolve_field_defaults` emits `field_defaults_encoded` alongside the
+# unchanged `field_defaults`, shaping each value for the wire per its
+# field's declared schema_type.
+
+setup_015() {
+  ITYPES_015='[{"logical_name":"Epic","id":"10101"}]'
+}
+
+@test "015 T008 — a select-list (option) default is encoded as {value: v}" {
+  setup_015
+  local df='{"10101":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA"]}]}'
+  local recorded='{"Epic":{"Region":"EMEA"}}'
+  run plan_resolve_field_defaults "${ITYPES_015}" "${df}" "${recorded}" "[]"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.field_defaults_encoded."10101"."customfield_1"' <<< "$output")" = '{"value":"EMEA"}' ]
+  [ "$(jq -r '.field_defaults."10101"."customfield_1"' <<< "$output")" = "EMEA" ]
+}
+
+@test "015 T008 — each named-entity schema_type is encoded as {name: v}" {
+  setup_015
+  for st in priority resolution version component group; do
+    local df='{"10101":[{"logical_name":"F","field_id":"customfield_2","schema_type":"'"${st}"'","required":true,"defaultable":true,"allowed_values":[]}]}'
+    local recorded='{"Epic":{"F":"Val"}}'
+    run plan_resolve_field_defaults "${ITYPES_015}" "${df}" "${recorded}" "[]"
+    [ "$status" -eq 0 ]
+    [ "$(jq -c '.field_defaults_encoded."10101"."customfield_2"' <<< "$output")" = '{"name":"Val"}' ]
+  done
+}
+
+@test "015 T008 — a string-typed default falls through unencoded" {
+  setup_015
+  local df='{"10101":[{"logical_name":"F","field_id":"customfield_3","schema_type":"string","required":true,"defaultable":true,"allowed_values":[]}]}'
+  local recorded='{"Epic":{"F":"Plain text"}}'
+  run plan_resolve_field_defaults "${ITYPES_015}" "${df}" "${recorded}" "[]"
+  [ "$(jq -r '.field_defaults_encoded."10101"."customfield_3"' <<< "$output")" = "Plain text" ]
+}
+
+@test "015 T008 (FR-004) — a user-typed default falls through unencoded, deliberately excluded from the table" {
+  setup_015
+  local df='{"10101":[{"logical_name":"Business Owner","field_id":"customfield_40011","schema_type":"user","required":true,"defaultable":true,"allowed_values":[]}]}'
+  local recorded='{"Epic":{"Business Owner":"Platform Team"}}'
+  run plan_resolve_field_defaults "${ITYPES_015}" "${df}" "${recorded}" "[]"
+  [ "$(jq -r '.field_defaults_encoded."10101"."customfield_40011"' <<< "$output")" = "Platform Team" ]
+}
+
+@test "015 T008 — a cascading select (option-with-child) falls through unencoded — deliberately absent from the table" {
+  setup_015
+  local df='{"10101":[{"logical_name":"Cascade","field_id":"customfield_4","schema_type":"option-with-child","required":true,"defaultable":true,"allowed_values":[]}]}'
+  local recorded='{"Epic":{"Cascade":"Parent Value"}}'
+  run plan_resolve_field_defaults "${ITYPES_015}" "${df}" "${recorded}" "[]"
+  [ "$(jq -r '.field_defaults_encoded."10101"."customfield_4"' <<< "$output")" = "Parent Value" ]
+}
+
+@test "015 T008 (FR-006) — the non-string guard: a non-string recorded value passes through unchanged even for an option field" {
+  setup_015
+  local df='{"10101":[{"logical_name":"Flag","field_id":"customfield_5","schema_type":"option","required":false,"defaultable":true,"allowed_values":[]}]}'
+  local recorded='[{"type":"Epic","label":"Flag","value":true}]'
+  run plan_resolve_field_defaults "${ITYPES_015}" "${df}" "{}" "${recorded}"
+  [ "$(jq -c '.field_defaults_encoded."10101"."customfield_5"' <<< "$output")" = "true" ]
+  [ "$(jq -c '.field_defaults."10101"."customfield_5"' <<< "$output")" = "true" ]
+}
+
+@test "015 T050 (US2/AC4) — a this-run answer on an option-typed field encodes identically to the same text recorded" {
+  setup_015
+  local df='{"10101":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA"]}]}'
+  local answers='[{"type":"Epic","label":"Region","value":"EMEA"}]'
+  run plan_resolve_field_defaults "${ITYPES_015}" "${df}" "{}" "${answers}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.field_defaults_encoded."10101"."customfield_1"' <<< "$output")" = '{"value":"EMEA"}' ]
+
+  local recorded='{"Epic":{"Region":"EMEA"}}'
+  run plan_resolve_field_defaults "${ITYPES_015}" "${df}" "${recorded}" "[]"
+  [ "$(jq -c '.field_defaults_encoded."10101"."customfield_1"' <<< "$output")" = '{"value":"EMEA"}' ]
+}
+
+@test "015 T008 (FR-007) — a label resolving to no field falls through as recorded, and unresolved stays byte-identical to today" {
+  setup_015
+  local df='{"10101":[]}'
+  local recorded='{"Epic":{"Nonexistent":"X"}}'
+  run plan_resolve_field_defaults "${ITYPES_015}" "${df}" "${recorded}" "[]"
+  [ "$(jq -r '.field_defaults | length' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.field_defaults_encoded | length' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.unresolved[0].reason' <<< "$output")" = "unknown field label" ]
+}
+
+@test "015 T008 (FR-007) — a field with absent schema_type falls through as recorded" {
+  setup_015
+  local df='{"10101":[{"logical_name":"F","field_id":"customfield_6","required":true,"defaultable":true,"allowed_values":[]}]}'
+  local recorded='{"Epic":{"F":"Val"}}'
+  run plan_resolve_field_defaults "${ITYPES_015}" "${df}" "${recorded}" "[]"
+  [ "$(jq -r '.field_defaults_encoded."10101"."customfield_6"' <<< "$output")" = "Val" ]
+}
+
+@test "015 (data-model §2 I1/I2) — field_defaults is unchanged, and both maps share an identical key set" {
+  setup_015
+  local df='{"10101":[
+    {"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA"]},
+    {"logical_name":"F","field_id":"customfield_3","schema_type":"string","required":true,"defaultable":true,"allowed_values":[]}
+  ]}'
+  local recorded='{"Epic":{"Region":"EMEA","F":"Plain"}}'
+  run plan_resolve_field_defaults "${ITYPES_015}" "${df}" "${recorded}" "[]"
+  [ "$(jq -r '.field_defaults."10101" | keys | sort | join(",")' <<< "$output")" = "customfield_1,customfield_3" ]
+  [ "$(jq -r '.field_defaults_encoded."10101" | keys | sort | join(",")' <<< "$output")" = "customfield_1,customfield_3" ]
+  [ "$(jq -r '.field_defaults."10101".Region // empty' <<< "$output")" = "" ]
+}
+
+@test "015 (data-model §2 I4) — nothing recorded and no answer: both maps are {} and the output is byte-identical to today's" {
+  setup_015
+  local df='{"10101":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":false,"defaultable":true,"allowed_values":[]}]}'
+  run plan_resolve_field_defaults "${ITYPES_015}" "${df}" "{}" "[]"
+  [ "$status" -eq 0 ]
+  [ "$(jq -cS 'keys' <<< "$output")" = '["field_default_sources","field_defaults","field_defaults_encoded","unresolved"]' ]
+  [ "$(jq -r '.field_defaults | length' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.field_defaults_encoded | length' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.unresolved | length' <<< "$output")" -eq 0 ]
+}

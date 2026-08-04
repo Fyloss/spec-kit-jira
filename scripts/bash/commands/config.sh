@@ -313,7 +313,7 @@ _config_field_default_merge() {
 
 # _config_field_default_report <itypes-json> <defaultable-by-type-json>
 # <ask-types-json> <merged-json> <bridge-written-type-ids-json> — three
-# non-blocking reports plus one refusal trigger, computed over the merged
+# non-blocking reports plus two refusal triggers, computed over the merged
 # (already-valid) field_defaults entry:
 #   - orphaned: a recorded type or field label the project no longer offers
 #     (contract §2.8, FR-008) — never blocks.
@@ -326,6 +326,21 @@ _config_field_default_merge() {
 #     neither a recorded value nor a this-run answer — the ceremony's own
 #     closed question (contract §2.1-§2.3); a non-empty result is this
 #     function's one refusal trigger.
+#   - outside_allowed (015, research R5, contract §6, data-model.md §7): a
+#     MERGED entry — recorded or this-run, either can reach here — whose
+#     value is not one of its field's `allowed_values`. Examined only when
+#     the type name resolves (A1), the label resolves to a defaultable field
+#     of that type (A2), that field's `allowed_values` is non-empty (A3),
+#     and the recorded value is a STRING (A4) — an entry failing A1/A2 stays
+#     classified `orphaned` and never blocks (011 FR-008), and an absent
+#     list is not an empty one. A4 keeps FR-006's escape hatch open: a value
+#     an operator wrote as an object or an array is the shape the bridge
+#     does not derive, obeyed literally, and it can never be a member of an
+#     `allowed_values` list that holds option labels — checking it would
+#     refuse exactly the value the spec promises to pass through. A
+#     non-empty result is a refusal trigger, like `pending`; the recorded
+#     value itself never appears in the entry, only the label, the type,
+#     and the candidates (Principle IV).
 _config_field_default_report() {
   local itypes="${1:-}" defaultable="${2:-}" ask_types="${3:-}" merged="${4:-}" bridge="${5:-}"
   [[ -z "${itypes}" ]] && itypes='[]'
@@ -362,6 +377,19 @@ _config_field_default_report() {
           | select(.required == true and .defaultable == true)
           | select( ($merged[$tname][.logical_name] // null) == null )
           | {type: $tname, label: .logical_name, allowed_values: (.allowed_values // [])}
+        ],
+        outside_allowed: [
+          ($merged | to_entries)[] as $te
+          | ($te.key) as $tname | ($te.value) as $labels | (typeId($tname)) as $tid
+          | select($tid != null)
+          | ($labels | to_entries)[] as $le
+          | ($le.key) as $lbl | ($le.value) as $val
+          | (first((($df[$tid]) // [])[] | select(.logical_name == $lbl)) // null) as $meta
+          | select($meta != null)
+          | ($meta.allowed_values // []) as $av
+          | select(($val | type) == "string")
+          | select(($av | length) > 0 and ($av | index($val)) == null)
+          | {type: $tname, label: $lbl, candidates: $av}
         ]
       }
   '
@@ -936,6 +964,20 @@ cmd_config() {
     # not merely recorded (FR-012).
     fd_bridge_ids="$(jq -cn --argjson roles "${roles}" '[$roles.specification, $roles.story, $roles.task] | map(select(. != null) | .id)')"
     fd_report="$(_config_field_default_report "${itypes}" "${df_map}" "${fd_ask_types}" "${fd_merged}" "${fd_bridge_ids}")"
+    # 015, research R5, contract §6.3: a recorded value outside its field's
+    # allowed_values refuses HERE, at configuration time — the whole point of
+    # US4 is that this check no longer waits for a hook to fire mid-task.
+    # Reuses the flag path's own "outside_allowed" message and exit code
+    # (`_config_report_field_default_problems`), so a refusal from the file
+    # is indistinguishable from one from a flag; the recorded value itself
+    # never reaches the message or any structured output. Zero writes: this
+    # runs before the loop's own config.yml/local.yml write, below.
+    local fd_outside_allowed
+    fd_outside_allowed="$(jq -cn --argjson r "${fd_report}" '[$r.outside_allowed[] | . + {kind:"outside_allowed"}]')"
+    if [[ "$(jq -r 'length' <<< "${fd_outside_allowed}")" -gt 0 ]]; then
+      _config_report_field_default_problems "${pkey}" "${fd_outside_allowed}" "${json}"
+      return "${EXIT_CONFIG}"
+    fi
     # A pending question (contract §6: "consolidated question pending | 0 —
     # not a failure") is NON-BLOCKING at config time: the ceremony's role is
     # discovery and recording, not gating a creation. Whether the run can

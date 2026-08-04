@@ -27,7 +27,7 @@ Describe 'Invoke-JiraApplyWriteSetWithRecognition — the task tier' {
         $tasksFile = Join-Path $TestDrive 'tasks.md'
         Set-Content -NoNewline -Path $specFile -Value "# Title`n"
         Set-Content -NoNewline -Path $tasksFile -Value "- [ ] T001 A task`n"
-        $rc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $script:SpecRef -SpecFile $specFile -TasksActionsJson $tasks -TasksFile $tasksFile
+        $rc = (Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $script:SpecRef -SpecFile $specFile -TasksActionsJson $tasks -TasksFile $tasksFile).ExitCode
         $rc | Should -Be 0
         $calls = (Get-JiraMockCallLog -Mock $script:M) -split "`n" | Where-Object { $_ -eq 'POST /rest/api/3/issue' }
         @($calls).Count | Should -Be 3
@@ -42,7 +42,7 @@ Describe 'Invoke-JiraApplyWriteSetWithRecognition — the task tier' {
         $tasksFile = Join-Path $TestDrive 'tasks.md'
         Set-Content -NoNewline -Path $specFile -Value "# Title`n"
         Set-Content -NoNewline -Path $tasksFile -Value "- [ ] T001 A task`n"
-        $rc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $script:SpecRef -SpecFile $specFile -TasksActionsJson $tasks -TasksFile $tasksFile
+        $rc = (Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $script:SpecRef -SpecFile $specFile -TasksActionsJson $tasks -TasksFile $tasksFile).ExitCode
         $rc | Should -Be 0
         (Get-JiraMockIssueField -Mock $script:M -Key 'COMP-2' -Path 'fields.parent.key') | Should -Be 'COMP-1'
     }
@@ -57,7 +57,7 @@ Describe 'Invoke-JiraApplyWriteSetWithRecognition — the task tier' {
         $tasksFile = Join-Path $TestDrive 'tasks.md'
         Set-Content -NoNewline -Path $specFile -Value "# Title`n"
         Set-Content -NoNewline -Path $tasksFile -Value "- [ ] T001 A`n- [ ] T002 B`n"
-        $rc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $script:SpecRef -SpecFile $specFile -TasksActionsJson $tasks -TasksFile $tasksFile -KnownStoryKeysJson $knownKeys
+        $rc = (Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $script:SpecRef -SpecFile $specFile -TasksActionsJson $tasks -TasksFile $tasksFile -KnownStoryKeysJson $knownKeys).ExitCode
         $rc | Should -Be 0
         $calls = (Get-JiraMockCallLog -Mock $script:M) -split "`n" | Where-Object { $_ -eq 'POST /rest/api/3/issue' }
         @($calls).Count | Should -Be 1
@@ -72,7 +72,7 @@ Describe 'Invoke-JiraApplyWriteSetWithRecognition — the task tier' {
         $tasksFile = Join-Path $TestDrive 'tasks.md'
         Set-Content -NoNewline -Path $specFile -Value "# Title`n"
         Set-Content -NoNewline -Path $tasksFile -Value "- [ ] T001 A task`n<!-- speckit-jira task=5555555555555555 creating -->`n"
-        $rc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $script:SpecRef -SpecFile $specFile -TasksActionsJson $tasks -TasksFile $tasksFile
+        $rc = (Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $script:SpecRef -SpecFile $specFile -TasksActionsJson $tasks -TasksFile $tasksFile).ExitCode
         $rc | Should -Be 0
         (Get-Content -Raw $tasksFile) | Should -BeLike '*task=5555555555555555 ticket=COMP-1*'
     }
@@ -83,7 +83,7 @@ Describe 'Invoke-JiraApplyWriteSetWithRecognition — the task tier' {
         $plan = "{`"parent`":{`"method`":`"POST`",`"url`":`"$($script:M.BaseUrl)/rest/api/3/issue`",`"body`":{`"fields`":{`"project`":{`"key`":`"COMP`"},`"summary`":`"The Epic`"}},`"local_id`":`"aaaaaaaaaaaaaaaa`",`"role`":`"parent`"},`"stories`":[{`"method`":`"POST`",`"url`":`"$($script:M.BaseUrl)/rest/api/3/issue`",`"body`":{`"fields`":{`"project`":{`"key`":`"COMP`"},`"summary`":`"Add billing`",`"parent`":{`"key`":`"<resolved at apply time>`"}}},`"local_id`":`"1111111111111111`",`"role`":`"story`"}]}"
         $specFile = Join-Path $TestDrive 'spec2.md'
         Set-Content -NoNewline -Path $specFile -Value "# Title`n"
-        $rc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $script:SpecRef -SpecFile $specFile
+        $rc = (Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $script:SpecRef -SpecFile $specFile).ExitCode
         $rc | Should -Be 0
         $calls = (Get-JiraMockCallLog -Mock $script:M) -split "`n" | Where-Object { $_ -eq 'POST /rest/api/3/issue' }
         @($calls).Count | Should -Be 2
@@ -98,8 +98,14 @@ Describe 'Invoke-JiraApplyWriteSetWithRecognition — the task tier' {
         $tasksFile = Join-Path $TestDrive 'tasks.md'
         Set-Content -NoNewline -Path $specFile -Value "# Title`n"
         Set-Content -NoNewline -Path $tasksFile -Value "- [ ] T001 A task`n"
-        $rc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $script:SpecRef -SpecFile $specFile -TasksActionsJson $tasks -TasksFile $tasksFile
-        $rc | Should -Be 9
+        $result = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $script:SpecRef -SpecFile $specFile -TasksActionsJson $tasks -TasksFile $tasksFile
+        # 015 contract §4.2 (rule O4): EVERY return of this function carries the
+        # outcome shape, the two pre-write guards included — the task sweep is
+        # the third, and 012 added it. A bare exit code here reads as
+        # $result.ExitCode -eq $null at the call site, i.e. exit 0: a refused
+        # write reported as a clean run.
+        $result.ExitCode | Should -Be 9
+        @($result.Created).Count | Should -Be 0
         (Get-JiraMockCallLog -Mock $script:M) | Should -BeNullOrEmpty
     }
 }

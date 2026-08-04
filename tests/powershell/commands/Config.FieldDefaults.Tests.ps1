@@ -3,6 +3,11 @@
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
     Import-Module (Join-Path $Root 'scripts/powershell/commands/Config.psm1') -Force
+    # Config.psm1 -Force-imports lib/Output.psm1 internally, which rebinds
+    # ConvertTo-JiraJsonValue into Config.psm1's own scope — reimport here
+    # so this test file keeps direct access to it too (see memory:
+    # powershell-import-force-clobbers-caller-scope).
+    Import-Module (Join-Path $Root 'scripts/powershell/lib/Output.psm1') -Force
     $script:Mock = Join-Path $Root 'tests/conformance/mock-jira'
     $script:Fixture = Join-Path $Root 'tests/conformance/fixtures/repo-with-field-defaults'
     Import-Module (Join-Path $Mock 'Mock.psm1') -Force
@@ -312,6 +317,115 @@ Describe 'Get-JiraFieldDefaultAnswerProblem / Merge-JiraFieldDefault / Get-JiraF
     }
 }
 
+Describe '015 T035 — a recorded value outside allowed_values (contract §6), mirror of the bash 015 cases' {
+    BeforeAll {
+        $script:ITypes = '[{"logical_name":"Epic","id":"10101"},{"logical_name":"Story","id":"10102"}]'
+        $script:Defaultable = '{"10101":[' +
+            '{"logical_name":"Business Owner","field_id":"customfield_40011","schema_type":"user","required":true,"defaultable":true,"allowed_values":[]},' +
+            '{"logical_name":"Program Increment","field_id":"customfield_40012","schema_type":"option","required":true,"defaultable":true,"allowed_values":["PI-2026-Q2","PI-2026-Q3"]},' +
+            '{"logical_name":"Impediment","field_id":"customfield_40013","schema_type":"array","required":false,"defaultable":false,"undefaultable_reason":"a list of values cannot be expressed as a single recorded value"}' +
+            ']}'
+    }
+
+    It 'a recorded value outside allowed_values is a refusal trigger (contract §6.1/§6.2)' {
+        $merged = '{"Epic":{"Program Increment":"PI-2020-Q1"}}'
+        $out = Get-JiraFieldDefaultsReport -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $script:Defaultable -AskTypesJson '["Epic"]' -MergedJson $merged -BridgeTypeIdsJson '["10101"]' | ConvertFrom-Json
+        @($out.outside_allowed).Count | Should -Be 1
+        $out.outside_allowed[0].type | Should -Be 'Epic'
+        $out.outside_allowed[0].label | Should -Be 'Program Increment'
+        (@($out.outside_allowed[0].candidates) -join ',') | Should -Be 'PI-2026-Q2,PI-2026-Q3'
+    }
+
+    It 'a recorded value inside allowed_values is not outside_allowed' {
+        $merged = '{"Epic":{"Program Increment":"PI-2026-Q3"}}'
+        $out = Get-JiraFieldDefaultsReport -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $script:Defaultable -AskTypesJson '["Epic"]' -MergedJson $merged -BridgeTypeIdsJson '["10101"]' | ConvertFrom-Json
+        @($out.outside_allowed).Count | Should -Be 0
+    }
+
+    It 'contract §6.2 A1/A2 — an unresolvable type or label stays orphaned, never outside_allowed (011 FR-008 must not regress)' {
+        $merged = '{"Retired Type":{"Program Increment":"NotAValue"},"Epic":{"Retired Field":"NotAValue"}}'
+        $out = Get-JiraFieldDefaultsReport -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $script:Defaultable -AskTypesJson '["Epic"]' -MergedJson $merged -BridgeTypeIdsJson '["10101"]' | ConvertFrom-Json
+        @($out.outside_allowed).Count | Should -Be 0
+        @($out.orphaned).Count | Should -Be 2
+    }
+
+    It 'contract §6.2 A3 — a field with no enumerated allowed_values is never outside_allowed' {
+        $merged = '{"Epic":{"Business Owner":"Anything At All"}}'
+        $out = Get-JiraFieldDefaultsReport -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $script:Defaultable -AskTypesJson '["Epic"]' -MergedJson $merged -BridgeTypeIdsJson '["10101"]' | ConvertFrom-Json
+        @($out.outside_allowed).Count | Should -Be 0
+    }
+
+    It 'FR-006 — a hand-recorded structured value on an enumerated field is not outside_allowed (the escape hatch must survive the check)' {
+        # The escape hatch of US1 scenario 6 / FR-006: an operator states the
+        # shape the bridge does not derive, and the bridge obeys it literally.
+        # allowed_values holds option LABELS, so a structured value can never
+        # be a member of it.
+        $merged = '{"Epic":{"Program Increment":{"value":"PI-2026-Q3"}}}'
+        $out = Get-JiraFieldDefaultsReport -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $script:Defaultable -AskTypesJson '["Epic"]' -MergedJson $merged -BridgeTypeIdsJson '["10101"]' | ConvertFrom-Json
+        @($out.outside_allowed).Count | Should -Be 0
+    }
+
+    It 'FR-006 — an array, a number, a boolean and a null recorded value are never outside_allowed' {
+        $df = '{"10101":[' +
+            '{"logical_name":"A","field_id":"customfield_1","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]},' +
+            '{"logical_name":"B","field_id":"customfield_2","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]},' +
+            '{"logical_name":"C","field_id":"customfield_3","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]},' +
+            '{"logical_name":"D","field_id":"customfield_4","schema_type":"option","required":false,"defaultable":true,"allowed_values":["x"]}' +
+            ']}'
+        $merged = '{"Epic":{"A":[{"value":"x"}],"B":7,"C":true,"D":null}}'
+        $out = Get-JiraFieldDefaultsReport -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $df -AskTypesJson '["Epic"]' -MergedJson $merged -BridgeTypeIdsJson '["10101"]' | ConvertFrom-Json
+        @($out.outside_allowed).Count | Should -Be 0
+    }
+
+    It 'FR-006 — a structured value passes while a genuinely wrong string beside it still refuses' {
+        $df = '{"10101":[' +
+            '{"logical_name":"Program Increment","field_id":"customfield_40012","schema_type":"option","required":true,"defaultable":true,"allowed_values":["PI-2026-Q2","PI-2026-Q3"]},' +
+            '{"logical_name":"Region","field_id":"customfield_40014","schema_type":"option","required":false,"defaultable":true,"allowed_values":["EMEA","APAC"]}' +
+            ']}'
+        $merged = '{"Epic":{"Program Increment":{"id":"10250"},"Region":"NotAllowed"}}'
+        $out = Get-JiraFieldDefaultsReport -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $df -AskTypesJson '["Epic"]' -MergedJson $merged -BridgeTypeIdsJson '["10101"]' | ConvertFrom-Json
+        @($out.outside_allowed).Count | Should -Be 1
+        $out.outside_allowed[0].label | Should -Be 'Region'
+    }
+
+    It 'refusals are batched into one pass, never one refusal per entry' {
+        $df = '{"10101":[' +
+            '{"logical_name":"Program Increment","field_id":"customfield_40012","schema_type":"option","required":true,"defaultable":true,"allowed_values":["PI-2026-Q2","PI-2026-Q3"]},' +
+            '{"logical_name":"Region","field_id":"customfield_40014","schema_type":"option","required":false,"defaultable":true,"allowed_values":["EMEA","APAC"]}' +
+            ']}'
+        $merged = '{"Epic":{"Program Increment":"PI-2020-Q1","Region":"NotAllowed"}}'
+        $out = Get-JiraFieldDefaultsReport -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $df -AskTypesJson '["Epic"]' -MergedJson $merged -BridgeTypeIdsJson '["10101"]' | ConvertFrom-Json
+        @($out.outside_allowed).Count | Should -Be 2
+    }
+
+    It 'FR-014 — the refusal names the label and the candidates; the recorded value appears in neither the message nor the structured output' {
+        $merged = '{"Epic":{"Program Increment":"A Secret Recorded Value"}}'
+        $reportJson = Get-JiraFieldDefaultsReport -IssueTypesJson $script:ITypes -DefaultableFieldsByTypeJson $script:Defaultable -AskTypesJson '["Epic"]' -MergedJson $merged -BridgeTypeIdsJson '["10101"]'
+        $report = $reportJson | ConvertFrom-Json
+        $problems = [System.Collections.Generic.List[object]]::new()
+        foreach ($oa in @($report.outside_allowed)) {
+            $problems.Add([ordered]@{ kind = 'outside_allowed'; type = $oa.type; label = $oa.label; candidates = @($oa.candidates) })
+        }
+        $sw = [System.IO.StringWriter]::new()
+        $se = [System.IO.StringWriter]::new()
+        $origOut = [Console]::Out
+        $origErr = [Console]::Error
+        [Console]::SetOut($sw)
+        [Console]::SetError($se)
+        try {
+            Write-JiraFieldDefaultProblemsReport -ProjectKey 'PM' -ProblemsJson (ConvertTo-JiraJsonValue $problems) -Json $false
+        }
+        finally {
+            [Console]::SetOut($origOut)
+            [Console]::SetError($origErr)
+        }
+        $se.ToString() | Should -Match 'Program Increment'
+        $se.ToString() | Should -Match ([regex]::Escape('PI-2026-Q2, PI-2026-Q3'))
+        $se.ToString() | Should -Not -Match ([regex]::Escape('A Secret Recorded Value'))
+        $sw.ToString() | Should -Not -Match ([regex]::Escape('A Secret Recorded Value'))
+    }
+}
+
 Describe 'End-to-end — the full ceremony against the mock (T035/T037 spirit)' {
     BeforeEach {
         $script:Work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
@@ -427,6 +541,23 @@ Describe 'End-to-end — the full ceremony against the mock (T035/T037 spirit)' 
         finally { [Console]::SetError($origErr) }
         $code | Should -Be 4
         $se.ToString() | Should -Match 'duplicate key'
+        (Get-Content -Raw -LiteralPath $path) | Should -Be $before
+    }
+
+    It '015 — a recorded value outside allowed_values refuses the whole ceremony (exit 4) and writes nothing' {
+        $null = Invoke-JiraConfig -Arguments @('config', 'FD', '--field-default', 'FD=Deliverable=Business Owner=Platform Team', '--field-default', 'FD=Deliverable=Program Increment=PI-2026-Q3', '--json')
+        $path = Join-Path $env:JIRA_CONFIG_DIR 'config.yml'
+        $handEditedMap = '{"FD":{"ask":true,"Deliverable":{"Business Owner":"Platform Team","Program Increment":"PI-2020-Q1"}}}'
+        Set-JiraFieldDefaultsBlock -Path $path -MapJson $handEditedMap -DryRun $false | Out-Null
+        $before = Get-Content -Raw -LiteralPath $path
+        $se = [System.IO.StringWriter]::new()
+        $origErr = [Console]::Error
+        [Console]::SetError($se)
+        try { $code = Invoke-JiraConfig -Arguments @('config', 'FD', '--json') }
+        finally { [Console]::SetError($origErr) }
+        $code | Should -Be 4
+        $se.ToString() | Should -Match 'Program Increment'
+        $se.ToString() | Should -Match 'must be one of'
         (Get-Content -Raw -LiteralPath $path) | Should -Be $before
     }
 

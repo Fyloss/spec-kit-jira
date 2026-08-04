@@ -320,7 +320,10 @@ _reconcile_plan_context() {
   fd_df="$(jq -c '.defaultable_fields // {}' <<< "${binding}")"
   fd_recorded="$(config_field_defaults_for "${key}" "${cfg}")"
   fd_answers="$(cli_field_answers_for "${key}" "${field_values}")"
-  field_defaults="$(plan_resolve_field_defaults "${fd_itypes}" "${fd_df}" "${fd_recorded}" "${fd_answers}" | jq -c '.field_defaults')"
+  # 015, research R1/R2, contract §2: the plan context is the SENDING side —
+  # it reads the encoded map, shaped for the wire, while every display-facing
+  # consumer elsewhere in this file keeps reading the recorded map unchanged.
+  field_defaults="$(plan_resolve_field_defaults "${fd_itypes}" "${fd_df}" "${fd_recorded}" "${fd_answers}" | jq -c '.field_defaults_encoded')"
 
   # Two-step priority resolution (FR-008): level -> logical name (team config)
   # -> identifier (persisted binding). Either step yielding nothing omits the
@@ -1200,7 +1203,7 @@ cmd_reconcile() {
     # the parent first, marks every planned creation `creating` before the
     # first create, and stamps + records each created ticket's key
     # IMMEDIATELY, per ticket — never batched.
-    local apply_plan known_parent_key=""
+    local apply_plan known_parent_key="" apply_outcome=""
     apply_plan="$(jq -cn --argjson p "${parent_action}" --argjson s "${actions}" '{parent:$p, stories:$s}')"
     [[ "${parent_state}" == "bound" ]] && known_parent_key="$(jq -r '.key' <<< "${recog_parent}")"
     # Phase 3, US1: the task tier's own writes join the SAME apply call —
@@ -1211,8 +1214,19 @@ cmd_reconcile() {
     # map as the apply pass reaches it.
     local known_story_keys='{}'
     [[ "${task_role_active}" == "true" ]] && known_story_keys="$(jq -c '.bound | with_entries(.value |= .key)' <<< "${recog}")"
-    apply_writes_with_recognition "${apply_plan}" "${spec_ref}" "${spec_file}" "${known_parent_key}" "[]" "${fd_df}" \
-      "${tasks_actions}" "${tasks_file}" "${known_story_keys}" || rc=$?
+    apply_outcome="$(apply_writes_with_recognition "${apply_plan}" "${spec_ref}" "${spec_file}" "${known_parent_key}" "[]" "${fd_df}" \
+      "${tasks_actions}" "${tasks_file}" "${known_story_keys}")" || rc=$?
+    # 015, research R4, contract §4.3/§5: `created` now reports what Jira
+    # actually confirmed, not what was merely planned — empty stdout (the
+    # three pre-write privacy-guard returns, the task sweep included) reads
+    # as zero created. The
+    # `parent`/`story` filter keeps 012's sub-tasks out of this tier's tally:
+    # they are counted separately in `counts.tasks.created` (012 FR-011).
+    if [[ -z "${apply_outcome}" ]]; then
+      created=0
+    else
+      created="$(jq '[(.created // [])[] | select(.role == "parent" or .role == "story")] | length' <<< "${apply_outcome}")"
+    fi
   fi
 
   # Edge Cases (contract §6, final line; T084): a task checked before its
@@ -1248,8 +1262,12 @@ cmd_reconcile() {
       pcc_actions="$(jq -c '.actions' <<< "${pcc_result}")"
       if [[ "$(jq 'length' <<< "${pcc_actions}")" -gt 0 ]]; then
         local pcc_rc=0
+        # 015 contract §4.2: the apply prints its confirmed-creation outcome on
+        # stdout. This pass only transitions already-created sub-tasks, so the
+        # outcome carries nothing this tier counts — but it MUST still be
+        # captured, or it would land in the middle of the run summary.
         apply_writes_with_recognition '{"parent":null,"stories":[]}' "${spec_ref}" "${spec_file}" "" "[]" "${fd_df}" \
-          "${pcc_actions}" "${tasks_file}" '{}' || pcc_rc=$?
+          "${pcc_actions}" "${tasks_file}" '{}' > /dev/null || pcc_rc=$?
         if ((pcc_rc == 0)); then
           tasks_actions="$(jq -c --argjson a "${pcc_actions}" '. + $a' <<< "${tasks_actions}")"
         else

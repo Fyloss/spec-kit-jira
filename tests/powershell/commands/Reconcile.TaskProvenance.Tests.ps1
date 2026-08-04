@@ -12,6 +12,7 @@ BeforeAll {
     Import-Module (Join-Path $Mock 'Mock.psm1') -Force
     Import-Module (Join-Path $CmdDir 'Config.psm1') -Force
     Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
+    Import-Module (Join-Path $Root 'scripts/powershell/lib/Config.psm1') -Force # Get-JiraHooksDisabled: Reconcile.psm1's own nested import is module-scoped, and Hierarchy.psm1's later -Force re-import unbinds it (mirrors every sibling Reconcile.*.Tests.ps1)
 
     $env:JIRA_EMAIL = 'user@example.com'
     $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'

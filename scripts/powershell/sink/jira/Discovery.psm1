@@ -206,7 +206,10 @@ function Get-JiraDiscoveryDefaultableFields {
       constant is never a candidate for a recorded default (contract §1.1)
       and is simply absent from the output. `defaultable: false` only for a
       shape that cannot be a single recorded scalar — array or issuelink —
-      carrying an `undefaultable_reason` (FR-010).
+      carrying an `undefaultable_reason` (FR-010). `schema_type` is captured
+      here and consumed at plan-resolve time (015, contract §1.3) to shape
+      the recorded value for the wire — the bridge no longer sends exactly
+      what was recorded.
     #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Names the set of defaultable-field descriptors it derives; a singular name would misdescribe the value.')]
     [CmdletBinding()]

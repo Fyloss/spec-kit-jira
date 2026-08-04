@@ -405,8 +405,11 @@ function Get-JiraReconcilePlanContextFromBinding {
     $fdDfJson = if ($null -ne $fdDfRaw) { ConvertTo-JiraJsonValue $fdDfRaw } else { '{}' }
     $fdRecordedJson = Get-JiraFieldDefaultsFor -ProjectKey $ProjectKey -ConfigJson $ConfigJson
     $fdAnswersJson = Get-JiraFieldAnswersFor -ProjectKey $ProjectKey -FieldFlags $FieldValues
+    # 015, research R1/R2, contract §2: the plan context is the SENDING side —
+    # it reads the encoded map, shaped for the wire, while every display-facing
+    # consumer elsewhere in this file keeps reading the recorded map unchanged.
     $fieldDefaultsJson = (Get-JiraPlanResolveFieldDefault -IssueTypesJson $fdItypesJson -DefaultableFieldsByTypeJson $fdDfJson `
-            -RecordedJson $fdRecordedJson -AnswersJson $fdAnswersJson | ConvertFrom-Json -Depth 100).field_defaults
+            -RecordedJson $fdRecordedJson -AnswersJson $fdAnswersJson | ConvertFrom-Json -Depth 100).field_defaults_encoded
 
     # Two-step priority resolution (FR-008): level -> logical name (team
     # config) -> identifier (persisted binding). Either step yielding nothing
@@ -1352,7 +1355,17 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
                 $fdPendingTypes.Add([string]$x.body.fields.issuetype.id)
             }
         }
-        $fdPendingTypesJson = ConvertTo-JiraJsonValue (@($fdPendingTypes | Select-Object -Unique))
+        # 015 (regression, NFR-1): jq's `unique` (bash's twin, reconcile.sh)
+        # sorts its result ordinally — Select-Object -Unique only dedupes,
+        # preserving first-seen order, which diverges whenever more than one
+        # type is pending in the same run (first exposed by an option-typed
+        # default required on both the specification and story roles at
+        # once). Sort with the same comparer ConvertTo-JiraJsonValue already
+        # uses for key order, so both ports agree byte for byte.
+        $fdPendingUnique = [System.Collections.Generic.List[string]]::new()
+        foreach ($t in @($fdPendingTypes | Select-Object -Unique)) { $fdPendingUnique.Add($t) }
+        $fdPendingUnique.Sort([System.StringComparer]::Ordinal)
+        $fdPendingTypesJson = ConvertTo-JiraJsonValue (@($fdPendingUnique))
         $fdFieldsJson = Get-JiraPlanConfirmationField -IssueTypesJson $fdItypesJson -DefaultableFieldsByTypeJson $fdDfJson `
             -FieldDefaultsByTypeJson $fdDefaultsByTypeJson -PendingTypeIdsJson $fdPendingTypesJson
         $fdFields = @($fdFieldsJson | ConvertFrom-Json -Depth 100)
@@ -1419,8 +1432,14 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
             }
             $knownStoryKeysJson = ConvertTo-JiraJsonValue $ksk
         }
-        $rc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $applyPlanJson -SpecRefJson $specRefJson -SpecFile $specFile -KnownParentKey $knownParentKey -DefaultableFieldsByTypeJson $fdDfJson `
+        $applyOutcome = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $applyPlanJson -SpecRefJson $specRefJson -SpecFile $specFile -KnownParentKey $knownParentKey -DefaultableFieldsByTypeJson $fdDfJson `
             -TasksActionsJson $tasksActionsJson -TasksFile $tasksFile -KnownStoryKeysJson $knownStoryKeysJson
+        $rc = [int]$applyOutcome.ExitCode
+        # 015, research R4, contract §4.3/§5: `created` now reports what Jira
+        # actually confirmed, not what was merely planned. The parent/story
+        # filter keeps 012's sub-tasks out of this tier's tally: they are
+        # counted separately in counts.tasks.created (012 FR-011).
+        $created = @(@($applyOutcome.Created) | Where-Object { $_.role -eq 'parent' -or $_.role -eq 'story' }).Count
     }
 
     # Edge Cases (contract §6, final line; T084): a task checked before its
@@ -1451,8 +1470,14 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
             $pccActions = @(Get-JiraPlanPropSafe $pccResult 'actions')
             if ($pccActions.Count -gt 0) {
                 $pccActionsJson = ConvertTo-JiraJsonValue $pccActions
-                $pccRc = Invoke-JiraApplyWriteSetWithRecognition -PlanJson '{"parent":null,"stories":[]}' -SpecRefJson $specRefJson -SpecFile $specFile -KnownParentKey '' -DefaultableFieldsByTypeJson $fdDfJson `
+                # 015 contract §4.2: the apply returns @{ExitCode; Created}, not
+                # a bare code. This pass only transitions already-created
+                # sub-tasks, so Created carries nothing this tier counts — but
+                # the exit code must be read off the object, not the object
+                # itself, or every outcome would compare as non-zero.
+                $pccOutcome = Invoke-JiraApplyWriteSetWithRecognition -PlanJson '{"parent":null,"stories":[]}' -SpecRefJson $specRefJson -SpecFile $specFile -KnownParentKey '' -DefaultableFieldsByTypeJson $fdDfJson `
                     -TasksActionsJson $pccActionsJson -TasksFile $tasksFile -KnownStoryKeysJson '{}'
+                $pccRc = [int]$pccOutcome.ExitCode
                 if ($pccRc -eq 0) {
                     $tasksActionsListPcc = [System.Collections.Generic.List[object]]::new()
                     foreach ($x in @($tasksActionsJson | ConvertFrom-Json -Depth 100)) { $tasksActionsListPcc.Add($x) }

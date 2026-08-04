@@ -383,3 +383,50 @@ _record_both_fields() {
     [[ "${line}" == GET\ * ]]
   done <<< "$output"
 }
+
+# --- 015 T019/T020 [US2] — every operator-facing surface keeps speaking the --
+# operator's own words. Decision R2 makes this hold BY CONSTRUCTION: the
+# three display sites (plan_confirmation_fields, the provenance line, and the
+# --field-default promotion command) keep reading the recorded map, never the
+# encoded one — these are guard tests, direct unit calls against an
+# option-typed field, proving no wire shape leaks through.
+
+@test "015 T019 — plan_confirmation_fields' recorded_value for an option-typed field is the plain recorded string" {
+  local itypes='[{"logical_name":"Deliverable","id":"10101"}]'
+  local df='{"10101":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA","APAC"]}]}'
+  local defaults='{"10101":{"customfield_1":"EMEA"}}'
+  run plan_confirmation_fields "${itypes}" "${df}" "${defaults}" '["10101"]'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].recorded_value' <<< "$output")" = "EMEA" ]
+  [[ "$output" != *'"value"'* ]]
+}
+
+@test "015 T019 (FR-010) — a required option-typed field with nothing to send is still listed, with a null value" {
+  local itypes='[{"logical_name":"Deliverable","id":"10101"}]'
+  local df='{"10101":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA","APAC"]}]}'
+  run plan_confirmation_fields "${itypes}" "${df}" "{}" '["10101"]'
+  [ "$(jq -r 'length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.[0].recorded_value' <<< "$output")" = "null" ]
+}
+
+@test "015 T020 — the provenance line reads the plain recorded value for an option-typed field, never its wire shape" {
+  local itypes='[{"logical_name":"Deliverable","id":"10101"}]'
+  local df='{"10101":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA","APAC"]}]}'
+  local resolved='{"field_defaults":{"10101":{"customfield_1":"EMEA"}},"field_default_sources":{"10101":{"customfield_1":"team-config"}},"unresolved":[]}'
+  local actions='[{"method":"POST","url":"https://example.atlassian.net/rest/api/3/issue","body":{"fields":{"issuetype":{"id":"10101"},"customfield_1":"EMEA"}}}]'
+  run _reconcile_field_default_notes "PM" "${itypes}" "${df}" "${resolved}" "${actions}" "null" "true" "false" "false"
+  [[ "$output" == *'Region (Deliverable) = "EMEA" — sent from team-config'* ]]
+  [[ "$output" != *'"value"'* ]]
+}
+
+@test "015 T020 — the --field-default promotion command embeds the recorded value verbatim, re-recordable as printed" {
+  local itypes='[{"logical_name":"Deliverable","id":"10101"}]'
+  local df='{"10101":[{"logical_name":"Region","field_id":"customfield_1","schema_type":"option","required":true,"defaultable":true,"allowed_values":["EMEA","APAC"]}]}'
+  local resolved='{"field_defaults":{"10101":{"customfield_1":"EMEA"}},"field_default_sources":{"10101":{"customfield_1":"operator-answer"}},"unresolved":[]}'
+  local actions='[{"method":"POST","url":"https://example.atlassian.net/rest/api/3/issue","body":{"fields":{"issuetype":{"id":"10101"},"customfield_1":"EMEA"}}}]'
+  run _reconcile_field_default_notes "PM" "${itypes}" "${df}" "${resolved}" "${actions}" "null" "true" "false" "false"
+  [[ "$output" == *"--field-default 'PM=Deliverable=Region=EMEA'"* ]]
+  # Running the printed command re-records exactly the recorded value —
+  # the promotion line must never carry {"value": ...} or any other wrap.
+  [[ "$output" != *'{"value"'* ]]
+}

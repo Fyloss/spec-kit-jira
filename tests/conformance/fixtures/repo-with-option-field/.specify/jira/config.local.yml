@@ -1,0 +1,103 @@
+# Machine-owned resolved identifiers (gitignored in a real repository;
+# committed here only as a fixture). Reuses the company-managed hierarchy;
+# BOTH the specification type (Deliverable, 10101) and the story type
+# (Story, 10102) declare the same required, option-typed custom field
+# ("Region") the bridge cannot supply — the shape of the reported defect
+# (015): a mandatory single-select on both written types, which made
+# creation fail closed on the FIRST ticket, leaving the second unattempted.
+#
+# defaultable_fields (011, research R3; encoded per 015, contract §1.3)
+# mirrors the mock's "fd-option" createmeta shape (tests/conformance/
+# mock-jira/fixtures/createmeta-fields-fd-option.json).
+resolved_ids:
+  FD:
+    style: company_managed
+    style_source: api
+    issue_types:
+      - logical_name: "Initiative"
+        id: "10100"
+        hierarchy_level: "2"
+        subtask: false
+      - logical_name: "Deliverable"
+        id: "10101"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "10102"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "Defect"
+        id: "10103"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "Sub-task"
+        id: "10104"
+        hierarchy_level: "-1"
+        subtask: true
+    child_type:
+      logical_name: "Story"
+      id: "10102"
+      source: operator
+    parent_type:
+      logical_name: "Deliverable"
+      id: "10101"
+      source: derived
+    required_fields:
+      "10101":
+        - logical_name: "Summary"
+          field_id: "summary"
+        - logical_name: "Region"
+          field_id: "customfield_50021"
+        - logical_name: "Team Nickname"
+          field_id: "customfield_50022"
+      "10102":
+        - logical_name: "Summary"
+          field_id: "summary"
+        - logical_name: "Region"
+          field_id: "customfield_50021"
+    defaultable_fields:
+      "10101":
+        - logical_name: "Region"
+          field_id: "customfield_50021"
+          schema_type: "option"
+          required: true
+          defaultable: true
+          allowed_values:
+            - "EMEA"
+            - "APAC"
+        - logical_name: "Team Nickname"
+          field_id: "customfield_50022"
+          schema_type: "string"
+          required: true
+          defaultable: true
+          allowed_values: []
+        - logical_name: "Business Owner"
+          field_id: "customfield_50024"
+          schema_type: "user"
+          required: false
+          defaultable: true
+          allowed_values: []
+      "10102":
+        - logical_name: "Region"
+          field_id: "customfield_50021"
+          schema_type: "option"
+          required: true
+          defaultable: true
+          allowed_values:
+            - "EMEA"
+            - "APAC"
+        - logical_name: "Business Owner"
+          field_id: "customfield_50024"
+          schema_type: "user"
+          required: false
+          defaultable: true
+          allowed_values: []
+    parent_link_available:
+      "10102": true
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"
+    estimation_field_id: null
