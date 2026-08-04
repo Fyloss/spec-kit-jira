@@ -351,6 +351,15 @@ It 'a pre-seeded file already holding the escaped form loads and rewrites byte-i
         }
     }
 
+    It 'two-path refusal listing orders ordinally, not culture-sensitively (013 FR-023, contract §4)' {
+        $json = '{"Won''t Do":"before\nafter","Won-t Do":"before\nafter"}'
+        { ConvertTo-JiraConfigYaml -Json $json } | Should -Throw
+        try { ConvertTo-JiraConfigYaml -Json $json }
+        catch {
+            $_.Exception.Message | Should -Be "config: Won't Do: a string value here contains a line break, which this writer cannot represent`nconfig: Won-t Do: a string value here contains a line break, which this writer cannot represent"
+        }
+    }
+
     # --- Compatibility guards: must stay green throughout (013 FR-012/013, 007 R1, research R2) -
 
     It 'an unrecognised backslash escape stays literal, both backslashes kept (013 FR-012)' {

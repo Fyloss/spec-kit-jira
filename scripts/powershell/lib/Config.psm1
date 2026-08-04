@@ -562,13 +562,16 @@ function Get-CfgWriteRefusalError {
     param($Node, [string] $Path)
 
     $errors = [System.Collections.Generic.List[string]]::new()
-    Get-CfgWriteRefusalErrors -Node $Node -Path $Path -Errors $errors
+    Add-CfgWriteRefusalError -Node $Node -Path $Path -Errors $errors
     if ($errors.Count -eq 0) { return $null }
-    $sorted = $errors | Sort-Object -Unique
-    return ($sorted -join "`n")
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $distinct = [System.Collections.Generic.List[string]]::new()
+    foreach ($e in $errors) { if ($seen.Add($e)) { $distinct.Add($e) } }
+    $distinct.Sort([System.StringComparer]::Ordinal)
+    return ($distinct -join "`n")
 }
 
-function Get-CfgWriteRefusalErrors {
+function Add-CfgWriteRefusalError {
     param($Node, [string] $Path, [System.Collections.Generic.List[string]] $Errors)
 
     if ($Node -is [System.Collections.IDictionary] -or $Node -is [System.Management.Automation.PSCustomObject]) {
@@ -581,14 +584,14 @@ function Get-CfgWriteRefusalErrors {
                 $Errors.Add("${Path}: a key here contains a line break, which this writer cannot represent")
                 continue
             }
-            Get-CfgWriteRefusalErrors -Node $map[$k] -Path $childPath -Errors $Errors
+            Add-CfgWriteRefusalError -Node $map[$k] -Path $childPath -Errors $Errors
         }
         return
     }
     if (($Node -is [System.Collections.IEnumerable]) -and ($Node -isnot [string])) {
         $i = 0
         foreach ($item in $Node) {
-            Get-CfgWriteRefusalErrors -Node $item -Path "$Path[$i]" -Errors $Errors
+            Add-CfgWriteRefusalError -Node $item -Path "$Path[$i]" -Errors $Errors
             $i++
         }
         return

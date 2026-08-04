@@ -472,6 +472,16 @@ EOF
   [ "$(wc -l < "${DIR}/err.txt" | tr -d ' ')" = "2" ]
 }
 
+@test "two-path refusal listing orders ordinally, not culture-sensitively (013 FR-023, contract §4)" {
+  local out status=0
+  out="$(printf '%s' '{"Won'"'"'t Do":"before\nafter","Won-t Do":"before\nafter"}' | config_to_yaml 2>"${DIR}/err.txt")" || status=$?
+  [ "$status" -eq 4 ]
+  [ -z "$out" ]
+  [ "$(sed -n 1p "${DIR}/err.txt")" = "config: Won't Do: a string value here contains a line break, which this writer cannot represent" ]
+  [ "$(sed -n 2p "${DIR}/err.txt")" = 'config: Won-t Do: a string value here contains a line break, which this writer cannot represent' ]
+  [ "$(wc -l < "${DIR}/err.txt" | tr -d ' ')" = "2" ]
+}
+
 # --- Fail-closed on a line that cannot be interpreted (007, contracts/parse-failure.md) -
 
 @test "a malformed line fails closed with the exact three-line message (007 FR-007 to FR-009)" {
