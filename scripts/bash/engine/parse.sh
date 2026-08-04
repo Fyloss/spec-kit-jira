@@ -23,6 +23,8 @@ source "${_parse_dir}/../lib/output.sh" # json_canonical only — lib/, never si
 source "${_parse_dir}/story_marker.sh" # the durable identifier's grammar (Phase 2, contracts/story-marker.md)
 # shellcheck source=/dev/null
 source "${_parse_dir}/spec_marker.sh" # the parent identifier's grammar (Phase 5, US2, contracts/parent-marker.md)
+# shellcheck source=/dev/null
+source "${_parse_dir}/markdown.sh" # the Markdown subset tokenizer (016, contracts/markdown-subset.md)
 
 # _parse_strip_marker_lines — remove every speckit-jira marker attempt line
 # (story= or spec=, valid or malformed — contract "Reading rules" #2) from
@@ -129,53 +131,89 @@ parse_title() {
 }
 
 # parse_description_blocks — synthesise a never-empty structured description
-# (FR 014). Collects the overview prose (up to two paragraphs) that precedes the
-# first Acceptance/Design/Tasks/Scenario section; falls back to the H1 text and
-# then a fixed sentence so the description is never empty, including for specs
-# with no `## Summary` section (SC 002).
+# (FR 014, FR-008, FR-009). Collects the overview REGION that precedes the
+# first Acceptance/Design/Tasks/Scenario section, segments it into real blocks
+# (contracts/markdown-subset.md Part B), then keeps the first two CONTENT
+# blocks — headings ride free and a trailing heading with no following
+# content is dropped (data-model.md §4, the B9 cap). Falls back to the H1 text
+# and then a fixed sentence so the description is never empty, including for
+# specs with no `## Summary` section (SC 002).
+#
+# The document's own H1 is excluded from the region (it is the title, per the
+# title ladder — re-emitting it as a body heading would duplicate it); any
+# OTHER heading level within the region becomes a real heading block (US2 acceptance scenario 4).
 parse_description_blocks() {
   local doc line
   doc="$(cat)"
 
-  local -a paras=()
-  local para="" h1=""
+  local -a region=()
+  local h1="" first_line=1
   while IFS= read -r line || [[ -n "${line}" ]]; do
     line="${line%$'\r'}"
+    local was_first=${first_line}; first_line=0
     local t; t="$(_parse_trim "${line}")"
-    if [[ -z "${t}" ]]; then
-      [[ -n "${para}" ]] && { paras+=("${para}"); para=""; }
-      continue
-    fi
-    if [[ "${t}" =~ ^#{1,6}[[:space:]]+(.*)$ ]]; then
-      local ht="${BASH_REMATCH[1]}"
-      [[ -z "${h1}" && "${line}" =~ ^#[[:space:]] ]] && h1="$(_parse_trim "${ht#Feature Specification: }")"
-      if [[ "${ht}" =~ ^(Acceptance|Design|Task|Scenario|Requirement|Success|Edge) ]]; then break; fi
-      [[ -n "${para}" ]] && { paras+=("${para}"); para=""; }
-      continue
+    if [[ "${t}" =~ ^(#{1,6})[[:space:]]+(.*)$ ]]; then
+      local hl=${#BASH_REMATCH[1]} ht="${BASH_REMATCH[2]}"
+      if ((hl == 1)) && [[ -z "${h1}" ]]; then h1="$(_parse_trim "${ht#Feature Specification: }")"; fi
+      # "User Story" also closes the region: a story's own text is already
+      # pre-split into its own section before this function ever sees it
+      # (parse_spec), so this boundary only ever fires on the EPIC's call —
+      # without it, headings now rendering as real blocks (FR-008) would pull
+      # every story's title into the epic description, violating FR-011. When
+      # it IS the very first line, it is the story section's OWN heading
+      # (parse_spec's split keeps it as line 1 of the section for parse_title
+      # to read) — skip it like the H1 case rather than closing an empty region.
+      if [[ "${ht}" =~ ^(Acceptance|Design|Task|Scenario|Requirement|Success|Edge|User[[:space:]]+Story) ]]; then
+        if ((was_first)) && [[ "${ht}" =~ ^User[[:space:]]+Story ]]; then continue; fi
+        break
+      fi
+      ((hl == 1)) && continue # the document's own H1 stays out of the body
     fi
     [[ "${t}" =~ ^Title: ]] && continue
-    t="$(_parse_trim "$(_parse_strip_marker "${t}")")"
-    if [[ -n "${para}" ]]; then para="${para} ${t}"; else para="${t}"; fi
+    region+=("${line}")
   done <<< "${doc}"
-  [[ -n "${para}" ]] && paras+=("${para}")
+
+  local region_text=""
+  ((${#region[@]} > 0)) && region_text="$(printf '%s\n' "${region[@]}")"
+  local all_blocks; all_blocks="$(markdown_parse_blocks "${region_text}")"
+
+  # B9 cap: content blocks (paragraph/bullet_list/ordered_list/code) are kept
+  # up to the first two; headings are always carried through, then a heading
+  # left trailing with nothing kept after it is dropped.
+  local kept="[]" content_count=0 nb idx
+  nb="$(jq 'length' <<< "${all_blocks}")"
+  for ((idx = 0; idx < nb; idx++)); do
+    local blk btype
+    blk="$(jq -c ".[${idx}]" <<< "${all_blocks}")"
+    btype="$(jq -r '.type' <<< "${blk}")"
+    if [[ "${btype}" == "heading" ]]; then
+      kept="$(jq -c --argjson b "${blk}" '. + [$b]' <<< "${kept}")"
+      continue
+    fi
+    ((content_count >= 2)) && continue
+    kept="$(jq -c --argjson b "${blk}" '. + [$b]' <<< "${kept}")"
+    content_count=$((content_count + 1))
+  done
+  local kn; kn="$(jq 'length' <<< "${kept}")"
+  while ((kn > 0)) && [[ "$(jq -r ".[$((kn - 1))].type" <<< "${kept}")" == "heading" ]]; do
+    kept="$(jq -c '.[:-1]' <<< "${kept}")"
+    kn=$((kn - 1))
+  done
 
   # Never empty: fall back to the H1 text, then a fixed sentence.
-  if ((${#paras[@]} == 0)); then
-    if [[ -n "${h1}" ]]; then paras+=("${h1}"); else paras+=("This ticket tracks the linked specification."); fi
+  if [[ "$(jq 'length' <<< "${kept}")" -eq 0 ]]; then
+    local fallback="${h1:-This ticket tracks the linked specification.}"
+    kept="$(jq -cn --argjson s "$(markdown_inline_plain "${fallback}")" '[{type:"paragraph", spans:$s}]')"
   fi
 
-  # Keep at most the first two paragraphs (need statement + one context block).
-  local blocks="[]" idx=0 p
-  for p in "${paras[@]}"; do
-    ((idx >= 2)) && break
-    blocks="$(jq -c --arg t "${p}" '. + [{type:"paragraph", text:$t}]' <<< "${blocks}")"
-    idx=$((idx + 1))
-  done
-  jq -cn --argjson b "${blocks}" '{blocks:$b}' | json_canonical
+  jq -cn --argjson b "${kept}" '{blocks:$b}' | json_canonical
 }
 
 # parse_acceptance_criteria — extract Given/When/Then scenarios (FR 015) as a
-# JSON array of {given[],when[],then[]}. Supports one-clause-per-line and inline
+# JSON array of {given[],when[],then[]}, each clause an inline sequence
+# (data-model.md §3, feature 016 — this replaces the crude global asterisk
+# strip that used to sit here as a partial workaround for the same defect;
+# full tokenization subsumes it). Supports one-clause-per-line and inline
 # single-line triples; And/But continuations append to the last-touched bucket.
 # Only a scenario that reaches a Then is emitted.
 parse_acceptance_criteria() {
@@ -196,7 +234,6 @@ parse_acceptance_criteria() {
   while IFS= read -r line || [[ -n "${line}" ]]; do
     line="${line%$'\r'}"
     local t; t="$(_parse_trim "${line}")"
-    t="${t//\*\*/}"
     t="$(_parse_trim "$(_parse_strip_marker "${t}")")"
     [[ -z "${t}" ]] && continue
 
@@ -204,42 +241,52 @@ parse_acceptance_criteria() {
     # (", When" / ", Then") so a Given clause that itself contains the word
     # "when" survives intact; only a delimiter-free line falls back to the
     # first-keyword split. The regex lives in a variable (the reliable way to
-    # feed ERE to bash =~).
-    if [[ "${t}" =~ [Gg]iven[[:space:]] ]] && [[ "${t}" =~ [Ww]hen[[:space:]] ]] && [[ "${t}" =~ [Tt]hen[[:space:]] ]]; then
+    # feed ERE to bash =~). Tolerates an emphasised keyword ("**Given**") the
+    # same way the one-clause-per-line branch below does.
+    if [[ "${t}" =~ [Gg]iven(\*\*|__|\*|_)?[[:space:]] ]] && [[ "${t}" =~ [Ww]hen(\*\*|__|\*|_)?[[:space:]] ]] && [[ "${t}" =~ [Tt]hen(\*\*|__|\*|_)?[[:space:]] ]]; then
       _parse_ac_flush
       local rest gv wv tv
-      local trip_re='[Gg]iven[[:space:]]+(.+)[,;][[:space:]]*[Ww]hen[[:space:]]+(.+)[,;][[:space:]]*[Tt]hen[[:space:]]+(.+)$'
+      local trip_re='[Gg]iven(\*\*|__|\*|_)?[[:space:]]+(.+)[,;][[:space:]]*[Ww]hen(\*\*|__|\*|_)?[[:space:]]+(.+)[,;][[:space:]]*[Tt]hen(\*\*|__|\*|_)?[[:space:]]+(.+)$'
       if [[ "${t}" =~ ${trip_re} ]]; then
-        gv="${BASH_REMATCH[1]}"
-        wv="${BASH_REMATCH[2]}"
-        tv="${BASH_REMATCH[3]}"
+        gv="${BASH_REMATCH[2]}"
+        wv="${BASH_REMATCH[4]}"
+        tv="${BASH_REMATCH[6]}"
       else
+        # Delimiter-free fallback: unadorned keywords only (the comma/
+        # semicolon form above is the one the corpus and contract exercise
+        # with an emphasised keyword).
         rest="${t#*[Gg]iven }"
         gv="${rest%%[Ww]hen *}"
         rest="${rest#*[Ww]hen }"
         wv="${rest%%[Tt]hen *}"
         tv="${rest#*[Tt]hen }"
       fi
-      given="$(jq -cn --arg v "$(_parse_trim "${gv}")" '[$v]')"
-      when="$(jq -cn --arg v "$(_parse_trim "${wv}")" '[$v]')"
-      then="$(jq -cn --arg v "$(_parse_trim "${tv}")" '[$v]')"
+      given="$(jq -cn --argjson v "$(markdown_tokenize_inline "$(_parse_trim "${gv}")")" '[$v]')"
+      when="$(jq -cn --argjson v "$(markdown_tokenize_inline "$(_parse_trim "${wv}")")" '[$v]')"
+      then="$(jq -cn --argjson v "$(markdown_tokenize_inline "$(_parse_trim "${tv}")")" '[$v]')"
       _parse_ac_flush
       continue
     fi
 
-    if [[ "${t}" =~ ^[Gg]iven[[:space:]]+(.+)$ ]]; then
+    # A keyword is often itself emphasised by the author ("**Given** ...").
+    # The wrapper is stripped only immediately around the keyword — unlike the
+    # crude global asterisk strip this replaces, everything else in the
+    # clause (including a `**user**` further along) reaches the tokenizer
+    # with its markdown intact.
+    local kw_wrap='(\*\*|__|\*|_)?'
+    if [[ "${t}" =~ ^${kw_wrap}[Gg]iven${kw_wrap}[[:space:]]+(.+)$ ]]; then
       ((have_then)) && _parse_ac_flush
-      given="$(jq -c --arg v "$(_parse_trim "${BASH_REMATCH[1]}")" '. + [$v]' <<< "${given}")"; last="g"
-    elif [[ "${t}" =~ ^[Ww]hen[[:space:]]+(.+)$ ]]; then
-      when="$(jq -c --arg v "$(_parse_trim "${BASH_REMATCH[1]}")" '. + [$v]' <<< "${when}")"; last="w"
-    elif [[ "${t}" =~ ^[Tt]hen[[:space:]]+(.+)$ ]]; then
-      then="$(jq -c --arg v "$(_parse_trim "${BASH_REMATCH[1]}")" '. + [$v]' <<< "${then}")"; have_then=1; last="t"
-    elif [[ "${t}" =~ ^([Aa]nd|[Bb]ut)[[:space:]]+(.+)$ ]]; then
-      local v; v="$(_parse_trim "${BASH_REMATCH[2]}")"
+      given="$(jq -c --argjson v "$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")" '. + [$v]' <<< "${given}")"; last="g"
+    elif [[ "${t}" =~ ^${kw_wrap}[Ww]hen${kw_wrap}[[:space:]]+(.+)$ ]]; then
+      when="$(jq -c --argjson v "$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")" '. + [$v]' <<< "${when}")"; last="w"
+    elif [[ "${t}" =~ ^${kw_wrap}[Tt]hen${kw_wrap}[[:space:]]+(.+)$ ]]; then
+      then="$(jq -c --argjson v "$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")" '. + [$v]' <<< "${then}")"; have_then=1; last="t"
+    elif [[ "${t}" =~ ^${kw_wrap}([Aa]nd|[Bb]ut)${kw_wrap}[[:space:]]+(.+)$ ]]; then
+      local v; v="$(_parse_trim "${BASH_REMATCH[4]}")"
       case "${last}" in
-        g) given="$(jq -c --arg v "${v}" '. + [$v]' <<< "${given}")" ;;
-        w) when="$(jq -c --arg v "${v}" '. + [$v]' <<< "${when}")" ;;
-        t) then="$(jq -c --arg v "${v}" '. + [$v]' <<< "${then}")" ;;
+        g) given="$(jq -c --argjson v "$(markdown_tokenize_inline "${v}")" '. + [$v]' <<< "${given}")" ;;
+        w) when="$(jq -c --argjson v "$(markdown_tokenize_inline "${v}")" '. + [$v]' <<< "${when}")" ;;
+        t) then="$(jq -c --argjson v "$(markdown_tokenize_inline "${v}")" '. + [$v]' <<< "${then}")" ;;
       esac
     fi
   done <<< "${doc}"
@@ -291,7 +338,7 @@ parse_design() {
       [[ "${t}" =~ figma\.com ]] && continue
       t="$(_parse_trim "$(_parse_strip_marker "${t}")")"
       [[ -z "${t}" ]] && continue
-      items="$(jq -c --arg v "${t}" '. + [{kind:"guidance", value:$v}]' <<< "${items}")"
+      items="$(jq -c --argjson v "$(markdown_tokenize_inline "${t}")" '. + [{kind:"guidance", value:$v}]' <<< "${items}")"
     fi
   done <<< "${doc}"
 
@@ -396,9 +443,9 @@ _parse_epic_extra_blocks() {
     local trimmed; trimmed="$(_parse_trim "${cur}")"
     if [[ "${mode}" == "sc" ]]; then
       trimmed="$(_parse_strip_sc_label "${trimmed}")"
-      sc_items="$(jq -c --arg v "${trimmed}" '. + [$v]' <<< "${sc_items}")"
+      sc_items="$(jq -c --argjson v "$(markdown_tokenize_inline "${trimmed}")" '. + [$v]' <<< "${sc_items}")"
     elif [[ "${mode}" == "oos" ]]; then
-      oos_items="$(jq -c --arg v "${trimmed}" '. + [$v]' <<< "${oos_items}")"
+      oos_items="$(jq -c --argjson v "$(markdown_tokenize_inline "${trimmed}")" '. + [$v]' <<< "${oos_items}")"
     fi
     cur=""
   }
@@ -438,12 +485,12 @@ _parse_epic_extra_blocks() {
 
   local blocks="[]"
   if [[ "$(jq 'length' <<< "${sc_items}")" -gt 0 ]]; then
-    blocks="$(jq -c --argjson items "${sc_items}" \
-      '. + [{type:"heading", level:3, text:"Success Criteria"}, {type:"bullet_list", items:$items}]' <<< "${blocks}")"
+    blocks="$(jq -c --argjson items "${sc_items}" --argjson h "$(markdown_inline_plain "Success Criteria")" \
+      '. + [{type:"heading", level:3, spans:$h}, {type:"bullet_list", items:$items}]' <<< "${blocks}")"
   fi
   if [[ "$(jq 'length' <<< "${oos_items}")" -gt 0 ]]; then
-    blocks="$(jq -c --argjson items "${oos_items}" \
-      '. + [{type:"heading", level:3, text:"Out of Scope"}, {type:"bullet_list", items:$items}]' <<< "${blocks}")"
+    blocks="$(jq -c --argjson items "${oos_items}" --argjson h "$(markdown_inline_plain "Out of Scope")" \
+      '. + [{type:"heading", level:3, spans:$h}, {type:"bullet_list", items:$items}]' <<< "${blocks}")"
   fi
   printf '%s' "${blocks}"
 }
@@ -490,9 +537,9 @@ parse_plan_summary() {
   fi
 
   local blocks p
-  blocks="$(jq -cn '[{type:"heading", level:3, text:"Implementation Plan"}]')"
+  blocks="$(jq -cn --argjson h "$(markdown_inline_plain "Implementation Plan")" '[{type:"heading", level:3, spans:$h}]')"
   for p in "${paras[@]}"; do
-    blocks="$(jq -c --arg t "${p}" '. + [{type:"paragraph", text:$t}]' <<< "${blocks}")"
+    blocks="$(jq -c --argjson s "$(markdown_tokenize_inline "${p}")" '. + [{type:"paragraph", spans:$s}]' <<< "${blocks}")"
   done
   json_canonical <<< "${blocks}"
 }

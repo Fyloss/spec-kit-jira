@@ -65,34 +65,38 @@ setup() {
   [ "$status" -eq 0 ]
   n="$(printf '%s' "$output" | jq '.blocks | length')"
   [ "$n" -ge 1 ]
-  # A first non-empty paragraph field is always present.
-  empty="$(printf '%s' "$output" | jq '[.blocks[] | select(.type=="paragraph") | .text] | map(select(length>0)) | length')"
+  # A first non-empty paragraph field is always present (feature 016: text
+  # lives on span[0].text within the paragraph's spans array).
+  empty="$(printf '%s' "$output" | jq '[.blocks[] | select(.type=="paragraph") | .spans[0].text] | map(select(length>0)) | length')"
   [ "$empty" -ge 1 ]
 }
 
-# --- Gherkin extraction (FR-015) -------------------------------------------
+# --- Gherkin extraction (FR-015) --------------------------------------------
+# Feature 016: each clause is an inline sequence of spans, not a plain string
+# — .given[0] is now the FIRST clause's span array; .given[0][0].text is that
+# clause's (unmarked, in these plain-text fixtures) literal text.
 
 @test "extracts a Given/When/Then scenario from one-clause-per-line" {
   run bash -c "printf '%s\n' '- **Given** a signed-in user' '- **When** they open the board' '- **Then** widgets load' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq 'length')" -eq 1 ]
-  [ "$(printf '%s' "$output" | jq -r '.[0].given[0]')" = "a signed-in user" ]
-  [ "$(printf '%s' "$output" | jq -r '.[0].when[0]')" = "they open the board" ]
-  [ "$(printf '%s' "$output" | jq -r '.[0].then[0]')" = "widgets load" ]
+  [ "$(printf '%s' "$output" | jq -r '.[0].given[0][0].text')" = "a signed-in user" ]
+  [ "$(printf '%s' "$output" | jq -r '.[0].when[0][0].text')" = "they open the board" ]
+  [ "$(printf '%s' "$output" | jq -r '.[0].then[0][0].text')" = "widgets load" ]
 }
 
 @test "an inline triple keeps a Given clause containing the word 'when' intact" {
   run bash -c "printf '%s\n' 'Given the user logs in when prompted, When they click, Then it opens' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.[0].given[0]' <<< "$output")" = "the user logs in when prompted" ]
-  [ "$(jq -r '.[0].when[0]' <<< "$output")" = "they click" ]
-  [ "$(jq -r '.[0].then[0]' <<< "$output")" = "it opens" ]
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "the user logs in when prompted" ]
+  [ "$(jq -r '.[0].when[0][0].text' <<< "$output")" = "they click" ]
+  [ "$(jq -r '.[0].then[0][0].text' <<< "$output")" = "it opens" ]
 }
 
 @test "extracts an inline Given/When/Then scenario on one line" {
   run bash -c "printf '%s\n' 'Given a user When they click Then it opens' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
   [ "$(printf '%s' "$output" | jq 'length')" -eq 1 ]
-  [ "$(printf '%s' "$output" | jq -r '.[0].then[0]')" = "it opens" ]
+  [ "$(printf '%s' "$output" | jq -r '.[0].then[0][0].text')" = "it opens" ]
 }
 
 @test "no Gherkin present yields an empty array" {

@@ -46,7 +46,7 @@ _parse_wrapper() {
   doc=$'### User Story 1 - First (Priority: P1)\n<!-- speckit-jira story=7f3a9c1e40b2d85a -->\n\nBody.\n\n#### Design\n\nSome guidance here.\n'
   run _parse_wrapper "${doc}"
   [ "$status" -eq 0 ]
-  [ "$(jq -c '.stories[0].design' <<< "$output")" = '[{"kind":"guidance","value":"Some guidance here."}]' ]
+  [ "$(jq -c '.stories[0].design' <<< "$output")" = '[{"kind":"guidance","value":[{"marks":[],"text":"Some guidance here."}]}]' ]
 }
 
 @test "the marker line never lands in priority or estimation extraction" {
@@ -107,7 +107,7 @@ _parse_wrapper() {
   run _parse_wrapper "${doc}"
   [ "$status" -eq 0 ]
   [[ "$output" != *"speckit-jira"* ]]
-  [ "$(jq -r '.epic.description.blocks[0].text' <<< "$output")" = "Overview prose." ]
+  [ "$(jq -r '.epic.description.blocks[0].spans[0].text' <<< "$output")" = "Overview prose." ]
 }
 
 @test "T052: a spec= line inside a story section never lands in that story's title, description or acceptance criteria" {
@@ -125,7 +125,7 @@ _parse_wrapper() {
   run _parse_wrapper "${doc}"
   [ "$status" -eq 0 ]
   [[ "$output" != *"speckit-jira"* ]]
-  [ "$(jq -c '.stories[0].design' <<< "$output")" = '[{"kind":"guidance","value":"Some guidance here."}]' ]
+  [ "$(jq -c '.stories[0].design' <<< "$output")" = '[{"kind":"guidance","value":[{"marks":[],"text":"Some guidance here."}]}]' ]
 }
 
 @test "T052: a spec= line inside a story section never lands in priority or estimation extraction" {

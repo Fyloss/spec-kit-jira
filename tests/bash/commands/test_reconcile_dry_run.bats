@@ -131,6 +131,31 @@ boot_declared_hierarchy() {
   [ "$(jq -r '[.actions[] | select(.role=="story")] | length' <<< "${ps_out}")" -eq 2 ]
 }
 
+# --- T060 [016, US3] — the rendered description in the dry-run preview -----
+@test "T060 [016, US3] — the rendered description appears in the dry-run preview with no write issued (FR-014)" {
+  local work="${BATS_TEST_TMPDIR}/repo-markdown-prose-dry"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-markdown-prose" "${work}"
+  local spec="${work}/specs/001-markdown-prose/spec.md"
+  export JIRA_CONFIG_DIR="${work}/.specify/jira"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-markdown-prose"
+  export SPEC_KIT_JIRA_ID_SOURCE="aaaaaaaaaaaaaaaa 1111111111111111"
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_reconcile reconcile "${spec}" --dry-run --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.dry_run' <<< "$output")" = "true" ]
+
+  local desc
+  desc="$(jq -c '[.actions[] | select(.role=="story")][0].body.fields.description' <<< "$output")"
+  [[ "${desc}" == *'"type":"strong"'* ]]
+  [[ "${desc}" != *'**FR-012**'* ]]
+
+  run mock_calls
+  [ -z "$output" ]
+}
+
 # --- T061 [US2] — dry-run/real-run agreement for field defaults (011, ------
 # contract §4.3, FR-023) --------------------------------------------------
 @test "FR-023 — the preview predicts every defaulted value and its source, asks no question, and writes nothing" {

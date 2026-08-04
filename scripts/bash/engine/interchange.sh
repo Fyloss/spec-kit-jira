@@ -19,9 +19,45 @@ source "${_interchange_dir}/../lib/output.sh" # json_canonical only — lib/, ne
 
 # The validation program: emits a JSON array of human-readable error strings
 # (empty array => valid). Kept as a jq program so the rules are declarative.
+# The mark/span/block defs below encode data-model.md §5 rules 1-5 (feature
+# 016): block-type enum (now including ordered_list), per-type required
+# field, span shape, mark shape, and href matching ^https?://. Rule 5 is the
+# schema-level backstop for FR-006 — even a tokenizer bug cannot get a
+# non-http target to Jira as a live link, because a validation failure blocks
+# every downstream write (Constitution VIII).
+# shellcheck disable=SC2016  # single-quoted jq program; `$k`/`$t` are jq variables, not shell
 # kcov-excl-start — jq literal (string lines are not statements)
 # shellcheck disable=SC2016  # $ids is a jq variable (`as $ids`), not shell expansion
 _INTERCHANGE_ERRORS_JQ='
+def mark_errors:
+  (.kind // "") as $k |
+  (if (["bold","italic","monospace","strikethrough","link"] | index($k)) == null
+   then "mark.kind is invalid" else empty end),
+  (if .kind == "link" then
+     (if (has("href") | not) then "mark.href is required for a link mark"
+      elif ((.href // "") | test("^https?://[^ \t\n]+$") | not) then "mark.href must be an absolute http(s) URL"
+      else empty end)
+   else
+     (if has("href") then "mark.href is forbidden for a non-link mark" else empty end)
+   end);
+def span_errors:
+  (if (.text | type) != "string" then "span.text is required" else empty end),
+  (if (.marks | type) != "array" then "span.marks is required" else empty end),
+  ((.marks // [])[]? | mark_errors);
+def inline_errors: (.[]? | span_errors);
+def block_errors:
+  (.type) as $t |
+  (if (["heading","paragraph","bullet_list","ordered_list","code","panel_ref"] | index($t)) == null
+   then "block.type is invalid" else empty end),
+  (if ($t == "heading" or $t == "paragraph") then
+     (if (has("spans") | not) then "block.spans is required for a \($t) block" else (.spans | inline_errors) end)
+   else empty end),
+  (if ($t == "bullet_list" or $t == "ordered_list") then
+     (if (has("items") | not) then "block.items is required for a \($t) block" else ((.items // [])[]? | inline_errors) end)
+   else empty end),
+  (if ($t == "code") and (has("text") | not) then "block.text is required for a code block" else empty end),
+  (if ($t == "panel_ref") and (has("ref") | not) then "block.ref is required for a panel_ref block" else empty end);
+def blocks_errors: ((.blocks // [])[]? | block_errors);
 [
   (if (.schema_version != "1.0") then "schema_version must be \"1.0\"" else empty end),
   (if (.spec_ref | type) != "object" then "spec_ref is required"
@@ -37,6 +73,7 @@ _INTERCHANGE_ERRORS_JQ='
    else
      (if ((.epic.title // "") | length) < 1 then "epic.title is required" else empty end),
      (if ((.epic.description.blocks // []) | length) < 1 then "epic.description.blocks must be non-empty" else empty end),
+     (.epic.description // {} | blocks_errors),
      (if ((.epic.marker.state // "absent") != "absent") and (((.epic.local_id // "") | test("^[0-9a-f]{16}$")) | not)
       then "epic.local_id is required and must be 16 hex characters unless the marker state is absent" else empty end)
    end),
@@ -45,7 +82,10 @@ _INTERCHANGE_ERRORS_JQ='
      (.stories[] | if ((.local_id // "") | length) < 1 then "story.local_id is required" else empty end),
      (.stories[] | if ((.title // "") | length) < 1 then "story.title is required" else empty end),
      (.stories[] | if (.priority_logical | IN("P1","P2","P3") | not) then "story.priority_logical is invalid" else empty end),
-     (.stories[] | if ((.description.blocks // []) | length) < 1 then "story.description.blocks must be non-empty" else empty end)
+     (.stories[] | if ((.description.blocks // []) | length) < 1 then "story.description.blocks must be non-empty" else empty end),
+     (.stories[] | .description // {} | blocks_errors),
+     (.stories[] | (.acceptance_criteria // [])[]? | ((.given // [])[]?, (.when // [])[]?, (.then // [])[]?) | inline_errors),
+     (.stories[] | (.design // [])[]? | select(.kind == "guidance") | .value | inline_errors)
    end),
   # Phase 2, T025/T027, data-model.md §3: the task tier — validated only for
   # a story that carries a "tasks" key at all (its absence is the off switch,

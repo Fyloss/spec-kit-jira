@@ -25,51 +25,82 @@ source "${_adf_dir}/../../lib/output.sh"
 # shellcheck source=/dev/null
 source "${_adf_dir}/../../engine/managed_section.sh"
 
+# _ADF_MARK_DEFS_JQ — the neutral mark -> ADF mark map (research §1, feature
+# 016). THE ONLY place ADF mark names may appear (Constitution VIII). Shared
+# by every jq program below that renders spans.
+# kcov-excl-start — jq literal (string lines are not statements)
+_ADF_MARK_DEFS_JQ='
+def marks_to_adf:
+  map(
+    if .kind == "bold" then {type:"strong"}
+    elif .kind == "italic" then {type:"em"}
+    elif .kind == "monospace" then {type:"code"}
+    elif .kind == "strikethrough" then {type:"strike"}
+    elif .kind == "link" then {type:"link", attrs:{href:.href}}
+    else empty end
+  );
+def spans_to_adf:
+  [ .[] | {type:"text", text:.text} + (if (.marks|length) > 0 then {marks:(.marks|marks_to_adf)} else {} end) ];
+'
+# kcov-excl-stop
+
 # _adf_blocks_to_nodes <blocks-json> — render neutral content blocks to ADF
 # nodes. panel_ref blocks are dropped here: the sink appends the acceptance and
-# design sections deterministically after the description body.
+# design sections deterministically after the description body. code stays a
+# plain-string body (FR-007: no markup interpretation inside code).
 _adf_blocks_to_nodes() {
   # kcov-excl-start — jq literal (string lines are not statements)
-  jq -c '[ .[] |
-    if .type == "heading" then
-      {type:"heading", attrs:{level:(.level // 3)}, content:[{type:"text", text:(.text // "")}]}
-    elif .type == "paragraph" then
-      {type:"paragraph", content:(if (.text // "") == "" then [] else [{type:"text", text:.text}] end)}
-    elif .type == "bullet_list" then
-      {type:"bulletList", content:[ (.items // [])[] | {type:"listItem", content:[{type:"paragraph", content:[{type:"text", text:.}]}]} ]}
-    elif .type == "code" then
-      {type:"codeBlock", content:(if (.text // "") == "" then [] else [{type:"text", text:.text}] end)}
-    else empty end ]' <<< "$1"
+  jq -c "${_ADF_MARK_DEFS_JQ}"'
+    [ .[] |
+      if .type == "heading" then
+        {type:"heading", attrs:{level:(.level // 3)}, content:((.spans // [])|spans_to_adf)}
+      elif .type == "paragraph" then
+        {type:"paragraph", content:((.spans // [])|spans_to_adf)}
+      elif .type == "bullet_list" then
+        {type:"bulletList", content:[ (.items // [])[] | {type:"listItem", content:[{type:"paragraph", content:(.|spans_to_adf)}]} ]}
+      elif .type == "ordered_list" then
+        {type:"orderedList", content:[ (.items // [])[] | {type:"listItem", content:[{type:"paragraph", content:(.|spans_to_adf)}]} ]}
+      elif .type == "code" then
+        {type:"codeBlock", content:(if (.text // "") == "" then [] else [{type:"text", text:.text}] end)}
+      else empty end ]' <<< "$1"
   # kcov-excl-stop
 }
 
 # _adf_gherkin_panel <ac-json> — a dedicated info panel carrying each scenario's
-# Given/When/Then clauses as paragraphs (FR-015). Empty when there is no AC.
+# Given/When/Then clauses as paragraphs (FR-015). Each clause is an inline
+# sequence (feature 016): the "Given "/"When "/"Then " prefix is a plain
+# unmarked text node ahead of the clause's own tokenized spans. Empty when
+# there is no AC.
 _adf_gherkin_panel() {
   # kcov-excl-start — jq literal (string lines are not statements)
-  jq -c '
+  jq -c "${_ADF_MARK_DEFS_JQ}"'
     if length == 0 then empty else
     {type:"panel", attrs:{panelType:"info"},
      content:[ .[] |
-       ( (.given // [])[] | {type:"paragraph", content:[{type:"text", text:("Given " + .)}]}),
-       ( (.when  // [])[] | {type:"paragraph", content:[{type:"text", text:("When " + .)}]}),
-       ( (.then  // [])[] | {type:"paragraph", content:[{type:"text", text:("Then " + .)}]}) ]}
+       ( (.given // [])[] | {type:"paragraph", content:([{type:"text", text:"Given "}] + (.|spans_to_adf))}),
+       ( (.when  // [])[] | {type:"paragraph", content:([{type:"text", text:"When "}]  + (.|spans_to_adf))}),
+       ( (.then  // [])[] | {type:"paragraph", content:([{type:"text", text:"Then "}]  + (.|spans_to_adf))}) ]}
     end' <<< "$1"
   # kcov-excl-stop
 }
 
 # _adf_design_nodes <design-json> — a distinct Design section (FR-016): a level-3
 # "Design" heading followed by a bullet list of guidance lines and Figma links.
-# Empty when there is no design content.
+# guidance values are inline sequences (feature 016); figma_link stays a plain
+# string URL (a URL is not prose) with its label prefixed as plain text. Empty
+# when there is no design content.
 _adf_design_nodes() {
   # kcov-excl-start — jq literal (string lines are not statements)
-  jq -c '
+  jq -c "${_ADF_MARK_DEFS_JQ}"'
     if length == 0 then empty else
     ( {type:"heading", attrs:{level:3}, content:[{type:"text", text:"Design"}]},
       {type:"bulletList",
        content:[ .[] |
-         (if .kind == "figma_link" then ((.label // "Figma") + ": " + .value) else .value end) as $line
-         | {type:"listItem", content:[{type:"paragraph", content:[{type:"text", text:$line}]}]} ]} )
+         if .kind == "figma_link" then
+           {type:"listItem", content:[{type:"paragraph", content:[{type:"text", text:((.label // "Figma") + ": " + .value)}]}]}
+         else
+           {type:"listItem", content:[{type:"paragraph", content:(.value|spans_to_adf)}]}
+         end ]} )
     end' <<< "$1"
   # kcov-excl-stop
 }

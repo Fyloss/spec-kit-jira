@@ -22,10 +22,10 @@ DOC=$'# Feature Specification: Billing Invoices\n\nWe need to let customers expo
   run _epic_wrapper "${DOC}"
   [ "$status" -eq 0 ]
   local blocks; blocks="$(jq -c '.epic.description.blocks' <<< "$output")"
-  [ "$(jq -r '[.[] | select(.type=="heading" and .text=="Success Criteria")] | length' <<< "${blocks}")" -eq 1 ]
+  [ "$(jq -r '[.[] | select(.type=="heading" and .spans[0].text=="Success Criteria")] | length' <<< "${blocks}")" -eq 1 ]
   local items; items="$(jq -c '[.[] | select(.type=="bullet_list")][0].items' <<< "${blocks}")"
-  [[ "$(jq -r '.[0]' <<< "${items}")" == "A customer exports an invoice in under 5 seconds." ]]
-  [[ "$(jq -r '.[1]' <<< "${items}")" == "Support tickets about missing invoices drop by half." ]]
+  [[ "$(jq -r '.[0][0].text' <<< "${items}")" == "A customer exports an invoice in under 5 seconds." ]]
+  [[ "$(jq -r '.[1][0].text' <<< "${items}")" == "Support tickets about missing invoices drop by half." ]]
   # No SC-00N label survives.
   [[ "$(jq -c . <<< "${blocks}")" != *"SC-001"* ]]
 }
@@ -34,10 +34,10 @@ DOC=$'# Feature Specification: Billing Invoices\n\nWe need to let customers expo
   run _epic_wrapper "${DOC}"
   [ "$status" -eq 0 ]
   local blocks; blocks="$(jq -c '.epic.description.blocks' <<< "$output")"
-  [ "$(jq -r '[.[] | select(.type=="heading" and .text=="Out of Scope")] | length' <<< "${blocks}")" -eq 1 ]
+  [ "$(jq -r '[.[] | select(.type=="heading" and .spans[0].text=="Out of Scope")] | length' <<< "${blocks}")" -eq 1 ]
   local items; items="$(jq -c '[.[] | select(.type=="bullet_list")][1].items' <<< "${blocks}")"
-  [[ "$(jq -r '.[0]' <<< "${items}")" == *"Refunds."* ]]
-  [[ "$(jq -r '.[1]' <<< "${items}")" == *"Bulk import."* ]]
+  [[ "$(jq -r '.[0][0].text' <<< "${items}")" == *"Refunds."* ]]
+  [[ "$(jq -r '.[1][0].text' <<< "${items}")" == *"Bulk import."* ]]
 }
 
 @test "the epic description carries no list of user stories (FR-011)" {

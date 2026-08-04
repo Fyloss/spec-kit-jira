@@ -61,6 +61,10 @@ jobs:
             "[A-Z]{2,}-[0-9]+"               # Jira issue-key shape (>=2 letters)
             "mediaSingle"                    # ADF node name
             "bodiedExtension"                # ADF node name
+            "bulletList"                     # ADF node name (016)
+            "codeBlock"                      # ADF node name (016)
+            "listItem"                       # ADF node name (016)
+            "panelType"                      # ADF attribute name (016)
           )
           # Tokens that share the issue-key shape but name no Jira issue: this
           # repository's own artifact labels (FR-011, NFR-004, SC-003, US-2,

@@ -156,6 +156,39 @@ teardown() {
   [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 0 ]
 }
 
+@test "T056 [016, US3] — a ticket carrying a pre-feature description heals once, then stays quiet (FR-011, FR-012, SC-004)" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  # Give story 1's overview a Markdown construct so a pre-feature (raw-syntax)
+  # description differs from what the current renderer produces.
+  sed -i.bak 's/As a customer, I want to export one invoice as a PDF\./As a customer, I want to export one invoice as a PDF, per **FR-012**./' "${SPEC}"
+  cmd_reconcile reconcile "${SPEC}" --json > /dev/null
+
+  # Simulate a ticket written by the pre-016 renderer: the intro paragraph
+  # carries the raw Markdown as one unmarked text node instead of a bold span.
+  local current raw healed
+  current="$(jira_request GET "${MOCK_BASE_URL}/rest/api/3/issue/COMP-2?fields=description" | jq -c '.fields.description')"
+  raw='As a customer, I want to export one invoice as a PDF, per **FR-012**.'
+  healed="$(jq -c --arg raw "${raw}" \
+    '.content[0] = {type:"paragraph", content:[{type:"text", text:$raw}]}' <<< "${current}")"
+  jira_request PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-2" \
+    "$(jq -cn --argjson d "${healed}" '{fields:{description:$d}}')" > /dev/null
+
+  : > "${MOCK_CALLLOG}"
+  run cmd_reconcile reconcile "${SPEC}" --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.counts.updated' <<< "$output")" -eq 1 ]
+  [ "$(grep -c '^PUT /rest/api/3/issue/COMP-2$' "${MOCK_CALLLOG}")" -eq 1 ]
+  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 1 ]
+
+  : > "${MOCK_CALLLOG}"
+  run cmd_reconcile reconcile "${SPEC}" --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
+  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 0 ]
+}
+
 @test "the PowerShell port shows the identical zero-churn signature (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   # A native pwsh HTTP client cannot reach the curl shim's sentinel

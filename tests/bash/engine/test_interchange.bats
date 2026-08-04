@@ -65,7 +65,7 @@ setup() {
 
 @test "interchange_build assembles a schema-valid neutral document" {
   local parse ctx
-  parse='{"epic":{"title":"Repo Epic","description":{"blocks":[{"type":"paragraph","text":"x"}]}},"stories":[{"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},"priority_logical":"P1"}]}'
+  parse='{"epic":{"title":"Repo Epic","description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}},"stories":[{"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","spans":[{"text":"need","marks":[]}]}]},"priority_logical":"P1"}]}'
   ctx='{"spec_ref":{"repo":"acme/app","spec_slug":"001-feature","folder":"specs/001-feature"},"project_key":"PROJ"}'
   run interchange_build "${parse}" "${ctx}"
   [ "$status" -eq 0 ]
@@ -77,7 +77,7 @@ setup() {
 
 @test "T068 [Phase 5, US2]: interchange_build carries epic.local_id and epic.marker through" {
   local parse ctx
-  parse='{"epic":{"title":"Repo Epic","local_id":"3f2a91c04b7e6d18","marker":{"state":"bound","id":"3f2a91c04b7e6d18","ticket":"COMP-1","lines":[2]},"description":{"blocks":[{"type":"paragraph","text":"x"}]}},"stories":[{"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},"priority_logical":"P1"}]}'
+  parse='{"epic":{"title":"Repo Epic","local_id":"3f2a91c04b7e6d18","marker":{"state":"bound","id":"3f2a91c04b7e6d18","ticket":"COMP-1","lines":[2]},"description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}},"stories":[{"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","spans":[{"text":"need","marks":[]}]}]},"priority_logical":"P1"}]}'
   ctx='{"spec_ref":{"repo":"acme/app","spec_slug":"001-feature","folder":"specs/001-feature"},"project_key":"PROJ"}'
   run interchange_build "${parse}" "${ctx}"
   [ "$status" -eq 0 ]
@@ -88,7 +88,7 @@ setup() {
 
 @test "T068: epic.local_id is required unless the marker state is absent" {
   local parse ctx
-  parse='{"epic":{"title":"E","marker":{"state":"assigned","id":"","lines":[]},"description":{"blocks":[{"type":"paragraph","text":"x"}]}},"stories":[{"local_id":"s1","title":"S","description":{"blocks":[{"type":"paragraph","text":"n"}]},"priority_logical":"P1"}]}'
+  parse='{"epic":{"title":"E","marker":{"state":"assigned","id":"","lines":[]},"description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}},"stories":[{"local_id":"s1","title":"S","description":{"blocks":[{"type":"paragraph","spans":[{"text":"n","marks":[]}]}]},"priority_logical":"P1"}]}'
   ctx='{"spec_ref":{"repo":"acme/app","spec_slug":"001-feature","folder":"specs/001-feature"},"project_key":"PROJ"}'
   run interchange_build "${parse}" "${ctx}"
   [ "$status" -ne 0 ]
@@ -97,7 +97,7 @@ setup() {
 
 @test "T068: an absent marker (dry run on an untouched spec) does not require epic.local_id" {
   local parse ctx
-  parse='{"epic":{"title":"E","marker":{"state":"absent","id":"","lines":[]},"description":{"blocks":[{"type":"paragraph","text":"x"}]}},"stories":[{"local_id":"s1","title":"S","description":{"blocks":[{"type":"paragraph","text":"n"}]},"priority_logical":"P1"}]}'
+  parse='{"epic":{"title":"E","marker":{"state":"absent","id":"","lines":[]},"description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}},"stories":[{"local_id":"s1","title":"S","description":{"blocks":[{"type":"paragraph","spans":[{"text":"n","marks":[]}]}]},"priority_logical":"P1"}]}'
   ctx='{"spec_ref":{"repo":"acme/app","spec_slug":"001-feature","folder":"specs/001-feature"},"project_key":"PROJ"}'
   run interchange_build "${parse}" "${ctx}"
   [ "$status" -eq 0 ]
@@ -105,7 +105,7 @@ setup() {
 
 @test "interchange_build refuses an assembly with an invalid project_key (zero writes)" {
   local parse ctx
-  parse='{"epic":{"title":"E","description":{"blocks":[{"type":"paragraph","text":"x"}]}},"stories":[{"local_id":"s1","title":"S","description":{"blocks":[{"type":"paragraph","text":"n"}]},"priority_logical":"P1"}]}'
+  parse='{"epic":{"title":"E","description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}},"stories":[{"local_id":"s1","title":"S","description":{"blocks":[{"type":"paragraph","spans":[{"text":"n","marks":[]}]}]},"priority_logical":"P1"}]}'
   ctx='{"spec_ref":{"repo":"acme/app","spec_slug":"001-feature","folder":"specs/001-feature"},"project_key":"bad-key"}'
   run interchange_build "${parse}" "${ctx}"
   [ "$status" -ne 0 ]
@@ -211,7 +211,7 @@ setup() {
 @test "interchange_build is byte-identical across ports (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local parse ctx b p
-  parse='{"epic":{"title":"Repo Epic","description":{"blocks":[{"type":"paragraph","text":"x"}]}},"stories":[{"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},"priority_logical":"P2","estimation":3}]}'
+  parse='{"epic":{"title":"Repo Epic","description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}},"stories":[{"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","spans":[{"text":"need","marks":[]}]}]},"priority_logical":"P2","estimation":3}]}'
   ctx='{"spec_ref":{"repo":"acme/app","spec_slug":"001-feature","folder":"specs/001-feature"},"project_key":"PROJ"}'
   b="$(interchange_build "${parse}" "${ctx}")"
   p="$(pwsh -NoProfile -Command "Import-Module '${PS_ENGINE}/Interchange.psm1' -Force; [Console]::Out.Write((Build-JiraNeutralDocument -ParseJson '${parse}' -ContextJson '${ctx}').Document)")"

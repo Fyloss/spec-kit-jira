@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # T017d [009, US2] — Mechanical guard for SC-011/FR-018/FR-019: every OS leg of
-# the `unit` job must run Pester in full AND the complete 103-scenario
+# the `unit` job must run Pester in full AND the complete 105-scenario
 # conformance corpus — never a shard of it. Decision 7 permits sharding the
 # corpus WITHIN one OS (multiple runners of the SAME os value); it explicitly
 # FORBIDS spreading scenarios ACROSS the three OSes, which would leave no host
@@ -13,22 +13,23 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (103)" {
+@test "the conformance corpus has exactly the recorded scenario count (105)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
   # 012 adds ten task sub-task scenarios (74 -> 84).
+  # 016 adds two: us1-markdown-rendering, us3-markdown-idempotent (84 -> 86).
   # 017 adds six: us1-target-refusal, us1-stray-markers, us2-label-create,
-  # us2-label-backfill, us2-label-second-run, us4-duplicate-probe (84 -> 90).
+  # us2-label-backfill, us2-label-second-run, us4-duplicate-probe (86 -> 92).
   # 018 adds six: us2-preserve-human-prefix, us1-plan-added-not-replaced,
   # us3-summary-rename-withheld, us3-summary-rename-proceed,
-  # us4-migration-clean, us4-migration-ambiguous (90 -> 96).
+  # us4-migration-clean, us4-migration-ambiguous (92 -> 98).
   # 018 Phase 8 (convergence) adds seven: sc008-task-tier-boundary,
   # sc008-oversized-description-refused, sc008-two-delimiters-refused,
   # sc008-privacy-prefix-allowed, sc008-privacy-composed-blocked,
-  # sc008-deleted-managed-region-restored, sc008-summary-record-edges (96 -> 103).
+  # sc008-deleted-managed-region-restored, sc008-summary-record-edges (98 -> 105).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 103 ]
+  [ "${count}" -eq 105 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

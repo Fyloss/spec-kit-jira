@@ -28,6 +28,7 @@ flowchart TB
         E7["story_marker"]
         E8["task_marker (012)"]
         E9["tasks_parse (012)"]
+        E10["markdown"]
     end
 
     subgraph SinkLayer["sink/jira/ — ALL Jira knowledge"]
@@ -113,6 +114,10 @@ mindmap
         Design section
         P1 P2 P3 priority
         declared estimation
+      markdown
+        Markdown subset -> neutral blocks and spans
+        source-format knowledge, not Jira knowledge
+        no Atlassian identifiers (Gate #2)
       interchange
         schema validation before any write
       story_marker

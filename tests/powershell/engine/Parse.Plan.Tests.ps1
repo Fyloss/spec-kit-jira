@@ -25,11 +25,11 @@ Language: Bash and PowerShell.
 Describe 'Get-JiraParsedPlanSummary' {
     It 'extracts the Summary section as a named heading plus one paragraph per paragraph' {
         $blocks = Get-JiraParsedPlanSummary -Text $script:Plan | ConvertFrom-Json
-        @($blocks | Where-Object { $_.type -eq 'heading' -and $_.text -eq 'Implementation Plan' }).Count | Should -Be 1
+        @($blocks | Where-Object { $_.type -eq 'heading' -and $_.spans[0].text -eq 'Implementation Plan' }).Count | Should -Be 1
         $paras = @($blocks | Where-Object { $_.type -eq 'paragraph' })
         $paras.Count | Should -Be 2
-        $paras[0].text | Should -Be 'The sink drops the parent today. This plan makes the parent real.'
-        $paras[1].text | Should -Be 'A second paragraph adds more context.'
+        $paras[0].spans[0].text | Should -Be 'The sink drops the parent today. This plan makes the parent real.'
+        $paras[1].spans[0].text | Should -Be 'A second paragraph adds more context.'
     }
 
     It 'stops at the next heading (Technical Context never leaks in)' {

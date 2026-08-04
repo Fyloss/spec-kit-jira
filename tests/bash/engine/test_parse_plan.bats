@@ -20,11 +20,11 @@ PLAN=$'# Implementation Plan: Billing Invoices\n\n**Branch**: `001-billing`\n\n#
 @test "extracts the Summary section as a named heading plus one paragraph per paragraph" {
   run _plan_wrapper "${PLAN}"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '[.[] | select(.type=="heading" and .text=="Implementation Plan")] | length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '[.[] | select(.type=="heading" and .spans[0].text=="Implementation Plan")] | length' <<< "$output")" -eq 1 ]
   local paras; paras="$(jq -c '[.[] | select(.type=="paragraph")]' <<< "$output")"
   [ "$(jq 'length' <<< "${paras}")" -eq 2 ]
-  [[ "$(jq -r '.[0].text' <<< "${paras}")" == "The sink drops the parent today. This plan makes the parent real." ]]
-  [[ "$(jq -r '.[1].text' <<< "${paras}")" == "A second paragraph adds more context." ]]
+  [[ "$(jq -r '.[0].spans[0].text' <<< "${paras}")" == "The sink drops the parent today. This plan makes the parent real." ]]
+  [[ "$(jq -r '.[1].spans[0].text' <<< "${paras}")" == "A second paragraph adds more context." ]]
 }
 
 @test "stops at the next heading (Technical Context never leaks in)" {

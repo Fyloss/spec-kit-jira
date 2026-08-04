@@ -34,7 +34,7 @@ Describe 'Get-JiraParsedSpec — marker exclusion' {
     It 'the marker line never lands in the design section' {
         $doc = "### User Story 1 - First (Priority: P1)`n<!-- speckit-jira story=7f3a9c1e40b2d85a -->`n`nBody.`n`n#### Design`n`nSome guidance here.`n"
         $r = Invoke-ParseWrapper $doc
-        (ConvertTo-Json $r.stories[0].design -Compress) | Should -Be '[{"kind":"guidance","value":"Some guidance here."}]'
+        (ConvertTo-Json $r.stories[0].design -Compress -Depth 100) | Should -Be '[{"kind":"guidance","value":[{"marks":[],"text":"Some guidance here."}]}]'
     }
 
     It 'the marker line never lands in priority or estimation extraction' {
@@ -82,7 +82,7 @@ Describe 'Get-JiraParsedSpec — T052 [Phase 5, US2] spec= marker exclusion' {
         $doc = "# Feature Specification: X`n<!-- speckit-jira spec=3f2a91c04b7e6d18 ticket=COMP-412 -->`n`nOverview prose.`n"
         $r = Invoke-ParseWrapper $doc
         (Get-JiraParsedSpec -Text $doc -FolderSlug '001-x') | Should -Not -BeLike '*speckit-jira*'
-        $r.epic.description.blocks[0].text | Should -Be 'Overview prose.'
+        $r.epic.description.blocks[0].spans[0].text | Should -Be 'Overview prose.'
     }
 
     It "a spec= line inside a story section never lands in that story's title, description or acceptance criteria" {
@@ -96,7 +96,7 @@ Describe 'Get-JiraParsedSpec — T052 [Phase 5, US2] spec= marker exclusion' {
         $doc = "### User Story 1 - First (Priority: P1)`n<!-- speckit-jira story=7f3a9c1e40b2d85a -->`n<!-- speckit-jira spec=3f2a91c04b7e6d18 -->`n`nBody.`n`n#### Design`n`nSome guidance here.`n"
         $r = Invoke-ParseWrapper $doc
         (Get-JiraParsedSpec -Text $doc -FolderSlug '001-x') | Should -Not -BeLike '*speckit-jira*'
-        (ConvertTo-Json $r.stories[0].design -Compress) | Should -Be '[{"kind":"guidance","value":"Some guidance here."}]'
+        (ConvertTo-Json $r.stories[0].design -Compress -Depth 100) | Should -Be '[{"kind":"guidance","value":[{"marks":[],"text":"Some guidance here."}]}]'
     }
 
     It 'a spec= line inside a story section never lands in priority or estimation extraction' {

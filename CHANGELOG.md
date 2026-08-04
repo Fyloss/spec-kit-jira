@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Story and epic descriptions now render Markdown as native Jira formatting
+  instead of leaving the raw syntax visible. Bold, italic, inline code,
+  strikethrough, links, autolinks, headings, bullet and ordered lists, and
+  fenced code blocks all convert; anything outside that subset degrades to
+  plain text rather than failing the run. Tickets synced by an earlier
+  version carry a one-off corrective description rewrite on their next
+  reconcile — after that, an unchanged spec produces zero further writes.
+
 ## [0.11.2] - 2026-08-06
 
 ### Fixed

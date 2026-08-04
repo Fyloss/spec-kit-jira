@@ -219,6 +219,29 @@ flowchart LR
 The engine emits *logical* content; the sink resolves logical names to ids and
 renders ADF. `sink/jira/adf.sh` is the only place ADF node names exist.
 
+## Markdown rendering in descriptions
+
+Overview prose, acceptance-criteria clauses, and Design guidance lines are
+parsed as Markdown before they reach the ticket: `**bold**`, `_italic_`,
+`` `monospace` ``, `~~strikethrough~~`, links, autolinks, headings, bullet and
+ordered lists, and fenced code blocks all render as native Jira formatting
+instead of surviving as literal punctuation. Anything outside that set (raw
+HTML, image targets, table alignment rows) degrades to plain text rather than
+failing the run.
+
+The engine parses this subset itself — `engine/markdown.sh` and its
+PowerShell mirror `engine/Markdown.psm1` — into a neutral tree of blocks and
+marked spans; the sink then maps that neutral vocabulary onto ADF node names.
+It is deliberately a fixed, restricted subset rather than full CommonMark, so
+that both native ports agree on the result byte-for-byte. The exact grammar —
+every rule numbered, with worked examples — is normative in
+[contracts/markdown-subset.md](../specs/016-jira-markdown-rendering/contracts/markdown-subset.md).
+
+Spec files are read-only input to this parser: nothing about formatting is
+ever written back to them (FR-000), and only the two content blocks the
+selection rule already kept before this feature are affected — the set of
+prose selected does not change.
+
 ## The plan context — the facts the engine cannot know
 
 ```mermaid
