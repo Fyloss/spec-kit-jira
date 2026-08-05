@@ -95,7 +95,11 @@ Describe 'Invoke-JiraReconcile — the task tier' {
         @($r.actions | Where-Object { $_.role -eq 'task' }).Count | Should -Be 1
         $after = Get-Content -Raw -LiteralPath $script:Tasks
         $after | Should -Be $before
-        @(Get-JiraMockCallLog -Mock $script:M).Count | Should -Be 0
+        # 017's duplicate probe is a read-only GET fired in the planning pass, so
+        # a --dry-run over a specification with no parent marker legitimately
+        # reaches the double. The dry-run invariant is zero WRITES, not zero
+        # requests.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
     }
 
     It 'no tasks.md is a silent no-op — no counts.tasks key at all' {

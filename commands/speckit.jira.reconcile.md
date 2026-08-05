@@ -35,8 +35,12 @@ in a consuming repository, and assuming it does is what produced the reported
 
 1. **Locate the feature** — read `.specify/feature.json` for the active feature
    directory and use its `spec.md`, unless a spec file path was passed as the
-   argument. **With no active feature the step is inert**: do nothing and report
-   nothing.
+   argument. **The target is always that feature's own `spec.md` — never any
+   other artifact, whichever host command just produced it.** `plan.md`,
+   `tasks.md`, `research.md`, `data-model.md`, `quickstart.md`,
+   `contracts/api.md`, and an analysis output are never targets, for this event
+   or any other: this rule holds identically across all six `after_*` events.
+   **With no active feature the step is inert**: do nothing and report nothing.
 
 2. **Invoke the bridge** by the repository-relative path above, passing the spec
    file and `--json`:
@@ -68,12 +72,13 @@ in a consuming repository, and assuming it does is what produced the reported
    mirror that could not run is never a reason for `/speckit.plan` or
    `/speckit.implement` to fail.
 
-## Message discipline — the six distinguished causes
+## Message discipline — the eight distinguished causes
 
 At most **one** message per host command run, naming the **true** cause:
 
 | Cause | Distinguishing signal | What to say |
 | --- | --- | --- |
+| Rejected target | Exit `1`, message says a file "is not a feature specification" | Relay the entry point's own message verbatim — it names the rejected path and, when one exists, the correct `spec.md` for that folder. This is a caller defect (this procedure invoked the wrong artifact), not a degraded Jira state |
 | Not yet configured | The bridge exits `0` and reports no binding | At most three lines: this repository is not yet bound to a Jira project; run `/speckit.jira.config` |
 | Binding predates this release | Exit `4`, message says the binding "predates parent support" | The project is already bound; its local binding is a version behind. Run `/speckit.jira.config` to refresh it (see INSTALL.md, "Upgrading to the parent-hierarchy release") |
 | Credentials absent | Exit `4`, no token on any of the three resolution rungs | The token resolved through none of env, OS secret manager, or `.specify/jira/.env` |
@@ -179,6 +184,28 @@ A story whose recorded ticket cannot be verified (a mismatched or missing
 identity marker, a duplicate identifier, or a ticket claimed by another
 specification) is reported in `warnings` and left untouched; it never blocks
 its siblings.
+
+## The provenance label (017)
+
+Every ticket the mirror manages — the specification-role parent, each story-role
+child, and each task-role sub-task — carries the label `speckit-<folder>`, where
+`<folder>` is the specification's own folder reference (`speckit-001-test-page`
+for `specs/001-test-page/`). Searching that label in Jira returns exactly that
+specification's tickets and nothing else.
+
+The label is additive: it is merged with any label the project's configuration
+already sends and with any label an operator applied by hand, and the mirror
+never removes one it did not add. A ticket that predates this behaviour gains
+the label once, on its next ordinary run, counted as an ordinary `updated`
+(`counts.tasks.updated` for a sub-task) — not as drift, and with no warning.
+Once the estate is labelled, a further unchanged run reports zero created and
+zero updated.
+
+A project whose issue types cannot hold labels mirrors every ticket exactly as
+before, with one named warning per issue type saying the label could not be
+applied. A ticket whose write is suppressed — halted, flagged, drifted, or a
+withheld sub-task — is not labelled either: the label follows the write and is
+never an exception to a hold.
 
 ## The task tier (012)
 
@@ -296,8 +323,12 @@ waits.
 
 ## Flags
 
-- `<SPEC-FILE>` — optional positional: the specification to mirror; defaults to
-  the active feature's `spec.md`.
+- `<SPEC-FILE>` — optional positional, accepting a feature specification file
+  only: the target must be a feature folder's own `spec.md`; defaults to the
+  active feature's `spec.md` when omitted. Any other path — `plan.md`,
+  `tasks.md`, a research or analysis artifact, a differently named file —
+  is refused before any read, write, or network call (the rejected-target
+  cause above).
 - `--json` — emit the machine-readable run summary (`run-summary.schema.json`).
 - `--dry-run` — compute the full action set and report it, writing nothing to
   Jira. The dry-run action set equals the real run's exactly.

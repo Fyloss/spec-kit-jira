@@ -107,13 +107,17 @@ Describe 'Invoke-JiraReconcile — the parent hierarchy regression' {
         $out.actions[0].body.fields.summary | Should -Be 'Billing Invoices'
         @($out.actions | Where-Object { $_.role -eq 'story' }).Count | Should -Be 3
         (@($out.actions | Where-Object { $_.role -eq 'story' }))[0].body.fields.parent.key | Should -Be '<resolved at apply time>'
-        (Get-JiraMockCallLog -Mock $script:M).Count | Should -Be 0
+        # The one read this run makes: the duplicate probe (017, US4)
+        # predicting the parent's creation. Read-only — zero writes either way.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match 'search/jql' }).Count | Should -Be 1
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 0
     }
 
     It 'T095: --dry-run predicts a recognised, unchanged parent''s reuse — no parent action, matching the real zero-churn run' {
         $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
         $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
         $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
+        $null = Invoke-Captured @('reconcile', $script:Spec, '--json') # back-fills the provenance label once
 
         $out = Invoke-Captured @('reconcile', $script:Spec, '--dry-run', '--json') | ConvertFrom-Json
         $out.dry_run | Should -Be $true

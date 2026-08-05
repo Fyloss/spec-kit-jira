@@ -104,8 +104,11 @@ MD
   [ "$(jq -r '[.actions[] | select(.role=="story")] | length' <<< "$output")" -eq 3 ]
   [ "$(jq -r '[.actions[] | select(.role=="story")][0].body.fields.parent.key' <<< "$output")" = "<resolved at apply time>" ]
 
+  # The one read this run makes: the duplicate probe (017, US4) predicting
+  # the parent's creation. Read-only — zero writes either way.
   run mock_calls
-  [ -z "$output" ]
+  [ "$(grep -c 'search/jql' <<< "$output")" -eq 1 ]
+  [ "$(grep -cE '^(POST|PUT) ' <<< "$output")" -eq 0 ]
 }
 
 @test "T095: --dry-run predicts a recognised, unchanged parent's reuse — no parent action, matching the real zero-churn run" {
@@ -113,6 +116,7 @@ MD
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   run cmd_reconcile reconcile "${SPEC}" --json
   [ "$status" -eq 0 ]
+  cmd_reconcile reconcile "${SPEC}" --json > /dev/null # back-fills the provenance label once
 
   run cmd_reconcile reconcile "${SPEC}" --dry-run --json
   [ "$status" -eq 0 ]

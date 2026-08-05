@@ -22,6 +22,7 @@ Import-Module (Join-Path $PSScriptRoot '../engine/StoryMarker.psm1') -Force -Glo
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Recognition.psm1') -Force # R5 step 2 — recognise recorded tickets
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/PlanApply.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force # Phase 8, US5 — the completion pass's transitions read
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/DuplicateProbe.psm1') -Force # US4, droppable — the second, best-effort guard
 Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force # hook health — READ ONLY (003 FR-022)
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force          # the operator disable record
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Hierarchy.psm1') -Force -Global # the mandatory-field gate — a nested import inside lib/Config.psm1 is not enough
@@ -436,6 +437,10 @@ function Get-JiraReconcilePlanContextFromBinding {
     # "No migration"); a child linked to the wrong parent is what
     # Get-JiraPlanWriteSet corrects.
     $ticketParents = [ordered]@{}
+    # ticket_labels (017, US2, contracts/provenance-label.md §2/§3): each
+    # recognised ticket's CURRENT labels, already unique-normalised by
+    # recognition — omitted entirely when empty, like every neighbouring map.
+    $ticketLabels = [ordered]@{}
     if ($boundVal) {
         foreach ($p in $boundVal.PSObject.Properties) {
             $tickets[$p.Name] = [string](Get-JiraPlanPropSafe $p.Value 'key')
@@ -449,6 +454,7 @@ function Get-JiraReconcilePlanContextFromBinding {
             $ticketDescriptions[$p.Name] = Get-JiraPlanPropSafe $current 'description'
             $currentParent = Get-JiraPlanPropSafe $current 'parent'
             if ($null -ne $currentParent) { $ticketParents[$p.Name] = [string]$currentParent }
+            $ticketLabels[$p.Name] = @(Get-JiraPlanPropSafe $current 'labels')
         }
     }
 
@@ -481,6 +487,16 @@ function Get-JiraReconcilePlanContextFromBinding {
     if ($ticketOrigins.Count -gt 0) { $result['ticket_origins'] = $ticketOrigins }
     if ($ticketDescriptions.Count -gt 0) { $result['ticket_descriptions'] = $ticketDescriptions }
     if ($ticketParents.Count -gt 0) { $result['ticket_parents'] = $ticketParents }
+    if ($ticketLabels.Count -gt 0) { $result['ticket_labels'] = $ticketLabels }
+    # defaultable_fields_by_type / issue_types (017, contract §4): the RAW
+    # per-type map discovery already records, plus the type-id -> logical-name
+    # list — threaded through so Get-JiraPlanApplyLabelDecision can answer
+    # "does this type's create screen offer labels at all" without a second
+    # discovery pass. Omitted when the binding predates them (mirror of
+    # _reconcile_plan_context; R6's "not recorded at all ⇒ send" branch reads
+    # this same absence).
+    if ($null -ne $fdDfRaw -and @($fdDfRaw.PSObject.Properties).Count -gt 0) { $result['defaultable_fields_by_type'] = $fdDfRaw }
+    if ($null -ne $fdItypesRaw -and @($fdItypesRaw).Count -gt 0) { $result['issue_types'] = @($fdItypesRaw) }
     if (@($fieldDefaultsJson.PSObject.Properties).Count -gt 0) { $result['field_defaults'] = $fieldDefaultsJson }
     if (-not [string]::IsNullOrEmpty($taskTypeId)) { $result['task_type_id'] = $taskTypeId }
     if ($ticketCurrent.Count -gt 0) { $result['ticket_current'] = $ticketCurrent }
@@ -534,8 +550,40 @@ function Invoke-JiraReconcile {
         if ($a -eq 'reconcile' -or $a.StartsWith('-')) { continue }
         $specFile = $a; break
     }
-    if ([string]::IsNullOrEmpty($specFile) -or -not (Test-Path -LiteralPath $specFile)) {
+    # -PathType Leaf (NOT a bare Test-Path): a directory exists as a path but
+    # is not a readable FILE, and must keep this message rather than falling
+    # through to the target guard below (contracts/target-guard.md §5 T11) —
+    # the mirror of the Bash port's `-f` test, which a bare Test-Path is not.
+    if ([string]::IsNullOrEmpty($specFile) -or -not (Test-Path -LiteralPath $specFile -PathType Leaf)) {
         return (Get-JiraReconcileFaultCode -Code ([int](Get-JiraExitCode 'usage')) -Message 'reconcile: a readable spec file argument is required')
+    }
+
+    # TARGET GUARD (User Story 1, FR-001–FR-008, contracts/target-guard.md
+    # §1–§3): only a feature folder's own spec.md is ever mirrored. This runs
+    # before any configuration read, any network call and any file write —
+    # the earliest point at which the target is known (research R1: after
+    # the dispatch guard above, so an event the operator disabled stays
+    # silent). Split-Path -Leaf ONLY — never a glob or a suffix test
+    # (research R3) — and -cne for byte-equal, case-sensitive comparison; the
+    # native `specs\001-x\spec.md` separator spelling passes here because
+    # Split-Path -Leaf is this port's own path-splitting primitive.
+    $targetName = Split-Path -Leaf $specFile
+    if ($targetName -cne 'spec.md') {
+        $targetDir = Split-Path -Parent $specFile
+        if ([string]::IsNullOrEmpty($targetDir)) {
+            $targetDir = if ($specFile.StartsWith('/')) { '/' } else { '.' }
+        }
+        # String concatenation, NOT Join-Path: Join-Path would rewrite a
+        # forward-slash scenario path to this port's native separator and
+        # break the byte-identical refusal FR-027 requires across ports.
+        $siblingSpec = "$targetDir/spec.md"
+        if (Test-Path -LiteralPath $siblingSpec -PathType Leaf) {
+            $targetMsg = "reconcile: `"$specFile`" is not a feature specification — only a feature folder's spec.md is ever mirrored (zero writes); the target for this folder is `"$siblingSpec`""
+        }
+        else {
+            $targetMsg = "reconcile: `"$specFile`" is not a feature specification — only a feature folder's spec.md is ever mirrored (zero writes); no spec.md exists in that folder"
+        }
+        return (Get-JiraReconcileFaultCode -Code ([int](Get-JiraExitCode 'usage')) -Message $targetMsg)
     }
 
     # NOT YET CONFIGURED (FR-017 first cause, FR-019). This is the normal state of
@@ -645,6 +693,12 @@ function Invoke-JiraReconcile {
 
     $specRef = [ordered]@{ repo = $repo; spec_slug = $slug; folder = $folder }
     $specRefJson = ConvertTo-JiraJsonValue $specRef
+
+    # Stray-marker scan (FR-007, contracts/target-guard.md §4): runs on every
+    # valid target, dry-run included, and never changes the exit code.
+    # Computed once, here, and folded into the run summary's warnings array
+    # below.
+    $strayFiles = Get-JiraMarkerSpliceStrayFile -Folder $folder
 
     # Phase 6, US4: the phase->status map and halted-status list this run's
     # lifecycle-safety rules resolve against — declared per project, exactly
@@ -830,6 +884,8 @@ function Invoke-JiraReconcile {
     if ($parentState -eq 'blocked') {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: $($recogParent.detail)")
     }
+
+    $dupProbeWarning = ''
 
     # R5 step 2b — RECOGNISE the stories (Phase 3, US1;
     # contracts/recognition-contract.md): one read per recorded ticket,
@@ -1122,6 +1178,30 @@ function Invoke-JiraReconcile {
         $planCtx = ConvertTo-JiraJsonValue $planCtxMap
     }
 
+    # DUPLICATE PROBE (User Story 4, P3, droppable; FR-022-FR-026,
+    # contracts/duplicate-probe.md §2): fires only when about to CREATE a
+    # parent -- parentState "new" (no marker recorded) AND the plan context
+    # actually resolved a parent_type_id (a hierarchy with no parent type
+    # never creates one) -- and only once every OTHER pre-write refusal
+    # above (routing, project validity, the stale-binding read) has already
+    # cleared, so a run that was going to refuse anyway never issues this
+    # read first. At most one request per run. Read-only, best-effort -- a
+    # false negative here leaves today's behaviour unchanged (SC-001 rests
+    # on the marker line, not on this).
+    $planCtxForProbe = $planCtx | ConvertFrom-Json -Depth 100
+    $probeParentTypeId = [string](Get-JiraPlanPropSafe $planCtxForProbe 'parent_type_id')
+    if ($parentState -eq 'new' -and -not [string]::IsNullOrEmpty($probeParentTypeId)) {
+        $dupLabel = "speckit-$slug"
+        $dupResult = Get-JiraDuplicateProbeResult -BaseUrl $base -ProjectKey $projectKey -Label $dupLabel
+        if ($dupResult.Verdict -eq 'hit') {
+            $dupKeys = ($dupResult.Keys -join ', ')
+            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: project $projectKey already holds tickets labelled `"$dupLabel`" ($dupKeys) but this specification records no ticket of its own — bind each with the bridge's ``mention <issue-key>`` command, or remove the label from them (zero writes)")
+        }
+        elseif ($dupResult.Verdict -eq 'unavailable') {
+            $dupProbeWarning = 'the duplicate-label check could not be performed on this site; the run proceeded on its recorded markers alone'
+        }
+    }
+
     try { $planJson = Get-JiraPlanWriteSet -NeutralDocJson $docForWriteJson -PlanContextJson $planCtx }
     catch {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the write plan could not be assembled (zero writes)')
@@ -1129,6 +1209,16 @@ function Invoke-JiraReconcile {
     $planObj = $planJson | ConvertFrom-Json -Depth 100
     $parentAction = Get-JiraPlanPropSafe $planObj 'parent'
     $actionsJson = ConvertTo-JiraJsonValue @(Get-JiraPlanPropSafe $planObj 'stories')
+    # 017, contract §4: the label-degradation warnings Get-JiraPlanWriteSet
+    # returns alongside the action set — mirror of the bash port's
+    # plan_label_warnings, folded into the run summary's warnings below.
+    $planLabelWarningsRaw = Get-JiraPlanPropSafe $planObj 'warnings'
+    $planLabelWarnings = if ($null -eq $planLabelWarningsRaw) { @() } else { @($planLabelWarningsRaw) }
+    # The task type's resolved provenance token (017 FR-009 on 012's tier),
+    # decided inside Get-JiraPlanWriteSet beside the story's and the parent's
+    # so its own degradation warning travels with theirs. Empty when no
+    # `task` role resolved, or when the type cannot hold the label.
+    $taskLabel = [string](Get-JiraPlanPropSafe $planObj 'task_label')
 
     # Phase 3, US1 (contract 4): the task tier's own plan, over the SAME
     # document and context — never through Get-JiraLifecyclePlan, which
@@ -1136,7 +1226,7 @@ function Invoke-JiraReconcile {
     # inactive, so $tasksActionsJson stays the '[]' it was initialised to
     # and every downstream read of it is a no-op (FR-011).
     if ($taskRoleActive) {
-        try { $tasksActionsJson = Get-JiraPlanTaskWriteSet -DocJson $docForWriteJson -ContextJson $planCtx }
+        try { $tasksActionsJson = Get-JiraPlanTaskWriteSet -DocJson $docForWriteJson -ContextJson $planCtx -TaskLabel $taskLabel }
         catch {
             $taskWarns.Add("reconcile: the task tier's write plan could not be assembled and was withheld this run")
             $tasksActionsJson = '[]'
@@ -1309,6 +1399,17 @@ function Invoke-JiraReconcile {
     # Phase 3, US1: the task tier's own warnings — a withheld tier, a
     # recognition block, or a plan failure — join the same channel.
     foreach ($tw in $taskWarns) { $warnsList.Add($tw) }
+    # Stray-marker warning (FR-007, contracts/target-guard.md §4): one entry
+    # naming every match, computed earlier, before the plan or Jira were
+    # even reached — never blocks, never changes the exit code.
+    if (-not [string]::IsNullOrEmpty($strayFiles)) {
+        $warnsList.Add("spec-kit-jira markers were found in files this mirror never writes: $strayFiles — they are inert, were left untouched, and can be removed by hand")
+    }
+    foreach ($lw in $planLabelWarnings) { $warnsList.Add([string]$lw) }
+    # Duplicate-probe "unavailable" warning (User Story 4, contract §4):
+    # computed above, on the planning pass — never blocks, never changes the
+    # exit code.
+    if (-not [string]::IsNullOrEmpty($dupProbeWarning)) { $warnsList.Add($dupProbeWarning) }
     $warnsJson = ConvertTo-JiraJsonValue $warnsList
 
 # T073 (FR-021, FR-022): orphan and re-attribution reports join the notes

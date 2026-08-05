@@ -84,7 +84,8 @@ teardown() {
   # Reuse the SAME durable identifier (via SPEC_KIT_JIRA_ID_SOURCE) across
   # two DIFFERENT specifications, mirrored into two DIFFERENT projects.
   # Recognition must never let one spec's marker satisfy the other's.
-  local specA="${BATS_TEST_TMPDIR}/a.md" specB="${BATS_TEST_TMPDIR}/b.md"
+  mkdir -p "${BATS_TEST_TMPDIR}/a" "${BATS_TEST_TMPDIR}/b"
+  local specA="${BATS_TEST_TMPDIR}/a/spec.md" specB="${BATS_TEST_TMPDIR}/b/spec.md"
   printf '%s\n' '### User Story 1 - Alpha (Priority: P1)' '<!-- speckit-jira story=1111111111111111 ticket=OTHER-1 -->' '' 'Alpha body.' > "${specA}"
   printf '%s\n' '### User Story 1 - Beta (Priority: P1)' '<!-- speckit-jira story=1111111111111111 ticket=COMP-9 -->' '' 'Beta body.' > "${specB}"
 

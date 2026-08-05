@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-08-05
+
+### Fixed
+
+- A lifecycle hook that mirrored the wrong artifact (`plan.md` instead of the
+  active feature's `spec.md`) created duplicate tickets: `reconcile` now
+  refuses before any request when its target's basename is not `spec.md`,
+  naming the correct file when one exists in the same folder, and reports
+  stray `speckit-jira` marker comments left behind in sibling artifacts by the
+  earlier defect (never touching them).
+- Every ticket the mirror creates or manages now carries a `speckit-<slug>`
+  label naming its specification folder, back-filled once on tickets that
+  predate this release and merged with any labels an operator already added.
+  An existing consumer will see this back-fill as ordinary `updated` counts on
+  its next run — and, where a `task` role is declared, as
+  `counts.tasks.updated` for the sub-tasks feature 012 mirrors — see INSTALL.md.
+- Before creating a parent a specification holds no marker for, `reconcile`
+  now looks for tickets already carrying that specification's provenance
+  label and refuses rather than risking a duplicate — a best-effort,
+  read-only mitigation on top of the marker-line fix above, droppable
+  independently of it.
+
 ## [0.11.0] - 2026-08-04
 
 ### Added
@@ -692,7 +714,8 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.0...v0.10.1

@@ -17,14 +17,16 @@ BeforeAll {
     $env:JIRA_CONFIG_DIR = Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-reconcile-legacy/.specify/jira'
     $env:SPEC_KIT_JIRA_PLAN_CONTEXT = $null
 
-    $script:SpecWith = Join-Path $TestDrive 'with.md'
+    New-Item -ItemType Directory -Path (Join-Path $TestDrive 'with') -Force | Out-Null
+    $script:SpecWith = Join-Path $TestDrive 'with/spec.md'
     @(
         '# Feature Specification: Rich Tickets', '', 'We need a reconcile bridge for specs.', '',
         '### User Story 1 - The core story (Priority: P1)', '', 'Estimation: 5', '',
         '- **Given** a signed-in user', '- **When** they open the board', '- **Then** the widgets load'
     ) -join "`n" | Set-Content -LiteralPath $script:SpecWith -NoNewline
 
-    $script:SpecNoSummary = Join-Path $TestDrive 'nosummary.md'
+    New-Item -ItemType Directory -Path (Join-Path $TestDrive 'nosummary') -Force | Out-Null
+    $script:SpecNoSummary = Join-Path $TestDrive 'nosummary/spec.md'
     '# Only A Title' | Set-Content -LiteralPath $script:SpecNoSummary -NoNewline
 
     function Invoke-Captured {
@@ -77,9 +79,9 @@ Describe 'Invoke-JiraReconcile (dry-run)' {
         # Split-Path -Parent yields '' for a bare filename, where the Bash port's
         # dirname yields '.' — the folder must still resolve instead of failing
         # the interchange schema with an empty spec_ref.folder.
-        Push-Location $TestDrive
+        Push-Location (Join-Path $TestDrive 'with')
         try {
-            $out = Invoke-Captured @('reconcile', '--dry-run', '--json', 'with.md') 2> $null | ConvertFrom-Json
+            $out = Invoke-Captured @('reconcile', '--dry-run', '--json', 'spec.md') 2> $null | ConvertFrom-Json
             $script:code | Should -Be 0
             $out.actions[1].body.fields.summary | Should -Be 'The core story'
         }

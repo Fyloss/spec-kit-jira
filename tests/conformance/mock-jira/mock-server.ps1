@@ -74,6 +74,14 @@ function Get-DefaultStatus {
     return @{ name = 'To Do'; statusCategory = @{ key = 'new' } }
 }
 
+# Optional label -> [keys] map (017, duplicate_probe): a jql search keyed on
+# `labels = "<label>"` (the duplicate probe's own query shape, distinct from
+# discovery's `parent=<key>` sibling search, which keeps reading the static
+# search-siblings fixture unchanged). Unconfigured or unmatched -> zero
+# issues (the "clear" verdict) -- today's behaviour for every test that
+# never sets it.
+$LabelSearch = if ($cfg.ContainsKey('labelSearch')) { $cfg.labelSearch } else { @{} }
+
 # --- Stateful issue store (Phase 1, T001-T004) -------------------------------
 #
 # The double was write-only and stateless, so it could not express "the ticket
@@ -237,6 +245,24 @@ function Get-Fault {
     return $GlobalFault
 }
 
+function Get-LabelSearchResult {
+    # 017, contracts/duplicate-probe.md §3/§4: decode the jql query's
+    # `labels = "<label>"` clause and look it up in $LabelSearch. Mirror of
+    # the bash shim's _shim_label_search.
+    param([string]$Query)
+    # `+` is form-encoding for space (jq's @uri normalisation this port's
+    # ConvertTo-JiraUriComponent mirrors) — UnescapeDataString alone leaves a
+    # literal `+` in place, so replace it first.
+    $decoded = [System.Uri]::UnescapeDataString(($Query -replace '\+', ' '))
+    $keys = @()
+    if ($decoded -match 'labels = "([^"]*)"') {
+        $label = $Matches[1]
+        if ($LabelSearch.ContainsKey($label)) { $keys = @($LabelSearch[$label]) }
+    }
+    $issues = @($keys | ForEach-Object { @{ key = $_ } })
+    return @{ status = 200; body = (@{ issues = $issues } | ConvertTo-Json -Depth 10 -Compress) }
+}
+
 function Get-IdentityMarker {
     # Return the stored identity property body ({key,value}) for an issue whose key
     # matches a configured identity entry, or $null when no entry matches (unclaimed).
@@ -304,6 +330,7 @@ function Resolve-Route {
                     issuelinks  = @()
                     parent      = if ($suppliedFields.ContainsKey('parent')) { $suppliedFields.parent } else { $null }
                     issuetype   = if ($suppliedFields.ContainsKey('issuetype')) { $suppliedFields.issuetype } else { $null }
+                    labels      = if ($suppliedFields.ContainsKey('labels')) { @($suppliedFields.labels) } else { @() }
                 }
                 $script:Issues[$key] = @{ fields = $fields; properties = @{} }
                 return @{ status = 201; body = "{`"id`":`"99001`",`"key`":`"$key`",`"self`":`"/rest/api/3/issue/99001`"}" }
@@ -323,7 +350,10 @@ function Resolve-Route {
             }
         }
         '^/rest/api/3/issue/[^/]+/remotelink$'                        { if ($Method -eq 'GET') { return (Read-FixtureBody 'remotelinks') } }
-        '^/rest/api/3/(search|search/jql)$'                           { if ($Method -eq 'GET') { return (Read-FixtureBody 'search-siblings') } }
+        '^/rest/api/3/(search|search/jql)$'                           {
+            if ($Method -eq 'GET' -and $Query -match 'labels') { return (Get-LabelSearchResult -Query $Query) }
+            if ($Method -eq 'GET') { return (Read-FixtureBody 'search-siblings') }
+        }
         '^/rest/api/3/issue/[^/]+/properties/[^/]+$' {
             $ikey = ($Path -split '/')[-3]
             $propKey = ($Path -split '/')[-1]

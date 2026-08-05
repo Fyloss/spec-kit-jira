@@ -93,6 +93,26 @@ boot() {
   [ "$(jq -r '.fields.issuetype | has("name")' <<< "$output")" = "false" ]
 }
 
+@test "T024b, T12 [017] — jira_create_fields_base sends the provenance label as its fifth argument (union with recorded labels default)" {
+  run jira_create_fields_base "IJT" "invoice export" "10201" '{}' "speckit-001-x"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.labels | join(",")' <<< "$output")" = "speckit-001-x" ]
+}
+
+@test "T024b, T12 [017] — the feature ceremony's _ticket_create_body carries NO labels key — in particular never speckit-spec — while its base stays byte-identical to the mirror's" {
+  local base_no_prov base_with_prov
+  base_no_prov="$(jira_create_fields_base "IJT" "invoice export" "10201")"
+  base_with_prov="$(jira_create_fields_base "IJT" "invoice export" "10201" '{}' "speckit-spec")"
+  # The mirror's own path (labelled) differs ONLY by the labels key — the
+  # shared base underneath is byte-identical (FR-025).
+  [ "$(jq -c 'del(.labels)' <<< "${base_with_prov}")" = "$(jq -c . <<< "${base_no_prov}")" ]
+
+  run _ticket_create_body "IJT" "invoice export" "10201"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.fields | has("labels")' <<< "$output")" = "false" ]
+  [ "$(jq -c '.fields' <<< "$output")" = "$(jq -c . <<< "${base_no_prov}")" ]
+}
+
 @test "ticket_create POSTs, prints the created key, and identity-stamps it" {
   boot '{"projects":{"IJT":"team"},"createdKey":"IJT-123"}'
   run ticket_create "IJT" "invoice export" "10201" '[]' '[]' '{"repo":"acme/app","spec_slug":"003-x"}'

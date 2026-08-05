@@ -33,7 +33,7 @@ function Get-JiraRecognitionRead {
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Key, [string] $Extra = '')
     $base = if ($env:SPEC_KIT_JIRA_BASE_URL) { $env:SPEC_KIT_JIRA_BASE_URL } else { '' }
-    $fieldsParam = 'summary,description,priority,status,issuelinks,parent'
+    $fieldsParam = 'summary,description,priority,status,issuelinks,parent,labels'
     if (-not [string]::IsNullOrEmpty($Extra)) { $fieldsParam = "$fieldsParam,$Extra" }
     $idKey = Get-JiraRecognitionIdentityKey
     $url = "$base/rest/api/3/issue/$Key`?properties=$idKey&fields=$fieldsParam"
@@ -69,6 +69,28 @@ function Get-JiraRecognitionSafe {
     return $m.Value
 }
 
+function Get-JiraRecognitionNormalizedLabel {
+    <#
+    .SYNOPSIS
+      A ticket's `labels` field, sorted (this port's ordinal comparer, so
+      both ports produce the same order) and deduplicated — mirror of the
+      Bash port's `(.labels // []) | unique`. Load-bearing for the
+      zero-churn label comparison (017, research R4): jq's array `==` is
+      order-sensitive.
+    #>
+    param($Fields)
+    $raw = @(Get-JiraRecognitionSafe $Fields 'labels')
+    $labels = [string[]]@($raw | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ } | Select-Object -Unique)
+    [System.Array]::Sort($labels, [System.StringComparer]::Ordinal)
+    # `return $labels` alone STREAMS the array onto the output pipeline, and
+    # PowerShell unrolls a one-element collection into its bare scalar there
+    # — a ticket with exactly one label would silently return a plain string
+    # instead of a one-element array (017, the R4 regression's actual root
+    # cause: this is the value the zero-churn comparison reads as `current`).
+    # The unary comma suppresses that enumeration.
+    return , $labels
+}
+
 function Get-JiraRecognitionReadParent {
     <#
     .SYNOPSIS
@@ -81,7 +103,7 @@ function Get-JiraRecognitionReadParent {
     param([Parameter(Mandatory)] [string] $Key)
     $base = if ($env:SPEC_KIT_JIRA_BASE_URL) { $env:SPEC_KIT_JIRA_BASE_URL } else { '' }
     $idKey = Get-JiraRecognitionIdentityKey
-    $url = "$base/rest/api/3/issue/$Key`?properties=$idKey&fields=summary,description"
+    $url = "$base/rest/api/3/issue/$Key`?properties=$idKey&fields=summary,description,labels"
     $r = Invoke-JiraRequest -Method GET -Url $url
     if ([int]$r.ExitCode -eq 0) {
         $body = $r.Body | ConvertFrom-Json -Depth 100
@@ -175,6 +197,7 @@ function Invoke-JiraRecognitionParentRun {
             $current = [ordered]@{
                 summary     = [string](Get-JiraRecognitionSafe $fields 'summary')
                 description = if ($null -eq $descVal) { [ordered]@{} } else { $descVal }
+                labels      = (Get-JiraRecognitionNormalizedLabel $fields)
             }
             $origin = [string](Get-JiraRecognitionSafe $marker 'origin')
             if ([string]::IsNullOrEmpty($origin)) { $origin = 'bridge' }
@@ -338,6 +361,7 @@ function Invoke-JiraRecognitionRun {
             description = if ($null -eq $descVal) { [ordered]@{} } else { $descVal }
             priority    = (Get-JiraRecognitionSafe $fields 'priority')
             parent      = $parentKey
+            labels      = (Get-JiraRecognitionNormalizedLabel $fields)
         }
         $statusObj = Get-JiraRecognitionSafe $fields 'status'
         $status = if ($statusObj) { [string](Get-JiraRecognitionSafe $statusObj 'name') } else { '' }

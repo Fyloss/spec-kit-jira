@@ -141,8 +141,10 @@ Describe 'Invoke-JiraRecognitionRun — scoped to the routed project' {
         # Reuse the SAME durable identifier across two DIFFERENT
         # specifications, mirrored into two DIFFERENT projects. Recognition
         # must never let one spec's marker satisfy the other's.
-        $specA = Join-Path $TestDrive 'a.md'
-        $specB = Join-Path $TestDrive 'b.md'
+        New-Item -ItemType Directory -Path (Join-Path $TestDrive 'a') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $TestDrive 'b') -Force | Out-Null
+        $specA = Join-Path $TestDrive 'a/spec.md'
+        $specB = Join-Path $TestDrive 'b/spec.md'
         @('### User Story 1 - Alpha (Priority: P1)', '<!-- speckit-jira story=1111111111111111 ticket=OTHER-1 -->', '', 'Alpha body.') -join "`n" | Set-Content -NoNewline -Path $specA
         @('### User Story 1 - Beta (Priority: P1)', '<!-- speckit-jira story=1111111111111111 ticket=COMP-9 -->', '', 'Beta body.') -join "`n" | Set-Content -NoNewline -Path $specB
 

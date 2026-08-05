@@ -69,27 +69,48 @@ function Get-JiraCreateFieldsBase {
       IssueTypeId, so a caller cannot get FR-018 wrong by passing the wrong
       sub-map. Omitted or empty ⇒ the merge is a no-op (FR-028, research R6),
       and the output is byte-identical to before this feature.
+
+      Provenance (017, contracts/provenance-label.md §2) is OPTIONAL and
+      passed by Get-JiraPlanWriteSet (the mirror) ONLY — Get-JiraTicketCreateBody
+      (the feature ceremony) never passes it, for the same reason its Bash
+      twin does not (see that function's own comment). When given, it is
+      merged into `labels` AFTER the field-defaults spread, as a union with
+      whatever default the type records, so a recorded `labels` default is
+      preserved rather than overwritten. When empty, no `labels` key is
+      produced at all.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [AllowEmptyString()] [string] $ProjectKey,
         [Parameter(Mandatory)] [AllowEmptyString()] [string] $Summary,
         [Parameter(Mandatory)] [AllowEmptyString()] [string] $IssueTypeId,
-        [string] $FieldDefaultsByTypeJson = ''
+        [string] $FieldDefaultsByTypeJson = '',
+        [string] $Provenance = ''
     )
-    $base = '{"project":{"key":' + (ConvertTo-JiraJsonString $ProjectKey) +
-        '},"issuetype":{"id":' + (ConvertTo-JiraJsonString $IssueTypeId) +
-        '},"summary":' + (ConvertTo-JiraJsonString $Summary) + '}'
-    if ([string]::IsNullOrEmpty($FieldDefaultsByTypeJson) -or [string]::IsNullOrEmpty($IssueTypeId)) { return $base }
-    $dbt = $FieldDefaultsByTypeJson | ConvertFrom-Json -Depth 100
-    $typeProp = $dbt.PSObject.Properties[$IssueTypeId]
-    if ($null -eq $typeProp -or $null -eq $typeProp.Value) { return $base }
     $merged = [ordered]@{
         project   = [ordered]@{ key = $ProjectKey }
         issuetype = [ordered]@{ id = $IssueTypeId }
         summary   = $Summary
     }
-    foreach ($p in $typeProp.Value.PSObject.Properties) { $merged[$p.Name] = $p.Value }
+    $defaultsForType = $null
+    if (-not [string]::IsNullOrEmpty($FieldDefaultsByTypeJson) -and -not [string]::IsNullOrEmpty($IssueTypeId)) {
+        $dbt = $FieldDefaultsByTypeJson | ConvertFrom-Json -Depth 100
+        $typeProp = $dbt.PSObject.Properties[$IssueTypeId]
+        if ($null -ne $typeProp -and $null -ne $typeProp.Value) { $defaultsForType = $typeProp.Value }
+    }
+    if ($null -ne $defaultsForType) {
+        foreach ($p in $defaultsForType.PSObject.Properties) { $merged[$p.Name] = $p.Value }
+    }
+    if (-not [string]::IsNullOrEmpty($Provenance)) {
+        $existingLabels = @()
+        if ($null -ne $defaultsForType) {
+            $labelsProp = $defaultsForType.PSObject.Properties['labels']
+            if ($null -ne $labelsProp -and $null -ne $labelsProp.Value) { $existingLabels = @($labelsProp.Value) }
+        }
+        $labels = [string[]]@(@($existingLabels) + @($Provenance) | ForEach-Object { [string]$_ } | Select-Object -Unique)
+        [System.Array]::Sort($labels, [System.StringComparer]::Ordinal)
+        $merged['labels'] = $labels
+    }
     return (ConvertTo-JiraJsonValue $merged)
 }
 
@@ -155,6 +176,10 @@ function Get-JiraTicketCreateBody {
     .SYNOPSIS
       The canonical create payload. Mirror of _ticket_create_body: wraps
       Get-JiraCreateFieldsBase unchanged, matching the Bash twin byte-for-byte.
+      Deliberately passes NO Provenance argument (017, contract §2): the
+      feature ceremony's single-item creation stays unlabelled at creation,
+      and its specification's first reconcile back-fills the label like any
+      other unlabelled ticket.
     #>
     [CmdletBinding()]
     param(

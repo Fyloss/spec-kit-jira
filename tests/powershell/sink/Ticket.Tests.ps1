@@ -83,6 +83,25 @@ Describe 'Ticket sink' {
         ($obj.fields.issuetype.PSObject.Properties.Name -contains 'name') | Should -BeFalse
     }
 
+    It 'T024b, T12 [017] -- Get-JiraCreateFieldsBase sends the provenance label as its fifth argument (union with recorded labels default)' {
+        $out = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'invoice export' -IssueTypeId '10201' -FieldDefaultsByTypeJson '{}' -Provenance 'speckit-001-x' | ConvertFrom-Json
+        ($out.labels -join ',') | Should -Be 'speckit-001-x'
+    }
+
+    It 'T024b, T12 [017] -- the feature ceremony''s Get-JiraTicketCreateBody carries NO labels key -- in particular never speckit-spec -- while its base stays byte-identical to the mirror''s' {
+        $baseNoProv = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'invoice export' -IssueTypeId '10201'
+        $baseWithProv = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'invoice export' -IssueTypeId '10201' -FieldDefaultsByTypeJson '{}' -Provenance 'speckit-spec'
+        $withProvObj = $baseWithProv | ConvertFrom-Json
+        $noLabels = [ordered]@{}
+        foreach ($p in $withProvObj.PSObject.Properties) { if ($p.Name -ne 'labels') { $noLabels[$p.Name] = $p.Value } }
+        (ConvertTo-Json -InputObject $noLabels -Compress -Depth 10) | Should -Be ($baseNoProv | ConvertFrom-Json | ConvertTo-Json -Compress -Depth 10)
+
+        $body = Get-JiraTicketCreateBody -ProjectKey 'IJT' -Summary 'invoice export' -StoryTypeId '10201'
+        $bodyObj = $body | ConvertFrom-Json
+        ($bodyObj.fields.PSObject.Properties.Name -contains 'labels') | Should -BeFalse
+        (($bodyObj.fields | ConvertTo-Json -Compress -Depth 10)) | Should -Be ($baseNoProv | ConvertFrom-Json | ConvertTo-Json -Compress -Depth 10)
+    }
+
     It 'creates, returns the new key, and identity-stamps it' {
         Start-TestMock '{"projects":{"IJT":"team"},"createdKey":"IJT-123"}'
         $r = New-JiraTicket -ProjectKey 'IJT' -Summary 'invoice export' -StoryTypeId '10201' -SpecRefJson '{"repo":"acme/app","spec_slug":"003-x"}'

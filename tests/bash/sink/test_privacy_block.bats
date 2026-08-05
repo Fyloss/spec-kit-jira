@@ -93,6 +93,16 @@ teardown() {
   [ -z "$output" ]
 }
 
+@test "T10 [017] — a BLOCK-tier string reachable through the labels array is caught before any write (exit 9)" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local actions='[{"method":"POST","url":"'"${MOCK_BASE_URL}"'/rest/api/3/issue","body":{"fields":{"summary":"Add the billing feature","labels":["speckit-001-x","leak acme-corp.atlassian.net"]}}}]'
+  run apply_writes "${actions}"
+  [ "$status" -eq 9 ]
+  run mock_calls
+  [ -z "$output" ]
+}
+
 @test "apply_writes lets a clean write through (no gap for legitimate writes)" {
   mock_start "${MOCK}/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"

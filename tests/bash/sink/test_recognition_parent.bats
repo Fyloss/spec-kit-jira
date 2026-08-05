@@ -176,6 +176,22 @@ EOF
   [ "$(jq -r '.recreated_from.key' <<< "$output")" = "COMP-412" ]
 }
 
+# --- T021 [017, US2] — labels are read and unique-normalised -----------------
+
+@test "017 — the parent recognition read requests labels and current.labels is unique-normalised" {
+  local cfg; cfg="$(_seed_config '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","role":"parent"}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-412" \
+    -H 'Content-Type: application/json' \
+    -d '{"fields":{"labels":["zeta","alpha","alpha"]}}' > /dev/null
+
+  local minfo='{"state":"bound","id":"3f2a91c04b7e6d18","ticket":"COMP-412","lines":[2]}'
+  run recognition_parent_run "${minfo}" "${SPEC_REF}" "COMP" "${SPEC_PATH}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.current.labels | join(",")' <<< "$output")" = "alpha,zeta" ]
+}
+
 # --- Cross-port parity -------------------------------------------------------
 
 @test "the PowerShell port decides the same outcome for every row (NFR-1)" {

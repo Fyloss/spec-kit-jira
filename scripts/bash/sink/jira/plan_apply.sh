@@ -46,6 +46,49 @@ source "${_plan_apply_dir}/../../engine/spec_marker.sh" # the parent's own `crea
 # shellcheck source=/dev/null
 source "${_plan_apply_dir}/identity.sh" # stamp the identity marker on each created ticket (R5 step 6)
 
+# 017, contracts/provenance-label.md §4: Jira Cloud's documented label-length
+# cap. One named constant so a tracker that differs is a one-line correction.
+: "${JIRA_LABEL_MAX_LENGTH:=255}"
+
+# _plan_apply_label_decision <defaultable-fields-by-type-json> <type-id>
+#   <type-logical-name> <project-key> <provenance-label> <slug>
+#   017, contract §4's two degradation triggers. Prints
+#   {"label":"<token-or-empty>","warning":"<text-or-empty>"}. Neither trigger
+#   ever refuses or drops a write — the label is simply omitted, with one
+#   named warning.
+_plan_apply_label_decision() {
+  local dft="${1:-{\}}" type_id="$2" type_name="$3" project="$4" prov="$5" slug="$6"
+  [[ -z "${dft}" ]] && dft='{}'
+  [[ -z "${prov}" ]] && { printf '{"label":"","warning":""}'; return 0; }
+
+  # (b) The label is too long — checked first: an over-long label is never
+  # sent regardless of the type's own capability, and its warning names the
+  # SLUG (the operator's remedy), never the type.
+  if ((${#prov} > JIRA_LABEL_MAX_LENGTH)); then
+    jq -cn --arg s "${slug}" --argjson n "${#prov}" --argjson lim "${JIRA_LABEL_MAX_LENGTH}" \
+      '{label:"", warning:"the provenance label for \"\($s)\" is \($n) characters, past the tracker'"'"'s \($lim)-character limit; every ticket was mirrored without it"}'
+    return 0
+  fi
+
+  # (a) The type cannot hold labels — "present" means the key EXISTS in the
+  # type's defaultable_fields entry (recorded `defaultable: false` included),
+  # never whether it is itself defaultable (research R6/contract §4): that
+  # entry is exactly discovery's evidence that the type's create screen
+  # OFFERS labels at all. A type with no defaultable_fields entry recorded
+  # predates the metadata and must not gain a second refusal — it sends.
+  local has_entry has_labels
+  has_entry="$(jq -r --arg t "${type_id}" 'has($t)' <<< "${dft}")"
+  if [[ "${has_entry}" == "true" ]]; then
+    has_labels="$(jq -r --arg t "${type_id}" '[.[$t][] | select(.field_id=="labels")] | length > 0' <<< "${dft}")"
+    if [[ "${has_labels}" != "true" ]]; then
+      jq -cn --arg lbl "${prov}" --arg tn "${type_name}" --arg p "${project}" \
+        '{label:"", warning:"the provenance label \"\($lbl)\" could not be applied to \($tn) in \($p); every ticket was mirrored without it"}'
+      return 0
+    fi
+  fi
+  jq -cn --arg lbl "${prov}" '{label:$lbl, warning:""}'
+}
+
 # plan_resolve_field_defaults <issue_types_json> <defaultable_fields_by_type_json>
 # <recorded_json> <answers_json> — 011, research R2/R3, contract §3.1/§3.2,
 # data-model.md §3: join the labels one project's `field_defaults` holds (and
@@ -214,6 +257,29 @@ plan_writes() {
   # with the run summary's resolved project (research R2, FR-023).
   project="$(jq -r '.routing.project_key // ""' <<< "${doc}")"
 
+  # Provenance label (017, contracts/provenance-label.md §1/§4): derived once
+  # per run, from the document's own validated spec_ref — the "speckit-"
+  # prefix is a sink literal, the engine never learns the word "label".
+  # The degradation decision (§4's two triggers) is resolved ONCE for the
+  # story type here and reused by every story this run creates or updates,
+  # so at most one warning is ever emitted for it.
+  local slug provenance_label defaultable_by_type issue_types_list story_type_name
+  slug="$(jq -r '.spec_ref.spec_slug // ""' <<< "${doc}")"
+  provenance_label=""
+  [[ -n "${slug}" ]] && provenance_label="speckit-${slug}"
+  defaultable_by_type="$(jq -c '.defaultable_fields_by_type // {}' <<< "${ctx}")"
+  issue_types_list="$(jq -c '.issue_types // []' <<< "${ctx}")"
+  story_type_name="$(jq -r --arg t "${story_type}" '(first(.[] | select(.id==$t)) // null) | .logical_name // $t' <<< "${issue_types_list}")"
+  local story_label="" story_label_warning=""
+  local plan_warnings="[]"
+  if [[ -n "${provenance_label}" ]]; then
+    local story_decision
+    story_decision="$(_plan_apply_label_decision "${defaultable_by_type}" "${story_type}" "${story_type_name}" "${project}" "${provenance_label}" "${slug}")"
+    story_label="$(jq -r '.label' <<< "${story_decision}")"
+    story_label_warning="$(jq -r '.warning' <<< "${story_decision}")"
+    [[ -n "${story_label_warning}" ]] && plan_warnings="$(jq -c --arg w "${story_label_warning}" '. + [$w]' <<< "${plan_warnings}")"
+  fi
+
   local stories="[]" n i
   n="$(jq '.stories | length' <<< "${doc}")"
   for ((i = 0; i < n; i++)); do
@@ -238,7 +304,7 @@ plan_writes() {
       # priority + estimation (create-only) + the parent-key placeholder
       # (T072/T073), resolved once the parent's create response is read. A
       # bridge-created ticket owns its whole description (no delimiter, FR-040).
-      base_fields="$(jira_create_fields_base "${project}" "${title}" "${story_type}" "${field_defaults}")"
+      base_fields="$(jira_create_fields_base "${project}" "${title}" "${story_type}" "${field_defaults}" "${story_label}")"
       fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${adf}" \
         '$base + {description:$d, parent:{key:"<resolved at apply time>"}}')"
       [[ -n "${priority_id}" ]] && fields="$(jq -c --arg pid "${priority_id}" '. + {priority:{id:$pid}}' <<< "${fields}")"
@@ -262,6 +328,19 @@ plan_writes() {
       fi
       fields="$(jq -cn --arg t "${title}" --argjson d "${adf}" '{summary:$t, description:$d}')"
       [[ -n "${priority_id}" ]] && fields="$(jq -c --arg pid "${priority_id}" '. + {priority:{id:$pid}}' <<< "${fields}")"
+
+      # Provenance label union (017, contract §2/§3): the desired list is
+      # the ticket's CURRENT labels plus the provenance token — Jira's PUT
+      # replaces the whole array, so the union is simultaneously the merge
+      # rule (FR-012) and the zero-churn rule (FR-013). Omitted entirely
+      # when the label is degraded (empty story_label) — an existing label
+      # set is never touched on a project that cannot hold the token.
+      if [[ -n "${story_label}" ]]; then
+        local existing_labels
+        existing_labels="$(jq -c --arg s "${sid}" '.ticket_labels[$s] // []' <<< "${ctx}")"
+        fields="$(jq -c --argjson cur "${existing_labels}" --arg lbl "${story_label}" \
+          '. + {labels: (($cur + [$lbl]) | unique)}' <<< "${fields}")"
+      fi
 
       # Parent-link correction (T109): a child ALREADY linked to a parent
       # (never a flat mirror carrying none — that is Out of Scope, "no
@@ -287,8 +366,43 @@ plan_writes() {
     stories="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${stories}")"
   done
 
-  local parent; parent="$(_plan_writes_parent "${doc}" "${ctx}" "${base}")"
-  jq -cn --argjson p "${parent}" --argjson s "${stories}" '{parent:$p, stories:$s}' | json_canonical
+  # The parent type's own label decision (017, contract §4) — resolved here,
+  # independently of the story type's, and reused whether the parent is
+  # created or updated this run. At most one further warning.
+  local parent_type parent_type_name parent_label=""
+  parent_type="$(jq -r '.parent_type_id // ""' <<< "${ctx}")"
+  if [[ -n "${provenance_label}" && -n "${parent_type}" ]]; then
+    parent_type_name="$(jq -r --arg t "${parent_type}" '(first(.[] | select(.id==$t)) // null) | .logical_name // $t' <<< "${issue_types_list}")"
+    local parent_decision parent_label_warning
+    parent_decision="$(_plan_apply_label_decision "${defaultable_by_type}" "${parent_type}" "${parent_type_name}" "${project}" "${provenance_label}" "${slug}")"
+    parent_label="$(jq -r '.label' <<< "${parent_decision}")"
+    parent_label_warning="$(jq -r '.warning' <<< "${parent_decision}")"
+    [[ -n "${parent_label_warning}" ]] && plan_warnings="$(jq -c --arg w "${parent_label_warning}" '. + [$w]' <<< "${plan_warnings}")"
+  fi
+
+  # The task type's own label decision (017 FR-009, extended to 012's task
+  # tier) — resolved here beside the story's and the parent's, so all three
+  # degradation warnings leave through this function's single `warnings`
+  # channel. The resolved token travels back as `task_label` because
+  # `plan_writes_tasks` returns a bare action array and has no warnings
+  # channel of its own. Absent when no `task` role resolved, which keeps a
+  # run with no task tier byte-identical to before this feature.
+  local task_type task_type_name task_label=""
+  task_type="$(jq -r '.task_type_id // ""' <<< "${ctx}")"
+  if [[ -n "${provenance_label}" && -n "${task_type}" ]]; then
+    task_type_name="$(jq -r --arg t "${task_type}" '(first(.[] | select(.id==$t)) // null) | .logical_name // $t' <<< "${issue_types_list}")"
+    local task_decision task_label_warning
+    task_decision="$(_plan_apply_label_decision "${defaultable_by_type}" "${task_type}" "${task_type_name}" "${project}" "${provenance_label}" "${slug}")"
+    task_label="$(jq -r '.label' <<< "${task_decision}")"
+    task_label_warning="$(jq -r '.warning' <<< "${task_decision}")"
+    [[ -n "${task_label_warning}" ]] && plan_warnings="$(jq -c --arg w "${task_label_warning}" '. + [$w]' <<< "${plan_warnings}")"
+  fi
+
+  local parent; parent="$(_plan_writes_parent "${doc}" "${ctx}" "${base}" "${parent_label}")"
+  jq -cn --argjson p "${parent}" --argjson s "${stories}" --argjson w "${plan_warnings}" --arg tl "${task_label}" \
+    '{parent:$p, stories:$s}
+     + (if $tl == "" then {} else {task_label:$tl} end)
+     + (if ($w|length) == 0 then {} else {warnings:$w} end)' | json_canonical
 }
 
 # _plan_writes_parent <neutral-doc-json> <plan-context-json> <base-url> —
@@ -296,7 +410,7 @@ plan_writes() {
 # `epic.local_id`/`epic.title`/`epic.description` come from the neutral
 # document; the recognised-parent facts come from the plan context.
 _plan_writes_parent() {
-  local doc="$1" ctx="$2" base="$3"
+  local doc="$1" ctx="$2" base="$3" parent_label="${4:-}"
   local parent_type project epic_title epic_local_id
   parent_type="$(jq -r '.parent_type_id // ""' <<< "${ctx}")"
   project="$(jq -r '.routing.project_key // ""' <<< "${doc}")"
@@ -313,7 +427,7 @@ _plan_writes_parent() {
     # builder itself.
     local base_fields fields field_defaults
     field_defaults="$(jq -c '.field_defaults // {}' <<< "${ctx}")"
-    base_fields="$(jira_create_fields_base "${project}" "${epic_title}" "${parent_type}" "${field_defaults}")"
+    base_fields="$(jira_create_fields_base "${project}" "${epic_title}" "${parent_type}" "${field_defaults}" "${parent_label}")"
     fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${epic_adf}" '$base + {description:$d}')"
     jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" --arg lid "${epic_local_id}" \
       '{method:"POST", url:$u, body:{fields:$f}, local_id:$lid, role:"parent"}'
@@ -334,6 +448,18 @@ _plan_writes_parent() {
     epic_adf="$(adf_render_managed_description "$(jq -c '.epic' <<< "${doc}")" "${origin}" "${existing}")"
   fi
   local desired_fields; desired_fields="$(jq -cn --arg t "${epic_title}" --argjson d "${epic_adf}" '{summary:$t, description:$d}')"
+
+  # Provenance label union (017, contract §2/§3), on the recognised-parent
+  # branch — same union rule as the story branch, and folded into
+  # desired_fields BEFORE the zero-churn comparison below so a settled
+  # parent's label participates in it exactly like every other field.
+  if [[ -n "${parent_label}" ]]; then
+    local existing_parent_labels
+    existing_parent_labels="$(jq -c '.labels // []' <<< "${current}")"
+    [[ "${current}" == "null" ]] && existing_parent_labels='[]'
+    desired_fields="$(jq -c --argjson cur "${existing_parent_labels}" --arg lbl "${parent_label}" \
+      '. + {labels: (($cur + [$lbl]) | unique)}' <<< "${desired_fields}")"
+  fi
 
   if [[ "${current}" == "null" ]]; then
     status="changed"
@@ -394,7 +520,7 @@ plan_managed_description_status() {
 # `warning` naming the ticket and the divergent field(s) attached to that
 # same action (FR-020); nothing for an unchanged task (FR-015).
 plan_writes_tasks() {
-  local doc="$1" ctx="$2"
+  local doc="$1" ctx="$2" task_label="${3:-}"
   local base task_type project field_defaults
   base="$(jq -r '.base_url // ""' <<< "${ctx}")"
   task_type="$(jq -r '.task_type_id // ""' <<< "${ctx}")"
@@ -422,7 +548,7 @@ plan_writes_tasks() {
           printf 'plan_writes_tasks: refusing to assemble a creation for "%s" with no project or issue type (zero writes)\n' "${tid}" >&2
           return 1
         fi
-        base_fields="$(jira_create_fields_base "${project}" "${summary}" "${task_type}" "${field_defaults}")"
+        base_fields="$(jira_create_fields_base "${project}" "${summary}" "${task_type}" "${field_defaults}" "${task_label}")"
         fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${adf}" \
           '$base + {description:$d, parent:{key:"<resolved at apply time>"}}')"
         action="$(jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" \
@@ -432,6 +558,17 @@ plan_writes_tasks() {
         local current desired st
         current="$(jq -c --arg t "${tid}" '.ticket_current[$t] // null' <<< "${ctx}")"
         desired="$(jq -cn --arg s "${summary}" --argjson d "${adf}" '{summary:$s, description:$d}')"
+        # Provenance label union (017 FR-009/FR-011/FR-012/FR-013 on the task
+        # tier): the desired list is the sub-task's CURRENT labels plus the
+        # provenance token, both `unique`-normalised — which is at once the
+        # merge rule, the one-time back-fill trigger, and the zero-churn rule,
+        # because the comparison below is over the desired keys.
+        if [[ -n "${task_label}" ]]; then
+          local cur_labels
+          cur_labels="$(jq -c '(.labels // [])' <<< "${current}")"
+          desired="$(jq -c --argjson cur "${cur_labels}" --arg lbl "${task_label}" \
+            '. + {labels: (($cur + [$lbl]) | unique)}' <<< "${desired}")"
+        fi
         if [[ "${current}" == "null" ]]; then
           st="changed"
         else
@@ -450,9 +587,13 @@ plan_writes_tasks() {
         else
           filtered="$(jq -cn --argjson cur "${current}" --argjson des "${desired}" \
             '[ $des | to_entries[] | select(.value != ($cur[.key])) ] | from_entries')"
+          # `labels` is excluded from the divergence naming (017 FR-011): a
+          # sub-task that merely lacks its provenance label has not diverged
+          # from the specification, and back-filling it must stay as silent
+          # on the task tier as it is on the story tier.
           diverged="$(jq -rn --argjson cur "${current}" --argjson des "${desired}" \
-            '[ $des | to_entries[] | select(.value != ($cur[.key])) | .key ] | join(", ")')"
-          warning="${ticket} diverges from the specification on \"${diverged}\"; only the differing field(s) will be written"
+            '[ $des | to_entries[] | select(.key != "labels") | select(.value != ($cur[.key])) | .key ] | join(", ")')"
+          [[ -n "${diverged}" ]] && warning="${ticket} diverges from the specification on \"${diverged}\"; only the differing field(s) will be written"
         fi
 
         if [[ -n "${warning}" ]]; then
