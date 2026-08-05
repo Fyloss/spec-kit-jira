@@ -22,7 +22,12 @@ the code. Roughly fifteen lines per port.
 document already carries `spec_ref.spec_slug`, already validated as `^[0-9]{3}-[a-z0-9-]+$` — which
 is exactly the reference the operator asked for (`001-test-page`). The sink renders it as
 `speckit-<slug>` in three places: `jira_create_fields_base` (both creation roles funnel through it),
-the story-update branch of `plan_writes`, and the recognised-parent branch of `_plan_writes_parent`.
+the story-update branch of `plan_writes`, the recognised-parent branch of `_plan_writes_parent`,
+and — since feature 012 landed a third managed tier — the create and update branches of
+`plan_writes_tasks`. The task type's own degradation decision is resolved inside `plan_writes`
+beside the story's and the parent's, and the resolved token is handed to `plan_writes_tasks` as an
+optional third argument, because that function returns a bare action array and has no warnings
+channel of its own.
 Back-fill and zero churn come for free from the existing `idempotency_field_status` comparison, on
 one condition — the desired label list is the **union** of the ticket's current labels and the
 provenance label, and both sides are normalised with `unique` so the comparison, which is
@@ -125,6 +130,7 @@ scripts/bash/
 └── sink/jira/
     ├── ticket.sh                  # jira_create_fields_base (L64) — the one creation choke point
     ├── plan_apply.sh              # plan_writes story-update branch (L261);
+    │                              #   plan_writes_tasks create + update branches (012's task tier);
     │                              #   _plan_writes_parent recognised branch (L334)
     ├── recognition.sh             # +labels on both field lists (L36, L71); labels into `current`
     └── duplicate_probe.sh         # NEW FILE (US4 only): the read-only label search
@@ -134,7 +140,7 @@ scripts/powershell/
 ├── engine/MarkerSplice.psm1       # twin of the stray-marker scan
 └── sink/jira/
     ├── Ticket.psm1                # Get-JiraCreateFieldsBase (L56)
-    ├── PlanApply.psm1             # twin update branches
+    ├── PlanApply.psm1             # twin update branches, task tier included
     ├── Recognition.psm1           # +labels on both field lists (L39, L84)
     └── DuplicateProbe.psm1        # NEW FILE (US4 only)
 

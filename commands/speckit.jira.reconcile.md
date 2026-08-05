@@ -185,6 +185,28 @@ identity marker, a duplicate identifier, or a ticket claimed by another
 specification) is reported in `warnings` and left untouched; it never blocks
 its siblings.
 
+## The provenance label (017)
+
+Every ticket the mirror manages — the specification-role parent, each story-role
+child, and each task-role sub-task — carries the label `speckit-<folder>`, where
+`<folder>` is the specification's own folder reference (`speckit-001-test-page`
+for `specs/001-test-page/`). Searching that label in Jira returns exactly that
+specification's tickets and nothing else.
+
+The label is additive: it is merged with any label the project's configuration
+already sends and with any label an operator applied by hand, and the mirror
+never removes one it did not add. A ticket that predates this behaviour gains
+the label once, on its next ordinary run, counted as an ordinary `updated`
+(`counts.tasks.updated` for a sub-task) — not as drift, and with no warning.
+Once the estate is labelled, a further unchanged run reports zero created and
+zero updated.
+
+A project whose issue types cannot hold labels mirrors every ticket exactly as
+before, with one named warning per issue type saying the label could not be
+applied. A ticket whose write is suppressed — halted, flagged, drifted, or a
+withheld sub-task — is not labelled either: the label follows the write and is
+never an exception to a hold.
+
 ## The task tier (012)
 
 When `tasks.md` sits beside the mirrored specification and the project's

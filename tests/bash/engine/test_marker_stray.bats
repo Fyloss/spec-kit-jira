@@ -35,11 +35,28 @@ teardown() {
 
 @test "sorts multiple matches as bare file names" {
   printf 'no markers\n' > "${WORK}/spec.md"
-  printf '%s\n' '<!-- speckit-jira spec=0123456789abcdef -->' > "${WORK}/tasks.md"
+  printf '%s\n' '<!-- speckit-jira spec=0123456789abcdef -->' > "${WORK}/research.md"
   printf '%s\n' '<!-- speckit-jira story=abcdef0123456789 -->' > "${WORK}/plan.md"
   run marker_splice_stray_files "${WORK}"
   [ "$status" -eq 0 ]
-  [ "${output}" = "plan.md, tasks.md" ]
+  [ "${output}" = "plan.md, research.md" ]
+}
+
+@test "excludes tasks.md — the task tier writes its own markers there (012)" {
+  printf 'no markers\n' > "${WORK}/spec.md"
+  printf '%s\n' '- [ ] T001 do the thing' '<!-- speckit-jira task=abcdef0123456789 ticket=COMP-3 -->' > "${WORK}/tasks.md"
+  run marker_splice_stray_files "${WORK}"
+  [ "$status" -eq 0 ]
+  [ -z "${output}" ]
+}
+
+@test "excludes tasks.md while still naming a genuine stray sibling" {
+  printf 'no markers\n' > "${WORK}/spec.md"
+  printf '%s\n' '- [ ] T001 do the thing' '<!-- speckit-jira task=abcdef0123456789 -->' > "${WORK}/tasks.md"
+  printf '%s\n' '<!-- speckit-jira story=abcdef0123456789 -->' > "${WORK}/plan.md"
+  run marker_splice_stray_files "${WORK}"
+  [ "$status" -eq 0 ]
+  [ "${output}" = "plan.md" ]
 }
 
 @test "ignores subdirectories — no recursion" {

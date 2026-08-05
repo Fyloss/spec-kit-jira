@@ -148,7 +148,9 @@ they are not migrated; see the CHANGELOG's Migration note.
 Every ticket the mirror manages now carries a `speckit-<slug>` label. An
 existing consumer's first `reconcile` after upgrading back-fills it onto
 every ticket that predates this release — one `PUT` per ticket, counted in
-`counts.updated` exactly like an ordinary content change. This is expected,
+`counts.updated` exactly like an ordinary content change. A repository that also
+declares a `task` role sees its sub-tasks back-filled the same way, counted
+under the task tier's own `counts.tasks.updated` rather than `counts.updated`. This is expected,
 not a sign anything else changed: any labels an operator already applied by
 hand are kept, and a specification with nothing else to reconcile will still
 report updates for this reason alone, once.

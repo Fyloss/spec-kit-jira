@@ -167,3 +167,90 @@ CTX_CREATE='{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
     [Console]::Out.Write((Get-JiraPlanTaskWriteSet -DocJson '${DOC_ONE_TASK}' -ContextJson '${CTX_CREATE}'))")"
   [ "${b}" = "${p}" ]
 }
+
+@test "017 [US2] the PowerShell port produces an identical LABELLED plan (FR-027)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local b p
+  b="$(plan_writes_tasks "${DOC_ONE_TASK}" "${CTX_CREATE}" "speckit-001-x")"
+  p="$(pwsh -NoProfile -Command "
+    Import-Module '${PS_SINK}/PlanApply.psm1' -Force
+    [Console]::Out.Write((Get-JiraPlanTaskWriteSet -DocJson '${DOC_ONE_TASK}' -ContextJson '${CTX_CREATE}' -TaskLabel 'speckit-001-x'))")"
+  [ "${b}" = "${p}" ]
+}
+
+@test "017 [US2] the PowerShell port back-fills and merges labels identically (FR-027)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local ctx b p
+  ctx='{"base_url":"https://mock","task_type_id":"10099",
+        "tickets":{"1111111111111111":"COMP-9"},
+        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(adf_render_task_description "${TASK1}")"',"labels":["ops","zeta"]}}}'
+  b="$(plan_writes_tasks "${DOC_ONE_TASK}" "${ctx}" "speckit-001-x")"
+  p="$(pwsh -NoProfile -Command "
+    Import-Module '${PS_SINK}/PlanApply.psm1' -Force
+    [Console]::Out.Write((Get-JiraPlanTaskWriteSet -DocJson '${DOC_ONE_TASK}' -ContextJson '${ctx}' -TaskLabel 'speckit-001-x'))")"
+  [ "${b}" = "${p}" ]
+}
+
+# ---------------------------------------------------------------------------
+# 017 FR-009 on 012's task tier: the sub-task carries the provenance label too,
+# is back-filled once when it does not, merges with labels already on the
+# ticket, and costs nothing on a settled mirror.
+# ---------------------------------------------------------------------------
+
+@test "017 [US2] a created sub-task carries the provenance label passed by the caller" {
+  run plan_writes_tasks "${DOC_ONE_TASK}" "${CTX_CREATE}" "speckit-001-x"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.[0].body.fields.labels' <<< "$output")" = '["speckit-001-x"]' ]
+}
+
+@test "017 [US2] no label argument leaves the created sub-task's payload without a labels key at all" {
+  run plan_writes_tasks "${DOC_ONE_TASK}" "${CTX_CREATE}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].body.fields | has("labels")' <<< "$output")" = "false" ]
+}
+
+@test "017 [US2] a bound sub-task missing its label is back-filled by a PUT carrying labels alone" {
+  local ctx
+  ctx='{"base_url":"https://mock","task_type_id":"10099",
+        "tickets":{"1111111111111111":"COMP-9"},
+        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(adf_render_task_description "${TASK1}")"',"labels":[]}}}'
+  run plan_writes_tasks "${DOC_ONE_TASK}" "${ctx}" "speckit-001-x"
+  [ "$status" -eq 0 ]
+  [ "$(jq '. | length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.[0].method' <<< "$output")" = "PUT" ]
+  [ "$(jq -c '.[0].body.fields | keys' <<< "$output")" = '["labels"]' ]
+  [ "$(jq -c '.[0].body.fields.labels' <<< "$output")" = '["speckit-001-x"]' ]
+  # A pure back-fill is not drift: it must not carry FR-020's divergence warning.
+  [ "$(jq -r '.[0] | has("warning")' <<< "$output")" = "false" ]
+}
+
+@test "017 [US2] the label is merged with labels already on the sub-task, never replacing them" {
+  local ctx
+  ctx='{"base_url":"https://mock","task_type_id":"10099",
+        "tickets":{"1111111111111111":"COMP-9"},
+        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(adf_render_task_description "${TASK1}")"',"labels":["ops","zeta"]}}}'
+  run plan_writes_tasks "${DOC_ONE_TASK}" "${ctx}" "speckit-001-x"
+  [ "$(jq -c '.[0].body.fields.labels' <<< "$output")" = '["ops","speckit-001-x","zeta"]' ]
+}
+
+@test "017 [US2] a sub-task that already carries its label plans nothing (zero churn)" {
+  local ctx
+  ctx='{"base_url":"https://mock","task_type_id":"10099",
+        "tickets":{"1111111111111111":"COMP-9"},
+        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(adf_render_task_description "${TASK1}")"',"labels":["speckit-001-x"]}}}'
+  run plan_writes_tasks "${DOC_ONE_TASK}" "${ctx}" "speckit-001-x"
+  [ "$status" -eq 0 ]
+  [ "$(jq '. | length' <<< "$output")" -eq 0 ]
+}
+
+@test "017 [US2] real content drift still names its divergent field, and labels are never named" {
+  local task doc ctx
+  task="$(jq -c '.title="Implement the parser, reworded"' <<< "${TASK1}")"
+  doc="$(jq -c --argjson t "${task}" '.stories[0].tasks=[$t]' <<< "${DOC_ONE_TASK}")"
+  ctx='{"base_url":"https://mock","task_type_id":"10099",
+        "tickets":{"1111111111111111":"COMP-9"},
+        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(adf_render_task_description "${TASK1}")"',"labels":[]}}}'
+  run plan_writes_tasks "${doc}" "${ctx}" "speckit-001-x"
+  [ "$(jq -r '.[0].warning' <<< "$output")" = 'COMP-9 diverges from the specification on "summary, description"; only the differing field(s) will be written' ]
+  [ "$(jq -c '.[0].body.fields.labels' <<< "$output")" = '["speckit-001-x"]' ]
+}

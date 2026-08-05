@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   label naming its specification folder, back-filled once on tickets that
   predate this release and merged with any labels an operator already added.
   An existing consumer will see this back-fill as ordinary `updated` counts on
-  its next run — see INSTALL.md.
+  its next run — and, where a `task` role is declared, as
+  `counts.tasks.updated` for the sub-tasks feature 012 mirrors — see INSTALL.md.
 - Before creating a parent a specification holds no marker for, `reconcile`
   now looks for tickets already carrying that specification's provenance
   label and refuses rather than risking a duplicate — a best-effort,

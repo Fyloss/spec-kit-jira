@@ -94,17 +94,22 @@ function Write-JiraMarkerSpliceFile {
 function Get-JiraMarkerSpliceStrayFile {
     <#
     .SYNOPSIS
-      The top-level files of <Folder>, excluding spec.md, that carry the
-      bridge's marker framing comment (`<!-- speckit-jira … -->`), sorted as
-      bare file names and joined ", " — empty when none (FR-007, research
-      R9). Mirror of marker_splice_stray_files. No recursion into
-      subdirectories; every file is only ever opened for reading.
+      The top-level files of <Folder>, excluding the two files the mirror
+      legitimately writes markers into, that carry the bridge's marker
+      framing comment (`<!-- speckit-jira … -->`), sorted as bare file names
+      and joined ", " — empty when none (FR-007, research R9). Mirror of
+      marker_splice_stray_files. No recursion into subdirectories; every
+      file is only ever opened for reading.
+
+      The exclusion list is spec.md AND tasks.md: FR-007 reports files "this
+      mirror never writes", and since 012 the task tier splices its own
+      `task=<id>` markers into tasks.md on every ordinary run.
     #>
     param([Parameter(Mandatory)] [string] $Folder)
     $genericRe = '^<!--\s+speckit-jira\s+(.*)-->\s*$'
     $hits = [System.Collections.Generic.List[string]]::new()
     foreach ($item in Get-ChildItem -LiteralPath $Folder -File) {
-        if ($item.Name -eq 'spec.md') { continue }
+        if ($item.Name -eq 'spec.md' -or $item.Name -eq 'tasks.md') { continue }
         $lines = Get-Content -LiteralPath $item.FullName -ErrorAction SilentlyContinue
         foreach ($line in $lines) {
             if ($line -match $genericRe) {

@@ -1036,6 +1036,11 @@ cmd_reconcile() {
   # Label-degradation warnings (017, contract §4): at most one per type, per
   # run — never an exit-code change, never a refusal.
   plan_label_warnings="$(jq -c '.warnings // []' <<< "${plan}")"
+  # The task type's resolved provenance token (017 FR-009 on 012's tier),
+  # decided inside plan_writes beside the story's and the parent's so its own
+  # degradation warning travels with theirs. Empty when no `task` role
+  # resolved, or when the type cannot hold the label.
+  local task_label; task_label="$(jq -r '.task_label // ""' <<< "${plan}")"
 
   # Phase 3, US1 (contract §4): the task tier's own plan, over the SAME
   # document and context — never through plan_lifecycle, which only knows
@@ -1043,7 +1048,7 @@ cmd_reconcile() {
   # `tasks_actions` stays the "[]" it was initialised to and every
   # downstream read of it is a no-op (FR-011).
   if [[ "${task_role_active}" == "true" ]]; then
-    if ! tasks_actions="$(plan_writes_tasks "${doc_for_write}" "${plan_ctx}")"; then
+    if ! tasks_actions="$(plan_writes_tasks "${doc_for_write}" "${plan_ctx}" "${task_label}")"; then
       task_warns="$(jq -c '. + ["reconcile: the task tier'"'"'s write plan could not be assembled and was withheld this run"]' <<< "${task_warns}")"
       tasks_actions="[]"
     fi

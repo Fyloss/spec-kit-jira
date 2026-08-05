@@ -189,4 +189,78 @@ Describe 'Get-JiraPlanTaskWriteSet' {
         $result[0].parent_local_id | Should -Be 's1'
         $result[1].parent_local_id | Should -Be 's2'
     }
+
+    # -----------------------------------------------------------------
+    # 017 FR-009 on 012's task tier — twin of test_plan_writes_tasks.bats.
+    # -----------------------------------------------------------------
+
+    It '017 [US2] a created sub-task carries the provenance label passed by the caller' {
+        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $script:CtxCreate -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100
+        @($result[0].body.fields.labels) | Should -Be @('speckit-001-x')
+    }
+
+    It '017 [US2] no label argument leaves the created sub-task payload without a labels key at all' {
+        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100
+        $result[0].body.fields.PSObject.Properties.Name | Should -Not -Contain 'labels'
+    }
+
+    It '017 [US2] a bound sub-task missing its label is back-filled by a PUT carrying labels alone' {
+        $desc = ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100
+        $ctx = [ordered]@{
+            base_url = 'https://mock'
+            task_type_id = '10099'
+            tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
+            ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = $desc; labels = @() } }
+        } | ConvertTo-Json -Depth 100 -Compress
+        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $ctx -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100
+        @($result).Count | Should -Be 1
+        $result[0].method | Should -Be 'PUT'
+        @($result[0].body.fields.PSObject.Properties.Name) | Should -Be @('labels')
+        @($result[0].body.fields.labels) | Should -Be @('speckit-001-x')
+        # A pure back-fill is not drift: no FR-020 divergence warning.
+        $result[0].PSObject.Properties.Name | Should -Not -Contain 'warning'
+    }
+
+    It '017 [US2] the label is merged with labels already on the sub-task, never replacing them' {
+        $desc = ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100
+        $ctx = [ordered]@{
+            base_url = 'https://mock'
+            task_type_id = '10099'
+            tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
+            ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = $desc; labels = @('ops', 'zeta') } }
+        } | ConvertTo-Json -Depth 100 -Compress
+        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $ctx -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100
+        @($result[0].body.fields.labels) | Should -Be @('ops', 'speckit-001-x', 'zeta')
+    }
+
+    It '017 [US2] a sub-task that already carries its label plans nothing (zero churn)' {
+        $desc = ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100
+        $ctx = [ordered]@{
+            base_url = 'https://mock'
+            task_type_id = '10099'
+            tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
+            ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = $desc; labels = @('speckit-001-x') } }
+        } | ConvertTo-Json -Depth 100 -Compress
+        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $ctx -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100
+        @($result).Count | Should -Be 0
+    }
+
+    It '017 [US2] real content drift still names its divergent field, and labels are never named' {
+        $desc = ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100
+        $task = $script:Task1 | ConvertFrom-Json -Depth 100
+        $task.title = 'Implement the parser, reworded'
+        $doc = $script:DocOneTask | ConvertFrom-Json -Depth 100
+        $doc.stories[0].tasks = @($task)
+        $docJson = $doc | ConvertTo-Json -Depth 100 -Compress
+        $ctx = [ordered]@{
+            base_url = 'https://mock'
+            task_type_id = '10099'
+            tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
+            ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = $desc; labels = @() } }
+        } | ConvertTo-Json -Depth 100 -Compress
+        $result = Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $ctx -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100
+        $result[0].warning | Should -Be 'COMP-9 diverges from the specification on "summary, description"; only the differing field(s) will be written'
+        @($result[0].body.fields.labels) | Should -Be @('speckit-001-x')
+    }
+
 }

@@ -442,8 +442,24 @@ function Get-JiraPlanWriteSet {
         if ($parentDecision.Warning -ne '') { $planWarnings.Add($parentDecision.Warning) }
     }
 
+    # The task type's own label decision (017 FR-009, extended to 012's task
+    # tier) — resolved here beside the story's and the parent's, so all three
+    # degradation warnings leave through this function's single `warnings`
+    # channel. The resolved token travels back as `task_label` because
+    # Get-JiraPlanTaskWriteSet returns a bare action array and has no
+    # warnings channel of its own. Absent when no `task` role resolved.
+    $taskTypeForLabel = [string](Get-JiraPlanProp $ctx 'task_type_id')
+    $taskLabel = ''
+    if ($provenanceLabel -ne '' -and $taskTypeForLabel -ne '') {
+        $taskDecision = Get-JiraPlanApplyLabelDecision -DefaultableByType $defaultableByType -TypeId $taskTypeForLabel `
+            -TypeName (Resolve-JiraPlanTypeName $taskTypeForLabel) -ProjectKey $project -Provenance $provenanceLabel -Slug $slug
+        $taskLabel = $taskDecision.Label
+        if ($taskDecision.Warning -ne '') { $planWarnings.Add($taskDecision.Warning) }
+    }
+
     $parent = Get-JiraPlanWriteSetParent -DocObject $doc -CtxObject $ctx -Base $base -ParentLabel $parentLabel
     $result = [ordered]@{ parent = $parent; stories = $actions }
+    if ($taskLabel -ne '') { $result['task_label'] = $taskLabel }
     if ($planWarnings.Count -gt 0) { $result['warnings'] = $planWarnings }
     return (ConvertTo-JiraJsonValue $result)
 }
@@ -547,7 +563,11 @@ function Get-JiraPlanTaskWriteSet {
       field(s) attached to that same action (FR-020).
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] [string] $DocJson, [Parameter(Mandatory)] [string] $ContextJson)
+    param(
+        [Parameter(Mandatory)] [string] $DocJson,
+        [Parameter(Mandatory)] [string] $ContextJson,
+        [string] $TaskLabel = ''
+    )
     $doc = $DocJson | ConvertFrom-Json -Depth 100
     $ctx = $ContextJson | ConvertFrom-Json -Depth 100
 
@@ -580,7 +600,7 @@ function Get-JiraPlanTaskWriteSet {
                 if ($project -eq '' -or $taskType -eq '') {
                     throw "plan_writes_tasks: refusing to assemble a creation for `"$tid`" with no project or issue type (zero writes)"
                 }
-                $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $summary -IssueTypeId $taskType -FieldDefaultsByTypeJson $fieldDefaultsJson | ConvertFrom-Json
+                $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $summary -IssueTypeId $taskType -FieldDefaultsByTypeJson $fieldDefaultsJson -Provenance $TaskLabel | ConvertFrom-Json
                 $fields = [ordered]@{}
                 foreach ($p in $baseFields.PSObject.Properties) { $fields[$p.Name] = $p.Value }
                 $fields['description'] = $adf
@@ -590,6 +610,26 @@ function Get-JiraPlanTaskWriteSet {
             else {
                 $current = Get-JiraPlanProp $ticketCurrent $tid
                 $desired = [ordered]@{ summary = $summary; description = $adf }
+                # Provenance label union (017 FR-009/FR-011/FR-012/FR-013 on
+                # the task tier): the desired list is the sub-task's CURRENT
+                # labels plus the provenance token, both unique-normalised —
+                # at once the merge rule, the one-time back-fill trigger, and
+                # the zero-churn rule, because the comparison below is over
+                # the desired keys.
+                if ($TaskLabel -ne '') {
+                    # @() around a $null property wraps it into a ONE-element
+                    # array holding $null, not an empty array — a sub-task
+                    # with no current labels (the back-fill case) would
+                    # otherwise union in a spurious "" label.
+                    $curLabelsProp = if ($null -ne $current) { Get-JiraPlanProp $current 'labels' } else { $null }
+                    $curLabels = if ($null -eq $curLabelsProp) { @() } else { @($curLabelsProp) }
+                    $taskLabels = [string[]]@(@($curLabels) + @($TaskLabel) | ForEach-Object { [string]$_ } | Select-Object -Unique)
+                    # Ordinal, like the story branch: jq's `unique` sorts by
+                    # byte, and Sort-Object's culture-aware order would
+                    # diverge from it (FR-027).
+                    [System.Array]::Sort($taskLabels, [System.StringComparer]::Ordinal)
+                    $desired['labels'] = $taskLabels
+                }
                 if ($null -eq $current) {
                     $st = 'changed'
                 }
@@ -615,10 +655,17 @@ function Get-JiraPlanTaskWriteSet {
                         $curCanon = if ($null -eq $curVal) { 'null' } else { ConvertTo-JiraJsonValue $curVal }
                         if (-not [System.String]::Equals($desCanon, $curCanon, [System.StringComparison]::Ordinal)) {
                             $filtered[$key] = $desired[$key]
-                            $diverged.Add($key)
+                            # `labels` is excluded from the divergence naming
+                            # (017 FR-011): a sub-task that merely lacks its
+                            # provenance label has not diverged from the
+                            # specification, and back-filling it must stay as
+                            # silent on the task tier as on the story tier.
+                            if ($key -ne 'labels') { $diverged.Add($key) }
                         }
                     }
-                    $warning = "$ticket diverges from the specification on `"$($diverged -join ', ')`"; only the differing field(s) will be written"
+                    if ($diverged.Count -gt 0) {
+                        $warning = "$ticket diverges from the specification on `"$($diverged -join ', ')`"; only the differing field(s) will be written"
+                    }
                 }
 
                 $action = [ordered]@{ method = 'PUT'; url = "$base/rest/api/3/issue/$ticket"; body = [ordered]@{ fields = $filtered }; role = 'task' }

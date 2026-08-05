@@ -1214,6 +1214,11 @@ function Invoke-JiraReconcile {
     # plan_label_warnings, folded into the run summary's warnings below.
     $planLabelWarningsRaw = Get-JiraPlanPropSafe $planObj 'warnings'
     $planLabelWarnings = if ($null -eq $planLabelWarningsRaw) { @() } else { @($planLabelWarningsRaw) }
+    # The task type's resolved provenance token (017 FR-009 on 012's tier),
+    # decided inside Get-JiraPlanWriteSet beside the story's and the parent's
+    # so its own degradation warning travels with theirs. Empty when no
+    # `task` role resolved, or when the type cannot hold the label.
+    $taskLabel = [string](Get-JiraPlanPropSafe $planObj 'task_label')
 
     # Phase 3, US1 (contract 4): the task tier's own plan, over the SAME
     # document and context — never through Get-JiraLifecyclePlan, which
@@ -1221,7 +1226,7 @@ function Invoke-JiraReconcile {
     # inactive, so $tasksActionsJson stays the '[]' it was initialised to
     # and every downstream read of it is a no-op (FR-011).
     if ($taskRoleActive) {
-        try { $tasksActionsJson = Get-JiraPlanTaskWriteSet -DocJson $docForWriteJson -ContextJson $planCtx }
+        try { $tasksActionsJson = Get-JiraPlanTaskWriteSet -DocJson $docForWriteJson -ContextJson $planCtx -TaskLabel $taskLabel }
         catch {
             $taskWarns.Add("reconcile: the task tier's write plan could not be assembled and was withheld this run")
             $tasksActionsJson = '[]'

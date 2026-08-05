@@ -29,9 +29,22 @@ Describe 'Get-JiraMarkerSpliceStrayFile' {
 
     It 'sorts multiple matches as bare file names' {
         'no markers' | Set-Content -LiteralPath (Join-Path $script:Work 'spec.md') -NoNewline
-        '<!-- speckit-jira spec=0123456789abcdef -->' | Set-Content -LiteralPath (Join-Path $script:Work 'tasks.md') -NoNewline
+        '<!-- speckit-jira spec=0123456789abcdef -->' | Set-Content -LiteralPath (Join-Path $script:Work 'research.md') -NoNewline
         '<!-- speckit-jira story=abcdef0123456789 -->' | Set-Content -LiteralPath (Join-Path $script:Work 'plan.md') -NoNewline
-        (Get-JiraMarkerSpliceStrayFile -Folder $script:Work) | Should -Be 'plan.md, tasks.md'
+        (Get-JiraMarkerSpliceStrayFile -Folder $script:Work) | Should -Be 'plan.md, research.md'
+    }
+
+    It 'excludes tasks.md — the task tier writes its own markers there (012)' {
+        'no markers' | Set-Content -LiteralPath (Join-Path $script:Work 'spec.md') -NoNewline
+        @('- [ ] T001 do the thing', '<!-- speckit-jira task=abcdef0123456789 ticket=COMP-3 -->') -join "`n" | Set-Content -LiteralPath (Join-Path $script:Work 'tasks.md') -NoNewline
+        (Get-JiraMarkerSpliceStrayFile -Folder $script:Work) | Should -Be ''
+    }
+
+    It 'excludes tasks.md while still naming a genuine stray sibling' {
+        'no markers' | Set-Content -LiteralPath (Join-Path $script:Work 'spec.md') -NoNewline
+        @('- [ ] T001 do the thing', '<!-- speckit-jira task=abcdef0123456789 -->') -join "`n" | Set-Content -LiteralPath (Join-Path $script:Work 'tasks.md') -NoNewline
+        '<!-- speckit-jira story=abcdef0123456789 -->' | Set-Content -LiteralPath (Join-Path $script:Work 'plan.md') -NoNewline
+        (Get-JiraMarkerSpliceStrayFile -Folder $script:Work) | Should -Be 'plan.md'
     }
 
     It 'ignores subdirectories — no recursion' {

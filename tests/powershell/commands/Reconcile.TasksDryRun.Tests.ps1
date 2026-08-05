@@ -77,7 +77,11 @@ Describe 'Invoke-JiraReconcile --dry-run — the task tier (012)' {
         ($byStory | Where-Object { $_.Task -eq 'Implement the widget delete endpoint' })[0].Story | Should -Be 'Delete a widget'
 
         (Get-Content -Raw -LiteralPath $script:Tasks) | Should -Be $before
-        @(Get-JiraMockCallLog -Mock $script:M).Count | Should -Be 0
+        # 017's duplicate probe is a read-only GET fired in the planning pass, so
+        # a --dry-run over a specification with no parent marker legitimately
+        # reaches the double. The dry-run invariant is zero WRITES, not zero
+        # requests.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
     }
 
     It 'shows the summary and description of a created sub-task' {

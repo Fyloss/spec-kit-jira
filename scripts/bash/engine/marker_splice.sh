@@ -103,10 +103,17 @@ marker_splice_write_file() {
 }
 
 # marker_splice_stray_files <folder> — the top-level files of <folder>,
-# excluding spec.md, that carry the bridge's marker framing comment
-# (`<!-- speckit-jira … -->`), sorted as bare file names and joined ", " —
-# empty when none (FR-007, research R9). No recursion into subdirectories;
-# every file is only ever opened for reading, never for writing.
+# excluding the two files the mirror legitimately writes markers into, that
+# carry the bridge's marker framing comment (`<!-- speckit-jira … -->`),
+# sorted as bare file names and joined ", " — empty when none (FR-007,
+# research R9). No recursion into subdirectories; every file is only ever
+# opened for reading, never for writing.
+#
+# The exclusion list is spec.md AND tasks.md: FR-007 reports files "this
+# mirror never writes", and since 012 the task tier splices its own
+# `task=<id>` markers into tasks.md on every ordinary run. Reporting those
+# as stray damage would fire the warning on every healthy repository with a
+# task role declared.
 marker_splice_stray_files() {
   local folder="$1" f base line
   local generic_re='^<!--[[:space:]]+speckit-jira[[:space:]]+(.*)-->[[:space:]]*$'
@@ -114,7 +121,7 @@ marker_splice_stray_files() {
   for f in "${folder}"/*; do
     [[ -f "${f}" ]] || continue
     base="$(basename "${f}")"
-    [[ "${base}" == "spec.md" ]] && continue
+    [[ "${base}" == "spec.md" || "${base}" == "tasks.md" ]] && continue
     while IFS= read -r line || [[ -n "${line}" ]]; do
       line="${line%$'\r'}"
       if [[ "${line}" =~ ${generic_re} ]]; then

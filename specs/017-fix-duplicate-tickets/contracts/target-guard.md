@@ -83,13 +83,18 @@ correct target precisely; the agent reading it holds the invocation table in
 
 Runs on a **valid** target, after routing, on the real and the dry-run path alike.
 
-- Scans the top-level files of the specification's folder, excluding `spec.md`, for the bridge's
-  marker framing comment.
+- Scans the top-level files of the specification's folder, excluding `spec.md` **and `tasks.md`**,
+  for the bridge's marker framing comment.
 - Emits **one** warning naming every match, sorted, comma-separated, as bare file names.
 - Opens no file for writing. Deletes nothing. Never changes the exit code and never blocks the run.
 
+`tasks.md` is excluded for the same reason `spec.md` is: the warning names files *this mirror never
+writes*, and since feature 012 the task tier splices its own `task=<id>` markers into `tasks.md` on
+every ordinary run. Scanning it would fire the warning on every healthy repository that declares a
+`task` role.
+
 ```text
-spec-kit-jira markers were found in files this mirror never writes: plan.md, tasks.md — they are inert, were left untouched, and can be removed by hand
+spec-kit-jira markers were found in files this mirror never writes: plan.md, research.md — they are inert, were left untouched, and can be removed by hand
 ```
 
 Absent any match, nothing is emitted.
@@ -110,3 +115,4 @@ Absent any match, nothing is emitted.
 | T10 | `--dry-run plan.md` refuses exactly as the real run does | bats + Pester |
 | T11 | Path shapes that must **refuse**: a directory; a path that does not exist; a symlink whose own name is not `spec.md`, even when it resolves to one; a path carrying trailing whitespace. The first two keep today's readability message (§1); the last two carry §3's | bats + Pester |
 | T12 | Path shapes that must **pass**: the relative spelling `./specs/001-test-page/spec.md`, a symlink *named* `spec.md`, and — on the PowerShell port only — the native `specs\001-test-page\spec.md` (research R3) | bats + Pester |
+| T13 | A feature folder whose `tasks.md` carries the task tier's own `task=<id>` markers produces **no** §4 warning, while a genuine stray sibling in the same folder is still named (012 interaction) | bats + Pester |

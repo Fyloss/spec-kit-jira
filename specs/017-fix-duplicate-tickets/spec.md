@@ -109,7 +109,8 @@ every one of the six lifecycle events and for a direct invocation.
 ### User Story 2 - Every ticket the mirror manages names its specification folder (Priority: P1)
 
 A tech lead opens the Jira board and sees, on every ticket the bridge produced, a label naming the
-specification folder it mirrors — `speckit-001-test-page` on the parent and on each of its children. They
+specification folder it mirrors — `speckit-001-test-page` on the parent, on each of its story children, and on each
+sub-task the task tier mirrors beneath them. They
 can search that label and get exactly that specification's tickets, and nothing else. When a stray
 duplicate does exist — created before this release, or by a hand-run command — it stands out because it
 is either unlabelled or labelled for a different specification.
@@ -220,7 +221,8 @@ remedy.
 - **The damage already done.** A consumer repository already carrying marker lines in `plan.md` and two
   orphan tickets in Jira: the guard stops any further duplication, and reconciling the feature's
   `spec.md` reports a named warning listing every sibling artifact in the feature folder that carries a
-  bridge marker line. The mirror never reads, rewrites, or deletes those files, and never touches the
+  bridge marker line — apart from `tasks.md`, whose `task=<id>` markers the task tier writes
+  itself. The mirror never reads, rewrites, or deletes those files, and never touches the
   orphan tickets — the clean-up is the operator's, and the warning tells them where to look.
 - **The target is a directory**, a path that does not exist, a symlink resolving to a `spec.md`, a
   relative path spelled `./specs/001-x/spec.md`, or a path carrying trailing whitespace.
@@ -275,22 +277,30 @@ remedy.
   successfully and the developer sees exactly one line, as with every other reported cause.
 - **FR-007**: When reconciling a valid specification, the mirror MUST report a named warning listing
   every other **top-level** file of the same feature folder that carries a bridge marker line, and
-  MUST NOT modify or delete those files. The scan does not recurse into subdirectories: every
-  host-produced artifact a hook could plausibly hand the mirror sits at the top level, and the
-  reported damage did. This warning MUST NOT block the run or change its exit code.
+  MUST NOT modify or delete those files. The scan MUST exclude the files the mirror itself writes
+  markers into — `spec.md` and, since feature 012's task tier, `tasks.md` — because the warning
+  names files *this mirror never writes*; reporting the mirror's own markers would fire the warning
+  on every healthy repository that declares a `task` role. The scan does not recurse into
+  subdirectories: every host-produced artifact a hook could plausibly hand the mirror sits at the
+  top level, and the reported damage did. This warning MUST NOT block the run or change its exit
+  code.
 - **FR-008**: `--dry-run` MUST predict a refusal exactly as a real run performs it.
 
 **The provenance label (User Story 2)**
 
-- **FR-009**: Every ticket the mirror creates — the specification-role parent and every story-role
-  child — MUST carry a provenance label naming the specification folder it mirrors.
+- **FR-009**: Every ticket the mirror creates — the specification-role parent, every story-role
+  child, and every task-role sub-task feature 012's task tier mirrors from `tasks.md` —
+  MUST carry a provenance label naming the specification folder it mirrors. The rule is
+  per managed ticket, not per tier: a role added later inherits it rather than needing a
+  requirement of its own.
 - **FR-010**: The provenance label MUST be the fixed prefix `speckit-` followed by the
   specification's own recorded identifier — the value the mirror already validates for every
   specification, which for the folder `specs/001-test-page/` is `001-test-page` — giving
   `speckit-001-test-page`. That identifier is already a single whitespace-free token by
   construction, so the label needs no substitution rule of its own.
 - **FR-011**: A recognised ticket that does not yet carry its provenance label MUST have it added, once,
-  as part of that ticket's ordinary update, counted and reported like any other update.
+  as part of that ticket's ordinary update, counted and reported like any other update. A sub-task's back-fill is counted under
+  the task tier's own `counts.tasks.updated`, never folded into `counts.updated`.
 - **FR-012**: The provenance label MUST be merged with every label the project's configuration already
   sends, and the mirror MUST NEVER remove or replace a label it did not add.
 - **FR-013**: Once every managed ticket carries its provenance label, a subsequent unchanged run MUST
@@ -305,7 +315,9 @@ remedy.
 - **FR-017**: The provenance label MUST pass through the pre-write privacy scan like every other
   outbound value.
 - **FR-018**: A ticket whose content write is suppressed — halted status, operator flag, or unresolved
-  drift — MUST NOT be labelled either; the label follows the write, it is never an exception to a hold.
+  drift — MUST NOT be labelled either; the label follows the write, it is never an exception to a hold. On the task tier the
+  same rule holds for a withheld or skipped sub-task: a tier that writes nothing writes
+  no label either.
 
 **The lifecycle procedure (User Story 3)**
 
@@ -321,10 +333,12 @@ remedy.
 **Duplicate detection before creation (User Story 4)**
 
 - **FR-022**: Before creating any ticket for a specification, the mirror MUST look for tickets already
-  carrying that specification's provenance label in the project the specification routes to.
+  carrying that specification's provenance label in the project the specification routes to. Because every managed tier carries the
+  label, that search returns sub-tasks as well as the parent and its stories; the check
+  is a duplication signal, not a parent census, so no tier is filtered out of it.
 - **FR-023**: When such tickets exist and the specification file holds no marker binding them, the
   mirror MUST create nothing for that specification, MUST refuse and report a named cause listing
-  every key it found, and MUST name the remedy — the bridge command that binds an existing ticket to this
+  every key it found — whatever tier each belongs to — and MUST name the remedy — the bridge command that binds an existing ticket to this
   specification — by a name that actually ships. Naming a command the operator does not have is a
   defect, not a remedy.
 - **FR-024**: This check MUST be read-only: it MUST NOT adopt, edit, relabel, transition, or otherwise
@@ -349,8 +363,9 @@ remedy.
   engine to the sink as the evidence of which specification a ticket mirrors.
 - **Provenance label**: the sink's rendering of that value as a tracker label,
   `speckit-<identifier>`, visible in Jira's UI and findable by an ordinary search.
-- **Stray marker report**: the list of files inside a feature folder, other than its `spec.md`, that
-  carry a bridge marker line — reported, never touched.
+- **Stray marker report**: the list of files inside a feature folder, other than the ones the mirror
+  writes markers into itself (`spec.md` and `tasks.md`), that carry a bridge marker line —
+  reported, never touched.
 
 ## Constitution Check *(mandatory)*
 
@@ -383,8 +398,8 @@ remedy.
 - **SC-002**: 100% of runs whose target is not a feature specification end with zero tickets created,
   zero requests issued, and every file on disk byte-identical to its pre-run state.
 - **SC-003**: Given a specification folder reference, an operator can list every ticket the mirror
-  manages for that specification with one search, with no ticket from another specification in the
-  result.
+  manages for that specification with one search — parent, stories, and sub-tasks alike —
+  with no ticket from another specification in the result.
 - **SC-004**: A second, unchanged run over an already-labelled specification reports zero created and
   zero updated.
 - **SC-005**: 100% of the refusals and warnings introduced by this feature leave the host lifecycle
@@ -430,6 +445,8 @@ remedy.
   already manage.
 - **A configurable label prefix**, an additional generic tool label, or any label the operator can
   template.
-- **Mirroring `plan.md`, `tasks.md`, or any other artifact as tickets of their own.** The plan summary
-  remains an input to the parent's description and nothing more.
+- **Mirroring `plan.md`, or any other artifact as tickets of their own.** The plan summary
+  remains an input to the parent's description and nothing more. `tasks.md` is no longer
+  named here: feature 012 mirrors it as sub-tasks, and this feature labels them like any
+  other managed ticket.
 - **Supporting a specification file under a name other than `spec.md`.**

@@ -380,9 +380,29 @@ plan_writes() {
     [[ -n "${parent_label_warning}" ]] && plan_warnings="$(jq -c --arg w "${parent_label_warning}" '. + [$w]' <<< "${plan_warnings}")"
   fi
 
+  # The task type's own label decision (017 FR-009, extended to 012's task
+  # tier) — resolved here beside the story's and the parent's, so all three
+  # degradation warnings leave through this function's single `warnings`
+  # channel. The resolved token travels back as `task_label` because
+  # `plan_writes_tasks` returns a bare action array and has no warnings
+  # channel of its own. Absent when no `task` role resolved, which keeps a
+  # run with no task tier byte-identical to before this feature.
+  local task_type task_type_name task_label=""
+  task_type="$(jq -r '.task_type_id // ""' <<< "${ctx}")"
+  if [[ -n "${provenance_label}" && -n "${task_type}" ]]; then
+    task_type_name="$(jq -r --arg t "${task_type}" '(first(.[] | select(.id==$t)) // null) | .logical_name // $t' <<< "${issue_types_list}")"
+    local task_decision task_label_warning
+    task_decision="$(_plan_apply_label_decision "${defaultable_by_type}" "${task_type}" "${task_type_name}" "${project}" "${provenance_label}" "${slug}")"
+    task_label="$(jq -r '.label' <<< "${task_decision}")"
+    task_label_warning="$(jq -r '.warning' <<< "${task_decision}")"
+    [[ -n "${task_label_warning}" ]] && plan_warnings="$(jq -c --arg w "${task_label_warning}" '. + [$w]' <<< "${plan_warnings}")"
+  fi
+
   local parent; parent="$(_plan_writes_parent "${doc}" "${ctx}" "${base}" "${parent_label}")"
-  jq -cn --argjson p "${parent}" --argjson s "${stories}" --argjson w "${plan_warnings}" \
-    '{parent:$p, stories:$s} + (if ($w|length) == 0 then {} else {warnings:$w} end)' | json_canonical
+  jq -cn --argjson p "${parent}" --argjson s "${stories}" --argjson w "${plan_warnings}" --arg tl "${task_label}" \
+    '{parent:$p, stories:$s}
+     + (if $tl == "" then {} else {task_label:$tl} end)
+     + (if ($w|length) == 0 then {} else {warnings:$w} end)' | json_canonical
 }
 
 # _plan_writes_parent <neutral-doc-json> <plan-context-json> <base-url> —
@@ -500,7 +520,7 @@ plan_managed_description_status() {
 # `warning` naming the ticket and the divergent field(s) attached to that
 # same action (FR-020); nothing for an unchanged task (FR-015).
 plan_writes_tasks() {
-  local doc="$1" ctx="$2"
+  local doc="$1" ctx="$2" task_label="${3:-}"
   local base task_type project field_defaults
   base="$(jq -r '.base_url // ""' <<< "${ctx}")"
   task_type="$(jq -r '.task_type_id // ""' <<< "${ctx}")"
@@ -528,7 +548,7 @@ plan_writes_tasks() {
           printf 'plan_writes_tasks: refusing to assemble a creation for "%s" with no project or issue type (zero writes)\n' "${tid}" >&2
           return 1
         fi
-        base_fields="$(jira_create_fields_base "${project}" "${summary}" "${task_type}" "${field_defaults}")"
+        base_fields="$(jira_create_fields_base "${project}" "${summary}" "${task_type}" "${field_defaults}" "${task_label}")"
         fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${adf}" \
           '$base + {description:$d, parent:{key:"<resolved at apply time>"}}')"
         action="$(jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" \
@@ -538,6 +558,17 @@ plan_writes_tasks() {
         local current desired st
         current="$(jq -c --arg t "${tid}" '.ticket_current[$t] // null' <<< "${ctx}")"
         desired="$(jq -cn --arg s "${summary}" --argjson d "${adf}" '{summary:$s, description:$d}')"
+        # Provenance label union (017 FR-009/FR-011/FR-012/FR-013 on the task
+        # tier): the desired list is the sub-task's CURRENT labels plus the
+        # provenance token, both `unique`-normalised — which is at once the
+        # merge rule, the one-time back-fill trigger, and the zero-churn rule,
+        # because the comparison below is over the desired keys.
+        if [[ -n "${task_label}" ]]; then
+          local cur_labels
+          cur_labels="$(jq -c '(.labels // [])' <<< "${current}")"
+          desired="$(jq -c --argjson cur "${cur_labels}" --arg lbl "${task_label}" \
+            '. + {labels: (($cur + [$lbl]) | unique)}' <<< "${desired}")"
+        fi
         if [[ "${current}" == "null" ]]; then
           st="changed"
         else
@@ -556,9 +587,13 @@ plan_writes_tasks() {
         else
           filtered="$(jq -cn --argjson cur "${current}" --argjson des "${desired}" \
             '[ $des | to_entries[] | select(.value != ($cur[.key])) ] | from_entries')"
+          # `labels` is excluded from the divergence naming (017 FR-011): a
+          # sub-task that merely lacks its provenance label has not diverged
+          # from the specification, and back-filling it must stay as silent
+          # on the task tier as it is on the story tier.
           diverged="$(jq -rn --argjson cur "${current}" --argjson des "${desired}" \
-            '[ $des | to_entries[] | select(.value != ($cur[.key])) | .key ] | join(", ")')"
-          warning="${ticket} diverges from the specification on \"${diverged}\"; only the differing field(s) will be written"
+            '[ $des | to_entries[] | select(.key != "labels") | select(.value != ($cur[.key])) | .key ] | join(", ")')"
+          [[ -n "${diverged}" ]] && warning="${ticket} diverges from the specification on \"${diverged}\"; only the differing field(s) will be written"
         fi
 
         if [[ -n "${warning}" ]]; then

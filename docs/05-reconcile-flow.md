@@ -283,7 +283,10 @@ Two details that make the summary trustworthy:
   the bridge's marker comment and — when it finds one — adds a single
   `warnings` entry naming every file, changing nothing else. The scan opens
   nothing for writing; a marker left in `plan.md` by a defect the target guard
-  now prevents is reported, never touched.
+  now prevents is reported, never touched. `tasks.md` is excluded alongside
+  `spec.md`: since feature 012 the task tier splices its own `task=<id>`
+  markers there on every ordinary run, so those are the mirror's own writes,
+  not stray damage.
 - **A second, unchanged run reads `created: 0`, `updated: 0`, `recognised` equal
   to the story count, and `skipped` equal to it too.** That is the correct
   signature of an idempotent re-run, not a failure to mirror anything.

@@ -197,6 +197,70 @@ markers stripped — zero writes, exit 4, both keys named, the found tickets unt
 
 ---
 
+## Phase 6b: Rebase onto feature 012 — the task tier interaction
+
+**Goal**: feature 012 (`specs/012-jira-task-subtasks/`) landed on `main` while this
+feature was in flight and added a third managed tier — Jira sub-tasks mirrored from
+`tasks.md`. These tasks close the three places the two features contradict each other.
+Every one of them is a defect in the *combination*, invisible to either feature alone.
+
+- [X] T060a Resolve the rebase onto `362d726`: `.specify/feature.json`, `CHANGELOG.md`
+  (this feature's `### Fixed` under `[Unreleased]`, 012's `[0.11.0]` preserved below),
+  both ports' `reconcile` command layer (union of the plan-context keys and of the
+  warning channel), the conformance scenario count (84 + 6 = 90), the PowerShell mock
+  server, and `Recognition.Tests.ps1`. Align the PowerShell warning order to the Bash
+  port's (stray → label → probe): FR-027 admits only one order and no scenario pinned it.
+- [X] T060b The stray-marker scan (FR-007) excluded only `spec.md`, and 012 splices
+  `<!-- speckit-jira task=… -->` as its own line into `tasks.md` on every ordinary run —
+  so every healthy repository with a `task` role would report its own markers as stray
+  damage. Exclude `tasks.md` alongside `spec.md` in `marker_splice.sh` and
+  `MarkerSplice.psm1`; failing tests first in `test_marker_stray.bats` and
+  `MarkerStray.Tests.ps1` (contract §5 T13). Update contract §4, FR-007, the Key Entities
+  entry, the "damage already done" edge case, and `docs/05-reconcile-flow.md`.
+- [X] T060c The conformance double dropped `labels` on create: `curl-shim.sh` stored a
+  fixed field list, so a labelled POST came back unlabelled on the next read and the
+  mirror re-sent the label forever — a zero-churn violation (Constitution II) that only
+  012's create-then-rerun test could see. Store `labels` on create in `curl-shim.sh` and
+  `mock-server.ps1`. (The PUT path already merged arbitrary fields, which is why this
+  feature's own tests passed.) The allowlist was also a deviation from the double's own
+  contract: `specs/009-optimize-test-performance/contracts/curl-shim.md` already states
+  that `POST /rest/api/3/issue` records the created key **and its `fields`**.
+- [X] T060h This feature's own label tests set up their "pre-017 ticket" state by
+  *relying* on that dropped field — the priming reconcile created tickets and the double
+  silently lost their labels. With the double made faithful, `test_plan_apply_labels.bats`
+  and `PlanApply.Labels.Tests.ps1` strip the label explicitly after priming instead. Two
+  assertions (T3's back-fill count, T8's halted ticket) were passing only because of the
+  double's defect; both now rest on state the test creates itself.
+- [X] T060d 012's two `--dry-run` tests asserted the run reaches the double **zero**
+  times. This feature's duplicate probe is a read-only GET fired in the planning pass, and
+  Constitution XI requires a dry run to predict the refusal it would produce. Relax the
+  assertion to zero **writes** in `test_reconcile_tasks.bats`,
+  `test_reconcile_tasks_dryrun.bats`, `Reconcile.Tasks.Tests.ps1` and
+  `Reconcile.TasksDryRun.Tests.ps1`, stating the reason at each site.
+- [X] T060e [US2] Extend FR-009 to the task role: a sub-task is a ticket the mirror
+  manages, so SC-003's one-search guarantee is false while sub-tasks are unlabelled.
+  Resolve the task type's own §4 degradation decision inside `plan_writes` (beside the
+  story's and the parent's, so its warning uses the existing channel) and hand the token
+  to `plan_writes_tasks` as an optional third argument; label the create payload and
+  union `labels` into the update branch's desired fields. Exclude `labels` from 012's
+  FR-020 divergence naming — a back-fill is not drift. Twin in `PlanApply.psm1`, with the
+  ordinal sort the story branch already uses. Tests: contract §6 T15–T19, in
+  `test_plan_writes_tasks.bats` and `PlanWrites.Tasks.Tests.ps1`, plus the two pwsh
+  parity cases proving both ports emit a byte-identical labelled task plan.
+- [X] T060f Carry the interaction into the artifacts: FR-009, FR-011 (the sub-task's
+  back-fill counts under `counts.tasks.updated`), FR-018 (a withheld sub-task is not
+  labelled), FR-022/FR-023 (the probe's label search returns every tier), SC-003, the
+  US2 narrative, and the Out of Scope bullet that still claimed `tasks.md` is never
+  mirrored as tickets of its own. Add the task rows and rationale to
+  `contracts/provenance-label.md` §2, refresh `plan.md`'s module map, document the
+  provenance label in `commands/speckit.jira.reconcile.md`, and note the task-tier
+  back-fill in `CHANGELOG.md` and `INSTALL.md`.
+- [ ] T060g Re-run the full `tests/run-bash.sh`, the full Pester suite, and
+  `bash tests/conformance/ci-conformance.sh` on the rebased tree. The conformance corpus
+  is now 90 scenarios and covers three tiers; a divergence introduced by the merge shows
+  up there first.
+
+
 ## Phase 7: Polish & cross-cutting
 
 - [X] T055 Add the CHANGELOG entry under the unreleased heading, naming the defect (a lifecycle hook mirroring `plan.md` created duplicate tickets), the guard, the provenance label, and the back-fill an existing consumer will see on its next run.

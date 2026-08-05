@@ -25,13 +25,27 @@ Example: `specs/001-test-page/spec.md` → `speckit-001-test-page`.
 
 | Path | Site (bash) | Desired value |
 | --- | --- | --- |
-| create, both mirror roles | `jira_create_fields_base`, `sink/jira/ticket.sh` | `((defaults.labels // []) + [L]) \| unique` |
+| create, all three mirror roles | `jira_create_fields_base`, `sink/jira/ticket.sh` | `((defaults.labels // []) + [L]) \| unique` |
 | create, feature ceremony | `_ticket_create_body`, `sink/jira/ticket.sh` | **none** — no label is sent |
 | update, story | `plan_writes` update branch, `sink/jira/plan_apply.sh` | `(ctx.ticket_labels[sid] + [L]) \| unique` |
 | update, parent | `_plan_writes_parent` recognised branch | `(ctx.parent_current.labels + [L]) \| unique` |
+| update, task | `plan_writes_tasks` update branch, `sink/jira/plan_apply.sh` | `(ctx.ticket_current[tid].labels + [L]) \| unique` |
 
-Both mirror creation roles funnel through one builder, so a single change covers the parent and
-every child.
+All three mirror creation roles funnel through one builder, so a single change covers the parent,
+every story child, and every sub-task feature 012's task tier mirrors beneath them.
+
+**The task tier reads its current labels from a different map, and that is not an inconsistency.**
+The story branch reads `ctx.ticket_labels[sid]` because recognition's story pass hands the command
+layer a labels-only map; the task branch reads `ctx.ticket_current[tid].labels` because the task
+pass already carries the sub-task's whole `current` record — the same recognition read, exposed
+through the map that tier already had. Both are the ticket's `unique`-normalised current labels, so
+the union, the back-fill and the zero-churn comparison behave identically on either tier.
+
+**A pure back-fill on the task tier is not drift.** The task tier's update branch attaches feature
+012's FR-020 divergence warning whenever a desired field differs from Jira's. `labels` is excluded
+from that naming: a sub-task that merely lacks its provenance label has not diverged from the
+specification, and back-filling it must stay as silent as it is on the story tier (FR-011). Real
+content drift on `summary` or `description` still names its field exactly as before.
 
 **The builder has a second caller, and it must not be labelled.** `jira_create_fields_base` is
 shared by `plan_writes` (the mirror) and `_ticket_create_body` (the feature ceremony's single-item
@@ -146,3 +160,8 @@ Recognition normalises on ingest; the desired list is built with `unique`, which
 | T12 | A feature-ceremony creation carries **no** `labels` key — in particular never `speckit-spec` — while its shared base stays byte-identical to the mirror's | bats + Pester |
 | T13 | A slug pushing the label past `JIRA_LABEL_MAX_LENGTH`: the label is absent from every payload, every ticket is still created, one §4 warning, exit unchanged, nothing truncated | bats + Pester |
 | T14 | A ticket adopted from a human author through `mention` gains the provenance label on its next ordinary update — **additively**: the human's own labels survive, and no field they wrote is altered | bats + Pester |
+| T15 | A created sub-task carries `speckit-<slug>`; with no label resolved its payload carries no `labels` key at all (012 interaction) | bats + Pester |
+| T16 | A bound sub-task missing the label is back-filled by a PUT carrying `labels` **alone**, with no FR-020 divergence warning | bats + Pester |
+| T17 | A sub-task's existing labels survive the union, and a sub-task already carrying the label plans nothing (task-tier zero churn) | bats + Pester |
+| T18 | Real task-tier content drift still names `summary`/`description` in its warning, and never names `labels` | bats + Pester |
+| T19 | Both ports emit a byte-identical **labelled** task plan, on the create, the back-fill and the merge path | bats (pwsh parity) |
