@@ -96,5 +96,15 @@ EOF
   run env -C "${WORKDIR}" bash tests/conformance/ci-conformance.sh
   [ "$status" -ne 0 ]
   [[ "${output}" == *"stub-2"* ]]
-  [[ "${output}" =~ verdicts:\ 2/3 ]]
+  # The EXACT surviving count is not portable: measured directly, GNU xargs
+  # (Linux) treats a signal-killed child as reason to stop the whole batch
+  # (0/3 survive here), while BSD xargs (macOS) lets already-dispatched
+  # siblings finish (2/3 survive). Both are correct per R5/R6 — a shortfall
+  # is reported either way — so the assertion is the portable invariant
+  # (fewer verdicts than the corpus), not a specific fraction.
+  verdicts="$(printf '%s' "${output}" | grep -oE 'verdicts: [0-9]+/3' | tail -n1)"
+  [ -n "${verdicts}" ]
+  count="${verdicts#verdicts: }"
+  count="${count%/3}"
+  [ "${count}" -lt 3 ]
 }
