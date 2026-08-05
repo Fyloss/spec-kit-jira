@@ -201,7 +201,13 @@ function Invoke-JiraRecognitionParentRun {
             }
             $origin = [string](Get-JiraRecognitionSafe $marker 'origin')
             if ([string]::IsNullOrEmpty($origin)) { $origin = 'bridge' }
-            return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue ([ordered]@{ state = 'bound'; key = $key; current = $current; origin = $origin })) }
+            $entry = [ordered]@{ state = 'bound'; key = $key; current = $current; origin = $origin }
+            # last_summary (018, T045; contracts/summary-record.md §1/§5:
+            # every tier, including the parent) — from the same
+            # already-fetched marker, omitted for a marker predating it.
+            $lastSummary = [string](Get-JiraRecognitionSafe $marker 'summary')
+            if (-not [string]::IsNullOrEmpty($lastSummary)) { $entry['last_summary'] = $lastSummary }
+            return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue $entry) }
         }
     }
 }
@@ -394,7 +400,7 @@ function Invoke-JiraRecognitionRun {
             $subtasks.Add([ordered]@{ key = [string](Get-JiraRecognitionSafe $sub 'key'); issuetype_id = $subItId })
         }
 
-        $bound[$id] = [ordered]@{
+        $entry = [ordered]@{
             key             = $key
             origin          = $origin
             current         = $current
@@ -404,6 +410,11 @@ function Invoke-JiraRecognitionRun {
             blockers        = $blockers
             subtasks        = $subtasks
         }
+        # last_summary (018, T045; contracts/summary-record.md §1) — from the
+        # same already-fetched marker, omitted for a marker predating it.
+        $lastSummary = [string](Get-JiraRecognitionSafe $rmarker 'summary')
+        if (-not [string]::IsNullOrEmpty($lastSummary)) { $entry['last_summary'] = $lastSummary }
+        $bound[$id] = $entry
     }
 
     $json = ConvertTo-JiraJsonValue ([ordered]@{ bound = $bound; new = $new; blocked = $blocked; rerouted = $rerouted })

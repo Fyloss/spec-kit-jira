@@ -89,6 +89,24 @@ EOF
   [ "$(jq -r '.origin' <<< "$output")" = "bridge" ]
 }
 
+@test "018, T038 — a bound parent surfaces last_summary from the identity marker; a legacy marker omits it" {
+  local cfg; cfg="$(_seed_config '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","role":"parent","summary":"The Epic, renamed"}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local minfo='{"state":"bound","id":"3f2a91c04b7e6d18","ticket":"COMP-412","lines":[2]}'
+  run recognition_parent_run "${minfo}" "${SPEC_REF}" "COMP" "${SPEC_PATH}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.last_summary' <<< "$output")" = "The Epic, renamed" ]
+
+  mock_stop
+  cfg="$(_seed_config '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","role":"parent"}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  run recognition_parent_run "${minfo}" "${SPEC_REF}" "COMP" "${SPEC_PATH}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("last_summary")' <<< "$output")" = "false" ]
+}
+
 @test "bound + ok + different spec_slug: state blocked, reason parent-claimed-by-other" {
   local cfg; cfg="$(_seed_config '{"origin":"bridge","repo":"acme/app","spec_slug":"999-other","role":"parent"}')"
   mock_start "${cfg}"

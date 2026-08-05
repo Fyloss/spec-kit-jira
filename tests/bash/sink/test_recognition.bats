@@ -45,6 +45,38 @@ EOF
   [ "$(jq '.blocked | length' <<< "$output")" -eq 0 ]
 }
 
+@test "018, T072 — a marker with no origin field defaults to \"bridge\", never \"bridge-created\"" {
+  # The origin vocabulary is unified on recognition.sh's own spelling
+  # ("bridge"); a bridge-owned marker predating this field must remain valid.
+  local cfg; cfg="$(_seed_config '{"repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111"}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local stories='[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+  run recognition_run "${stories}" "${SPEC_REF}" "COMP" "spec.md"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.bound["1111111111111111"].origin' <<< "$output")" = "bridge" ]
+}
+
+@test "018, T038 — a bound entry surfaces last_summary from the identity marker" {
+  local cfg; cfg="$(_seed_config '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111","summary":"The Epic, renamed"}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local stories='[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+  run recognition_run "${stories}" "${SPEC_REF}" "COMP" "spec.md"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.bound["1111111111111111"].last_summary' <<< "$output")" = "The Epic, renamed" ]
+}
+
+@test "018, T038 — a marker written by a previous release (no summary) omits last_summary entirely" {
+  local cfg; cfg="$(_seed_config '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111"}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local stories='[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+  run recognition_run "${stories}" "${SPEC_REF}" "COMP" "spec.md"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.bound["1111111111111111"] | has("last_summary")' <<< "$output")" = "false" ]
+}
+
 @test "a story-kind read carries its Jira-side sub-tasks (key, issuetype_id) — T073, FR-021" {
   cat > "${BATS_TEST_TMPDIR}/cfg.json" << 'EOF'
 {"issues": {

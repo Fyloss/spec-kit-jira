@@ -5,7 +5,7 @@
 # user-editable label or summary (Constitution II): entity properties are stable,
 # hidden from the editable UI, and survive a spec-folder rename (identity resolves
 # the stored marker, not the path). The marker records the origin
-# (bridge-created / human) and the spec ref; the spec ref is the discriminator for
+# ("bridge" / "human") and the spec ref; the spec ref is the discriminator for
 # "claimed by another spec" (US10 / FR-051). The identity property is per-issue,
 # so it is inherently per-project scoped (FR-044).
 #
@@ -24,21 +24,27 @@ source "${_identity_dir}/client.sh"
 
 : "${SPEC_KIT_JIRA_IDENTITY_KEY:=spec-kit-jira}"
 
-# identity_marker <spec-ref-json> <origin> [story-id] [role] — build the
-# canonical marker value. `story` (Phase 2, contracts/story-marker.md) is the
-# durable story identifier; it is omitted when absent — the feature-naming
-# ceremony and the mentioned-ticket flow mirror a whole feature rather than
-# one story, and those tickets are not story tickets (data-model.md
-# "Identity marker"). `role` — "parent" | "story" (Phase 5, US2, data-model.md
-# §4) — is omitted when the caller does not supply one, which is the marker
-# shape every installation carries before this feature; a marker with no
-# role is never treated as a parent by recognition.
+# identity_marker <spec-ref-json> <origin> [story-id] [role] [summary] —
+# build the canonical marker value. `story` (Phase 2, contracts/story-marker.md)
+# is the durable story identifier; it is omitted when absent — the
+# feature-naming ceremony and the mentioned-ticket flow mirror a whole
+# feature rather than one story, and those tickets are not story tickets
+# (data-model.md "Identity marker"). `role` — "parent" | "story" (Phase 5,
+# US2, data-model.md §4) — is omitted when the caller does not supply one,
+# which is the marker shape every installation carries before this feature;
+# a marker with no role is never treated as a parent by recognition.
+# `summary` (018, T042; contracts/summary-record.md §1/§2) is the
+# LAST-WRITTEN summary record — the exact string a payload carried, raw and
+# untruncated by this function — and is omitted, never written as an empty
+# string, when the caller does not supply one: a marker written before this
+# feature carries no `summary` and remains valid.
 identity_marker() {
-  local spec_ref="$1" origin="$2" story="${3:-}" role="${4:-}"
-  jq -cn --argjson s "${spec_ref}" --arg o "${origin}" --arg story "${story}" --arg role "${role}" \
+  local spec_ref="$1" origin="$2" story="${3:-}" role="${4:-}" summary="${5:-}"
+  jq -cn --argjson s "${spec_ref}" --arg o "${origin}" --arg story "${story}" --arg role "${role}" --arg summary "${summary}" \
     '{origin:$o, repo:($s.repo // ""), spec_slug:($s.spec_slug // "")}
      + (if $role == "" then {} else {role:$role} end)
-     + (if $story == "" then {} else {story:$story} end)' | json_canonical
+     + (if $story == "" then {} else {story:$story} end)
+     + (if $summary == "" then {} else {summary:$summary} end)' | json_canonical
 }
 
 # identity_claimed_by_other <marker-json> <spec-ref-json> — return 0 when the
@@ -87,17 +93,17 @@ identity_read() {
   return "${rc}"
 }
 
-# identity_write <issue-key> <spec-ref-json> <origin> [story-id] [role] —
-# stamp the identity marker on the ticket via the entity property. Returns
-# the transport exit code.
+# identity_write <issue-key> <spec-ref-json> <origin> [story-id] [role]
+# [summary] — stamp the identity marker on the ticket via the entity
+# property. Returns the transport exit code.
 identity_write() {
-  local key="$1" spec_ref="$2" origin="$3" story="${4:-}" role="${5:-}"
+  local key="$1" spec_ref="$2" origin="$3" story="${4:-}" role="${5:-}" summary="${6:-}"
   if [[ -z "${SPEC_KIT_JIRA_BASE_URL:-}" ]]; then
     printf 'identity: SPEC_KIT_JIRA_BASE_URL is not set\n' >&2
     return "$(cli_exit_code fail_closed)"
   fi
   local url marker
   url="$(_identity_url "${key}")"
-  marker="$(identity_marker "${spec_ref}" "${origin}" "${story}" "${role}")"
+  marker="$(identity_marker "${spec_ref}" "${origin}" "${story}" "${role}" "${summary}")"
   jira_request PUT "${url}" "${marker}" > /dev/null
 }

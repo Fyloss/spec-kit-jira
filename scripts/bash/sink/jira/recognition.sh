@@ -170,11 +170,16 @@ recognition_parent_run() {
         return 0
       fi
 
-      local fields current origin
+      local fields current origin last_summary
       fields="$(jq -c '.fields' <<< "${read_result}")"
       current="$(jq -c '{summary:(.summary // ""), description:(.description // {}), labels:((.labels // []) | unique)}' <<< "${fields}")"
       origin="$(jq -r '.origin // "bridge"' <<< "${marker}")"
-      jq -cn --arg k "${key}" --argjson c "${current}" --arg o "${origin}" '{state:"bound", key:$k, current:$c, origin:$o}' | json_canonical
+      # last_summary (018, T044; contracts/summary-record.md §1/§5: every
+      # tier, including the parent) — from the same already-fetched marker.
+      last_summary="$(jq -r '.summary // empty' <<< "${marker}")"
+      jq -cn --arg k "${key}" --argjson c "${current}" --arg o "${origin}" --arg ls "${last_summary}" \
+        '{state:"bound", key:$k, current:$c, origin:$o}
+         + (if $ls == "" then {} else {last_summary:$ls} end)' | json_canonical
       return 0
       ;;
   esac
@@ -362,9 +367,14 @@ recognition_run() {
 
     # Bound: recognised. current/status/status_category/flagged/blockers
     # feed the plan and lifecycle contexts (Phase 4/6).
-    local fields origin current status status_category flagged blockers
+    local fields origin current status status_category flagged blockers last_summary
     fields="$(jq -c '.fields' <<< "${read_result}")"
     origin="$(jq -r '.origin // "bridge"' <<< "${marker}")"
+    # last_summary (018, T044; contracts/summary-record.md §1): the summary
+    # this mirror last WROTE, read from the SAME already-fetched marker — no
+    # extra request. Omitted for a marker written by a previous release,
+    # which carries no `summary` field at all.
+    last_summary="$(jq -r '.summary // empty' <<< "${marker}")"
     # parent (T109): the child's CURRENT parent key, or null when it carries
     # none at all — a flat mirror from before this feature, which the "no
     # migration" boundary (plan.md "Scope boundaries worth stating") leaves
@@ -383,8 +393,9 @@ recognition_run() {
 
     local entry; entry="$(jq -cn --arg k "${key}" --arg o "${origin}" --argjson c "${current}" \
       --arg st "${status}" --arg sc "${status_category}" --argjson fl "${flagged}" --argjson bl "${blockers}" \
-      --argjson sub "${subtasks}" \
-      '{key:$k, origin:$o, current:$c, status:$st, status_category:$sc, flagged:$fl, blockers:$bl, subtasks:$sub}')"
+      --argjson sub "${subtasks}" --arg ls "${last_summary}" \
+      '{key:$k, origin:$o, current:$c, status:$st, status_category:$sc, flagged:$fl, blockers:$bl, subtasks:$sub}
+       + (if $ls == "" then {} else {last_summary:$ls} end)')"
     bound="$(jq -c --arg id "${id}" --argjson e "${entry}" '. + {($id): $e}' <<< "${bound}")"
   done
 

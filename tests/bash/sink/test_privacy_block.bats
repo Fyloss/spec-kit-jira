@@ -176,6 +176,49 @@ teardown() {
   [ "$(grep -c '^POST /rest/api/3/issue$' <<< "$output")" -eq 2 ]
 }
 
+# --- 018, T016: the narrowed scan scope (contract §5, FR-024a) -------------
+# A *.atlassian.net host present ONLY in the preserved human prefix must not
+# block the run — it is a verbatim round-trip, read from this ticket and
+# written back to it, so it cannot leak anything the tracker does not already
+# hold. The SAME host in a node the mirror composes (the managed region) must
+# still block, with the same exit code and zero writes, exactly as today.
+
+@test "a *.atlassian.net host present only in the preserved human prefix does not block the run" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local marker desc actions
+  marker="$(adf_managed_marker)"
+  desc="$(jq -cn --arg m "${marker}" '{type:"doc", version:1, content:[
+    {type:"paragraph", content:[{type:"text", text:"see mirror of https://acme-corp.atlassian.net/browse/X"}]},
+    {type:"paragraph", content:[{type:"text", text:$m, marks:[{type:"strong"}]}]},
+    {type:"paragraph", content:[{type:"text", text:"managed body, composed by the mirror"}]}
+  ]}')"
+  actions="$(jq -cn --arg u "${MOCK_BASE_URL}/rest/api/3/issue/PROJ-1" --argjson d "${desc}" \
+    '[{method:"PUT", url:$u, body:{fields:{description:$d}}}]')"
+  run apply_writes "${actions}"
+  [ "$status" -eq 0 ]
+  run mock_calls
+  [[ "$output" == *"PUT /rest/api/3/issue/PROJ-1"* ]]
+}
+
+@test "the same host in a node the mirror composes still blocks with zero writes" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local marker desc actions
+  marker="$(adf_managed_marker)"
+  desc="$(jq -cn --arg m "${marker}" '{type:"doc", version:1, content:[
+    {type:"paragraph", content:[{type:"text", text:"an ordinary human note"}]},
+    {type:"paragraph", content:[{type:"text", text:$m, marks:[{type:"strong"}]}]},
+    {type:"paragraph", content:[{type:"text", text:"leak acme-corp.atlassian.net"}]}
+  ]}')"
+  actions="$(jq -cn --arg u "${MOCK_BASE_URL}/rest/api/3/issue/PROJ-1" --argjson d "${desc}" \
+    '[{method:"PUT", url:$u, body:{fields:{description:$d}}}]')"
+  run apply_writes "${actions}"
+  [ "$status" -eq 9 ]
+  run mock_calls
+  [ -z "$output" ]
+}
+
 # --- Cross-port parity ------------------------------------------------------
 
 @test "the PowerShell port blocks the same three shapes identically (NFR-1)" {

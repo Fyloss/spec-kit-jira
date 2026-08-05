@@ -140,11 +140,13 @@ function Split-JiraManagedSectionPanel {
     <#
     .SYNOPSIS
       Split an existing description's content-node array at the managed panel
-      marker. Mirror of managed_section_panel_split (US7, T075). The marker is a
-      parameter; nodes are treated as opaque JSON. Returns canonical
-      { prefix, managed, had_marker } — everything before the first node carrying
-      the marker is the human-authored prefix; everything from it onward is the
-      previously-written managed section.
+      marker. Mirror of managed_section_panel_split (US7, T075; 018, T007). The
+      marker is a parameter; nodes are treated as opaque JSON. Returns canonical
+      { prefix, managed, had_marker, marker_count } — everything before the first
+      node carrying the marker is the human-authored prefix; everything from it
+      onward is the previously-written managed section. marker_count is the
+      number of nodes carrying the marker (0 = no boundary, 1 = well-formed,
+      >1 = malformed, contract §1); had_marker is unchanged (marker_count > 0).
     #>
     [CmdletBinding()]
     param(
@@ -154,22 +156,83 @@ function Split-JiraManagedSectionPanel {
     $nodes = @()
     if (-not [string]::IsNullOrEmpty($ContentJson)) { $nodes = @($ContentJson | ConvertFrom-Json -Depth 100) }
 
-    $k = -1
+    $idxs = [System.Collections.Generic.List[int]]::new()
     for ($i = 0; $i -lt $nodes.Count; $i++) {
         $strings = Get-JiraNodeStringValue $nodes[$i]
-        if (($strings -join "`n").Contains($Marker)) { $k = $i; break }
+        if (($strings -join "`n").Contains($Marker)) { $idxs.Add($i) }
     }
+    $count = $idxs.Count
+    $k = if ($count -gt 0) { $idxs[0] } else { -1 }
 
     $prefix = [System.Collections.Generic.List[object]]::new()
     $managed = [System.Collections.Generic.List[object]]::new()
     if ($k -lt 0) {
         foreach ($n in $nodes) { $prefix.Add($n) }
-        return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; managed = $managed; had_marker = $false }))
+        return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; managed = $managed; had_marker = $false; marker_count = $count }))
     }
     for ($i = 0; $i -lt $nodes.Count; $i++) {
         if ($i -lt $k) { $prefix.Add($nodes[$i]) } else { $managed.Add($nodes[$i]) }
     }
-    return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; managed = $managed; had_marker = $true }))
+    return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; managed = $managed; had_marker = $true; marker_count = $count }))
 }
 
-Export-ModuleMember -Function Get-JiraManagedSectionLineEnding, Invoke-JiraManagedSectionSplice, Split-JiraManagedSectionPanel
+function Split-JiraManagedSectionSuffix {
+    <#
+    .SYNOPSIS
+      The migration split (018, T011, research R3, contract §3, data-model.md
+      §2). Mirror of managed_section_suffix_split. PURE structural array
+      comparison — no marker, no tracker vocabulary — used only on the
+      migration path (marker_count == 0).
+    .DESCRIPTION
+      Returns canonical { prefix, matched }: matched is true when the existing
+      content array (ContentJson) ends with ManagedJson, in which case prefix is
+      everything before that matched suffix; false means the mirror's previous
+      output could not be identified, and prefix is the WHOLE existing array —
+      nothing is ever discarded (FR-020a/FR-020b). Built with List[object] and
+      explicit .Add() throughout — never a bare array slice assignment — because
+      PowerShell flattens a single-element array result of an if/else expression
+      into its lone element on assignment (the same trap Split-JiraManagedSectionPanel
+      already avoids the same way).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ManagedJson,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $ContentJson
+    )
+    $existing = [System.Collections.Generic.List[object]]::new()
+    if (-not [string]::IsNullOrEmpty($ContentJson)) {
+        foreach ($n in @($ContentJson | ConvertFrom-Json -Depth 100)) { $existing.Add($n) }
+    }
+    $managed = [System.Collections.Generic.List[object]]::new()
+    if (-not [string]::IsNullOrEmpty($ManagedJson)) {
+        foreach ($n in @($ManagedJson | ConvertFrom-Json -Depth 100)) { $managed.Add($n) }
+    }
+
+    $mlen = $managed.Count
+    $elen = $existing.Count
+    $prefix = [System.Collections.Generic.List[object]]::new()
+
+    if ($mlen -eq 0) {
+        foreach ($n in $existing) { $prefix.Add($n) }
+        return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; matched = $true }))
+    }
+    if ($elen -lt $mlen) {
+        foreach ($n in $existing) { $prefix.Add($n) }
+        return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; matched = $false }))
+    }
+
+    $matched = $true
+    for ($i = 0; $i -lt $mlen; $i++) {
+        $ea = ConvertTo-JiraJsonValue $existing[$elen - $mlen + $i]
+        $eb = ConvertTo-JiraJsonValue $managed[$i]
+        if ($ea -ne $eb) { $matched = $false; break }
+    }
+    if (-not $matched) {
+        foreach ($n in $existing) { $prefix.Add($n) }
+        return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; matched = $false }))
+    }
+    for ($i = 0; $i -lt ($elen - $mlen); $i++) { $prefix.Add($existing[$i]) }
+    return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; matched = $true }))
+}
+
+Export-ModuleMember -Function Get-JiraManagedSectionLineEnding, Invoke-JiraManagedSectionSplice, Split-JiraManagedSectionPanel, Split-JiraManagedSectionSuffix

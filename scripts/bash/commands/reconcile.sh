@@ -338,15 +338,25 @@ _reconcile_plan_context() {
         end
     ))')"
 
-  # ticket_origins (FR-038) is populated ONLY for a non-bridge origin: a
-  # "bridge" origin means plan_writes owns the whole description (the US3
-  # behaviour, unchanged) — the same meaning an absent map entry has always
-  # had. Including "bridge" here would wrongly route a bridge-created
-  # ticket through the human-origin managed-panel splice.
+  # ticket_origins (018, T024): populated for EVERY recognised ticket now —
+  # the managed-panel splice is origin-independent (research R1, contract §3)
+  # and routes through the SAME resolution regardless of "bridge" or "human".
+  # Before this feature, "bridge" was excluded here because plan_writes owned
+  # the whole description on that origin; that discriminator is gone.
   local tickets ticket_origins ticket_descriptions ticket_parents
   tickets="$(jq -c '(.bound // {}) | with_entries(.value |= .key)' <<< "${recog}")"
-  ticket_origins="$(jq -c '(.bound // {}) | with_entries(select(.value.origin != "bridge")) | with_entries(.value |= .origin)' <<< "${recog}")"
+  ticket_origins="$(jq -c '(.bound // {}) | with_entries(.value |= .origin)' <<< "${recog}")"
   ticket_descriptions="$(jq -c '(.bound // {}) | with_entries(.value |= .current.description)' <<< "${recog}")"
+  # ticket_summaries / ticket_last_summaries (018, T046; contracts/
+  # summary-record.md §2/§3): the CURRENT summary Jira holds, and the
+  # summary this mirror last WROTE (from the identity marker), per bound
+  # ticket — plan_apply.sh compares the two to decide FR-015..FR-019's
+  # summary-drift outcome. ticket_last_summaries omits an entry for a
+  # marker that predates the record, exactly as recognition.sh's own
+  # last_summary is omitted.
+  local ticket_summaries ticket_last_summaries
+  ticket_summaries="$(jq -c '(.bound // {}) | with_entries(.value |= .current.summary)' <<< "${recog}")"
+  ticket_last_summaries="$(jq -c '(.bound // {}) | with_entries(select(.value.last_summary != null)) | with_entries(.value |= .last_summary)' <<< "${recog}")"
   # ticket_parents (T109): only the entries whose CURRENT parent is non-null —
   # a flat mirror with no parent at all is left alone (plan.md "No
   # migration"); a child linked to the wrong parent is what plan_writes
@@ -380,13 +390,19 @@ _reconcile_plan_context() {
   task_tickets="$(jq -c '(.bound // {}) | with_entries(.value |= .key)' <<< "${tasks_recog}")"
   tickets="$(jq -c --argjson tt "${task_tickets}" '. + $tt' <<< "${tickets}")"
   ticket_current="$(jq -c '(.bound // {}) | with_entries(.value |= .current)' <<< "${tasks_recog}")"
+  ticket_summaries="$(jq -c --argjson t "$(jq -c '(.bound // {}) | with_entries(.value |= .current.summary)' <<< "${tasks_recog}")" '. + $t' <<< "${ticket_summaries}")"
+  ticket_last_summaries="$(jq -c --argjson t "$(jq -c '(.bound // {}) | with_entries(select(.value.last_summary != null)) | with_entries(.value |= .last_summary)' <<< "${tasks_recog}")" '. + $t' <<< "${ticket_last_summaries}")"
+  # ticket_origins also carries the task tier (018, T048): identity-stamping
+  # a task's summary record after a write needs its origin, same as a story.
+  ticket_origins="$(jq -c --argjson t "$(jq -c '(.bound // {}) | with_entries(.value |= .origin)' <<< "${tasks_recog}")" '. + $t' <<< "${ticket_origins}")"
 
   jq -cn --arg b "${base}" --arg st "${story_type}" --argjson pids "${priority_ids}" --arg ef "${est_field}" \
     --arg pt "${parent_type_id}" --argjson psl "${parent_supports_link}" \
     --argjson tk "${tickets}" --argjson to "${ticket_origins}" --argjson td "${ticket_descriptions}" \
     --argjson tp "${ticket_parents}" --argjson fd "${field_defaults}" --argjson tl "${ticket_labels}" \
     --argjson dft "${defaultable_fields_by_type}" --argjson itl "${issue_types_list}" \
-    --arg tt "${task_type_id}" --argjson tc "${ticket_current}" '
+    --arg tt "${task_type_id}" --argjson tc "${ticket_current}" \
+  --argjson ts "${ticket_summaries}" --argjson tls "${ticket_last_summaries}" '
     {base_url:$b}
     + (if $st == "" then {} else {story_type_id:$st} end)
     + (if $pt == "" then {} else {parent_type_id:$pt} end)
@@ -402,7 +418,9 @@ _reconcile_plan_context() {
     + (if ($itl|length) == 0 then {} else {issue_types:$itl} end)
     + (if ($fd|length) == 0 then {} else {field_defaults:$fd} end)
     + (if $tt == "" then {} else {task_type_id:$tt} end)
-    + (if ($tc|length) == 0 then {} else {ticket_current:$tc} end)'
+    + (if ($tc|length) == 0 then {} else {ticket_current:$tc} end)
+    + (if ($ts|length) == 0 then {} else {ticket_summaries:$ts} end)
+    + (if ($tls|length) == 0 then {} else {ticket_last_summaries:$tls} end)'
 }
 
 # cmd_reconcile <argv...> — reconcile one specification into its Jira project.
@@ -969,6 +987,10 @@ cmd_reconcile() {
   # otherwise it is built from the resolved project's persisted binding.
   local plan_ctx rc_pc=0
   plan_ctx="$(_reconcile_plan_context "${base}" "${project_key}" "${cfg_dir}" "${cfg}" "${recog}" "${field_values}" "${tasks_recog}")" || rc_pc=$?
+  # on_drift (018, T046; contracts/summary-record.md §4): the SAME
+  # --on-drift the lifecycle context already carries — plan_writes' summary
+  # decision reads it from here rather than a second flag.
+  [[ "${rc_pc}" -eq 0 ]] && plan_ctx="$(jq -c --arg od "${on_drift}" '. + {on_drift:$od}' <<< "${plan_ctx}")"
   if [[ "${rc_pc}" -eq 2 ]]; then
     _reconcile_notice \
       'Jira mirror skipped: this repository is not bound to a Jira project yet.' \
@@ -992,12 +1014,15 @@ cmd_reconcile() {
   # bound parent carries its key, current content (for zero churn) and
   # origin; a new/absent parent contributes nothing extra.
   if [[ "${parent_state}" == "bound" ]]; then
-    local parent_key_known parent_current_known parent_origin_known
+    local parent_key_known parent_current_known parent_origin_known parent_last_summary_known
     parent_key_known="$(jq -r '.key' <<< "${recog_parent}")"
     parent_current_known="$(jq -c '.current' <<< "${recog_parent}")"
     parent_origin_known="$(jq -r '.origin // "bridge"' <<< "${recog_parent}")"
-    plan_ctx="$(jq -c --arg k "${parent_key_known}" --argjson c "${parent_current_known}" --arg o "${parent_origin_known}" \
-      '. + {parent_key:$k, parent_current:$c, parent_origin:$o}' <<< "${plan_ctx}")"
+    # parent_last_summary (018, T046; contracts/summary-record.md §2/§5:
+    # every tier, including the parent) — omitted for a marker predating it.
+    parent_last_summary_known="$(jq -r '.last_summary // empty' <<< "${recog_parent}")"
+    plan_ctx="$(jq -c --arg k "${parent_key_known}" --argjson c "${parent_current_known}" --arg o "${parent_origin_known}" --arg ls "${parent_last_summary_known}" \
+      '. + {parent_key:$k, parent_current:$c, parent_origin:$o} + (if $ls == "" then {} else {parent_last_summary:$ls} end)' <<< "${plan_ctx}")"
   fi
 
   # DUPLICATE PROBE (User Story 4, P3, droppable; FR-022–FR-026,
@@ -1048,9 +1073,16 @@ cmd_reconcile() {
   # `tasks_actions` stays the "[]" it was initialised to and every
   # downstream read of it is a no-op (FR-011).
   if [[ "${task_role_active}" == "true" ]]; then
-    if ! tasks_actions="$(plan_writes_tasks "${doc_for_write}" "${plan_ctx}" "${task_label}")"; then
+    local tasks_plan
+    if ! tasks_plan="$(plan_writes_tasks "${doc_for_write}" "${plan_ctx}" "${task_label}")"; then
       task_warns="$(jq -c '. + ["reconcile: the task tier'"'"'s write plan could not be assembled and was withheld this run"]' <<< "${task_warns}")"
       tasks_actions="[]"
+    else
+      tasks_actions="$(jq -c '.actions' <<< "${tasks_plan}")"
+      # 018, T026: the boundary's own warnings (malformed / ambiguous
+      # migration) on the task tier, through the same channel every other
+      # task-tier warning already uses.
+      task_warns="$(jq -c --argjson w "$(jq -c '.warnings' <<< "${tasks_plan}")" '. + $w' <<< "${task_warns}")"
     fi
   fi
 
@@ -1141,12 +1173,10 @@ cmd_reconcile() {
       return $?
     fi
   else
-    # origin is omitted when "bridge" (mirrors the plan context's
-    # ticket_origins filter above): plan_lifecycle's own churn check
-    # branches on origin exactly as plan_writes does, and a "bridge" value
-    # would wrongly route a bridge-created ticket through the human-origin
-    # managed-panel comparison, which always reads "unchanged" for a
-    # description that never carried the panel marker in the first place.
+    # origin (018, T024): included for EVERY recognised ticket now, mirroring
+    # the plan context's ticket_origins above — the managed-panel comparison
+    # is origin-independent (contract §3), so there is no longer a "bridge"
+    # value that would route a ticket incorrectly.
     # target (Phase 6, US4, research R9): the status the CURRENT lifecycle
     # event maps to, via the routed project's phase_status_map — empty when
     # this run has no hook event (a direct invocation) or the event has no
@@ -1172,8 +1202,7 @@ cmd_reconcile() {
                 elif .status_category == "done" then "post-scope"
                 else "unknown" end),
               target: $tgt,
-              flagged: .flagged }
-            + (if .origin == "bridge" then {} else {origin: .origin} end)
+              flagged: .flagged, origin: .origin }
           )))}' \
       <<< "${recog}")"
   fi
@@ -1506,10 +1535,13 @@ cmd_reconcile() {
   # "<resolved at apply time>" placeholder for a same-run story creation.
   # Never kept for a no-task-role run, so FR-011's byte-identical guarantee
   # is unaffected.
+  # identity_stamp (018, T048) is an apply-time-only instruction — never
+  # part of the displayed/dry-run summary, on every branch below,
+  # regardless of whether local_id itself is kept for task matching.
   if [[ "${task_role_active}" == "true" ]]; then
-    disp_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b)]' <<< "${actions}")"
+    disp_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b) | del(.identity_stamp)]' <<< "${actions}")"
   else
-    disp_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b) | del(.local_id)]' <<< "${actions}")"
+    disp_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b) | del(.local_id, .identity_stamp)]' <<< "${actions}")"
   fi
   # Phase 3, US1 (Constitution XI): task actions join the SAME displayed
   # list, last — a --dry-run preview that reports counts.tasks but never
@@ -1518,11 +1550,11 @@ cmd_reconcile() {
   # against the story action's local_id kept above.
   if [[ "${task_role_active}" == "true" ]]; then
     local disp_task_actions
-    disp_task_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b) | del(.local_id)]' <<< "${tasks_actions}")"
+    disp_task_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b) | del(.local_id, .identity_stamp)]' <<< "${tasks_actions}")"
     disp_actions="$(jq -c --argjson t "${disp_task_actions}" '. + $t' <<< "${disp_actions}")"
   fi
   if [[ "${parent_action}" != "null" ]]; then
-    disp_parent="$(jq -c --arg b "${base}" '.url |= ltrimstr($b) | del(.local_id)' <<< "${parent_action}")"
+    disp_parent="$(jq -c --arg b "${base}" '.url |= ltrimstr($b) | del(.local_id, .identity_stamp)' <<< "${parent_action}")"
     disp_actions="$(jq -c --argjson p "${disp_parent}" '[$p] + .' <<< "${disp_actions}")"
   fi
 

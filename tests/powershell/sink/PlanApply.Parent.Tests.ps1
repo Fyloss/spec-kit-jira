@@ -36,13 +36,20 @@ BeforeAll {
 }
 '@
 
+    # 018, T027: the parent now carries the boundary too, so a fixture meant
+    # to be "unchanged" must already sit inside it — otherwise the first
+    # touch of a legacy (marker-less) description also migrates, which is
+    # its own, separately-tested behaviour (contract §3).
     $script:CtxBoundUnchanged = @'
 {
   "base_url":"https://mock",
   "story_type_id":"10002",
   "parent_type_id":"10101",
   "parent_key":"COMP-412",
-  "parent_current":{"summary":"The Epic Title","description":{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"Overview."}]}]}},
+  "parent_current":{"summary":"The Epic Title","description":{"type":"doc","version":1,"content":[
+    {"type":"paragraph","content":[{"type":"text","text":"Synced from spec-kit — do not edit below this line","marks":[{"type":"strong"}]}]},
+    {"type":"paragraph","content":[{"type":"text","text":"Overview."}]}
+  ]}},
   "priority_ids":{"P1":"1","P2":"2","P3":"3"},
   "tickets":{}
 }
@@ -167,6 +174,7 @@ Describe 'Get-JiraPlanWriteSet — T090 the plan section is replaced in place' {
 }
 '@
         $script:CurrentWithPlan = '{"summary":"The Epic Title","description":{"type":"doc","version":1,"content":[' +
+        '{"type":"paragraph","content":[{"type":"text","text":"Synced from spec-kit — do not edit below this line","marks":[{"type":"strong"}]}]},' +
         '{"type":"paragraph","content":[{"type":"text","text":"Overview."}]},' +
         '{"type":"heading","attrs":{"level":3},"content":[{"type":"text","text":"Implementation Plan"}]},' +
         '{"type":"paragraph","content":[{"type":"text","text":"The original plan summary."}]}' +

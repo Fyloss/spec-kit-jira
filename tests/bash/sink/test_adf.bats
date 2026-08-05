@@ -88,42 +88,86 @@ CONTENT='{
   [ "${b}" = "${p}" ]
 }
 
-# --- US7 (T075): origin-discriminated managed description --------------------
+# --- 018, T012: origin-independent managed description resolution (contract §3) ---
 
-@test "bridge-created origin renders the whole description as the managed section, no delimiter (FR-040)" {
-  run adf_render_managed_description "${CONTENT}" "bridge-created" '{}'
+@test "row 5 — a creation with no existing description carries no prefix, no warning (FR-020)" {
+  run adf_render_managed_description "${CONTENT}"
   [ "$status" -eq 0 ]
-  # No marker paragraph is present when the bridge owns the whole description.
-  [[ "$output" != *"do not edit below this line"* ]]
-  [ "$(jq -r '.type' <<< "$output")" = "doc" ]
+  [ "$(jq -r '.status' <<< "$output")" = "ok" ]
+  local doc; doc="$(jq -c '.doc' <<< "$output")"
+  [[ "$(jq -c '.' <<< "$doc")" == *"do not edit below this line"* ]]
+  [[ "$(jq -c '.' <<< "$doc")" == *"The need statement."* ]]
+  # The marker is the FIRST content node — no human prefix on a creation.
+  [[ "$(jq -r '.content[0].content[0].text' <<< "$doc")" == *"do not edit below this line"* ]]
 }
 
-@test "human origin preserves the human prefix verbatim above a delimited managed panel (FR-038)" {
-  run adf_render_managed_description "${CONTENT}" "human" "${EXISTING_HUMAN}"
+@test "row 2 — a well-formed boundary preserves the human prefix verbatim above a fresh managed panel (FR-007)" {
+  run adf_render_managed_description "${CONTENT}" "${EXISTING_HUMAN}"
   [ "$status" -eq 0 ]
-  # The human's line survives, the stale managed body is gone, the marker delimits.
-  [ "$(jq -r '.content[0].content[0].text' <<< "$output")" = "A note the PO wrote." ]
-  [[ "$output" == *"do not edit below this line"* ]]
-  [[ "$output" != *"OLD MANAGED BODY"* ]]
-  [[ "$output" == *"The need statement."* ]]
+  [ "$(jq -r '.status' <<< "$output")" = "ok" ]
+  local doc; doc="$(jq -c '.doc' <<< "$output")"
+  [ "$(jq -r '.content[0].content[0].text' <<< "$doc")" = "A note the PO wrote." ]
+  [[ "$(jq -c '.' <<< "$doc")" == *"do not edit below this line"* ]]
+  [[ "$(jq -c '.' <<< "$doc")" != *"OLD MANAGED BODY"* ]]
+  [[ "$(jq -c '.' <<< "$doc")" == *"The need statement."* ]]
 }
 
-@test "re-rendering a human description with unchanged managed content reproduces it byte-for-byte (idempotent)" {
-  # First render onto the existing human doc; then feed that result back in.
-  local once twice
-  once="$(adf_render_managed_description "${CONTENT}" "human" "${EXISTING_HUMAN}")"
-  twice="$(adf_render_managed_description "${CONTENT}" "human" "${once}")"
-  [ "${once}" = "${twice}" ]
+@test "row 1 — more than one delimiter is malformed: no doc, status malformed (FR-012)" {
+  local malformed; malformed="$(jq -cn --arg m "$(adf_managed_marker)" '
+    {type:"doc", version:1, content:[
+      {type:"paragraph", content:[{type:"text", text:"Human note."}]},
+      {type:"paragraph", content:[{type:"text", text:$m, marks:[{type:"strong"}]}]},
+      {type:"paragraph", content:[{type:"text", text:"body one"}]},
+      {type:"paragraph", content:[{type:"text", text:$m, marks:[{type:"strong"}]}]},
+      {type:"paragraph", content:[{type:"text", text:"body two"}]}
+    ]}')"
+  run adf_render_managed_description "${CONTENT}" "${malformed}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' <<< "$output")" = "malformed" ]
+  [ "$(jq -r 'has("doc")' <<< "$output")" = "false" ]
 }
 
-@test "the managed description renders byte-identical across ports (NFR-1)" {
+@test "row 3 — clean migration: existing ends with the freshly rendered managed nodes, no duplication (FR-020a)" {
+  local managed pre_release
+  managed="$(adf_render_description "${CONTENT}" | jq -c '.content')"
+  pre_release="$(jq -cn --argjson c "${managed}" '{type:"doc", version:1, content:$c}')"
+  run adf_render_managed_description "${CONTENT}" "${pre_release}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' <<< "$output")" = "ok" ]
+  local doc; doc="$(jq -c '.doc' <<< "$output")"
+  # Exactly one occurrence of the need statement — nothing duplicated.
+  [ "$(jq -r '[.content[].content[]?.text? // empty] | map(select(. == "The need statement.")) | length' <<< "$doc")" -eq 1 ]
+  [[ "$(jq -c '.' <<< "$doc")" == *"do not edit below this line"* ]]
+}
+
+@test "row 4 — ambiguous migration preserves everything and warns by status (FR-020b)" {
+  local unrelated; unrelated="$(jq -cn '{type:"doc", version:1, content:[{type:"paragraph", content:[{type:"text", text:"unrelated prior content"}]}]}')"
+  run adf_render_managed_description "${CONTENT}" "${unrelated}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' <<< "$output")" = "migrated-warned" ]
+  local doc; doc="$(jq -c '.doc' <<< "$output")"
+  [[ "$(jq -c '.' <<< "$doc")" == *"unrelated prior content"* ]]
+  [[ "$(jq -c '.' <<< "$doc")" == *"do not edit below this line"* ]]
+  [[ "$(jq -c '.' <<< "$doc")" == *"The need statement."* ]]
+}
+
+@test "re-rendering with unchanged managed content reproduces it byte-for-byte (idempotent)" {
+  local once twice once_doc
+  once="$(adf_render_managed_description "${CONTENT}" "${EXISTING_HUMAN}")"
+  once_doc="$(jq -c '.doc' <<< "${once}")"
+  twice="$(adf_render_managed_description "${CONTENT}" "${once_doc}")"
+  [ "$(jq -r '.status' <<< "${twice}")" = "ok" ]
+  [ "${once_doc}" = "$(jq -c '.doc' <<< "${twice}")" ]
+}
+
+@test "the managed description resolution renders byte-identical across ports (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local b p
-  b="$(adf_render_managed_description "${CONTENT}" "human" "${EXISTING_HUMAN}")"
+  b="$(adf_render_managed_description "${CONTENT}" "${EXISTING_HUMAN}")"
   p="$(pwsh -NoProfile -Command "
     Import-Module '${PS_SINK}/Adf.psm1' -Force
     \$c = [Console]::In.ReadToEnd()
-    [Console]::Out.Write((ConvertTo-JiraManagedAdfDocument -ContentJson \$c -Origin 'human' -ExistingJson '$(printf '%s' "${EXISTING_HUMAN}")'))
+    [Console]::Out.Write((ConvertTo-JiraManagedAdfDocument -ContentJson \$c -ExistingJson '$(printf '%s' "${EXISTING_HUMAN}")'))
   " <<< "${CONTENT}")"
   [ "${b}" = "${p}" ]
 }

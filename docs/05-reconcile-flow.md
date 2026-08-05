@@ -148,6 +148,35 @@ The ordering in the last block is the invariant: **guard, then write**. A single
 blocked payload aborts the whole apply — there is no gap through which a leak
 could reach Jira.
 
+## The managed-region boundary (018)
+
+An UPDATE never overwrites a whole description. Every rendered description
+carries a single boundary marker; the mirror's own content — the story body,
+the acceptance panel, the Design section, and now a `plan.md` section when one
+exists — lives entirely below it, and a human's prose above it is preserved
+verbatim on every reconcile. `sink/jira/adf.sh`'s `_adf_resolve_managed`
+(mirrored by `Resolve-JiraManagedAdfContent` in the PowerShell port) is the
+one place this decision is made, for every tier alike:
+
+- **A settled ticket** (marker present, unchanged below it) writes nothing —
+  the boundary is never itself a source of churn.
+- **A ticket a previous release wrote**, with no marker yet, is migrated on
+  its next ordinary write: where the mirror can identify its own former
+  output as the tail of the existing content, that tail becomes the managed
+  region and nothing above it is touched or duplicated; where it cannot, the
+  whole existing description is kept as human text above a fresh managed
+  region, and the run reports one warning naming the ticket so a human can
+  trim the resulting duplicate.
+- **More than one marker** is a malformed description: the field is omitted
+  from that write entirely rather than guessed at, and every other field of
+  the ticket still reconciles.
+
+A parallel record — the last summary the mirror itself sent, kept in the
+identity property, never in the description — lets a Product Owner's rename
+in the tracker survive too: a summary that no longer matches what the mirror
+last wrote is left alone and warned about by default, and only sent again
+under `--on-drift=proceed`.
+
 ## What the engine extracts from a specification
 
 ```mermaid

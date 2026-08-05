@@ -1,0 +1,10 @@
+# Minimal team config for the pre-release migration conformance scenarios
+# (018, T056/T057).
+projects:
+  - key: PRE
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing_default: PRE
