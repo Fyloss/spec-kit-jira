@@ -283,4 +283,96 @@ harness that prevented any measurement from completing).
   always() && matrix.shard == 0`), same commit. **Re-queued for the next
   push.**
 
+## T011 — second probe push (run `31028591939`, commit `07e2965`, 2026-08-05)
+
+Both fixes held. **Verdict set unchanged again**: shard 0 failed exactly
+`us2-field-defaults-option-question`, shard 2 exactly
+`us2-field-defaults-question`, shards 1/3 clean — same as the first push and
+as T003's baseline. Job durations: shard 1 = 21m54s, shard 2 = 22m36s,
+shard 3 = 21m28s (all close to the ~22-23 min baseline for a 21-scenario
+quarter of the corpus); **shard 0 = 60m08s**, almost entirely W4's cost
+(below).
+
+### W1 — process-spawn cost, Defender exclusions off/on (measured, real numbers)
+
+`Add-MpPreference` succeeded on all four paths without an elevation prompt:
+workspace, `RUNNER_TEMP`, git-bash's `usr/bin`, and Chocolatey's `jq` dir.
+
+| Spawn | Off | On | Improvement |
+| --- | --- | --- | --- |
+| `jq.exe` | 48.74 ms | 47.47 ms | ~2.6% |
+| git-bash fork | 25.31 ms | 25.08 ms | ~0.9% |
+| `pwsh` start | 219.83 ms | 217.51 ms | ~1.1% |
+
+**This overturns research.md §3's lever B estimate.** Research costed
+Defender exclusions at 1.3–2.0×, "the standard MSYS-on-Actions tax." Measured
+on this runner, the effect is **≤ 3% on every spawn type** — Defender
+exclusions are not the lever research.md expected them to be. Whatever this
+GitHub-hosted `windows-latest` image already does (a lighter default
+scan policy, or these three operations already sitting outside its
+on-access scan path) means lever B contributes negligibly to SC-001.
+
+### W2 — corpus survival and verdict count at concurrency 3 and 4 (measured)
+
+10-way subset (9 scenarios), both degrees driven by
+`SPEC_KIT_JIRA_CONFORMANCE_JOBS` (T010's pulled-forward override):
+
+| Degree | Result | Wall-clock | Verdicts |
+| --- | --- | --- | --- |
+| 3 | survived (exit 0) | 233.6s | 9/9 |
+| 4 | survived (exit 0) | 235.1s | 9/9 |
+
+**The runner survives at both degrees, with a complete verdict set at
+each** — R4/P2's proof obligation, satisfied. Wall-clock is essentially flat
+between 3 and 4 on this 9-scenario subset (233.6s vs 235.1s), which on this
+sample size does not by itself argue for 4 over 3; a larger subset or the
+full corpus at the chosen degree is what T026/T028 need before raising the
+default (FR-007 still requires the determinism check first — this run is
+survival evidence, not the determinism proof).
+
+### W3 — per-port, per-scenario time split (measured, shard 0's real 21-scenario run)
+
+`n=21 bash_total=1614.4s bash_avg=76.87s pwsh_total=93.5s pwsh_avg=4.45s`
+
+**Confirms research §2.1's spawn model directly**: the bash leg costs
+**~17× the pwsh leg per scenario** on this real host (76.87s vs 4.45s),
+consistent with "93% of spawns are the Bash port's own `jq` calls, frozen by
+FR-020." The PowerShell leg is not the problem; it never was.
+
+### W4 — MSYS-built jq: not established
+
+`pacman`/MSYS2 detection-and-install-and-compare step ran for **37m09s**
+(17:08:46–17:45:55) and produced **zero output** in the notice — not even
+its first line, which carries no external command substitution and should
+have been immune to quirk 8. The cause is not established: raw job logs
+answer 403 (non-admin token), and the step's own `continue-on-error: true`
+plus lack of any intermediate breadcrumb means there is no artifact to
+diagnose further from here.
+
+**Decision: not pursuing a third probe push to chase this.** Budget
+discipline (contracts/windows-probe.md: ~11 min and four runners per round
+trip; this project's own convention is one retry maximum on an inconclusive
+run) applies to the spirit of "stop iterating blindly," not only to its
+literal letter — two pushes have already landed real answers for W1/W2/W3,
+and W4's specific sub-experiment (installing a second jq and re-running a
+corpus slice under it) is the most complex, most novel, and least essential
+of the four. **W4 is reported as unmeasured, not guessed at.** If it is
+needed later, the right next step is a narrower, single-purpose probe (just
+the pacman/jq LF-check, no corpus re-run) with a breadcrumb written before
+every step of it — not a repeat of this attempt.
+
+### Consequence for T015
+
+The Complexity Tracking decision can be put to the user with W1's number
+attached (as the task requires) but **not** W4's: option (a) (an LF-emitting
+`jq` on the Windows runner) remains costed only by research.md's estimate,
+not by a measurement of whether MSYS2's `jq` is even reachable on this image
+or what it would cost. What IS now measured and materially changes the
+decision's inputs: **lever B (Defender exclusions) is worth ~1-3%, not the
+1.3-2.0× research.md assumed** — the "realistic case" arithmetic in
+plan.md's Complexity Tracking table should be re-run with B's real multiplier
+before the decision is presented, since it materially lowers the frozen-code
+ceiling and therefore strengthens the case for options (a)/(b)/(c) over
+"levers alone get there."
+
 ---
