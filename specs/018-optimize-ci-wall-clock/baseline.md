@@ -246,4 +246,41 @@ harness code parses and runs at all):
   runner's actual privilege level, whether MSYS2 `pacman` exists on the
   image at all, and every one of W1-W4's real numbers.
 
+## T011 — first probe push (run `31023793448`, commit `de255a3`, 2026-08-05)
+
+Pushed to `ci/windows-probe`. Result: **a real bug found, not a flake** —
+`docs/10-windows-portability.md` quirk 8 (a bare `\r` from `pwsh`'s CRLF
+output truncates a `::notice::` message). Fixed and a second push queued
+immediately after (not counted against the one-retry budget: that rule
+covers re-rolling an inconclusive MEASUREMENT, not fixing a bug in the
+harness that prevented any measurement from completing).
+
+**What this run DID establish, cleanly**:
+
+- **Verdict set unchanged (FR-019, SC-010)**: shard 0 failed exactly
+  `us2-field-defaults-option-question`; shard 2 failed exactly
+  `us2-field-defaults-question`; shards 1 and 3 passed cleanly. This is
+  T003's recorded pre-existing baseline, byte for byte — this feature's
+  changes (verdict counting, timing capture, the concurrency override,
+  the restructured probe) introduced **zero new Windows failures**.
+- **Host profile** (shard 0, this run): MINGW64_NT-10.0-26100,
+  bash 5.3.15(1), **jq 1.8.1 (emits CRLF: yes)**, GNU sed 4.9, curl
+  8.21.0 (mingw32), pwsh 7.6.4, **4 cores**, `core.autocrlf: true`
+  (harmless per quirk 6 — the checkout stays clean), no CR bytes in either
+  fixture. `jq`'s install path on this run: `C:\ProgramData\Chocolatey\bin`.
+- **W1 (partial)**: the FIRST `Add-MpPreference` call (workspace-independent
+  path) reported `excluded: C:\ProgramData\Chocolatey\bin` — so
+  `Add-MpPreference` **does** run without an elevation prompt on this
+  runner. The remaining three exclusion attempts and all six spawn-cost
+  numbers were lost to quirk 8, not measured yet.
+- **W4/W3/W2**: none ran on shard 0 this trip. W4 ran but its result was lost
+  to quirk 8 too (it landed between W1's truncated line and where W3/W2
+  would have appended). **A second, distinct bug**: W3 and W2 were declared
+  `if: matrix.shard == 0` only, no `always()` — and shard 0's own slice
+  reliably contains one of the two pre-existing failures, so the corpus step
+  fails on shard 0 **every single run** of this probe, which skipped both
+  steps entirely regardless of quirk 8. Fixed alongside quirk 8 (`if:
+  always() && matrix.shard == 0`), same commit. **Re-queued for the next
+  push.**
+
 ---
