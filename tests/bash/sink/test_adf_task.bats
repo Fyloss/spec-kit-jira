@@ -18,7 +18,7 @@ TASK='{
   "local_id": "3f8a1c02d94b7e65",
   "task_ref": "T014",
   "title": "Implement the neutral task parser in scripts/bash/engine/tasks_parse.sh",
-  "description": {"blocks": [{"type":"paragraph","text":"Implement the neutral task parser"}]},
+  "description": {"blocks": [{"type":"paragraph","spans":[{"text":"Implement the neutral task parser in scripts/bash/engine/tasks_parse.sh","marks":[]}]}]},
   "attribution": {"story_ordinal": 1, "source": "tag"},
   "phase": "Phase 3: User Story 1",
   "parallel": true,
@@ -80,11 +80,15 @@ TASK='{
 }
 
 @test "description carries the full untruncated text even when the summary is shortened" {
+  # The engine puts the task's full text in BOTH title and description blocks;
+  # the sink shortens only the summary (016 FR-017 moved the body to blocks).
   local long task
   long="$(printf 'x%.0s' {1..400})"
-  task="$(jq -c --arg t "${long}" '.title=$t' <<< "${TASK}")"
+  task="$(jq -c --arg t "${long}" \
+    '.title=$t | .description.blocks=[{type:"paragraph",spans:[{text:$t,marks:[]}]}]' <<< "${TASK}")"
   run adf_render_task_description "${task}"
   [[ "$output" == *"${long}"* ]]
+  [ "${#long}" -gt "$(adf_task_summary "${long}" | wc -c)" ]
 }
 
 @test "an unattributed task's description says so" {

@@ -19,7 +19,7 @@ setup() {
 
 TASK1='{
   "local_id":"1111111111111111","task_ref":"T014","title":"Implement the parser",
-  "description":{"blocks":[{"type":"paragraph","text":"Implement the parser"}]},
+  "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Implement the parser","marks":[]}]}]},
   "attribution":{"story_ordinal":1,"source":"tag"},"phase":"Phase 3","parallel":true,
   "files":[],"depends_on":[],"done":false,
   "marker":{"state":"assigned","id":"1111111111111111","ticket":"","lines":[10]}
@@ -28,9 +28,9 @@ TASK1='{
 DOC_ONE_TASK='{
   "routing":{"project_key":"COMP"},
   "epic":{"title":"Epic","local_id":"e1","marker":{"state":"assigned","id":"e1","lines":[1]},
-          "description":{"blocks":[{"type":"paragraph","text":"x"}]}},
+          "description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}},
   "stories":[
-    {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},
+    {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","spans":[{"text":"need","marks":[]}]}]},
      "priority_logical":"P1","tasks":['"${TASK1}"']}
   ]
 }'
@@ -38,9 +38,9 @@ DOC_ONE_TASK='{
 DOC_NO_TASKS='{
   "routing":{"project_key":"COMP"},
   "epic":{"title":"Epic","local_id":"e1","marker":{"state":"assigned","id":"e1","lines":[1]},
-          "description":{"blocks":[{"type":"paragraph","text":"x"}]}},
+          "description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}},
   "stories":[
-    {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},
+    {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","spans":[{"text":"need","marks":[]}]}]},
      "priority_logical":"P1"}
   ]
 }'
@@ -92,7 +92,10 @@ _already_migrated_task_desc() {
 @test "an over-long title produces a deterministically shortened summary with the full text in the description" {
   local long task doc
   long="$(printf 'x%.0s' {1..400})"
-  task="$(jq -c --arg t "${long}" '.title=$t' <<< "${TASK1}")"
+  # tasks_parse derives title and description blocks from the SAME text, so a
+  # fixture that moves one must move the other (016 FR-017).
+  task="$(jq -c --arg t "${long}" \
+    '.title=$t | .description.blocks=[{type:"paragraph",spans:[{text:$t,marks:[]}]}]' <<< "${TASK1}")"
   doc="$(jq -c --argjson t "${task}" '.stories[0].tasks=[$t]' <<< "${DOC_ONE_TASK}")"
   run plan_writes_tasks "${doc}" "${CTX_CREATE}"
   output="$(jq -c '.actions' <<< "$output")"
@@ -113,7 +116,8 @@ _already_migrated_task_desc() {
 
 @test "an already-bound task whose text changed plans a PUT carrying only the differing fields" {
   local task doc ctx
-  task="$(jq -c '.title="Implement the parser, reworded"' <<< "${TASK1}")"
+  task="$(jq -c '.title="Implement the parser, reworded"
+    | .description.blocks=[{type:"paragraph",spans:[{text:"Implement the parser, reworded",marks:[]}]}]' <<< "${TASK1}")"
   doc="$(jq -c --argjson t "${task}" '.stories[0].tasks=[$t]' <<< "${DOC_ONE_TASK}")"
   ctx='{"base_url":"https://mock","task_type_id":"10099",
         "tickets":{"1111111111111111":"COMP-9"},
@@ -179,7 +183,7 @@ _already_migrated_task_desc() {
 @test "several tasks under different stories each carry their own parent_local_id" {
   local task2 doc
   task2="$(jq -c '.local_id="2222222222222222"' <<< "${TASK1}")"
-  doc="$(jq -c --argjson t2 "${task2}" '.stories += [{"local_id":"s2","title":"B","description":{"blocks":[{"type":"paragraph","text":"n"}]},"priority_logical":"P2","tasks":[$t2]}]' <<< "${DOC_ONE_TASK}")"
+  doc="$(jq -c --argjson t2 "${task2}" '.stories += [{"local_id":"s2","title":"B","description":{"blocks":[{"type":"paragraph","spans":[{"text":"n","marks":[]}]}]},"priority_logical":"P2","tasks":[$t2]}]' <<< "${DOC_ONE_TASK}")"
   run plan_writes_tasks "${doc}" "${CTX_CREATE}"
   output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq '. | length' <<< "$output")" -eq 2 ]

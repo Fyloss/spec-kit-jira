@@ -237,6 +237,11 @@ function Test-JiraInterchange {
             }
             if ([string]::IsNullOrEmpty([string](Get-JiraInterchangeProp $tk 'title'))) { $errors.Add('task.title is required') }
             if ((Get-JiraArrayCount (Get-JiraInterchangeProp $tk 'description') 'blocks') -lt 1) { $errors.Add('task.description.blocks must be non-empty') }
+            # 016, FR-019: a task description obeys the SAME inline model every
+            # other description position obeys. Without this rule the task tier
+            # was the one place a pre-016 raw-string paragraph could pass
+            # validation and render as literal punctuation.
+            foreach ($e in (Get-JiraBlocksErrors (Get-JiraInterchangeProp $tk 'description'))) { $errors.Add($e) }
             $doneVal = Get-JiraInterchangeProp $tk 'done'
             if ($doneVal -isnot [bool]) { $errors.Add('task.done must be a boolean') }
             if (-not [string]::IsNullOrEmpty($taskLocalId)) { $allTaskLocalIds.Add($taskLocalId) }

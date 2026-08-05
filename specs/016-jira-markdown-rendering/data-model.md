@@ -83,10 +83,16 @@ Every text-bearing position that carries author prose becomes `inline`:
 | `epic.description.blocks[]`, `stories[].description.blocks[]` | Overview prose | FR-001, FR-008 — the reported defect |
 | `stories[].acceptance_criteria[].{given,when,then}[]` | Given/When/Then clauses | Spec Assumptions: AC is synced prose. Note this replaces the crude `t="${t//\*\*/}"` global asterisk strip at `parse.sh:199`, which is today's partial workaround |
 | `stories[].design[].value` where `kind == "guidance"` | Design guidance lines | Same reasoning |
+| `stories[].tasks[].description.blocks[]` | A task line's own text in `tasks.md` | FR-017 — feature 012's sub-task tier. Task text is as full of backtick-quoted paths as spec prose is, so the same defect applies to it verbatim |
 
 **Not** converted: `design[].value` where `kind == "figma_link"` (a URL, not
 prose), `title` fields (rendered as the Jira summary, a plain-text field — no
-rich text is possible there), and `code` block bodies.
+rich text is possible there), `code` block bodies, and the metadata lines
+feature 012 appends to a sub-task description — `Identifier:`, `Phase:`,
+`Attribution:`, `Parallel-safe:`, `Files:`, `Depends on:` (FR-018). Those are
+composed by the bridge, not written by an author, so there is no markup in them
+to honour; `Files:` in particular carries paths the task parser already
+extracted from *inside* their backticks.
 
 ## §4 — The selection rule, restated
 

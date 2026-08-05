@@ -58,6 +58,11 @@ survives in the visible text.
    **Then** every byte of that file other than the bridge's own ticket-identifier
    marker lines is identical to what it was before the run — the formatting
    travels to Jira and never back into the source.
+8. **Given** a `tasks.md` task line whose text names a file in backticks, such as
+   ``- [ ] T014 Implement the parser in `engine/tasks_parse.sh` ``, **When** its
+   sub-task is written, **Then** the reader sees the path as monospaced inline
+   code and no backticks. Task text is author prose on the same footing as spec
+   prose, and reaches the reader through the same conversion.
 
 ---
 
@@ -214,6 +219,23 @@ behaviour; the first run updates their descriptions, the second reports no chang
 - **FR-014**: The rendered description MUST be visible in the dry-run preview
   before any write occurs.
 
+**Every description body, not just the specification's (feature 012 overlap)**
+
+- **FR-017**: Conversion MUST apply to **every** description body the bridge
+  writes, including the sub-task descriptions mirrored from `tasks.md` by feature
+  012. A task's own text is author prose carrying the same markup spec prose
+  carries — backtick-quoted file paths above all — and MUST NOT reach a Jira
+  reader as literal punctuation. Whichever Spec Kit file a description's prose
+  came from, the reader sees rendered formatting.
+- **FR-018**: Bridge-generated metadata inside a description — the identifier,
+  phase, attribution, parallel-safety, files and dependency lines feature 012
+  appends to a sub-task — is **not** author prose and MUST remain plain text.
+  Only text an author wrote is converted; text the bridge composed is not.
+- **FR-019**: A description body whose block model is the pre-conversion shape
+  (a paragraph carrying a raw string instead of marked spans) MUST fail
+  interchange validation rather than render silently, so no future tier can
+  reintroduce the defect without a test failing first.
+
 **Equivalence and safety**
 
 - **FR-015**: Both supported ports MUST produce byte-identical rendered
@@ -267,7 +289,8 @@ behaviour; the first run updates their descriptions, the second reports no chang
   real runs alike.
 - **SC-001**: Zero Markdown delimiter characters from a converted construct
   appear in the visible text of any synced ticket description, across the full
-  conformance corpus.
+  conformance corpus — specification, story, **and sub-task** descriptions
+  alike (FR-017).
 - **SC-002**: 100% of the supported constructs (bold, italic, inline code,
   strikethrough, link, heading, bulleted list, numbered list, code block) render
   as their native equivalent in Jira, verified fixture by fixture.
@@ -291,7 +314,11 @@ behaviour; the first run updates their descriptions, the second reports no chang
   rule (FR-010).
 - Making the supported construct set configurable per team or per project.
 - Rendering anything other than the description body (comments, summaries, custom
-  fields).
+  fields). "Description body" now spans all three tiers — specification, story,
+  and the sub-task of feature 012 (FR-017). **Summaries stay excluded on both
+  tiers**: a Jira summary is a plain-text field where no rich text is possible,
+  so a story title and a task title alike are sent verbatim. Stripping markup
+  from a summary is a separate concern, not this feature's.
 - **Any modification of Spec Kit source files.** This feature is strictly
   one-directional, file to ticket. Specifically excluded: reading formatting back
   from Jira into the spec; rewriting an author's Markdown into a construct the

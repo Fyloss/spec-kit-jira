@@ -104,6 +104,11 @@ def blocks_errors: ((.blocks // [])[]? | block_errors);
     then "task.local_id is required and must be 16 hex characters unless the marker state is absent" else empty end),
   (.stories[]? | select(has("tasks") and ((.tasks | type) == "array")) | .tasks[]? | if ((.title // "") | length) < 1 then "task.title is required" else empty end),
   (.stories[]? | select(has("tasks") and ((.tasks | type) == "array")) | .tasks[]? | if ((.description.blocks // []) | length) < 1 then "task.description.blocks must be non-empty" else empty end),
+  # 016, FR-019: a task description obeys the SAME inline model every other
+  # description position obeys. Without this rule the task tier was the one
+  # place a pre-016 raw-string paragraph could pass validation and render as
+  # literal punctuation, which is exactly what feature 012 shipped.
+  (.stories[]? | select(has("tasks") and ((.tasks | type) == "array")) | .tasks[]? | .description // {} | blocks_errors),
   (.stories[]? | select(has("tasks") and ((.tasks | type) == "array")) | .tasks[]? | if (.done | type) != "boolean" then "task.done must be a boolean" else empty end),
   ( ( [ .stories[]? | select(has("tasks") and ((.tasks | type) == "array")) | .tasks[]? | (.local_id // "") | select(length > 0) ] ) as $ids
     | if ($ids | length) != ($ids | unique | length) then "two tasks share a local_id" else empty end )

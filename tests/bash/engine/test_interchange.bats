@@ -159,20 +159,20 @@ setup() {
 }
 
 @test "task.local_id is required unless the marker state is absent" {
-  local task='{"local_id":"","title":"T","description":{"blocks":[{"type":"paragraph","text":"x"}]},"done":false,"marker":{"state":"assigned","id":"","lines":[]}}'
+  local task='{"local_id":"","title":"T","description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]},"done":false,"marker":{"state":"assigned","id":"","lines":[]}}'
   run bash -c "jq --argjson t '${task}' '.stories[0].tasks=[\$t]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
   [ "$status" -ne 0 ]
   [[ "$output" == *"task.local_id"* ]]
 }
 
 @test "task.local_id absent is fine when the marker state is absent" {
-  local task='{"local_id":"","title":"T","description":{"blocks":[{"type":"paragraph","text":"x"}]},"done":false,"marker":{"state":"absent","id":"","lines":[]}}'
+  local task='{"local_id":"","title":"T","description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]},"done":false,"marker":{"state":"absent","id":"","lines":[]}}'
   run bash -c "jq --argjson t '${task}' '.stories[0].tasks=[\$t]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
   [ "$status" -eq 0 ]
 }
 
 @test "task.title is required" {
-  local task='{"local_id":"1111111111111111","title":"","description":{"blocks":[{"type":"paragraph","text":"x"}]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
+  local task='{"local_id":"1111111111111111","title":"","description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
   run bash -c "jq --argjson t '${task}' '.stories[0].tasks=[\$t]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
   [ "$status" -ne 0 ]
   [[ "$output" == *"task.title"* ]]
@@ -186,15 +186,15 @@ setup() {
 }
 
 @test "task.done must be a boolean" {
-  local task='{"local_id":"1111111111111111","title":"T","description":{"blocks":[{"type":"paragraph","text":"x"}]},"done":"false","marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
+  local task='{"local_id":"1111111111111111","title":"T","description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]},"done":"false","marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
   run bash -c "jq --argjson t '${task}' '.stories[0].tasks=[\$t]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
   [ "$status" -ne 0 ]
   [[ "$output" == *"task.done"* ]]
 }
 
 @test "no two tasks in the document share a local_id, even across different stories" {
-  local t1='{"local_id":"1111111111111111","title":"T1","description":{"blocks":[{"type":"paragraph","text":"x"}]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
-  local t2='{"local_id":"1111111111111111","title":"T2","description":{"blocks":[{"type":"paragraph","text":"y"}]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[2]}}'
+  local t1='{"local_id":"1111111111111111","title":"T1","description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
+  local t2='{"local_id":"1111111111111111","title":"T2","description":{"blocks":[{"type":"paragraph","spans":[{"text":"y","marks":[]}]}]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[2]}}'
   run bash -c "jq --argjson t1 '${t1}' --argjson t2 '${t2}' '.stories[0].tasks=[\$t1] | .stories[1].tasks=[\$t2]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
   [ "$status" -ne 0 ]
   [[ "$output" == *"share a local_id"* ]]
@@ -204,8 +204,41 @@ setup() {
 # validates unchanged"); this one sets a populated tasks array, so it proves
 # the opposite: a well-formed task tier passes every rule (Copilot review).
 @test "a story with a valid tasks array validates" {
-  run bash -c "jq '.stories[0].tasks=[{\"local_id\":\"1111111111111111\",\"title\":\"T\",\"description\":{\"blocks\":[{\"type\":\"paragraph\",\"text\":\"x\"}]},\"done\":false,\"marker\":{\"state\":\"assigned\",\"id\":\"1111111111111111\",\"lines\":[1]}}]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  run bash -c "jq '.stories[0].tasks=[{\"local_id\":\"1111111111111111\",\"title\":\"T\",\"description\":{\"blocks\":[{\"type\":\"paragraph\",\"spans\":[{\"text\":\"x\",\"marks\":[]}]}]},\"done\":false,\"marker\":{\"state\":\"assigned\",\"id\":\"1111111111111111\",\"lines\":[1]}}]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
   [ "$status" -eq 0 ]
+}
+
+# --- 016, FR-019: the task tier obeys the inline model ------------------------
+# Feature 012 landed while 016 was in flight and built task descriptions in the
+# PRE-016 block shape (a paragraph carrying a raw `text` string). Nothing caught
+# it, because task descriptions were the one description position not run
+# through block_errors. These four rules close that hole permanently.
+
+@test "a task description paragraph in the old raw-string shape is rejected (FR-019)" {
+  local task='{"local_id":"1111111111111111","title":"T","description":{"blocks":[{"type":"paragraph","text":"raw **bold** string"}]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
+  run bash -c "jq --argjson t '${task}' '.stories[0].tasks=[\$t]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"block.spans is required"* ]]
+}
+
+@test "a task description with marked spans validates (FR-017)" {
+  local task='{"local_id":"1111111111111111","title":"T","description":{"blocks":[{"type":"paragraph","spans":[{"text":"engine/x.sh","marks":[{"kind":"monospace"}]}]}]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
+  run bash -c "jq --argjson t '${task}' '.stories[0].tasks=[\$t]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -eq 0 ]
+}
+
+@test "an invalid mark kind inside a task description is rejected (FR-019)" {
+  local task='{"local_id":"1111111111111111","title":"T","description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[{"kind":"underline"}]}]}]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
+  run bash -c "jq --argjson t '${task}' '.stories[0].tasks=[\$t]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"mark.kind is invalid"* ]]
+}
+
+@test "a non-http link target inside a task description is rejected (FR-006)" {
+  local task='{"local_id":"1111111111111111","title":"T","description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[{"kind":"link","href":"javascript:alert(1)"}]}]}]},"done":false,"marker":{"state":"assigned","id":"1111111111111111","lines":[1]}}'
+  run bash -c "jq --argjson t '${task}' '.stories[0].tasks=[\$t]' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"mark.href must be an absolute http(s) URL"* ]]
 }
 
 @test "interchange_build is byte-identical across ports (NFR-1)" {

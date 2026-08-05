@@ -1,0 +1,15 @@
+# Team config for the task-tier conformance fixture (012, T003) — a project
+# whose hierarchy declares all three roles, including the task role that
+# reconcile mirrors sub-tasks under (FR-001..FR-011).
+projects:
+  - key: TASKS
+    style: company_managed
+    hierarchy:
+      specification: Deliverable
+      story: Story
+      task: "Sub-task"
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing_default: TASKS

@@ -12,8 +12,8 @@ BeforeAll {
             schema_version = '1.0'
             spec_ref       = [ordered]@{ repo = 'acme/app'; spec_slug = '001-x'; folder = '/tmp/001-x' }
             routing        = [ordered]@{ project_key = $Project }
-            epic           = [ordered]@{ local_id = '3f2a91c04b7e6d18'; title = 'E'; description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; text = 'e' }) } }
-            stories        = @([ordered]@{ local_id = 's1'; title = 'Story One'; priority_logical = 'P2'; description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; text = 'd' }) } })
+            epic           = [ordered]@{ local_id = '3f2a91c04b7e6d18'; title = 'E'; description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = 'e'; marks = @() }) }) } }
+            stories        = @([ordered]@{ local_id = 's1'; title = 'Story One'; priority_logical = 'P2'; description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = 'd'; marks = @() }) }) } })
         }
         return ($doc | ConvertTo-Json -Compress -Depth 10)
     }

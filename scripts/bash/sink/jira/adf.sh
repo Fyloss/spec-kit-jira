@@ -180,9 +180,16 @@ adf_task_summary() {
 # then its identifier, phase, attribution, parallel-safety, files and
 # dependencies as a bullet list. Nothing about the story or the
 # specification is restated (FR-009).
+#
+# The body comes from `.description.blocks` through the SAME neutral-block
+# renderer the story tier uses, so a task's markup renders as marks rather than
+# surviving as punctuation (016, FR-017). The metadata bullets below are
+# composed by the bridge, not written by an author, and stay plain text
+# (FR-018) — `Files:` in particular carries paths the task parser already
+# extracted from inside their backticks.
 adf_render_task_description() {
-  local task="$1" title task_ref phase parallel files deps ordinal
-  title="$(jq -r '.title' <<< "${task}")"
+  local task="$1" blocks task_ref phase parallel files deps ordinal
+  blocks="$(jq -c '.description.blocks // []' <<< "${task}")"
   task_ref="$(jq -r '.task_ref' <<< "${task}")"
   phase="$(jq -r '.phase // ""' <<< "${task}")"
   parallel="$(jq -r '.parallel' <<< "${task}")"
@@ -212,11 +219,13 @@ adf_render_task_description() {
     meta="$(jq -c --arg v "Depends on: ${deps_csv}" '. + [$v]' <<< "${meta}")"
   fi
 
+  local body_nodes; body_nodes="$(_adf_blocks_to_nodes "${blocks}")"
+
   # kcov-excl-start — jq literal (string lines are not statements)
   local body
-  body="$(jq -cn --arg t "${title}" --argjson meta "${meta}" '
-    [ {type:"paragraph", content:[{type:"text", text:$t}]},
-      {type:"bulletList", content:[ $meta[] | {type:"listItem", content:[{type:"paragraph", content:[{type:"text", text:.}]}]} ]} ]')"
+  body="$(jq -cn --argjson body "${body_nodes}" --argjson meta "${meta}" '
+    $body
+    + [ {type:"bulletList", content:[ $meta[] | {type:"listItem", content:[{type:"paragraph", content:[{type:"text", text:.}]}]} ]} ]')"
   jq -cn --argjson c "${body}" '{type:"doc", version:1, content:$c}' | json_canonical
   # kcov-excl-stop
 }

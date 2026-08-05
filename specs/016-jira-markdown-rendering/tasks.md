@@ -210,6 +210,28 @@ quiet.
 
 ---
 
+## Phase 7: The feature 012 overlap (FR-017/FR-018/FR-019)
+
+Feature 012 (the `tasks.md` sub-task tier) merged to `main` while this branch was
+in flight. It added a **fourth** prose-bearing position — a task line's own text —
+and built its descriptions in the pre-016 block shape, so every backtick-quoted
+path in a `tasks.md` line reached the Jira reader as literal punctuation. Neither
+spec claimed the surface: 012 predates the rendering work, and 016's FRs said
+"spec text". These tasks close it.
+
+- [X] T072 [P] Write failing tests for the neutral reader: a task description block carries `spans`, a backtick path becomes a `monospace` span, bold/strikethrough/link marks arrive, an unbalanced delimiter degrades, CRLF matches LF, and `title` keeps its raw markup — `tests/bash/engine/test_tasks_parse_markdown.bats` and its Pester mirror `tests/powershell/engine/TasksParse.Markdown.Tests.ps1`
+- [X] T073 [P] Write failing tests for the sink: the sub-task body renders `code`/`strong`/`link` ADF marks, reads `.description.blocks` rather than `.title`, renders multiple blocks in order, and leaves the bridge-composed metadata bullets unmarked — `tests/bash/sink/test_adf_task_markdown.bats` and its Pester mirror in `tests/powershell/sink/Adf.Task.Tests.ps1`
+- [X] T074 [P] Write failing tests for FR-019 in `tests/bash/engine/test_interchange.bats` and `tests/powershell/engine/Interchange.Tests.ps1`: a task description paragraph in the old raw-string shape is refused, one with marked spans validates, an invalid mark kind is refused, and a non-http link target is refused
+- [X] T075 Tokenize the task's own text in `scripts/bash/engine/tasks_parse.sh` and `scripts/powershell/engine/TasksParse.psm1`, emitting `{type:"paragraph", spans:[…]}`; leave `title` verbatim for the summary
+- [X] T076 Render the sub-task body from `.description.blocks` through the shared block renderer in `scripts/bash/sink/jira/adf.sh` and `scripts/powershell/sink/jira/Adf.psm1`, keeping the metadata bullet list plain (FR-018)
+- [X] T077 Add the task-description block rules to `scripts/bash/engine/interchange.sh` and `scripts/powershell/engine/Interchange.psm1` so no tier can reintroduce the raw-string shape (FR-019)
+- [X] T078 [P] Migrate every remaining test fixture off the pre-016 `{type:"paragraph","text":…}` shape across both ports
+- [X] T079 [P] Add the conformance fixture `tests/conformance/fixtures/repo-with-task-markdown/` (a `tasks.md` exercising backtick paths, bold, italic, strikethrough, a link, an unbalanced delimiter, a backslash escape, a non-http target and non-ASCII text) plus the scenario `us1-task-markdown-rendering.json`, and bump the recorded corpus count to 87
+- [X] T080 [P] Update `$defs/task` in `specs/001-jira-reconcile-engine/contracts/neutral-interchange.schema.json` — it was still feature 001's never-implemented three-field shape, which 012's real task object would have failed
+- [X] T081 [P] Record the overlap in `specs/016-jira-markdown-rendering/data-model.md` §3, `docs/05-reconcile-flow.md`, and `CHANGELOG.md`
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -303,11 +325,17 @@ but are not needed to close the complaint.
 | 4 — US2 (P2) | 13 | T043–T055 |
 | 5 — US3 (P3) | 8 | T056–T063 |
 | 6 — Polish | 8 | T064–T071 |
-| **Total** | **71** | |
+| 7 — The 012 overlap | 10 | T072–T081 |
+| **Total** | **81** | |
 
-Test tasks: 30 of 71. That ratio is the constitution's TDD requirement meeting a
+Test tasks: 33 of 81. That ratio is the constitution's TDD requirement meeting a
 normative grammar — every numbered rule in the contract owes a failing test in
 both ports before it owes an implementation.
+
+Phase 7 was not planned: it exists because feature 012 merged to `main` mid-flight
+and created a prose-bearing position this feature's FRs had not been written to
+cover. Its three test tasks came first and failed for the right reason — 14 red
+across the two ports — before any of its implementation tasks were written.
 
 ---
 

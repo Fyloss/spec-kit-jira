@@ -397,12 +397,21 @@ function ConvertTo-JiraAdfTaskDescription {
       The sub-task's description: the task's own full (untruncated) text,
       then its identifier, phase, attribution, parallel-safety, files and
       dependencies as a bullet list. Mirror of adf_render_task_description.
+
+      The body comes from .description.blocks through the SAME neutral-block
+      renderer the story tier uses, so a task's markup renders as marks
+      rather than surviving as punctuation (016, FR-017). The metadata
+      bullets are composed by the bridge and stay plain text (FR-018).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $TaskJson)
     $task = $TaskJson | ConvertFrom-Json -Depth 100
 
-    $title = [string]$task.title
+    $blocks = @(if ($task.PSObject.Properties.Name -contains 'description' -and $null -ne $task.description -and
+            $task.description.PSObject.Properties.Name -contains 'blocks' -and $null -ne $task.description.blocks) {
+            $task.description.blocks
+        }
+        else { @() })
     $taskRef = [string]$task.task_ref
     $phase = if ($task.PSObject.Properties.Name -contains 'phase' -and $null -ne $task.phase) { [string]$task.phase } else { '' }
     $parallel = [bool]$task.parallel
@@ -429,7 +438,7 @@ function ConvertTo-JiraAdfTaskDescription {
     if ($deps.Count -gt 0) { $meta.Add("Depends on: $($deps -join ', ')") }
 
     $docContent = [System.Collections.Generic.List[object]]::new()
-    $docContent.Add((New-JiraAdfParagraph $title))
+    foreach ($n in (ConvertTo-JiraAdfBlockNode -Blocks $blocks)) { $docContent.Add($n) }
     $items = [System.Collections.Generic.List[object]]::new()
     foreach ($m in $meta) { $items.Add((New-JiraAdfListItem $m)) }
     $docContent.Add([ordered]@{ type = 'bulletList'; content = $items })

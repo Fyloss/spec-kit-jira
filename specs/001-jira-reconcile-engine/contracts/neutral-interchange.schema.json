@@ -112,13 +112,45 @@
     "task": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["local_id", "title", "relation"],
+      "required": ["local_id", "title", "description", "done", "marker"],
+      "description": "A mirrored tasks.md line (feature 012). The `relation`/`link_type_logical` pair below is feature 001's original, never-implemented shape; 012 mirrors every task as a sub-task, so both stay optional rather than being invented as required.",
       "properties": {
-        "local_id": { "type": "string", "minLength": 1 },
+        "local_id": {
+          "type": "string",
+          "description": "16 hex characters, or empty when the marker state is 'absent'."
+        },
+        "task_ref": {
+          "type": "string",
+          "description": "The task's own reference as written in tasks.md (T014, T014a)."
+        },
         "title": { "type": "string", "minLength": 1 },
+        "description": {
+          "$ref": "#/$defs/content_blocks",
+          "description": "The task's own text as marked spans. Feature 016 FR-017: a task line is author prose and obeys the same inline model every other description position obeys — a paragraph here carries `spans`, never a raw `text` string."
+        },
+        "attribution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "story_ordinal": { "type": ["integer", "null"] },
+            "source": { "enum": ["tag", "heading", "none"] }
+          }
+        },
+        "phase": { "type": "string" },
+        "parallel": { "type": "boolean" },
+        "files": { "type": "array", "items": { "type": "string" } },
+        "depends_on": { "type": "array", "items": { "type": "string" } },
+        "done": {
+          "type": "boolean",
+          "description": "The checkbox state in tasks.md; drives the completion transition (012 FR-033)."
+        },
+        "marker": {
+          "type": "object",
+          "description": "The durable task identifier spliced into tasks.md, in the shape engine/task_marker emits."
+        },
         "relation": {
           "enum": ["subtask", "linked_story"],
-          "description": "Task strategy chosen explicitly in config (FR-009)."
+          "description": "Task strategy chosen explicitly in config (001 FR-009). Not emitted by 012, which always mirrors as a sub-task."
         },
         "link_type_logical": {
           "type": "string",
