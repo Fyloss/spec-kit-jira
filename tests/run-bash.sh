@@ -160,6 +160,47 @@ if [[ "${TOTAL_FILES}" -eq 0 ]]; then
   exit 1
 fi
 
+# --- D5 (018, FR-009): LPT ordering from a committed timing profile ----------
+#
+# 149 uneven files on N workers leaves the makespan hostage to whichever
+# heavy file starts last (research.md §4.1) — longest-processing-time-first
+# ordering is the classic fix. The profile is a scheduling HINT ONLY: an
+# absent or unreadable one falls back to the discovered (alphabetical)
+# order rather than failing, and every discovered file still runs either
+# way — this can reorder FILES, never filter it.
+TIMINGS_PATH="${SPEC_KIT_JIRA_BATS_TIMINGS:-${ROOT}/tests/bash-suite-timings.txt}"
+declare -A LPT_DURATIONS=()
+if [[ -r "${TIMINGS_PATH}" ]]; then
+  while IFS=$'\t' read -r _dur _path || [[ -n "${_dur}" ]]; do
+    [[ -n "${_dur}" && -n "${_path}" ]] || continue
+    LPT_DURATIONS["${_path}"]="${_dur}"
+  done < "${TIMINGS_PATH}"
+fi
+
+if [[ "${#LPT_DURATIONS[@]}" -gt 0 ]]; then
+  _lpt_duration() {
+    local f="$1" rel
+    if [[ -v "LPT_DURATIONS[${f}]" ]]; then
+      printf '%s' "${LPT_DURATIONS[${f}]}"
+      return
+    fi
+    rel="${f#"${ROOT}/"}"
+    if [[ -v "LPT_DURATIONS[${rel}]" ]]; then
+      printf '%s' "${LPT_DURATIONS[${rel}]}"
+      return
+    fi
+    printf '0' # unprofiled (new since the profile was refreshed): unknown cost, sorts last
+  }
+  _lpt_lines=""
+  for _f in "${FILES[@]}"; do
+    _lpt_lines+="$(_lpt_duration "${_f}")"$'\t'"${_f}"$'\n'
+  done
+  mapfile -t FILES < <(printf '%s' "${_lpt_lines}" | sort -t $'\t' -k1,1 -rn | cut -f2-)
+  printf 'run-bash.sh: ordering: LPT from %s (%d file(s) profiled)\n' "${TIMINGS_PATH}" "${#LPT_DURATIONS[@]}"
+else
+  printf 'run-bash.sh: ordering: no timing profile at %s — discovered order\n' "${TIMINGS_PATH}"
+fi
+
 printf 'run-bash.sh: mode: %s (%s)\n' "${RUN_LABEL}" "$(bats --version 2> /dev/null || printf 'bats not found')"
 if [[ "${RUN_LABEL}" == "PARTIAL RUN" ]]; then
   printf 'run-bash.sh: selected %d file(s) (this is a PARTIAL RUN, not a full-suite verdict):\n' "${TOTAL_FILES}"
@@ -171,9 +212,18 @@ fi
 RESULTS_DIR="$(mktemp -d)"
 trap 'rm -rf "${RESULTS_DIR}"' EXIT
 
-JOBS="$(getconf _NPROCESSORS_ONLN 2> /dev/null || printf '1')"
-[[ "${JOBS}" =~ ^[0-9]+$ ]] || JOBS=1
-[[ "${JOBS}" -lt 1 ]] && JOBS=1
+# D5: workers are process-creation/IO-bound, not CPU-bound (research §4.1) —
+# `-P core-count` leaves a 4-vCPU runner idle a large fraction of the time.
+# SPEC_KIT_JIRA_BATS_JOBS is the probe's own knob (may exceed the core
+# count deliberately); unset, the default oversubscribes by 3x.
+JOBS="${SPEC_KIT_JIRA_BATS_JOBS:-}"
+if [[ ! "${JOBS}" =~ ^[0-9]+$ ]] || [[ "${JOBS}" -lt 1 ]]; then
+  JOBS="$(getconf _NPROCESSORS_ONLN 2> /dev/null || printf '1')"
+  [[ "${JOBS}" =~ ^[0-9]+$ ]] || JOBS=1
+  [[ "${JOBS}" -lt 1 ]] && JOBS=1
+  JOBS=$((JOBS * 3))
+fi
+printf 'run-bash.sh: jobs: %s\n' "${JOBS}"
 
 if command -v xargs > /dev/null 2>&1; then
   printf '%s\n' "${FILES[@]}" | xargs -P "${JOBS}" -I{} bash -c '

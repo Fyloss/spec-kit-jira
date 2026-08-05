@@ -492,6 +492,31 @@ here in case a future scenario ever does.
 
 Full local bash suite after all four: 154 files, 1451 tests, 0 failures.
 
+## T030/T031 — `run-bash.sh` oversubscription and LPT ordering (D5, FR-009, 2026-08-05)
+
+`SPEC_KIT_JIRA_BATS_JOBS` overrides the worker count on any host (default:
+core count × 3, since these workers are process-creation/IO-bound per
+research §4.1, not CPU-bound). `SPEC_KIT_JIRA_BATS_TIMINGS` points at a
+profile file (`<seconds>\t<path>` per line, default
+`tests/bash-suite-timings.txt`); when present, `FILES` is sorted
+longest-first before dispatch. A path is matched exactly first, then
+relative-to-`ROOT` — so a profile committed with repo-relative paths (what
+T032 will produce) and a test using absolute paths (this feature's own
+fixture-based tests) both resolve correctly. Unprofiled files (added since
+the profile was last refreshed) sort last, not excluded.
+
+**T032 not yet done**: no real profile file has been committed (it needs a
+CI run's per-file timing data — research §4.2's own local-timing caveat
+applies to building it, not just to citing it). Every real invocation of
+`run-bash.sh` today therefore takes the "no timing profile" branch and runs
+in discovered (alphabetical) order — the oversubscription (T031's other
+half) is active regardless, since it does not depend on the profile.
+
+Full local run via `tests/run-bash.sh` itself (dogfooding the change):
+`ordering: no timing profile ... — discovered order`, `jobs: 48` (this
+16-core host × 3), `files executed: 154, tests executed: 1455, files
+failed: 0`, `PASSED`.
+
 ### T015 — the escalated decision (answered by the user, 2026-08-05)
 
 Put to the user with W1's measured number attached (W4's, per above, was not

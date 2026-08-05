@@ -135,11 +135,11 @@ push to the last check run's conclusion.
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T030 [P] [US2] Write failing meta-test for the runner's scheduling in `tests/bash/ci/test_run_bash_runner.bats` (extend the existing file): the worker count may exceed the core count, files are ordered longest-first from the committed profile, an absent or stale profile falls back to the current order rather than failing, and the executed file set is unchanged in every case (D5, FR-010)
+- [X] T030 [P] [US2] Write failing meta-test for the runner's scheduling in `tests/bash/ci/test_run_bash_runner.bats` (extend the existing file): the worker count may exceed the core count, files are ordered longest-first from the committed profile, an absent or stale profile falls back to the current order rather than failing, and the executed file set is unchanged in every case (D5, FR-010)
 
 ### Implementation for User Story 2
 
-- [ ] T031 [US2] Implement worker oversubscription and longest-processing-time-first ordering in `tests/run-bash.sh`, reading the profile committed by T032, so T030 passes (D5, FR-009)
+- [X] T031 [US2] Implement worker oversubscription and longest-processing-time-first ordering in `tests/run-bash.sh`, reading the profile committed by T032, so T030 passes (D5, FR-009) — **profile path/mechanism implemented and tested; T032's actual CI-measured profile file not yet committed, so the runner currently falls back to discovered order on every real invocation** (baseline.md)
 - [ ] T031a [US2] Run `tests/run-bash.sh` twice on CI at the oversubscribed worker count and confirm an identical pass/fail set and an identical executed-file set across both runs, recording both in `specs/018-optimize-ci-wall-clock/baseline.md` — the bats suite's determinism check at the new degree, the counterpart of T050 for the corpus (FR-007, FR-008, Constitution XIII's parallel-execution clause)
 - [ ] T032 [US2] **Runs before T031** — it produces the file T031 reads, so it is not parallel with it. Commit the per-file timing profile produced by T012 to `tests/bash-suite-timings.txt` (or the path T031 reads), documenting that it is a scheduling hint only — never a filter, and never a source of verdicts
 - [ ] T033 [US2] Refresh the timing profile from the nightly in `.github/workflows/bash-suite-stability.yml`, so the ordering does not rot as the suite grows — **not parallel**: T042 edits the same workflow file (the 51→84 and 986→1427 growth is exactly what invalidated the previous budgets)
