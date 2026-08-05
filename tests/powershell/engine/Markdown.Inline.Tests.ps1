@@ -155,3 +155,23 @@ Describe 'ConvertTo-JiraMarkdownInlineSpans — D1-D3 emission invariants' {
         ConvertTo-JiraMarkdownInlineSpans -Text '' | Should -Be '[]'
     }
 }
+
+Describe 'ConvertTo-JiraMarkdownInlineSpans — T085 non-ASCII inside a formatted span (spec Edge Cases)' {
+    It 'accented characters, CJK and emoji inside a bold span survive byte-for-byte' {
+        $got = Get-Norm (ConvertTo-JiraMarkdownInlineSpans -Text '**café 日本語 🎉**')
+        $exp = Get-Norm '[{"text":"café 日本語 🎉","marks":[{"kind":"bold"}]}]'
+        $got | Should -Be $exp
+    }
+
+    It 'non-ASCII inside a code span survives byte-for-byte' {
+        $got = Get-Norm (ConvertTo-JiraMarkdownInlineSpans -Text '`café 日本語 🎉`')
+        $exp = Get-Norm '[{"text":"café 日本語 🎉","marks":[{"kind":"monospace"}]}]'
+        $got | Should -Be $exp
+    }
+
+    It 'non-ASCII inside a link label survives byte-for-byte' {
+        $got = Get-Norm (ConvertTo-JiraMarkdownInlineSpans -Text '[café 日本語 🎉](https://ex.invalid/s)')
+        $exp = Get-Norm '[{"text":"café 日本語 🎉","marks":[{"kind":"link","href":"https://ex.invalid/s"}]}]'
+        $got | Should -Be $exp
+    }
+}

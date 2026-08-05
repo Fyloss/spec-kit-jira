@@ -131,6 +131,54 @@ Describe 'Invoke-JiraReconcile — no machine-local state' {
     }
 }
 
+Describe 'Invoke-JiraReconcile — T061 [016] FR-000/FR-000a prose durability' {
+    BeforeEach {
+        $script:MarkdownFixture = Join-Path $Mock '../../conformance/fixtures/repo-with-markdown-prose'
+    }
+    AfterEach {
+        Remove-Item Env:\SPEC_KIT_JIRA_SPEC_SLUG -ErrorAction SilentlyContinue
+        $env:SPEC_KIT_JIRA_ID_SOURCE = '1111111111111111 2222222222222222 3333333333333333'
+        if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null }
+    }
+
+    It 'a real run leaves every byte of the spec file unchanged except the speckit-jira marker lines' {
+        $pristine = Join-Path $script:MarkdownFixture 'specs/001-markdown-prose/spec.md'
+        $work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse $script:MarkdownFixture $work
+        $spec = Join-Path $work 'specs/001-markdown-prose/spec.md'
+        $env:JIRA_CONFIG_DIR = Join-Path $work '.specify/jira'
+        $env:SPEC_KIT_JIRA_REPO = 'acme/app'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-markdown-prose'
+        $env:SPEC_KIT_JIRA_ID_SOURCE = 'aaaaaaaaaaaaaaaa 1111111111111111'
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+
+        $null = Invoke-Captured @('reconcile', $spec, '--json')
+
+        $pristineLines = Get-Content -LiteralPath $pristine | Where-Object { $_ -notmatch 'speckit-jira ' }
+        $specLines = Get-Content -LiteralPath $spec | Where-Object { $_ -notmatch 'speckit-jira ' }
+        (Compare-Object $pristineLines $specLines) | Should -BeNullOrEmpty
+        (Get-Content -Raw -LiteralPath $spec) | Should -Match 'speckit-jira '
+    }
+
+    It 'a --dry-run leaves the spec file byte-identical, including its marker lines (there are none to add)' {
+        $pristine = Join-Path $script:MarkdownFixture 'specs/001-markdown-prose/spec.md'
+        $work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse $script:MarkdownFixture $work
+        $spec = Join-Path $work 'specs/001-markdown-prose/spec.md'
+        $env:JIRA_CONFIG_DIR = Join-Path $work '.specify/jira'
+        $env:SPEC_KIT_JIRA_REPO = 'acme/app'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-markdown-prose'
+        $env:SPEC_KIT_JIRA_ID_SOURCE = 'aaaaaaaaaaaaaaaa 1111111111111111'
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+
+        $null = Invoke-Captured @('reconcile', $spec, '--dry-run', '--json')
+
+        (Get-Content -Raw -LiteralPath $spec) | Should -Be (Get-Content -Raw -LiteralPath $pristine)
+    }
+}
+
 Describe 'Invoke-JiraRecognitionRun — scoped to the routed project' {
     AfterEach { Remove-Item Env:\SPEC_KIT_JIRA_SPEC_SLUG -ErrorAction SilentlyContinue; if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
 

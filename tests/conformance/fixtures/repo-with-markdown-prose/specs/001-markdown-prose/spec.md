@@ -1,5 +1,14 @@
 # Feature Specification: Markdown Prose Showcase
 
+#### Structure
+
+1. first ordered step in the epic-level overview
+2. second ordered step, proving `ordered_list` survives at the epic tier too
+
+```text
+a fenced code block in the epic-level overview, rendered verbatim
+```
+
 We need every Markdown pattern the bridge renders to survive round-tripping
 through both ports identically.
 

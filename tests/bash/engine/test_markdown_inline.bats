@@ -132,6 +132,21 @@ tok() { markdown_tokenize_inline "$1" | jq -cS .; }
   [ "$(markdown_tokenize_inline '')" = "[]" ]
 }
 
+# --- T085 [016, Phase 8] — non-ASCII inside a formatted span (spec Edge Cases,
+# "Non-ASCII content") --------------------------------------------------------
+
+@test "T085 — accented characters, CJK and emoji inside a bold span survive byte-for-byte" {
+  [ "$(tok '**café 日本語 🎉**')" = "$(jq -cnS '[{text:"café 日本語 🎉",marks:[{kind:"bold"}]}]')" ]
+}
+
+@test "T085 — non-ASCII inside a code span survives byte-for-byte" {
+  [ "$(tok '`café 日本語 🎉`')" = "$(jq -cnS '[{text:"café 日本語 🎉",marks:[{kind:"monospace"}]}]')" ]
+}
+
+@test "T085 — non-ASCII inside a link label survives byte-for-byte" {
+  [ "$(tok '[café 日本語 🎉](https://ex.invalid/s)')" = "$(jq -cnS '[{text:"café 日本語 🎉",marks:[{href:"https://ex.invalid/s",kind:"link"}]}]')" ]
+}
+
 # --- Cross-port parity (NFR-1) ------------------------------------------------
 
 @test "the PowerShell port tokenizes byte-identically (NFR-1)" {

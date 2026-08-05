@@ -87,6 +87,16 @@ blocks() { markdown_parse_blocks "$1" | jq -cS .; }
   [ "$(jq -r '.[2].type' <<< "${out}")" = "bullet_list" ]
 }
 
+# --- T086 [016, Phase 8] — CRLF equals LF at the block layer (FR-015, spec
+# Edge Cases "Windows line endings") -------------------------------------------
+
+@test "T086 — a CRLF document yields the same blocks as the LF original" {
+  local lf crlf
+  lf="$(blocks "$(printf '## Overview\nSome intro prose.\n- item a\n- item b')")"
+  crlf="$(blocks "$(printf '## Overview\r\nSome intro prose.\r\n- item a\r\n- item b')")"
+  [ "${lf}" = "${crlf}" ]
+}
+
 # --- Cross-port parity (NFR-1) ------------------------------------------------
 
 @test "the PowerShell port segments byte-identically (NFR-1)" {

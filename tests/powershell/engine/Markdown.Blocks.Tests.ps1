@@ -102,3 +102,11 @@ Describe 'ConvertTo-JiraMarkdownBlocks — B9 selection cap worked example (data
         $out[2].type | Should -Be 'bullet_list'
     }
 }
+
+Describe 'ConvertTo-JiraMarkdownBlocks — T086 CRLF equals LF (FR-015, spec Edge Cases)' {
+    It 'a CRLF document yields the same blocks as the LF original' {
+        $lf = Get-Norm (ConvertTo-JiraMarkdownBlocks -Text "## Overview`nSome intro prose.`n- item a`n- item b")
+        $crlf = Get-Norm (ConvertTo-JiraMarkdownBlocks -Text "## Overview`r`nSome intro prose.`r`n- item a`r`n- item b")
+        $lf | Should -Be $crlf
+    }
+}
