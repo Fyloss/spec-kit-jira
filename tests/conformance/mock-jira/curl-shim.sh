@@ -400,31 +400,39 @@ if [[ "${fault_json}" != "null" ]]; then
   [[ -n "${retry_after}" ]] && RESP_HEADERS_EXTRA+=("Retry-After: ${retry_after}")
 else
   # ---- route resolution (mirrors mock-server.ps1 Resolve-Route) ---------------
-  style="$(_shim_get_style "${path}")"
-  meta_style="$(_shim_get_meta_style "$(_shim_get_issuetype_style "${path}" "${style}")")"
-  # 012, T006a: the same per-project override issue-type names use also
-  # picks the project statuses fixture, when a dedicated one exists — falling
-  # back to the base style otherwise, so every pre-existing override without
-  # its own statuses fixture keeps behaving exactly as before. See
-  # mock-server.ps1's mirror of this comment for why.
-  if [[ -f "${MOCK_FIXTURE_DIR}/statuses-${meta_style}.json" ]]; then
-    status_style="${meta_style}"
-  else
-    status_style="$(_shim_get_meta_style "${style}")"
-  fi
-
+  # style/meta_style/status_style are computed LAZILY, only inside the four
+  # branches that actually read them (D4, R10, FR-003): the other ~10 route
+  # branches need none of the three, and the previous unconditional form
+  # cost every request 2 jq calls it then discarded most of the time.
   if [[ "${path}" == "/__mock/health" ]]; then
     RESP_STATUS=200
     RESP_BODY='{"ok":true}'
   elif [[ "${path}" == "/rest/api/3/project/search" && "${method}" == "GET" ]]; then
     _shim_project_search_page
   elif [[ "${path}" =~ ^/rest/api/3/project/[^/]+/statuses$ ]]; then
+    style="$(_shim_get_style "${path}")"
+    meta_style="$(_shim_get_meta_style "$(_shim_get_issuetype_style "${path}" "${style}")")"
+    # 012, T006a: the same per-project override issue-type names use also
+    # picks the project statuses fixture, when a dedicated one exists — falling
+    # back to the base style otherwise, so every pre-existing override without
+    # its own statuses fixture keeps behaving exactly as before. See
+    # mock-server.ps1's mirror of this comment for why.
+    if [[ -f "${MOCK_FIXTURE_DIR}/statuses-${meta_style}.json" ]]; then
+      status_style="${meta_style}"
+    else
+      status_style="$(_shim_get_meta_style "${style}")"
+    fi
     _read_fixture "statuses-${status_style}"
   elif [[ "${path}" =~ ^/rest/api/3/project/[^/]+$ ]]; then
+    style="$(_shim_get_style "${path}")"
     _read_fixture "project-${style}"
   elif [[ "${path}" =~ ^/rest/api/3/issue/createmeta/[^/]+/issuetypes/[^/]+$ ]]; then
+    style="$(_shim_get_style "${path}")"
+    meta_style="$(_shim_get_meta_style "$(_shim_get_issuetype_style "${path}" "${style}")")"
     _read_fixture "$(_shim_get_createmeta_fields_name "${path}" "${meta_style}")"
   elif [[ "${path}" =~ ^/rest/api/3/issue/createmeta/[^/]+/issuetypes$ ]]; then
+    style="$(_shim_get_style "${path}")"
+    meta_style="$(_shim_get_meta_style "$(_shim_get_issuetype_style "${path}" "${style}")")"
     _read_fixture "createmeta-issuetypes-${meta_style}"
   elif [[ "${path}" == "/rest/api/3/priority" ]]; then
     _read_fixture 'priority'

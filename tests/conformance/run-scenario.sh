@@ -69,7 +69,16 @@ _HARNESS_T0="${EPOCHREALTIME}"
 # lines are read. It also covers the ARGV path for BOTH ports — pwsh-invoke.ps1
 # already defends its own argv file, but the Bash port receives argv directly
 # and had no such guard.
-jq_lines() { jq "$@" | sed $'s/\r$//'; }
+# D4/R10 (018): the sed pipe above is only needed on a host whose jq emits
+# CRLF — same detection output.sh's own wrapper uses. Piping through sed
+# UNCONDITIONALLY, as this used to, cost every jq_lines call a second
+# process on every host, including the ones (Linux, macOS, and now Windows
+# when T025's LF-emitting jq is active) where jq never emits a CR at all.
+if [[ "$(command jq -rn '"a\nb"' 2> /dev/null)" == *$'\r'* ]]; then
+  jq_lines() { jq "$@" | sed $'s/\r$//'; }
+else
+  jq_lines() { jq "$@"; }
+fi
 
 case "${PORT}" in
   bash)
@@ -264,12 +273,16 @@ cp "${MOCK_CALLLOG}" "${OUTDIR}/calls.log" 2> /dev/null || : > "${OUTDIR}/calls.
 mock_stop
 
 # --- Snapshot the post-run repository tree (written files) -------------------
+# D4/R10 (018): one `cp -R` of the whole tree, then prune .git, replaces a
+# per-file mkdir+cp loop that used to cost two process creations PER FILE —
+# research.md's own methodology scenario had 12 files in its fixture alone.
+# `cp -R` on a `.` source copies the directory's CONTENTS (both GNU and BSD
+# cp agree on this), so `.git` lands inside the copy exactly where the old
+# loop would have walked past it — removed here instead of never visited.
 rm -rf "${OUTDIR}/workdir"
 mkdir -p "${OUTDIR}/workdir"
-( cd "${WORKDIR}" && find . -path ./.git -prune -o -type f -print0 | while IFS= read -r -d '' f; do
-  mkdir -p "${OUTDIR}/workdir/$(dirname "${f}")"
-  cp "${f}" "${OUTDIR}/workdir/${f}"
-done )
+( cd "${WORKDIR}" && cp -R . "${OUTDIR}/workdir/" )
+rm -rf "${OUTDIR}/workdir/.git"
 
 _HARNESS_T1="${EPOCHREALTIME}"
 awk -v a="${_HARNESS_T0}" -v b="${_HARNESS_T1}" 'BEGIN { printf "%.3f", b - a }' > "${OUTDIR}/duration"

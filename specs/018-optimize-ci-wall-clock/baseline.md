@@ -455,6 +455,43 @@ triggers `ci.yml`, or `windows-conformance.yml` temporarily pointed at this
 same guarded step for one measurement run. Recorded here as the next open
 question, not silently assumed.
 
+## T019/T020/T022/T023 — test-owned spawn reduction (D4, 2026-08-05)
+
+Both landed test-first, both verified against the real 84-scenario corpus
+(`verdicts: 84/84`, exit 0) after implementation.
+
+**Curl shim** (`tests/conformance/mock-jira/curl-shim.sh`, T019/T022):
+`style`/`meta_style`/`status_style` were computed unconditionally for every
+request, even though only 4 of ~15 route branches read them. Made lazy —
+computed only inside the branches that use them. Verified with a counting
+`jq` wrapper: a route needing neither (e.g. `/priority`) now costs ≤ 1 jq
+call (was 3); a project-style route costs ≤ 2 (was 3); an issue GET costs
+≤ 3 (was 5).
+
+**Harness** (`tests/conformance/run-scenario.sh`, T020/T023): two changes.
+`jq_lines` piped every call through `sed` unconditionally; now conditional
+on the SAME CRLF-detection `output.sh`'s own wrapper uses — zero `sed`
+calls on any LF-emitting host (verified: 0 on this macOS host). The
+post-run workdir snapshot spawned one `mkdir` + one `cp` PER FILE; replaced
+with a single `cp -R` of the whole tree followed by `rm -rf .git` — the
+`cp -R` on `.` copies contents including hidden dirs (matching the old
+`find`'s traversal), and pruning `.git` after is equivalent to the old
+loop's `-prune` on it. Verified: the harness's total `cp` count is
+identical whether the fixture has 3 files or 12 (proving no per-file
+scaling), and file contents/paths land correctly either way.
+
+**A real behavioural question raised and resolved by testing, not assumed**:
+`cp -R` copies empty directories; the old per-file `find -type f` loop
+never created one (only directories containing a file got an `mkdir -p`).
+This is a genuine difference between the two mechanisms — checked against
+the real corpus rather than reasoned about, since Constitution VI's
+measure-don't-assume rule applies here too, even though this is a POSIX-
+only question. Result: **84/84 verdicts unchanged**, so no scenario's
+fixture or port-written tree currently depends on that distinction; flagged
+here in case a future scenario ever does.
+
+Full local bash suite after all four: 154 files, 1451 tests, 0 failures.
+
 ### T015 — the escalated decision (answered by the user, 2026-08-05)
 
 Put to the user with W1's measured number attached (W4's, per above, was not

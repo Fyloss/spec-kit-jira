@@ -126,3 +126,73 @@ teardown() {
   # holds the first instance's data on disk (isolation, not clobbering).
   [ "$(jq -r '.issues["COMP-1"].fields.summary' "${first_tmp}/state.json")" = "a-only-in-first" ]
 }
+
+# --- T019 [018, Phase 3/US1] — reduced-spawn shim (D4, R10, FR-003) ----------
+#
+# Measured (research.md §2.1): the shim spawns 27 `jq` processes per 8 HTTP
+# calls, largely because EVERY request unconditionally computes style/
+# meta_style/status_style even though most route branches never use them.
+# Written and observed to FAIL before the shim was changed (Constitution
+# XIII TDD) — a counting `jq` wrapper on PATH, ahead of the real one, proves
+# the reduction directly rather than by re-deriving research's total.
+
+# _install_jq_counter — prepends a counting jq wrapper to PATH. Delegates to
+# the REAL jq resolved BEFORE the wrapper's own directory is added, so the
+# wrapper never recurses into itself.
+_install_jq_counter() {
+  JQ_COUNT_DIR="$(mktemp -d)"
+  JQ_COUNT_FILE="${JQ_COUNT_DIR}/count"
+  : > "${JQ_COUNT_FILE}"
+  local real_jq
+  real_jq="$(command -v jq)"
+  cat > "${JQ_COUNT_DIR}/jq" << EOF
+#!/usr/bin/env bash
+printf 'x' >> "${JQ_COUNT_FILE}"
+exec "${real_jq}" "\$@"
+EOF
+  chmod +x "${JQ_COUNT_DIR}/jq"
+  PATH="${JQ_COUNT_DIR}:${PATH}"
+}
+
+_jq_call_count() {
+  wc -c < "${JQ_COUNT_FILE}" | tr -d '[:space:]'
+}
+
+@test "R10/D4: a route needing neither style nor meta_style costs at most 1 jq call" {
+  mock_start "${MOCK}/configs/default.json"
+  _install_jq_counter
+  run curl -s "${MOCK_BASE_URL}/rest/api/3/priority"
+  [ "$status" -eq 0 ]
+  [ "$(_jq_call_count)" -le 1 ]
+}
+
+@test "R10/D4: a project-style route costs at most 2 jq calls" {
+  mock_start "${MOCK}/configs/default.json"
+  _install_jq_counter
+  run curl -s "${MOCK_BASE_URL}/rest/api/3/project/COMP"
+  [ "$status" -eq 0 ]
+  [ "$(_jq_call_count)" -le 2 ]
+}
+
+@test "R10/D4: an issue GET costs at most 3 jq calls" {
+  mock_start "${MOCK}/configs/default.json"
+  curl -s -X POST "${MOCK_BASE_URL}/rest/api/3/issue" \
+    -d '{"fields":{"project":{"key":"COMP"},"summary":"x"}}' > /dev/null
+  _install_jq_counter
+  run curl -s "${MOCK_BASE_URL}/rest/api/3/issue/COMP-1"
+  [ "$status" -eq 0 ]
+  [ "$(_jq_call_count)" -le 3 ]
+}
+
+@test "R10/D4: responses and call order are unchanged by the spawn reduction" {
+  mock_start "${MOCK}/configs/default.json"
+  run curl -s "${MOCK_BASE_URL}/rest/api/3/project/COMP"
+  [ "$(jq -r .style <<< "$output")" = "classic" ]
+  curl -s "${MOCK_BASE_URL}/rest/api/3/priority" > /dev/null
+  curl -s "${MOCK_BASE_URL}/rest/api/3/field" > /dev/null
+  run mock_calls
+  [ "${#lines[@]}" -eq 3 ]
+  [ "${lines[0]}" = "GET /rest/api/3/project/COMP" ]
+  [ "${lines[1]}" = "GET /rest/api/3/priority" ]
+  [ "${lines[2]}" = "GET /rest/api/3/field" ]
+}

@@ -130,3 +130,80 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"entry point not found"* ]]
 }
+
+# --- T020 [018, Phase 3/US1] — reduced-spawn harness (D4, R10, FR-003) -------
+#
+# Measured (research.md §2.1): jq_lines pipes EVERY jq call through sed
+# unconditionally, and the post-run workdir snapshot spawns one mkdir + one
+# cp PER FILE. Written and observed to FAIL before the harness was changed
+# (Constitution XIII TDD) — counting wrappers on PATH prove the reduction
+# directly, per the same technique as test_mock_shim_contract.bats's T019.
+
+_install_counter() {
+  local exe="$1" var="$2"
+  eval "${var}_DIR=\"\$(mktemp -d)\""
+  eval "local dir=\"\${${var}_DIR}\""
+  eval "${var}_FILE=\"\${dir}/count\""
+  eval "local file=\"\${${var}_FILE}\""
+  : > "${file}"
+  local real
+  real="$(command -v "${exe}")"
+  cat > "${dir}/${exe}" << EOF
+#!/usr/bin/env bash
+printf 'x' >> "${file}"
+exec "${real}" "\$@"
+EOF
+  chmod +x "${dir}/${exe}"
+  PATH="${dir}:${PATH}"
+}
+
+_counter_count() {
+  local var="$1" file
+  eval "file=\"\${${var}_FILE}\""
+  wc -c < "${file}" | tr -d '[:space:]'
+}
+
+@test "R10/D4: jq_lines never spawns sed on a host whose jq already emits LF" {
+  _install_counter sed SED
+  bash "${HARNESS}" "${SCENARIO}" bash "${OUT}"
+  # This test host's own jq (whatever CI or the developer's machine ships)
+  # is the one under test here, matching jq_lines' own detection — on any
+  # LF-emitting jq the count must be exactly 0, never "close to 0".
+  if [[ "$(command jq -rn '"a\nb"' 2> /dev/null)" != *$'\r'* ]]; then
+    [ "$(_counter_count SED)" -eq 0 ]
+  else
+    skip "this host's jq emits CRLF — sed is genuinely needed here"
+  fi
+}
+
+@test "R10/D4: the workdir snapshot's cp count does not scale with file count" {
+  # The harness makes a small, FIXED number of its own cp calls regardless of
+  # this test (mock_start's own one-time setup, stdout/stderr/exit, calls.log)
+  # — the property this test isolates is that the WORKDIR SNAPSHOT itself
+  # contributes ONE cp call (a single `cp -R`) no matter how many files are
+  # in it, not one mkdir+cp PER FILE as before. Proved by writing 3 files vs
+  # 12 and confirming the harness's total cp count is IDENTICAL both times.
+  _write_n_file_stub() {
+    local n="$1" i
+    { printf '#!/usr/bin/env bash\nset -euo pipefail\n'
+      for ((i = 1; i <= n; i++)); do printf 'printf "file %%s\\n" %d > "f%d.txt"\n' "${i}" "${i}"; done
+    } > "${STUB}"
+    chmod +x "${STUB}"
+  }
+
+  _write_n_file_stub 3
+  _install_counter cp CP3
+  bash "${HARNESS}" "${SCENARIO}" bash "${OUT}"
+  count_3="$(_counter_count CP3)"
+
+  rm -rf "${OUT}"
+  _write_n_file_stub 12
+  _install_counter cp CP12
+  bash "${HARNESS}" "${SCENARIO}" bash "${OUT}"
+  count_12="$(_counter_count CP12)"
+
+  [ "${count_3}" -eq "${count_12}" ]
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    [ "$(cat "${OUT}/workdir/f${i}.txt")" = "file ${i}" ]
+  done
+}
