@@ -32,12 +32,19 @@ CTX_NEW_PARENT='{
   "tickets":{}
 }'
 
+# 018, T026: the parent now carries the boundary too, so a fixture meant to
+# be "unchanged" must already sit inside it — otherwise the first touch of a
+# legacy (marker-less) description also migrates, which is its own,
+# separately-tested behaviour (contract §3).
 CTX_BOUND_UNCHANGED_PARENT='{
   "base_url":"https://mock",
   "story_type_id":"10002",
   "parent_type_id":"10101",
   "parent_key":"COMP-412",
-  "parent_current":{"summary":"The Epic Title","description":{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"Overview."}]}]}},
+  "parent_current":{"summary":"The Epic Title","description":{"type":"doc","version":1,"content":[
+    {"type":"paragraph","content":[{"type":"text","text":"Synced from spec-kit — do not edit below this line","marks":[{"type":"strong"}]}]},
+    {"type":"paragraph","content":[{"type":"text","text":"Overview."}]}
+  ]}},
   "priority_ids":{"P1":"1","P2":"2","P3":"3"},
   "tickets":{}
 }'
@@ -180,6 +187,7 @@ DOC_WITH_CHANGED_PLAN='{
   # plan section — a second run must plan parent: null, not a PUT.
   local current
   current='{"summary":"The Epic Title","description":{"type":"doc","version":1,"content":[
+    {"type":"paragraph","content":[{"type":"text","text":"Synced from spec-kit — do not edit below this line","marks":[{"type":"strong"}]}]},
     {"type":"paragraph","content":[{"type":"text","text":"Overview."}]},
     {"type":"heading","attrs":{"level":3},"content":[{"type":"text","text":"Implementation Plan"}]},
     {"type":"paragraph","content":[{"type":"text","text":"The original plan summary."}]}
@@ -193,6 +201,7 @@ DOC_WITH_CHANGED_PLAN='{
 @test "T090: a changed plan replaces the section in place — the old summary is gone, not appended alongside the new one" {
   local current
   current='{"summary":"The Epic Title","description":{"type":"doc","version":1,"content":[
+    {"type":"paragraph","content":[{"type":"text","text":"Synced from spec-kit — do not edit below this line","marks":[{"type":"strong"}]}]},
     {"type":"paragraph","content":[{"type":"text","text":"Overview."}]},
     {"type":"heading","attrs":{"level":3},"content":[{"type":"text","text":"Implementation Plan"}]},
     {"type":"paragraph","content":[{"type":"text","text":"The original plan summary."}]}

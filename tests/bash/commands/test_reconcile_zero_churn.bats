@@ -62,7 +62,10 @@ teardown() {
   [ "$(jq -r '.counts.updated' <<< "$output")" -eq 1 ]
   [ "$(jq -r '.counts.skipped' <<< "$output")" -eq 2 ]
   [ "$(grep -c '^PUT /rest/api/3/issue/COMP-3$' "${MOCK_CALLLOG}")" -eq 1 ]
-  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 1 ]
+  # 018, US3: the story's whole-object update always carries `summary`, so the
+  # write is followed by exactly one identity-property PUT recording it.
+  [ "$(grep -c '^PUT /rest/api/3/issue/COMP-3/properties/spec-kit-jira$' "${MOCK_CALLLOG}")" -eq 1 ]
+  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 2 ]
 }
 
 @test "spec.md is byte-identical after an unchanged re-run" {

@@ -155,6 +155,23 @@ not a sign anything else changed: any labels an operator already applied by
 hand are kept, and a specification with nothing else to reconcile will still
 report updates for this reason alone, once.
 
+### Upgrading to the boundary-preservation release
+
+Every managed description now carries a boundary marker separating the
+mirror's own content from anything else in the ticket. A ticket this mirror
+wrote before this release has no marker yet; its first `reconcile` after
+upgrading gains one, counted in `counts.updated` exactly like an ordinary
+content change — no manual step, no command of its own. Where the mirror can
+identify its own former output unambiguously, the transition duplicates
+nothing: that content becomes the managed region and everything above it is
+kept as human text. Where it cannot — most often because the description was
+also hand-edited before this release — the whole existing description is
+kept above a fresh managed region instead of guessing, the mirror's own prior
+output may then appear twice, and the run's `warnings` names the ticket so a
+human can trim the duplicate by hand. Nothing is ever discarded either way. A
+second reconcile after the transition reports zero writes, the same
+zero-churn guarantee as any other settled ticket.
+
 ## Verifying the install
 
 - Inspect `.specify/extensions.yml` straight after installing: seven events, one

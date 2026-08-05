@@ -519,6 +519,21 @@ try {
                 $faultPath = "/$($Matches[1])"
             }
             $fault = Get-Fault -Path $faultPath
+            # ifFieldPresent (018, T069, FR-011): mirrors curl-shim.sh — a
+            # fault only fires while the request body's `.fields` still
+            # carries the named key, so a retry with that field stripped
+            # succeeds.
+            if ($fault -and $fault.ContainsKey('ifFieldPresent')) {
+                $ifField = [string]$fault.ifFieldPresent
+                $hasField = $false
+                try {
+                    $parsedBody = $body | ConvertFrom-Json -AsHashtable
+                    if ($parsedBody -and $parsedBody.ContainsKey('fields') -and $parsedBody.fields.ContainsKey($ifField)) {
+                        $hasField = $true
+                    }
+                } catch {}
+                if (-not $hasField) { $fault = $null }
+            }
             if ($fault) {
                 if ($fault.ContainsKey('network') -and $fault.network) {
                     # Simulate a dropped connection: close without responding.

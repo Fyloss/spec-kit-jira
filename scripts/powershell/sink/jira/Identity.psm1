@@ -25,15 +25,20 @@ function Get-JiraIdentityMarker {
       omitted when absent. `Role` — 'parent' | 'story' (Phase 5, US2,
       data-model.md §4) — is omitted when the caller does not supply one,
       the marker shape every installation carries before this feature.
+      `Summary` (018, T043; contracts/summary-record.md §1/§2) is the
+      LAST-WRITTEN summary record — the exact string a payload carried — and
+      is omitted, never written as an empty string, when the caller does not
+      supply one.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] [string] $SpecRefJson, [Parameter(Mandatory)] [string] $Origin, [string] $Story = '', [string] $Role = '')
+    param([Parameter(Mandatory)] [string] $SpecRefJson, [Parameter(Mandatory)] [string] $Origin, [string] $Story = '', [string] $Role = '', [string] $Summary = '')
     $s = $SpecRefJson | ConvertFrom-Json -Depth 100
     $repo = if ($s.PSObject.Properties.Name -contains 'repo' -and $null -ne $s.repo) { [string]$s.repo } else { '' }
     $slug = if ($s.PSObject.Properties.Name -contains 'spec_slug' -and $null -ne $s.spec_slug) { [string]$s.spec_slug } else { '' }
     $marker = [ordered]@{ origin = $Origin; repo = $repo; spec_slug = $slug }
     if (-not [string]::IsNullOrEmpty($Role)) { $marker['role'] = $Role }
     if (-not [string]::IsNullOrEmpty($Story)) { $marker['story'] = $Story }
+    if (-not [string]::IsNullOrEmpty($Summary)) { $marker['summary'] = $Summary }
     return (ConvertTo-JiraJsonValue $marker)
 }
 
@@ -93,13 +98,13 @@ function Set-JiraIdentity {
       identity_write. Returns the transport exit code.
     #>
     [CmdletBinding(SupportsShouldProcess)]
-    param([Parameter(Mandatory)] [string] $IssueKey, [Parameter(Mandatory)] [string] $SpecRefJson, [Parameter(Mandatory)] [string] $Origin, [string] $Story = '', [string] $Role = '')
+    param([Parameter(Mandatory)] [string] $IssueKey, [Parameter(Mandatory)] [string] $SpecRefJson, [Parameter(Mandatory)] [string] $Origin, [string] $Story = '', [string] $Role = '', [string] $Summary = '')
     if ([string]::IsNullOrEmpty($env:SPEC_KIT_JIRA_BASE_URL)) {
         [Console]::Error.WriteLine('identity: SPEC_KIT_JIRA_BASE_URL is not set')
         return [int](Get-JiraExitCode 'fail_closed')
     }
     if (-not $PSCmdlet.ShouldProcess($IssueKey, 'write identity property')) { return 0 }
-    $marker = Get-JiraIdentityMarker -SpecRefJson $SpecRefJson -Origin $Origin -Story $Story -Role $Role
+    $marker = Get-JiraIdentityMarker -SpecRefJson $SpecRefJson -Origin $Origin -Story $Story -Role $Role -Summary $Summary
     $r = Invoke-JiraRequest -Method PUT -Url (Get-JiraIdentityUrl $IssueKey) -Body $marker
     return [int]$r.ExitCode
 }

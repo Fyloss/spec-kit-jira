@@ -104,6 +104,31 @@ The dropped-as-no-op count surfaces as `skipped` in the run summary. Identity
 never keys on a mutable field — a title, a summary, or any operator-editable
 display name — only on a server-side entity property and the on-disk marker.
 
+## Ownership — what the mirror writes, and what it never touches (018)
+
+A description is not one field the mirror owns outright; it is two regions
+separated by a single boundary marker. Everything below the marker — the
+story body, the acceptance panel, the Design section, and a `plan.md` section
+when one exists — is the mirror's own content, rewritten in full on every
+update. Everything above it is never the mirror's to change: a human's prose
+pasted directly into the tracker is preserved byte-for-byte, forever, on
+every reconcile that follows.
+
+The same rule protects a summary. The mirror keeps its own record of the
+title it last sent, in the identity property — never in the summary field
+itself, which is operator-editable and therefore never a place identity can
+live (Constitution II). A summary that no longer matches that record is a
+human's rename, not drift to correct: it is left alone by default and
+reported, and it is only overwritten when an operator explicitly asks for it
+with `--on-drift=proceed`.
+
+A ticket a previous release wrote — no marker yet — is not an exception to
+either rule. It gains the boundary on its next ordinary write, and the same
+loss guarantee applies to the transition itself: nothing the mirror cannot
+positively identify as its own former output is ever discarded, even when
+that means the mirror's own prior output ends up preserved twice, above a
+fresh boundary, with a warning naming the ticket.
+
 ## Drift — never silently overwriting Jira-side progress
 
 Drift classification is pure engine code: zero Jira reads, zero writes. It
@@ -169,6 +194,18 @@ control with false positives ends up disabled**. So low-confidence shapes only
 warn, and the allowlist exemption is evaluated **per match** — the payload is
 never rewritten, so a broad or overlapping allowlist entry can only neutralise
 the exact text it covers and can never disable detection of unrelated tokens.
+
+**The scan is narrowed to what the mirror composes (018, research R4).** A
+description's preserved human prefix is real content read back from Jira and
+written to that same ticket — Jira → Jira, never repository → Jira — so it
+cannot leak a coordinate the destination does not already hold. Scanning it
+anyway is a false-positive generator by construction: a human linking one
+Jira ticket from another, an entirely ordinary thing to do, would otherwise
+block every future run until the link is deleted by hand. The guard's own
+directional concern (Constitution IV: no tracked-repository coordinate may
+leak outward) is unaffected — every field the mirror composes is still
+scanned exactly as before, and only the verbatim preserved prefix is exempt,
+and only because it is verbatim.
 
 ## Exit codes — monotonically escalating
 

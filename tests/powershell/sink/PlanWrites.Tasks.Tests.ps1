@@ -4,6 +4,10 @@
 # planning nothing extra (FR-010); contract §4.
 # Mirror of tests/bash/sink/test_plan_writes_tasks.bats. Cross-port parity
 # is proven there via pwsh.
+#
+# 018, T027: Get-JiraPlanTaskWriteSet now returns {actions, warnings} rather
+# than a bare array (the boundary's own malformed/migrated-warned warnings
+# need a channel) — every test below reads $result.actions.
 
 BeforeAll {
     $SinkDir = Join-Path $PSScriptRoot '../../../scripts/powershell/sink/jira'
@@ -39,11 +43,20 @@ BeforeAll {
     }'
 
     $script:CtxCreate = '{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
+
+    # 018, T027: a fixture meant to isolate a NON-migration churn (a pure
+    # content change, or a pure label back-fill) must seed ticket_current's
+    # description already inside the boundary — otherwise the first touch of
+    # a legacy (marker-less) description also migrates, which is its own,
+    # separately-tested behaviour.
+    function script:AlreadyMigratedTaskDesc {
+        (ConvertTo-JiraManagedTaskAdfDocument -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100).doc
+    }
 }
 
 Describe 'Get-JiraPlanTaskWriteSet' {
     It 'one POST per attributed task, carrying local_id, parent_local_id, role and the parent placeholder' {
-        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100).actions
         @($result).Count | Should -Be 1
         $result[0].method | Should -Be 'POST'
         $result[0].url | Should -Be 'https://mock/rest/api/3/issue'
@@ -55,17 +68,17 @@ Describe 'Get-JiraPlanTaskWriteSet' {
     }
 
     It 'a story with no task plans nothing extra (FR-010)' {
-        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocNoTasks -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $script:DocNoTasks -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100).actions
         @($result).Count | Should -Be 0
     }
 
     It 'never a POST under the specification-level issue — the URL is always the collection endpoint' {
-        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100).actions
         $result[0].url | Should -Not -BeLike '*/issue/e1*'
     }
 
     It "the summary is the task's title (untruncated when short)" {
-        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100).actions
         $result[0].body.fields.summary | Should -Be 'Implement the parser'
     }
 
@@ -76,21 +89,21 @@ Describe 'Get-JiraPlanTaskWriteSet' {
         $doc = $script:DocOneTask | ConvertFrom-Json -Depth 100
         $doc.stories[0].tasks = @($task)
         $docJson = $doc | ConvertTo-Json -Depth 100 -Compress
-        $result = Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100).actions
         $result[0].body.fields.summary.Length | Should -Be 255
         $descJson = $result[0].body.fields.description | ConvertTo-Json -Depth 100 -Compress
         $descJson | Should -BeLike "*$long*"
     }
 
     It 'an already-bound task with unchanged content plans nothing (zero churn)' {
-        $desc = ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100
+        $desc = AlreadyMigratedTaskDesc
         $ctx = [ordered]@{
             base_url = 'https://mock'
             task_type_id = '10099'
             tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
             ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = $desc } }
         } | ConvertTo-Json -Depth 100 -Compress
-        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $ctx | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $ctx | ConvertFrom-Json -Depth 100).actions
         @($result).Count | Should -Be 0
     }
 
@@ -101,7 +114,7 @@ Describe 'Get-JiraPlanTaskWriteSet' {
         $doc.stories[0].tasks = @($task)
         $docJson = $doc | ConvertTo-Json -Depth 100 -Compress
 
-        $desc = ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100
+        $desc = AlreadyMigratedTaskDesc
         $ctx = [ordered]@{
             base_url = 'https://mock'
             task_type_id = '10099'
@@ -109,7 +122,7 @@ Describe 'Get-JiraPlanTaskWriteSet' {
             ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = $desc } }
         } | ConvertTo-Json -Depth 100 -Compress
 
-        $result = Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $ctx | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $ctx | ConvertFrom-Json -Depth 100).actions
         @($result).Count | Should -Be 1
         $result[0].method | Should -Be 'PUT'
         $result[0].url | Should -Be 'https://mock/rest/api/3/issue/COMP-9'
@@ -129,7 +142,7 @@ Describe 'Get-JiraPlanTaskWriteSet' {
         $doc.stories[0].tasks = @($task)
         $docJson = $doc | ConvertTo-Json -Depth 100 -Compress
 
-        $desc = ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100
+        $desc = AlreadyMigratedTaskDesc
         $ctx = [ordered]@{
             base_url = 'https://mock'
             task_type_id = '10099'
@@ -137,32 +150,41 @@ Describe 'Get-JiraPlanTaskWriteSet' {
             ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = $desc } }
         } | ConvertTo-Json -Depth 100 -Compress
 
-        $result = Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $ctx | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $ctx | ConvertFrom-Json -Depth 100).actions
         @($result).Count | Should -Be 1
         $result[0].method | Should -Be 'PUT'
         ($result[0].body.fields.PSObject.Properties.Name -contains 'description') | Should -Be $true
         ($result[0].body.fields.PSObject.Properties.Name -contains 'summary') | Should -Be $false
     }
 
-    It 'an already-bound task whose content diverges on the Jira side carries a named warning identifying the ticket and the field (FR-020)' {
+    It 'an already-bound task whose summary drifted on the Jira side carries a named warning identifying the ticket and the field (018, T049; contract summary-record.md §4)' {
+        # Predates 018: summary used to be named by the GENERIC per-field
+        # warning (FR-020) on any divergence, unconditionally. It is now
+        # carved out of that mechanism exactly like description and labels
+        # — an ordinary, un-drifted retitle (no recorded value yet) is
+        # silent (FR-018), and a genuine drift (a recorded value that
+        # disagrees with what Jira holds) is named through the summary
+        # record's OWN warning channel instead.
         $task = $script:Task1 | ConvertFrom-Json -Depth 100
         $task.title = 'Implement the parser, reworded'
         $doc = $script:DocOneTask | ConvertFrom-Json -Depth 100
         $doc.stories[0].tasks = @($task)
         $docJson = $doc | ConvertTo-Json -Depth 100 -Compress
 
-        $desc = ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100
+        $desc = AlreadyMigratedTaskDesc
         $ctx = [ordered]@{
             base_url = 'https://mock'
             task_type_id = '10099'
             tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
-            ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = $desc } }
+            ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = "A human's rename"; description = $desc } }
+            ticket_last_summaries = [ordered]@{ '1111111111111111' = 'Implement the parser' }
         } | ConvertTo-Json -Depth 100 -Compress
 
         $result = Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $ctx | ConvertFrom-Json -Depth 100
-        $result[0].warning | Should -Not -BeNullOrEmpty
-        $result[0].warning | Should -BeLike '*COMP-9*'
-        $result[0].warning | Should -BeLike '*summary*'
+        ($result.actions[0].PSObject.Properties.Name -contains 'warning') | Should -BeFalse
+        ($result.actions[0].body.fields.PSObject.Properties.Name -contains 'summary') | Should -BeFalse
+        ($result.warnings -join ' ') | Should -BeLike '*COMP-9*'
+        ($result.warnings -join ' ') | Should -BeLike '*summary*'
     }
 
     It 'a creation with no project or issue type refuses (zero writes)' {
@@ -184,7 +206,7 @@ Describe 'Get-JiraPlanTaskWriteSet' {
         $doc.stories = @($doc.stories) + $story2
         $docJson = $doc | ConvertTo-Json -Depth 100 -Compress
 
-        $result = Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100).actions
         @($result).Count | Should -Be 2
         $result[0].parent_local_id | Should -Be 's1'
         $result[1].parent_local_id | Should -Be 's2'
@@ -195,24 +217,24 @@ Describe 'Get-JiraPlanTaskWriteSet' {
     # -----------------------------------------------------------------
 
     It '017 [US2] a created sub-task carries the provenance label passed by the caller' {
-        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $script:CtxCreate -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $script:CtxCreate -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100).actions
         @($result[0].body.fields.labels) | Should -Be @('speckit-001-x')
     }
 
     It '017 [US2] no label argument leaves the created sub-task payload without a labels key at all' {
-        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $script:CtxCreate | ConvertFrom-Json -Depth 100).actions
         $result[0].body.fields.PSObject.Properties.Name | Should -Not -Contain 'labels'
     }
 
     It '017 [US2] a bound sub-task missing its label is back-filled by a PUT carrying labels alone' {
-        $desc = ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100
+        $desc = AlreadyMigratedTaskDesc
         $ctx = [ordered]@{
             base_url = 'https://mock'
             task_type_id = '10099'
             tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
             ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = $desc; labels = @() } }
         } | ConvertTo-Json -Depth 100 -Compress
-        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $ctx -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $ctx -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100).actions
         @($result).Count | Should -Be 1
         $result[0].method | Should -Be 'PUT'
         @($result[0].body.fields.PSObject.Properties.Name) | Should -Be @('labels')
@@ -222,31 +244,31 @@ Describe 'Get-JiraPlanTaskWriteSet' {
     }
 
     It '017 [US2] the label is merged with labels already on the sub-task, never replacing them' {
-        $desc = ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100
+        $desc = AlreadyMigratedTaskDesc
         $ctx = [ordered]@{
             base_url = 'https://mock'
             task_type_id = '10099'
             tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
             ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = $desc; labels = @('ops', 'zeta') } }
         } | ConvertTo-Json -Depth 100 -Compress
-        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $ctx -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $ctx -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100).actions
         @($result[0].body.fields.labels) | Should -Be @('ops', 'speckit-001-x', 'zeta')
     }
 
     It '017 [US2] a sub-task that already carries its label plans nothing (zero churn)' {
-        $desc = ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100
+        $desc = AlreadyMigratedTaskDesc
         $ctx = [ordered]@{
             base_url = 'https://mock'
             task_type_id = '10099'
             tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
             ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = $desc; labels = @('speckit-001-x') } }
         } | ConvertTo-Json -Depth 100 -Compress
-        $result = Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $ctx -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $ctx -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100).actions
         @($result).Count | Should -Be 0
     }
 
     It '017 [US2] real content drift still names its divergent field, and labels are never named' {
-        $desc = ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100
+        $desc = AlreadyMigratedTaskDesc
         $task = $script:Task1 | ConvertFrom-Json -Depth 100
         $task.title = 'Implement the parser, reworded'
         $doc = $script:DocOneTask | ConvertFrom-Json -Depth 100
@@ -258,9 +280,21 @@ Describe 'Get-JiraPlanTaskWriteSet' {
             tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
             ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = $desc; labels = @() } }
         } | ConvertTo-Json -Depth 100 -Compress
-        $result = Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $ctx -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100
-        $result[0].warning | Should -Be 'COMP-9 diverges from the specification on "summary, description"; only the differing field(s) will be written'
+        $fullResult = Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $ctx -TaskLabel 'speckit-001-x' | ConvertFrom-Json -Depth 100
+        $result = $fullResult.actions
+        # 018, T027: description's OWN divergence is reported through the
+        # boundary's warnings, not this per-field one. 018, T049: summary's
+        # own divergence is reported through the summary record's own
+        # mechanism (here, silently — no record exists yet, FR-018) —
+        # neither is named by the generic per-field warning, and no OTHER
+        # field diverges (labels are never named either), so this action
+        # carries no generic warning at all.
+        ($result[0].PSObject.Properties.Name -contains 'warning') | Should -Be $false
+        $result[0].body.fields.summary | Should -Be 'Implement the parser, reworded'
+        ($result[0].body.fields.PSObject.Properties.Name -contains 'description') | Should -Be $true
         @($result[0].body.fields.labels) | Should -Be @('speckit-001-x')
+        $warningsMember = $fullResult.PSObject.Properties['warnings']
+        if ($null -ne $warningsMember) { @($warningsMember.Value).Count | Should -Be 0 }
     }
 
 }

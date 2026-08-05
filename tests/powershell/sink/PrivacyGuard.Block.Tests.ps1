@@ -14,6 +14,7 @@ BeforeAll {
     Import-Module (Join-Path $Sink 'PlanApply.psm1') -Force
     Import-Module (Join-Path $Mock 'Mock.psm1') -Force
     Import-Module (Join-Path $Sink 'PrivacyGuard.psm1') -Force
+    Import-Module (Join-Path $Sink 'Adf.psm1') -Force
     $env:JIRA_EMAIL = 'user@example.com'
     $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
     $env:JIRA_NO_SLEEP = '1'
@@ -118,6 +119,44 @@ Describe 'T058 [Phase 5, US2] — the parent payload passes the SAME pre-write g
         $result = Invoke-JiraApplyWriteSetWithRecognition -PlanJson $plan -SpecRefJson $specRef -SpecFile $specFile
         $result.ExitCode | Should -Be 9
         @($result.Created).Count | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $M).Count | Should -Be 0
+    }
+}
+
+Describe '018, T017 — the narrowed scan scope (contract §5, FR-024a)' {
+    BeforeEach {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $M.BaseUrl
+    }
+    AfterEach { Stop-JiraMock -Mock $M }
+
+    It 'a *.atlassian.net host present only in the preserved human prefix does not block the run' {
+        $marker = Get-JiraManagedMarker
+        $desc = @{
+            type    = 'doc'; version = 1
+            content = @(
+                @{ type = 'paragraph'; content = @(@{ type = 'text'; text = 'see mirror of https://acme-corp.atlassian.net/browse/X' }) },
+                @{ type = 'paragraph'; content = @(@{ type = 'text'; text = $marker; marks = @(@{ type = 'strong' }) }) },
+                @{ type = 'paragraph'; content = @(@{ type = 'text'; text = 'managed body, composed by the mirror' }) }
+            )
+        } | ConvertTo-Json -Depth 100 -Compress
+        $actions = '[{"method":"PUT","url":"' + $M.BaseUrl + '/rest/api/3/issue/PROJ-1","body":{"fields":{"description":' + $desc + '}}}]'
+        Invoke-JiraApplyWriteSet -ActionsJson $actions | Should -Be 0
+        (Get-JiraMockCallLog -Mock $M) -join "`n" | Should -Match 'PUT /rest/api/3/issue/PROJ-1'
+    }
+
+    It 'the same host in a node the mirror composes still blocks with zero writes' {
+        $marker = Get-JiraManagedMarker
+        $desc = @{
+            type    = 'doc'; version = 1
+            content = @(
+                @{ type = 'paragraph'; content = @(@{ type = 'text'; text = 'an ordinary human note' }) },
+                @{ type = 'paragraph'; content = @(@{ type = 'text'; text = $marker; marks = @(@{ type = 'strong' }) }) },
+                @{ type = 'paragraph'; content = @(@{ type = 'text'; text = 'leak acme-corp.atlassian.net' }) }
+            )
+        } | ConvertTo-Json -Depth 100 -Compress
+        $actions = '[{"method":"PUT","url":"' + $M.BaseUrl + '/rest/api/3/issue/PROJ-1","body":{"fields":{"description":' + $desc + '}}}]'
+        Invoke-JiraApplyWriteSet -ActionsJson $actions | Should -Be 9
         @(Get-JiraMockCallLog -Mock $M).Count | Should -Be 0
     }
 }

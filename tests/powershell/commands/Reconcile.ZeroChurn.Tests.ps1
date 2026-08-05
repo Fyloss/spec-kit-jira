@@ -74,7 +74,10 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
         $r.counts.updated | Should -Be 1
         $r.counts.skipped | Should -Be 2
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-3' }).Count | Should -Be 1
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 1
+        # 018, US3: the story's whole-object update always carries `summary`, so the
+        # write is followed by exactly one identity-property PUT recording it.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-3/properties/spec-kit-jira' }).Count | Should -Be 1
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 2
     }
 
     It 'spec.md is byte-identical after an unchanged re-run' {

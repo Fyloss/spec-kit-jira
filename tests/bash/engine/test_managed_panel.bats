@@ -58,6 +58,34 @@ HUMAN_DESC='[
   [ "$(jq '.prefix | length' <<< "$output")" -eq 0 ]
 }
 
+# --- marker_count (018, T004, data-model.md §2, contract §1) ---------------
+
+@test "marker_count is 0 when no node carries the marker" {
+  local plain='[{"type":"paragraph","content":[{"type":"text","text":"only human text"}]}]'
+  run bash -c "source '${ENGINE}/managed_section.sh'; printf '%s' '${plain}' | managed_section_panel_split '${MARKER}'"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.marker_count' <<< "$output")" -eq 0 ]
+}
+
+@test "marker_count is 1 for a well-formed boundary" {
+  run bash -c "source '${ENGINE}/managed_section.sh'; printf '%s' '${HUMAN_DESC}' | managed_section_panel_split '${MARKER}'"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.marker_count' <<< "$output")" -eq 1 ]
+}
+
+@test "marker_count is 2 for a malformed, duplicated boundary" {
+  local two_markers='[
+    {"type":"paragraph","content":[{"type":"text","text":"Human note."}]},
+    {"type":"paragraph","content":[{"type":"text","text":"Synced from spec-kit — do not edit below this line","marks":[{"type":"strong"}]}]},
+    {"type":"paragraph","content":[{"type":"text","text":"managed body one"}]},
+    {"type":"paragraph","content":[{"type":"text","text":"Synced from spec-kit — do not edit below this line","marks":[{"type":"strong"}]}]},
+    {"type":"paragraph","content":[{"type":"text","text":"managed body two"}]}
+  ]'
+  run bash -c "source '${ENGINE}/managed_section.sh'; printf '%s' '${two_markers}' | managed_section_panel_split '${MARKER}'"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.marker_count' <<< "$output")" -eq 2 ]
+}
+
 @test "the split is byte-identical across ports (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   printf '%s' "${HUMAN_DESC}" > "${WORK}/desc.json"

@@ -43,7 +43,7 @@ Describe 'ConvertTo-JiraAdfDocument' {
     }
 }
 
-Describe 'ConvertTo-JiraManagedAdfDocument (US7)' {
+Describe 'ConvertTo-JiraManagedAdfDocument (018, T013, contract §3 — origin-independent)' {
     BeforeAll {
         $m = Get-JiraManagedMarker
         $script:ExistingHuman = @"
@@ -55,24 +55,67 @@ Describe 'ConvertTo-JiraManagedAdfDocument (US7)' {
 "@
     }
 
-    It 'renders the whole description as the managed section for a bridge-created ticket (FR-040)' {
-        $out = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -Origin 'bridge-created' -ExistingJson '{}'
-        $out | Should -Not -BeLike '*do not edit below this line*'
-        ($out | ConvertFrom-Json).type | Should -Be 'doc'
+    It 'row 5 — a creation with no existing description carries no prefix, no warning (FR-020)' {
+        $raw = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content
+        $r = $raw | ConvertFrom-Json
+        $r.status | Should -Be 'ok'
+        $raw | Should -BeLike '*do not edit below this line*'
+        $raw | Should -BeLike '*The need statement.*'
+        $r.doc.content[0].content[0].text | Should -BeLike '*do not edit below this line*'
     }
 
-    It 'preserves the human prefix verbatim above a delimited managed panel (FR-038)' {
-        $out = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -Origin 'human' -ExistingJson $script:ExistingHuman
-        $d = $out | ConvertFrom-Json
-        $d.content[0].content[0].text | Should -Be 'A note the PO wrote.'
-        $out | Should -BeLike '*do not edit below this line*'
-        $out | Should -Not -BeLike '*OLD MANAGED BODY*'
-        $out | Should -BeLike '*The need statement.*'
+    It 'row 2 — a well-formed boundary preserves the human prefix verbatim above a fresh managed panel (FR-007)' {
+        $raw = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -ExistingJson $script:ExistingHuman
+        $r = $raw | ConvertFrom-Json
+        $r.status | Should -Be 'ok'
+        $r.doc.content[0].content[0].text | Should -Be 'A note the PO wrote.'
+        $raw | Should -BeLike '*do not edit below this line*'
+        $raw | Should -Not -BeLike '*OLD MANAGED BODY*'
+        $raw | Should -BeLike '*The need statement.*'
+    }
+
+    It 'row 1 — more than one delimiter is malformed: no doc, status malformed (FR-012)' {
+        $malformed = @"
+{"type":"doc","version":1,"content":[
+  {"type":"paragraph","content":[{"type":"text","text":"Human note."}]},
+  {"type":"paragraph","content":[{"type":"text","text":"$m","marks":[{"type":"strong"}]}]},
+  {"type":"paragraph","content":[{"type":"text","text":"body one"}]},
+  {"type":"paragraph","content":[{"type":"text","text":"$m","marks":[{"type":"strong"}]}]},
+  {"type":"paragraph","content":[{"type":"text","text":"body two"}]}
+]}
+"@
+        $r = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -ExistingJson $malformed | ConvertFrom-Json
+        $r.status | Should -Be 'malformed'
+        $r.PSObject.Properties.Name | Should -Not -Contain 'doc'
+    }
+
+    It 'row 3 — clean migration: existing ends with the freshly rendered managed nodes, no duplication (FR-020a)' {
+        $managed = (ConvertTo-JiraAdfDocument -ContentJson $script:Content | ConvertFrom-Json).content
+        $preRelease = (@{ type = 'doc'; version = 1; content = $managed } | ConvertTo-Json -Depth 100 -Compress)
+        $raw = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -ExistingJson $preRelease
+        $r = $raw | ConvertFrom-Json
+        $r.status | Should -Be 'ok'
+        $needTexts = @($r.doc.content | Where-Object { $_.content -and $_.content[0].text -eq 'The need statement.' })
+        $needTexts.Count | Should -Be 1
+        $raw | Should -BeLike '*do not edit below this line*'
+    }
+
+    It 'row 4 — ambiguous migration preserves everything and warns by status (FR-020b)' {
+        $unrelated = '{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"unrelated prior content"}]}]}'
+        $raw = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -ExistingJson $unrelated
+        $r = $raw | ConvertFrom-Json
+        $r.status | Should -Be 'migrated-warned'
+        $raw | Should -BeLike '*unrelated prior content*'
+        $raw | Should -BeLike '*do not edit below this line*'
+        $raw | Should -BeLike '*The need statement.*'
     }
 
     It 'reproduces the description byte-for-byte when the managed content is unchanged (idempotent)' {
-        $once = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -Origin 'human' -ExistingJson $script:ExistingHuman
-        $twice = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -Origin 'human' -ExistingJson $once
-        [System.String]::Equals($once, $twice, [System.StringComparison]::Ordinal) | Should -BeTrue
+        $once = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -ExistingJson $script:ExistingHuman | ConvertFrom-Json
+        $onceDocJson = $once.doc | ConvertTo-Json -Depth 100 -Compress
+        $twice = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -ExistingJson $onceDocJson | ConvertFrom-Json
+        $twice.status | Should -Be 'ok'
+        $twiceDocJson = $twice.doc | ConvertTo-Json -Depth 100 -Compress
+        [System.String]::Equals($onceDocJson, $twiceDocJson, [System.StringComparison]::Ordinal) | Should -BeTrue
     }
 }

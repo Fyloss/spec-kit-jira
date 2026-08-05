@@ -44,12 +44,23 @@ setup() {
   [[ "$(jq -c '.' <<< "${desc}")" == *"New managed body."* ]]
 }
 
-@test "a bridge-created update (no origin) keeps the US3 whole-description behaviour" {
+@test "018, T020 — a bridge-created update preserves the human prefix and renders a delimited managed region below it" {
+  # This is the reproduction of the reported defect: a bridge-created ticket
+  # (no ticket_origins entry at all) must NOT overwrite a human's prose any
+  # more than a human-origin ticket does — the boundary is now universal.
   local ctx
-  ctx="$(jq -cn '{base_url:"https://mock", parent_type_id:"10101", parent_local_id:"3f2a91c04b7e6d18", tickets:{s1:"PROJ-1"}}')"
+  ctx="$(jq -cn --argjson ex "${EXISTING}" '{
+    base_url:"https://mock", parent_type_id:"10101", parent_local_id:"3f2a91c04b7e6d18",
+    tickets:{s1:"PROJ-1"}, ticket_descriptions:{s1:$ex}
+  }')"
   run plan_writes "${DOC}" "${ctx}"
   [ "$status" -eq 0 ]
-  [[ "$(jq -c '.stories' <<< "$output")" != *"do not edit below this line"* ]]
+  local desc
+  desc="$(jq -c '.stories[0].body.fields.description' <<< "$output")"
+  [ "$(jq -r '.content[0].content[0].text' <<< "${desc}")" = "PO handwritten note." ]
+  [[ "$(jq -c '.' <<< "${desc}")" == *"do not edit below this line"* ]]
+  [[ "$(jq -c '.' <<< "${desc}")" != *"stale managed body"* ]]
+  [[ "$(jq -c '.' <<< "${desc}")" == *"New managed body."* ]]
 }
 
 @test "an edit to the human prose above the panel is not churn (FR-039)" {

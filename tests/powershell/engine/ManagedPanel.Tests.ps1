@@ -44,3 +44,30 @@ Describe 'Managed-panel split' {
         @($r.prefix).Count | Should -Be 0
     }
 }
+
+Describe 'marker_count (018, T005, data-model.md §2, contract §1)' {
+    It 'is 0 when no node carries the marker' {
+        $plain = '[{"type":"paragraph","content":[{"type":"text","text":"only human text"}]}]'
+        $r = Split-JiraManagedSectionPanel -Marker $Marker -ContentJson $plain | ConvertFrom-Json
+        $r.marker_count | Should -Be 0
+    }
+
+    It 'is 1 for a well-formed boundary' {
+        $r = Split-JiraManagedSectionPanel -Marker $Marker -ContentJson $HumanDesc | ConvertFrom-Json
+        $r.marker_count | Should -Be 1
+    }
+
+    It 'is 2 for a malformed, duplicated boundary' {
+        $twoMarkers = @'
+[
+  {"type":"paragraph","content":[{"type":"text","text":"Human note."}]},
+  {"type":"paragraph","content":[{"type":"text","text":"Synced from spec-kit — do not edit below this line","marks":[{"type":"strong"}]}]},
+  {"type":"paragraph","content":[{"type":"text","text":"managed body one"}]},
+  {"type":"paragraph","content":[{"type":"text","text":"Synced from spec-kit — do not edit below this line","marks":[{"type":"strong"}]}]},
+  {"type":"paragraph","content":[{"type":"text","text":"managed body two"}]}
+]
+'@
+        $r = Split-JiraManagedSectionPanel -Marker $Marker -ContentJson $twoMarkers | ConvertFrom-Json
+        $r.marker_count | Should -Be 2
+    }
+}

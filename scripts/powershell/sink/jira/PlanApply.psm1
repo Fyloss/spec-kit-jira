@@ -78,6 +78,45 @@ function Get-JiraPlanApplyLabelDecision {
     return [ordered]@{ Label = $Provenance; Warning = '' }
 }
 
+function Get-JiraApplyManagedField {
+    <#
+    .SYNOPSIS
+      018, T027, contract §3 rows 1/4 (FR-012/FR-020a/FR-020b). Mirror of
+      _plan_apply_managed_field. Given ConvertTo-JiraManagedAdfDocument's or
+      ConvertTo-JiraManagedTaskAdfDocument's {status, doc} and a label
+      identifying the ticket for a warning (the ticket's key on an UPDATE;
+      empty on a CREATE, which never warns since a creation has no existing
+      content to be ambiguous about), decide the description FIELD to send
+      and any warning to surface. Returns canonical {doc, warning}: doc is
+      $null when the boundary is malformed — the caller MUST omit the
+      description key entirely rather than send null, so every other field
+      of that ticket still reconciles (FR-012); warning is '' when none
+      applies.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $RenderJson,
+        [Parameter()] [string] $Label = ''
+    )
+    $render = $RenderJson | ConvertFrom-Json -Depth 100
+    $status = [string]$render.status
+    $doc = $null
+    $warning = ''
+    switch ($status) {
+        'malformed' {
+            $warning = "$Label carries more than one boundary marker in its description; nothing was written to it. A human must remove the duplicate."
+        }
+        'migrated-warned' {
+            $doc = $render.doc
+            $warning = "$Label's previous mirrored content could not be identified and is preserved above the boundary; it may now appear twice."
+        }
+        default {
+            $doc = $render.doc
+        }
+    }
+    return (ConvertTo-JiraJsonValue ([ordered]@{ doc = $doc; warning = $warning }))
+}
+
 function Get-JiraPlanProp {
     # Safe property read: an EMPTY PSCustomObject's `.PSObject.Properties.Name`
     # throws under StrictMode, so index the member collection instead.
@@ -345,7 +384,6 @@ function Get-JiraPlanWriteSet {
 
         # The story object already carries description / acceptance_criteria / design.
         $storyJson = ConvertTo-JiraJsonValue $story
-        $adf = ConvertTo-JiraAdfDocument -ContentJson $storyJson | ConvertFrom-Json -Depth 100
 
         if ($ticket -eq '') {
             # FR-024 assembly guard: refuse an incomplete creation BEFORE it is
@@ -356,9 +394,10 @@ function Get-JiraPlanWriteSet {
             }
             # CREATE: the shared mandatory base (research R3, FR-025) + the
             # optional attributes + the parent-key placeholder (T072/T073),
-            # resolved once the parent's create response is read. A
-            # bridge-created ticket owns its whole description (no delimiter,
-            # FR-040).
+            # resolved once the parent's create response is read. Every
+            # ticket the mirror creates now carries the boundary from its
+            # first byte (018, T027, FR-006/FR-010) — a creation never warns.
+            $adf = (ConvertTo-JiraManagedAdfDocument -ContentJson $storyJson | ConvertFrom-Json -Depth 100).doc
             $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $title -IssueTypeId $storyType -FieldDefaultsByTypeJson $fieldDefaultsJson -Provenance $storyLabel | ConvertFrom-Json
             $fields = [ordered]@{}
             foreach ($p in $baseFields.PSObject.Properties) { $fields[$p.Name] = $p.Value }
@@ -367,22 +406,49 @@ function Get-JiraPlanWriteSet {
             if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
             $estValue = Get-JiraPlanProp $story 'estimation'
             if ($estId -ne '' -and $null -ne $estValue) { $fields[$estId] = $estValue }
-            $actions.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue"; body = [ordered]@{ fields = $fields }; local_id = $sid; role = 'story' })
+            # 018, T049, contracts/summary-record.md §2: a creation's payload
+            # always carries a summary, so it always establishes the record.
+            $identityStamp = [ordered]@{ origin = 'bridge'; story = $sid; role = 'story'; summary = $title }
+            $actions.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue"; body = [ordered]@{ fields = $fields }; local_id = $sid; role = 'story'; identity_stamp = $identityStamp })
         }
         else {
             # UPDATE: content + priority; no project or issuetype is required
-            # (an update targets an existing item by key). On a human-origin
-            # ticket the description is spliced into the managed panel so the
-            # human prose above survives (FR-038).
-            $fields = [ordered]@{ summary = $title; description = $adf }
-            $origins = Get-JiraPlanProp $ctx 'ticket_origins'
-            $origin = [string](Get-JiraPlanProp $origins $sid)
-            if ($origin -ne '' -and $origin -ne 'bridge-created') {
-                $descs = Get-JiraPlanProp $ctx 'ticket_descriptions'
-                $existing = Get-JiraPlanProp $descs $sid
-                $existingJson = if ($null -eq $existing) { '{}' } else { ConvertTo-JiraJsonValue $existing }
-                $adf = ConvertTo-JiraManagedAdfDocument -ContentJson $storyJson -Origin $origin -ExistingJson $existingJson | ConvertFrom-Json -Depth 100
-                $fields['description'] = $adf
+            # (an update targets an existing item by key). The managed-panel
+            # path is now UNCONDITIONAL (018, T027): every recognised story's
+            # description is spliced through the origin-independent
+            # resolution, so human prose above the boundary survives (FR-007)
+            # regardless of origin.
+            $descs = Get-JiraPlanProp $ctx 'ticket_descriptions'
+            $existing = Get-JiraPlanProp $descs $sid
+            $existingJson = if ($null -eq $existing) { '{}' } else { ConvertTo-JiraJsonValue $existing }
+            $renderJson = ConvertTo-JiraManagedAdfDocument -ContentJson $storyJson -ExistingJson $existingJson
+            $fieldResult = Get-JiraApplyManagedField -RenderJson $renderJson -Label $ticket | ConvertFrom-Json -Depth 100
+            if ([string]$fieldResult.warning -ne '') { $planWarnings.Add([string]$fieldResult.warning) }
+
+            # Summary drift (018, T049, contracts/summary-record.md §4):
+            # decided before `$fields` is built, so an omission never
+            # reaches the payload.
+            $ticketSummaries = Get-JiraPlanProp $ctx 'ticket_summaries'
+            $currentSummary = [string](Get-JiraPlanProp $ticketSummaries $sid)
+            $ticketLastSummaries = Get-JiraPlanProp $ctx 'ticket_last_summaries'
+            $recordedSummary = [string](Get-JiraPlanProp $ticketLastSummaries $sid)
+            $onDriftMode = [string](Get-JiraPlanProp $ctx 'on_drift')
+            if ($onDriftMode -eq '') { $onDriftMode = 'abort' }
+            $summaryDecision = Get-JiraPlanSummaryDriftStatus -CurrentSummary $currentSummary -RecordedSummary $recordedSummary -DesiredSummary $title -OnDrift $onDriftMode
+            $finalSummary = $summaryDecision.summary
+            $identityStamp = $null
+            if ([string]::IsNullOrEmpty($finalSummary)) {
+                $planWarnings.Add("reconcile: ticket $ticket diverges from the specification on `"summary`" — a human appears to have renamed it since the last write; nothing was sent. Pass --on-drift=proceed to restore the specification's title.")
+            }
+
+            $fields = [ordered]@{}
+            if ($null -ne $fieldResult.doc) { $fields['description'] = $fieldResult.doc }
+            if (-not [string]::IsNullOrEmpty($finalSummary)) {
+                $fields['summary'] = $finalSummary
+                $ticketOrigins = Get-JiraPlanProp $ctx 'ticket_origins'
+                $storyOrigin = [string](Get-JiraPlanProp $ticketOrigins $sid)
+                if ([string]::IsNullOrEmpty($storyOrigin)) { $storyOrigin = 'bridge' }
+                $identityStamp = [ordered]@{ origin = $storyOrigin; story = $sid; role = 'story'; summary = $finalSummary }
             }
             if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
 
@@ -426,7 +492,9 @@ function Get-JiraPlanWriteSet {
                 }
             }
 
-            $actions.Add([ordered]@{ method = 'PUT'; url = "$base/rest/api/3/issue/$ticket"; body = [ordered]@{ fields = $fields }; role = 'story' })
+            $storyAction = [ordered]@{ method = 'PUT'; url = "$base/rest/api/3/issue/$ticket"; body = [ordered]@{ fields = $fields }; role = 'story' }
+            if ($null -ne $identityStamp) { $storyAction['identity_stamp'] = $identityStamp }
+            $actions.Add($storyAction)
         }
     }
 
@@ -443,11 +511,12 @@ function Get-JiraPlanWriteSet {
     }
 
     # The task type's own label decision (017 FR-009, extended to 012's task
-    # tier) — resolved here beside the story's and the parent's, so all three
-    # degradation warnings leave through this function's single `warnings`
-    # channel. The resolved token travels back as `task_label` because
-    # Get-JiraPlanTaskWriteSet returns a bare action array and has no
-    # warnings channel of its own. Absent when no `task` role resolved.
+    # tier) — resolved here beside the story's and the parent's, so this ONE
+    # warning travels through this function's `warnings` channel. The
+    # resolved token travels back as `task_label`; Get-JiraPlanTaskWriteSet's
+    # OWN warnings (018, T027 — the boundary's malformed/migrated-warned
+    # cases) travel through its own `warnings` key instead, since they are
+    # per-ticket rather than per-run. Absent when no `task` role resolved.
     $taskTypeForLabel = [string](Get-JiraPlanProp $ctx 'task_type_id')
     $taskLabel = ''
     if ($provenanceLabel -ne '' -and $taskTypeForLabel -ne '') {
@@ -457,7 +526,9 @@ function Get-JiraPlanWriteSet {
         if ($taskDecision.Warning -ne '') { $planWarnings.Add($taskDecision.Warning) }
     }
 
-    $parent = Get-JiraPlanWriteSetParent -DocObject $doc -CtxObject $ctx -Base $base -ParentLabel $parentLabel
+    $parentResult = Get-JiraPlanWriteSetParent -DocObject $doc -CtxObject $ctx -Base $base -ParentLabel $parentLabel | ConvertFrom-Json -Depth 100
+    $parent = $parentResult.action
+    foreach ($w in @($parentResult.warnings)) { $planWarnings.Add([string]$w) }
     $result = [ordered]@{ parent = $parent; stories = $actions }
     if ($taskLabel -ne '') { $result['task_label'] = $taskLabel }
     if ($planWarnings.Count -gt 0) { $result['warnings'] = $planWarnings }
@@ -481,37 +552,64 @@ function Get-JiraPlanWriteSetParent {
     $epicLocalId = [string](Get-JiraPlanProp $epic 'local_id')
     $epicJson = ConvertTo-JiraJsonValue $epic
 
-    $epicAdf = ConvertTo-JiraAdfDocument -ContentJson $epicJson | ConvertFrom-Json -Depth 100
-
     $parentKey = [string](Get-JiraPlanProp $ctx 'parent_key')
+    $warnings = [System.Collections.Generic.List[string]]::new()
 
     if ($parentKey -eq '') {
         # CREATE: no parent recognised yet. 011, research R2: same
         # field_defaults map the story branch reads, scoped to the parent
-        # type by the shared builder itself.
+        # type by the shared builder itself. Every ticket the mirror creates
+        # now carries the boundary from its first byte (018, T027,
+        # FR-006/FR-010) — a creation never warns.
+        $epicAdf = (ConvertTo-JiraManagedAdfDocument -ContentJson $epicJson | ConvertFrom-Json -Depth 100).doc
         $fieldDefaultsProp = Get-JiraPlanProp $ctx 'field_defaults'
         $fieldDefaultsJson = if ($null -eq $fieldDefaultsProp) { '' } else { ConvertTo-JiraJsonValue $fieldDefaultsProp }
         $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $epicTitle -IssueTypeId $parentType -FieldDefaultsByTypeJson $fieldDefaultsJson -Provenance $ParentLabel | ConvertFrom-Json
         $fields = [ordered]@{}
         foreach ($p in $baseFields.PSObject.Properties) { $fields[$p.Name] = $p.Value }
         $fields['description'] = $epicAdf
-        return [ordered]@{ method = 'POST'; url = "$Base/rest/api/3/issue"; body = [ordered]@{ fields = $fields }; local_id = $epicLocalId; role = 'parent' }
+        # 018, T049, contracts/summary-record.md §2: a creation's payload
+        # always carries a summary, so it always establishes the record.
+        $identityStamp = [ordered]@{ origin = 'bridge'; role = 'parent'; summary = $epicTitle }
+        $action = [ordered]@{ method = 'POST'; url = "$Base/rest/api/3/issue"; body = [ordered]@{ fields = $fields }; local_id = $epicLocalId; role = 'parent'; identity_stamp = $identityStamp }
+        return (ConvertTo-JiraJsonValue ([ordered]@{ action = $action; warnings = $warnings }))
     }
 
-    # A recognised parent: compare its bridge-owned content before planning a
-    # write (T076) — a human-origin parent's description is rendered through
-    # the SAME managed-panel splice a human-origin story uses (FR-039's
-    # rule, extended to the parent), so its prose above the panel survives,
-    # and is then compared on its managed section alone.
+    # A recognised parent: the managed-panel path is now UNCONDITIONAL (018,
+    # T027) — every recognised parent's description is spliced through the
+    # origin-independent resolution (contract §3), so human prose above the
+    # boundary survives (FR-007) on the parent exactly as on a story.
     $current = Get-JiraPlanProp $ctx 'parent_current'
-    $origin = [string](Get-JiraPlanProp $ctx 'parent_origin')
 
-    if ($origin -ne '' -and $origin -ne 'bridge') {
-        $existing = Get-JiraPlanProp $current 'description'
-        $existingJson = if ($null -eq $existing) { '{}' } else { ConvertTo-JiraJsonValue $existing }
-        $epicAdf = ConvertTo-JiraManagedAdfDocument -ContentJson $epicJson -Origin $origin -ExistingJson $existingJson | ConvertFrom-Json -Depth 100
+    $existing = Get-JiraPlanProp $current 'description'
+    $existingJson = if ($null -eq $existing) { '{}' } else { ConvertTo-JiraJsonValue $existing }
+    $renderJson = ConvertTo-JiraManagedAdfDocument -ContentJson $epicJson -ExistingJson $existingJson
+    $fieldResult = Get-JiraApplyManagedField -RenderJson $renderJson -Label $parentKey | ConvertFrom-Json -Depth 100
+    if ([string]$fieldResult.warning -ne '') { $warnings.Add([string]$fieldResult.warning) }
+    $epicAdf = $fieldResult.doc
+
+    # Summary drift (018, T049, contracts/summary-record.md §4): decided
+    # before $desiredFields is built, so an omission never reaches the
+    # payload (mirror of the story branch).
+    $currentSummary = [string](Get-JiraPlanProp $current 'summary')
+    $recordedSummary = [string](Get-JiraPlanProp $ctx 'parent_last_summary')
+    $onDriftMode = [string](Get-JiraPlanProp $ctx 'on_drift')
+    if ($onDriftMode -eq '') { $onDriftMode = 'abort' }
+    $summaryDecision = Get-JiraPlanSummaryDriftStatus -CurrentSummary $currentSummary -RecordedSummary $recordedSummary -DesiredSummary $epicTitle -OnDrift $onDriftMode
+    $finalSummary = $summaryDecision.summary
+    $identityStamp = $null
+    if ([string]::IsNullOrEmpty($finalSummary)) {
+        $warnings.Add("reconcile: ticket $parentKey diverges from the specification on `"summary`" — a human appears to have renamed it since the last write; nothing was sent. Pass --on-drift=proceed to restore the specification's title.")
     }
-    $desiredFields = [ordered]@{ summary = $epicTitle; description = $epicAdf }
+
+    $desiredFields = [ordered]@{}
+    if ($null -ne $epicAdf) { $desiredFields['description'] = $epicAdf }
+    if (-not [string]::IsNullOrEmpty($finalSummary)) {
+        $desiredFields['summary'] = $finalSummary
+        $parentOrigin = [string](Get-JiraPlanProp $ctx 'parent_origin')
+        if ([string]::IsNullOrEmpty($parentOrigin)) { $parentOrigin = 'bridge' }
+        $identityStamp = [ordered]@{ origin = $parentOrigin; role = 'parent'; summary = $finalSummary }
+    }
 
     # Provenance label union (017, contract §2/§3), on the recognised-parent
     # branch — same union rule as the story branch, folded into
@@ -531,24 +629,28 @@ function Get-JiraPlanWriteSetParent {
         $desiredFields['labels'] = $labels
     }
 
+    $curRest = [ordered]@{}
+    if ($null -ne $current) { foreach ($p in $current.PSObject.Properties) { if ($p.Name -ne 'description') { $curRest[$p.Name] = $p.Value } } }
+    $desRest = [ordered]@{}; foreach ($k in $desiredFields.Keys) { if ($k -ne 'description') { $desRest[$k] = $desiredFields[$k] } }
+
     if ($null -eq $current) {
         $status = 'changed'
     }
-    elseif ($origin -ne '' -and $origin -ne 'bridge') {
-        $curDesc = Get-JiraPlanProp $current 'description'; if ($null -eq $curDesc) { $curDesc = [ordered]@{} }
-        $newDesc = $desiredFields['description']
-        $descSt = Get-JiraManagedDescriptionStatus -CurrentDescJson (ConvertTo-JiraJsonValue $curDesc) -NewDescJson (ConvertTo-JiraJsonValue $newDesc)
-        $curRest = [ordered]@{}; foreach ($p in $current.PSObject.Properties) { if ($p.Name -ne 'description') { $curRest[$p.Name] = $p.Value } }
-        $desRest = [ordered]@{}; foreach ($k in $desiredFields.Keys) { if ($k -ne 'description') { $desRest[$k] = $desiredFields[$k] } }
+    else {
+        $descSt = 'unchanged'
+        if ($desiredFields.Contains('description')) {
+            $curDesc = Get-JiraPlanProp $current 'description'; if ($null -eq $curDesc) { $curDesc = [ordered]@{} }
+            $newDesc = $desiredFields['description']
+            $descSt = Get-JiraManagedDescriptionStatus -CurrentDescJson (ConvertTo-JiraJsonValue $curDesc) -NewDescJson (ConvertTo-JiraJsonValue $newDesc)
+        }
         $otherSt = Get-JiraIdempotentFieldStatus -CurrentFieldsJson (ConvertTo-JiraJsonValue $curRest) -DesiredFieldsJson (ConvertTo-JiraJsonValue $desRest)
         $status = if ($descSt -eq 'unchanged' -and $otherSt -eq 'unchanged') { 'unchanged' } else { 'changed' }
     }
-    else {
-        $status = Get-JiraIdempotentFieldStatus -CurrentFieldsJson (ConvertTo-JiraJsonValue $current) -DesiredFieldsJson (ConvertTo-JiraJsonValue $desiredFields)
-    }
 
-    if ($status -eq 'unchanged') { return $null }
-    return [ordered]@{ method = 'PUT'; url = "$Base/rest/api/3/issue/$parentKey"; body = [ordered]@{ fields = $desiredFields }; role = 'parent' }
+    if ($status -eq 'unchanged') { return (ConvertTo-JiraJsonValue ([ordered]@{ action = $null; warnings = $warnings })) }
+    $action = [ordered]@{ method = 'PUT'; url = "$Base/rest/api/3/issue/$parentKey"; body = [ordered]@{ fields = $desiredFields }; role = 'parent' }
+    if ($null -ne $identityStamp) { $action['identity_stamp'] = $identityStamp }
+    return (ConvertTo-JiraJsonValue ([ordered]@{ action = $action; warnings = $warnings }))
 }
 
 function Get-JiraPlanTaskWriteSet {
@@ -584,6 +686,7 @@ function Get-JiraPlanTaskWriteSet {
     if ($null -ne $storyProp) { $stories = @($storyProp) }
 
     $actions = [System.Collections.Generic.List[object]]::new()
+    $warnings = [System.Collections.Generic.List[string]]::new()
     foreach ($story in $stories) {
         $storyLocalId = [string]$story.local_id
         $tasksProp = Get-JiraPlanProp $story 'tasks'
@@ -594,22 +697,64 @@ function Get-JiraPlanTaskWriteSet {
             $ticket = [string](Get-JiraPlanProp $tickets $tid)
             $taskJson = ConvertTo-JiraJsonValue $task
             $summary = Get-JiraAdfTaskSummary -Title $title
-            $adf = ConvertTo-JiraAdfTaskDescription -TaskJson $taskJson | ConvertFrom-Json -Depth 100
 
             if ($ticket -eq '') {
                 if ($project -eq '' -or $taskType -eq '') {
                     throw "plan_writes_tasks: refusing to assemble a creation for `"$tid`" with no project or issue type (zero writes)"
                 }
+                # Every ticket the mirror creates now carries the boundary
+                # from its first byte (018, T027, FR-006/FR-010) — a
+                # creation never warns.
+                $adf = (ConvertTo-JiraManagedTaskAdfDocument -TaskJson $taskJson | ConvertFrom-Json -Depth 100).doc
                 $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $summary -IssueTypeId $taskType -FieldDefaultsByTypeJson $fieldDefaultsJson -Provenance $TaskLabel | ConvertFrom-Json
                 $fields = [ordered]@{}
                 foreach ($p in $baseFields.PSObject.Properties) { $fields[$p.Name] = $p.Value }
                 $fields['description'] = $adf
                 $fields['parent'] = [ordered]@{ key = '<resolved at apply time>' }
-                $actions.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue"; body = [ordered]@{ fields = $fields }; local_id = $tid; parent_local_id = $storyLocalId; role = 'task' })
+                # 018, T049, contracts/summary-record.md §2: a creation's
+                # payload always carries a summary, so it always
+                # establishes the record.
+                $identityStamp = [ordered]@{ origin = 'bridge'; story = $tid; role = 'task'; summary = $summary }
+                $actions.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue"; body = [ordered]@{ fields = $fields }; local_id = $tid; parent_local_id = $storyLocalId; role = 'task'; identity_stamp = $identityStamp })
             }
             else {
                 $current = Get-JiraPlanProp $ticketCurrent $tid
-                $desired = [ordered]@{ summary = $summary; description = $adf }
+
+                # The managed-panel path is now UNCONDITIONAL (018, T027):
+                # every recognised sub-task's description is spliced through
+                # the origin-independent resolution (contract §3), so human
+                # prose above the boundary survives (FR-007) on the task
+                # tier exactly as on a story or the parent.
+                $existing = Get-JiraPlanProp $current 'description'
+                $existingJson = if ($null -eq $existing) { '{}' } else { ConvertTo-JiraJsonValue $existing }
+                $renderJson = ConvertTo-JiraManagedTaskAdfDocument -TaskJson $taskJson -ExistingJson $existingJson
+                $fieldResult = Get-JiraApplyManagedField -RenderJson $renderJson -Label $ticket | ConvertFrom-Json -Depth 100
+                if ([string]$fieldResult.warning -ne '') { $warnings.Add([string]$fieldResult.warning) }
+                $adf = $fieldResult.doc
+
+                # Summary drift (018, T049, contracts/summary-record.md
+                # §4/§5): decided before $desired is built. The desired
+                # value is the task tier's own (possibly shortened) summary
+                # — the exact string a payload carries is what the record
+                # keeps (contract §2).
+                $currentSummary = [string](Get-JiraPlanProp $current 'summary')
+                $ticketLastSummaries = Get-JiraPlanProp $ctx 'ticket_last_summaries'
+                $recordedSummary = [string](Get-JiraPlanProp $ticketLastSummaries $tid)
+                $onDriftMode = [string](Get-JiraPlanProp $ctx 'on_drift')
+                if ($onDriftMode -eq '') { $onDriftMode = 'abort' }
+                $summaryDecision = Get-JiraPlanSummaryDriftStatus -CurrentSummary $currentSummary -RecordedSummary $recordedSummary -DesiredSummary $summary -OnDrift $onDriftMode
+                $finalSummary = $summaryDecision.summary
+                $summaryChanged = $false
+                if ([string]::IsNullOrEmpty($finalSummary)) {
+                    $warnings.Add("reconcile: ticket $ticket diverges from the specification on `"summary`" — a human appears to have renamed it since the last write; nothing was sent. Pass --on-drift=proceed to restore the specification's title.")
+                }
+                elseif ($finalSummary -ne $currentSummary) {
+                    $summaryChanged = $true
+                }
+
+                $desired = [ordered]@{}
+                if ($null -ne $adf) { $desired['description'] = $adf }
+                if (-not [string]::IsNullOrEmpty($finalSummary)) { $desired['summary'] = $finalSummary }
                 # Provenance label union (017 FR-009/FR-011/FR-012/FR-013 on
                 # the task tier): the desired list is the sub-task's CURRENT
                 # labels plus the provenance token, both unique-normalised —
@@ -630,11 +775,30 @@ function Get-JiraPlanTaskWriteSet {
                     [System.Array]::Sort($taskLabels, [System.StringComparer]::Ordinal)
                     $desired['labels'] = $taskLabels
                 }
+
+                # Churn (FR-009): the description key, when present, is
+                # decided on its managed section alone — an edit confined to
+                # the human prefix is not churn. Every other field compares
+                # as before this feature.
+                # `summary` is excluded from the generic field-diff below
+                # and merged back in separately (summaryChanged), exactly
+                # like description — its own divergence is reported
+                # through the summary record's warning above, not the
+                # generic per-field one.
+                $curRest = [ordered]@{}
+                if ($null -ne $current) { foreach ($p in $current.PSObject.Properties) { if ($p.Name -ne 'description' -and $p.Name -ne 'summary') { $curRest[$p.Name] = $p.Value } } }
+                $desRest = [ordered]@{}; foreach ($k in $desired.Keys) { if ($k -ne 'description' -and $k -ne 'summary') { $desRest[$k] = $desired[$k] } }
+                $descSt = 'unchanged'
+                if ($desired.Contains('description') -and $null -ne $current) {
+                    $curDesc = Get-JiraPlanProp $current 'description'; if ($null -eq $curDesc) { $curDesc = [ordered]@{} }
+                    $descSt = Get-JiraManagedDescriptionStatus -CurrentDescJson (ConvertTo-JiraJsonValue $curDesc) -NewDescJson (ConvertTo-JiraJsonValue $desired['description'])
+                }
                 if ($null -eq $current) {
                     $st = 'changed'
                 }
                 else {
-                    $st = Get-JiraIdempotentFieldStatus -CurrentFieldsJson (ConvertTo-JiraJsonValue $current) -DesiredFieldsJson (ConvertTo-JiraJsonValue $desired)
+                    $otherSt = Get-JiraIdempotentFieldStatus -CurrentFieldsJson (ConvertTo-JiraJsonValue $curRest) -DesiredFieldsJson (ConvertTo-JiraJsonValue $desRest)
+                    $st = if ($descSt -eq 'unchanged' -and $otherSt -eq 'unchanged' -and -not $summaryChanged) { 'unchanged' } else { 'changed' }
                 }
                 if ($st -eq 'unchanged') { continue }
 
@@ -642,19 +806,22 @@ function Get-JiraPlanTaskWriteSet {
                 # comparison names the divergent field(s) in a warning before the
                 # overwrite — $current -eq $null means no prior state was read at
                 # all, so nothing narrower than the full desired set can be sent,
-                # and there is no known field to name.
+                # and there is no known field to name. The description field's
+                # own divergence is reported through the boundary's warnings
+                # above, not this per-field one, so it is excluded here and
+                # merged back in separately when it churned.
                 $filtered = $desired
                 $warning = ''
                 if ($null -ne $current) {
                     $filtered = [ordered]@{}
                     $diverged = [System.Collections.Generic.List[string]]::new()
-                    foreach ($key in $desired.Keys) {
+                    foreach ($key in $desRest.Keys) {
                         $curMember = if ($current -is [System.Management.Automation.PSCustomObject]) { $current.PSObject.Properties[$key] } else { $null }
                         $curVal = if ($null -eq $curMember) { $null } else { $curMember.Value }
-                        $desCanon = ConvertTo-JiraJsonValue $desired[$key]
+                        $desCanon = ConvertTo-JiraJsonValue $desRest[$key]
                         $curCanon = if ($null -eq $curVal) { 'null' } else { ConvertTo-JiraJsonValue $curVal }
                         if (-not [System.String]::Equals($desCanon, $curCanon, [System.StringComparison]::Ordinal)) {
-                            $filtered[$key] = $desired[$key]
+                            $filtered[$key] = $desRest[$key]
                             # `labels` is excluded from the divergence naming
                             # (017 FR-011): a sub-task that merely lacks its
                             # provenance label has not diverged from the
@@ -663,19 +830,34 @@ function Get-JiraPlanTaskWriteSet {
                             if ($key -ne 'labels') { $diverged.Add($key) }
                         }
                     }
+                    if ($descSt -eq 'changed') { $filtered['description'] = $desired['description'] }
+                    if ($summaryChanged) { $filtered['summary'] = $finalSummary }
                     if ($diverged.Count -gt 0) {
                         $warning = "$ticket diverges from the specification on `"$($diverged -join ', ')`"; only the differing field(s) will be written"
                     }
                 }
 
+                # identity_stamp (018, T049, contracts/summary-record.md
+                # §2): the record is written only after a payload that
+                # ACTUALLY carries `summary` — decided from $filtered, the
+                # payload this action will really send.
+                $identityStamp = $null
+                if ($filtered.Contains('summary')) {
+                    $taskOrigins = Get-JiraPlanProp $ctx 'ticket_origins'
+                    $taskOrigin = [string](Get-JiraPlanProp $taskOrigins $tid)
+                    if ([string]::IsNullOrEmpty($taskOrigin)) { $taskOrigin = 'bridge' }
+                    $identityStamp = [ordered]@{ origin = $taskOrigin; story = $tid; role = 'task'; summary = $finalSummary }
+                }
+
                 $action = [ordered]@{ method = 'PUT'; url = "$base/rest/api/3/issue/$ticket"; body = [ordered]@{ fields = $filtered }; role = 'task' }
                 if ($warning -ne '') { $action['warning'] = $warning }
+                if ($null -ne $identityStamp) { $action['identity_stamp'] = $identityStamp }
                 $actions.Add($action)
             }
         }
     }
 
-    return (ConvertTo-JiraJsonValue $actions)
+    return (ConvertTo-JiraJsonValue ([ordered]@{ actions = $actions; warnings = $warnings }))
 }
 
 function Get-JiraManagedDescriptionStatus {
@@ -702,6 +884,53 @@ function Get-JiraManagedDescriptionStatus {
     $nmJson = ConvertTo-JiraJsonValue @($nm)
     if ([System.String]::Equals($cmJson, $nmJson, [System.StringComparison]::Ordinal)) { return 'unchanged' }
     return 'changed'
+}
+
+function Get-JiraSummaryNormalized {
+    <#
+    .SYNOPSIS
+      Contract summary-record.md §3: strip leading/trailing whitespace, then
+      collapse every internal run of whitespace to a single space. For
+      COMPARISON only — never applied to a value recorded or sent. Mirror
+      of _summary_normalise.
+    #>
+    param([string] $Value)
+    return ([regex]::Replace($Value, '\s+', ' ')).Trim()
+}
+
+function Get-JiraPlanSummaryDriftStatus {
+    <#
+    .SYNOPSIS
+      018, T049, contracts/summary-record.md §4: the whole decision table,
+      collapsed into one function every tier calls identically. Mirror of
+      plan_summary_drift_status. Returns {summary: <string>|$null}: the
+      value to send (present), or $null when the field must be OMITTED —
+      the caller's own signal to skip this field and emit exactly one
+      warning naming the ticket.
+    #>
+    [CmdletBinding()]
+    param(
+        [string] $CurrentSummary,
+        [string] $RecordedSummary = '',
+        [Parameter(Mandatory)] [string] $DesiredSummary,
+        [string] $OnDrift = 'abort'
+    )
+    if ([string]::IsNullOrEmpty($RecordedSummary)) {
+        return [pscustomobject]@{ summary = $DesiredSummary }
+    }
+    $nc = Get-JiraSummaryNormalized $CurrentSummary
+    $nr = Get-JiraSummaryNormalized $RecordedSummary
+    if ($nc -eq $nr) {
+        return [pscustomobject]@{ summary = $DesiredSummary }
+    }
+    $nd = Get-JiraSummaryNormalized $DesiredSummary
+    if ($nc -eq $nd) {
+        return [pscustomobject]@{ summary = $DesiredSummary }
+    }
+    if ($OnDrift -eq 'proceed') {
+        return [pscustomobject]@{ summary = $DesiredSummary }
+    }
+    return [pscustomobject]@{ summary = $null }
 }
 
 function Get-JiraTransitionAction {
@@ -778,27 +1007,26 @@ function Get-JiraLifecyclePlan {
         $doTransition = $false
 
         # --- Zero churn: drop an unchanged UPDATE -----------------------------
+        # The managed-panel path is now UNCONDITIONAL (018, T027): every
+        # recognised ticket's description churn is decided on its managed
+        # section alone (FR-009), regardless of origin.
         if ($method -eq 'PUT') {
             $current = Get-JiraPlanProp $tk 'current'
             if ($null -ne $current) {
-                $desired = ConvertTo-JiraJsonValue $action.body.fields
-                $currentJson = ConvertTo-JiraJsonValue $current
-                $origin = [string](Get-JiraPlanProp $tk 'origin')
-                if ($origin -ne '' -and $origin -ne 'bridge-created') {
-                    # FR-039: description diff on the managed section alone; the
-                    # other fields compare normally.
+                $desObj = $action.body.fields
+                $descSt = 'unchanged'
+                # An EMPTY PSCustomObject's .PSObject.Properties.Name throws
+                # under StrictMode — index the member collection instead.
+                $desiredHasDescription = ($desObj -is [System.Management.Automation.PSCustomObject]) -and ($null -ne $desObj.PSObject.Properties['description'])
+                if ($desiredHasDescription) {
                     $curDesc = Get-JiraPlanProp $current 'description'; if ($null -eq $curDesc) { $curDesc = [pscustomobject]@{} }
-                    $desObj = $action.body.fields
                     $newDesc = Get-JiraPlanProp $desObj 'description'; if ($null -eq $newDesc) { $newDesc = [pscustomobject]@{} }
                     $descSt = Get-JiraManagedDescriptionStatus -CurrentDescJson (ConvertTo-JiraJsonValue $curDesc) -NewDescJson (ConvertTo-JiraJsonValue $newDesc)
-                    $curRest = [ordered]@{}; foreach ($p in $current.PSObject.Properties) { if ($p.Name -ne 'description') { $curRest[$p.Name] = $p.Value } }
-                    $desRest = [ordered]@{}; foreach ($p in $desObj.PSObject.Properties) { if ($p.Name -ne 'description') { $desRest[$p.Name] = $p.Value } }
-                    $otherSt = Get-JiraIdempotentFieldStatus -CurrentFieldsJson (ConvertTo-JiraJsonValue $curRest) -DesiredFieldsJson (ConvertTo-JiraJsonValue $desRest)
-                    if ($descSt -eq 'unchanged' -and $otherSt -eq 'unchanged') { $dropContent = $true }
                 }
-                elseif ((Get-JiraIdempotentFieldStatus -CurrentFieldsJson $currentJson -DesiredFieldsJson $desired) -eq 'unchanged') {
-                    $dropContent = $true
-                }
+                $curRest = [ordered]@{}; foreach ($p in $current.PSObject.Properties) { if ($p.Name -ne 'description') { $curRest[$p.Name] = $p.Value } }
+                $desRest = [ordered]@{}; foreach ($p in $desObj.PSObject.Properties) { if ($p.Name -ne 'description') { $desRest[$p.Name] = $p.Value } }
+                $otherSt = Get-JiraIdempotentFieldStatus -CurrentFieldsJson (ConvertTo-JiraJsonValue $curRest) -DesiredFieldsJson (ConvertTo-JiraJsonValue $desRest)
+                if ($descSt -eq 'unchanged' -and $otherSt -eq 'unchanged') { $dropContent = $true }
             }
         }
 
@@ -935,6 +1163,36 @@ function Get-JiraApplyKnownCoordinate {
     return (ConvertTo-JiraJsonValue @($set))
 }
 
+function Get-JiraApplyPrivacyProjection {
+    <#
+    .SYNOPSIS
+      018, T019, contract §5, FR-024a. Mirror of _plan_apply_privacy_projection.
+      The projection of a payload handed to the pre-write privacy scan,
+      excluding the description's preserved human prefix. The guard's own
+      rules (PrivacyGuard.psm1) are untouched; only what reaches them changes.
+      The preserved prefix is a verbatim round-trip — read from this ticket
+      and written back to it — so it cannot carry anything into the tracker
+      the tracker does not already hold. Splits the description's content at
+      the managed-panel marker (structural, not configurable) and scans only
+      the managed portion (the marker node onward) plus every other field,
+      exactly as before this feature. A payload with no description field, or
+      a description with no content array, is returned unchanged.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $BodyJson)
+    $body = $BodyJson | ConvertFrom-Json -Depth 100
+    $fields = Get-JiraPlanProp $body 'fields'
+    $desc = Get-JiraPlanProp $fields 'description'
+    $content = Get-JiraPlanProp $desc 'content'
+    if ($null -eq $content) { return $BodyJson }
+    $contentJson = ConvertTo-Json -InputObject @($content) -Depth 100 -Compress
+    $split = Split-JiraManagedSectionPanel -Marker (Get-JiraManagedMarker) -ContentJson $contentJson | ConvertFrom-Json -Depth 100
+    $managed = [System.Collections.Generic.List[object]]::new()
+    foreach ($n in @($split.managed)) { $managed.Add($n) }
+    $body.fields.description.content = $managed
+    return (ConvertTo-Json -InputObject $body -Depth 100 -Compress)
+}
+
 function Invoke-JiraApplyWriteSet {
     <#
     .SYNOPSIS
@@ -957,7 +1215,7 @@ function Invoke-JiraApplyWriteSet {
     foreach ($a in $actions) {
         $bodyObj = if ($a.PSObject.Properties.Name -contains 'body') { $a.body } else { $null }
         $bodyText = if ($null -eq $bodyObj) { '{}' } else { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 }
-        $code = Test-JiraPrivacyBlock -Payload $bodyText -KnownCoordinatesJson $coords -AllowlistJson $allow
+        $code = Test-JiraPrivacyBlock -Payload (Get-JiraApplyPrivacyProjection -BodyJson $bodyText) -KnownCoordinatesJson $coords -AllowlistJson $allow
         if ($code -ne 0) { return [int]$code }
     }
 
@@ -968,13 +1226,8 @@ function Invoke-JiraApplyWriteSet {
     $worst = 0
     foreach ($a in $actions) {
         $bodyObj = if ($a.PSObject.Properties.Name -contains 'body') { $a.body } else { $null }
-        if ($null -ne $bodyObj) {
-            $bodyText = ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100
-            $r = Invoke-JiraRequest -Method $a.method -Url $a.url -Body $bodyText
-        }
-        else {
-            $r = Invoke-JiraRequest -Method $a.method -Url $a.url
-        }
+        $bodyText = if ($null -ne $bodyObj) { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 } else { $null }
+        $r = Invoke-JiraApplyWrite -Method $a.method -Url $a.url -BodyJson $bodyText
         if ([int]$r.ExitCode -gt $worst) { $worst = [int]$r.ExitCode }
         if ([int]$r.ExitCode -ge 2) { return $worst }
     }
@@ -1002,6 +1255,75 @@ function Write-JiraApplyRejectionReport {
     $errBody = if ($Result.ErrorBody) { $Result.ErrorBody } else { '{}' }
     $msg = Get-JiraTicketFieldRejectionMessage -DefaultableFieldsByTypeJson $DefaultableFieldsByTypeJson -ActionJson $actionJson -ErrorBodyJson $errBody
     if ($msg) { [Console]::Error.WriteLine($msg) }
+}
+
+function Invoke-JiraApplyWrite {
+    <#
+    .SYNOPSIS
+      The single write primitive every write loop in this module goes
+      through. 018, T069, contract managed-description §2, FR-011: on a PUT
+      whose body carries a `description` field and Jira rejects it (400,
+      `errors.description` present), the write is retried ONCE with
+      `description` stripped from the payload and one warning is printed to
+      stderr naming the ticket key — EVERY OTHER field of that ticket still
+      reconciles, and the caller sees the retried result (success or
+      otherwise), never the original rejection: the host's exit code is
+      unaffected by a description-only rejection. A rejection that does not
+      name `description`, or a non-PUT method, is left to the existing
+      generic failure path untouched. Mirror of _plan_apply_write.
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $Method,
+        [Parameter(Mandatory)] [string] $Url,
+        [string] $BodyJson
+    )
+    $r = if ($BodyJson) { Invoke-JiraRequest -Method $Method -Url $Url -Body $BodyJson } else { Invoke-JiraRequest -Method $Method -Url $Url }
+    if ([int]$r.ExitCode -lt 2 -or $Method -ne 'PUT' -or [int]$r.Status -ne 400 -or -not $BodyJson) {
+        return $r
+    }
+    $bodyObj = $null
+    try { $bodyObj = $BodyJson | ConvertFrom-Json -Depth 100 } catch { $null = $_ }
+    if ($null -eq $bodyObj) { return $r }
+    $fieldsMember = $bodyObj.PSObject.Properties['fields']
+    if ($null -eq $fieldsMember -or $null -eq $fieldsMember.Value.PSObject.Properties['description']) {
+        return $r
+    }
+    $errObj = $null
+    try { $errObj = $r.ErrorBody | ConvertFrom-Json -Depth 100 } catch { $null = $_ }
+    $descReason = $null
+    if ($null -ne $errObj) {
+        $errorsMember = $errObj.PSObject.Properties['errors']
+        if ($null -ne $errorsMember) {
+            $descMember = $errorsMember.Value.PSObject.Properties['description']
+            if ($null -ne $descMember) { $descReason = [string]$descMember.Value }
+        }
+    }
+    if (-not $descReason) { return $r }
+    $key = $Url -replace '^.*/issue/', ''
+    [Console]::Error.WriteLine("reconcile: Jira rejected the description for $key — $descReason. No description was written for $key; every other field still reconciled.")
+    $fieldsMember.Value.PSObject.Properties.Remove('description')
+    $strippedJson = ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100
+    return Invoke-JiraRequest -Method $Method -Url $Url -Body $strippedJson
+}
+
+function Invoke-JiraApplyStampIdentity {
+    <#
+    .SYNOPSIS
+      018, T049, contracts/summary-record.md §2: stamp the identity marker
+      with $Action's identity_stamp when it carries one — a no-op when it
+      does not. Called after EVERY successful write (create or update), on
+      every tier's every role. Mirror of _plan_apply_stamp_identity.
+    #>
+    param([string] $IssueKey, [string] $SpecRefJson, $Action)
+    if ([string]::IsNullOrEmpty($IssueKey)) { return }
+    $stampMember = $Action.PSObject.Properties['identity_stamp']
+    if ($null -eq $stampMember -or $null -eq $stampMember.Value) { return }
+    $stamp = $stampMember.Value
+    $origin = [string](Get-JiraPlanProp $stamp 'origin'); if ($origin -eq '') { $origin = 'bridge' }
+    $story = [string](Get-JiraPlanProp $stamp 'story')
+    $role = [string](Get-JiraPlanProp $stamp 'role')
+    $summary = [string](Get-JiraPlanProp $stamp 'summary')
+    Set-JiraIdentity -IssueKey $IssueKey -SpecRefJson $SpecRefJson -Origin $origin -Story $story -Role $role -Summary $summary | Out-Null
 }
 
 function Invoke-JiraApplyWriteSetWithRecognition {
@@ -1080,19 +1402,19 @@ function Invoke-JiraApplyWriteSetWithRecognition {
     if ($null -ne $parent) {
         $bodyObj = Get-JiraPlanProp $parent 'body'
         $bodyText = if ($null -eq $bodyObj) { '{}' } else { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 }
-        $code = Test-JiraPrivacyBlock -Payload $bodyText -KnownCoordinatesJson $coords -AllowlistJson $allow
+        $code = Test-JiraPrivacyBlock -Payload (Get-JiraApplyPrivacyProjection -BodyJson $bodyText) -KnownCoordinatesJson $coords -AllowlistJson $allow
         if ($code -ne 0) { return [ordered]@{ ExitCode = [int]$code; Created = @() } }
     }
     foreach ($a in $stories) {
         $bodyObj = if ($a.PSObject.Properties.Name -contains 'body') { $a.body } else { $null }
         $bodyText = if ($null -eq $bodyObj) { '{}' } else { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 }
-        $code = Test-JiraPrivacyBlock -Payload $bodyText -KnownCoordinatesJson $coords -AllowlistJson $allow
+        $code = Test-JiraPrivacyBlock -Payload (Get-JiraApplyPrivacyProjection -BodyJson $bodyText) -KnownCoordinatesJson $coords -AllowlistJson $allow
         if ($code -ne 0) { return [ordered]@{ ExitCode = [int]$code; Created = @() } }
     }
     foreach ($a in $taskActions) {
         $bodyObj = if ($a.PSObject.Properties.Name -contains 'body') { $a.body } else { $null }
         $bodyText = if ($null -eq $bodyObj) { '{}' } else { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 }
-        $code = Test-JiraPrivacyBlock -Payload $bodyText -KnownCoordinatesJson $coords -AllowlistJson $allow
+        $code = Test-JiraPrivacyBlock -Payload (Get-JiraApplyPrivacyProjection -BodyJson $bodyText) -KnownCoordinatesJson $coords -AllowlistJson $allow
         # 015 contract §4.2 (rule O4): the task sweep is the THIRD pre-write
         # guard and returns the same outcome shape as the parent's and the
         # stories' — a bare exit code here reads as $null through the caller's
@@ -1149,13 +1471,8 @@ function Invoke-JiraApplyWriteSetWithRecognition {
     $parentKey = $KnownParentKey
     if ($null -ne $parent) {
         $bodyObj = Get-JiraPlanProp $parent 'body'
-        if ($null -ne $bodyObj) {
-            $bodyText = ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100
-            $r = Invoke-JiraRequest -Method $parent.method -Url $parent.url -Body $bodyText
-        }
-        else {
-            $r = Invoke-JiraRequest -Method $parent.method -Url $parent.url
-        }
+        $bodyText = if ($null -ne $bodyObj) { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 } else { $null }
+        $r = Invoke-JiraApplyWrite -Method $parent.method -Url $parent.url -BodyJson $bodyText
         if ([int]$r.ExitCode -gt $worst) { $worst = [int]$r.ExitCode }
         if ([int]$r.ExitCode -ge 2) {
             Write-JiraApplyRejectionReport -Method $parent.method -Url $parent.url -Action $parent -DefaultableFieldsByTypeJson $DefaultableFieldsByTypeJson -Result $r
@@ -1168,7 +1485,6 @@ function Invoke-JiraApplyWriteSetWithRecognition {
             try { $respObj = $r.Body | ConvertFrom-Json -Depth 100 } catch { $null = $_ }
             $parentKey = if ($respObj) { [string](Get-JiraPlanProp $respObj 'key') } else { '' }
             if ($parentKey -ne '' -and $parentLocalId -ne '') {
-                Set-JiraIdentity -IssueKey $parentKey -SpecRefJson $SpecRefJson -Origin 'bridge' -Role 'parent' | Out-Null
                 $cur = if (Test-Path -LiteralPath $SpecFile) { Get-Content -Raw -LiteralPath $SpecFile } else { '' }
                 if ($null -eq $cur) { $cur = '' }
                 $new = Set-JiraSpecMarkerRecordTicket -Text $cur -Id $parentLocalId -Key $parentKey
@@ -1176,6 +1492,7 @@ function Invoke-JiraApplyWriteSetWithRecognition {
                 $createdOut.Add([ordered]@{ key = $parentKey; role = 'parent'; local_id = $parentLocalId })
             }
         }
+        Invoke-JiraApplyStampIdentity -IssueKey $parentKey -SpecRefJson $SpecRefJson -Action $parent
     }
 
     # (4) Story writes (step 11) — the parent-key placeholder resolved to
@@ -1200,13 +1517,8 @@ function Invoke-JiraApplyWriteSetWithRecognition {
             }
         }
         $bodyObj = if ($action.PSObject.Properties.Name -contains 'body') { $action.body } else { $null }
-        if ($null -ne $bodyObj) {
-            $bodyText = ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100
-            $r = Invoke-JiraRequest -Method $action.method -Url $action.url -Body $bodyText
-        }
-        else {
-            $r = Invoke-JiraRequest -Method $action.method -Url $action.url
-        }
+        $bodyText = if ($null -ne $bodyObj) { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 } else { $null }
+        $r = Invoke-JiraApplyWrite -Method $action.method -Url $action.url -BodyJson $bodyText
         if ([int]$r.ExitCode -gt $worst) { $worst = [int]$r.ExitCode }
         if ([int]$r.ExitCode -ge 2) {
             Write-JiraApplyRejectionReport -Method $action.method -Url $action.url -Action $action -DefaultableFieldsByTypeJson $DefaultableFieldsByTypeJson -Result $r
@@ -1221,7 +1533,6 @@ function Invoke-JiraApplyWriteSetWithRecognition {
             $key = if ($respObj) { [string](Get-JiraPlanProp $respObj 'key') } else { '' }
             $localId = [string](Get-JiraPlanProp $action 'local_id')
             if ($key -ne '' -and $localId -ne '') {
-                Set-JiraIdentity -IssueKey $key -SpecRefJson $SpecRefJson -Origin 'bridge' -Story $localId -Role 'story' | Out-Null
                 $cur = if (Test-Path -LiteralPath $SpecFile) { Get-Content -Raw -LiteralPath $SpecFile } else { '' }
                 if ($null -eq $cur) { $cur = '' }
                 $new = Set-JiraStoryMarkerRecordTicket -Text $cur -Id $localId -Key $key
@@ -1229,6 +1540,10 @@ function Invoke-JiraApplyWriteSetWithRecognition {
                 $storyKeyMap[$localId] = $key
                 $createdOut.Add([ordered]@{ key = $key; role = 'story'; local_id = $localId })
             }
+            Invoke-JiraApplyStampIdentity -IssueKey $key -SpecRefJson $SpecRefJson -Action $action
+        }
+        elseif ($action.method -eq 'PUT') {
+            Invoke-JiraApplyStampIdentity -IssueKey ([string]$action.url -replace '^.*/issue/', '') -SpecRefJson $SpecRefJson -Action $action
         }
     }
 
@@ -1250,32 +1565,30 @@ function Invoke-JiraApplyWriteSetWithRecognition {
             }
         }
         $bodyObj = if ($taction.PSObject.Properties.Name -contains 'body') { $taction.body } else { $null }
-        if ($null -ne $bodyObj) {
-            $bodyText = ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100
-            $r = Invoke-JiraRequest -Method $taction.method -Url $taction.url -Body $bodyText
-        }
-        else {
-            $r = Invoke-JiraRequest -Method $taction.method -Url $taction.url
-        }
+        $bodyText = if ($null -ne $bodyObj) { ConvertTo-Json -InputObject $bodyObj -Compress -Depth 100 } else { $null }
+        $r = Invoke-JiraApplyWrite -Method $taction.method -Url $taction.url -BodyJson $bodyText
         if ([int]$r.ExitCode -gt $worst) { $worst = [int]$r.ExitCode }
         if ([int]$r.ExitCode -ge 2) {
             Write-JiraApplyRejectionReport -Method $taction.method -Url $taction.url -Action $taction -DefaultableFieldsByTypeJson $DefaultableFieldsByTypeJson -Result $r
             return [ordered]@{ ExitCode = $worst; Created = @($createdOut) }
         }
 
-        if ($taction.method -eq 'POST' -and ([string]$taction.url).EndsWith('/issue') -and $TasksFile -ne '') {
+        if ($taction.method -eq 'POST' -and ([string]$taction.url).EndsWith('/issue')) {
             $respObj = $null
             try { $respObj = $r.Body | ConvertFrom-Json -Depth 100 } catch { $null = $_ }
             $tKey = if ($respObj) { [string](Get-JiraPlanProp $respObj 'key') } else { '' }
             $tLocalId = [string](Get-JiraPlanProp $taction 'local_id')
-            if ($tKey -ne '' -and $tLocalId -ne '') {
-                Set-JiraIdentity -IssueKey $tKey -SpecRefJson $SpecRefJson -Origin 'bridge' -Story $tLocalId -Role 'task' | Out-Null
+            if ($tKey -ne '' -and $tLocalId -ne '' -and $TasksFile -ne '') {
                 $tCur = if (Test-Path -LiteralPath $TasksFile) { Get-Content -Raw -LiteralPath $TasksFile } else { '' }
                 if ($null -eq $tCur) { $tCur = '' }
                 $tNew = Set-JiraTaskMarkerRecordTicket -Text $tCur -Id $tLocalId -Key $tKey
                 Write-JiraMarkerSpliceFile -Path $TasksFile -NewContent $tNew | Out-Null
                 $createdOut.Add([ordered]@{ key = $tKey; role = 'task'; local_id = $tLocalId })
             }
+            Invoke-JiraApplyStampIdentity -IssueKey $tKey -SpecRefJson $SpecRefJson -Action $taction
+        }
+        elseif ($taction.method -eq 'PUT') {
+            Invoke-JiraApplyStampIdentity -IssueKey ([string]$taction.url -replace '^.*/issue/', '') -SpecRefJson $SpecRefJson -Action $taction
         }
     }
     return [ordered]@{ ExitCode = $worst; Created = @($createdOut) }
@@ -1283,4 +1596,4 @@ function Invoke-JiraApplyWriteSetWithRecognition {
 
 Export-ModuleMember -Function Get-JiraApplyKnownCoordinate, Invoke-JiraApplyWriteSet, Get-JiraPlanWriteSet, Get-JiraLifecyclePlan, `
     Get-JiraManagedDescriptionStatus, Invoke-JiraApplyWriteSetWithRecognition, Get-JiraPlanResolveFieldDefault, `
-    Get-JiraPlanConfirmationField, Get-JiraPlanTaskWriteSet, Get-JiraTaskLifecyclePlan
+    Get-JiraPlanConfirmationField, Get-JiraPlanTaskWriteSet, Get-JiraTaskLifecyclePlan, Get-JiraPlanSummaryDriftStatus

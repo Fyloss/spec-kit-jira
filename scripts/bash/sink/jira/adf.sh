@@ -190,28 +190,82 @@ adf_render_task_description() {
   # kcov-excl-stop
 }
 
-# adf_render_managed_description <content-json> <origin> [existing-desc-json]
-#   Origin-discriminated description rendering (US7, T075). On a bridge-created
-#   ticket the whole description IS the managed section, with no delimiter (FR-040).
-#   On a human-origin ticket the human-authored prefix of the existing description
-#   is preserved verbatim above a delimited managed panel (FR-038): the engine
-#   splits the existing content at the marker, and the new description is
-#   prefix + marker + freshly-rendered managed nodes.
-adf_render_managed_description() {
-  local content="$1" origin="$2" existing="${3:-}"
-  local managed
-  managed="$(_adf_content_nodes "${content}")"
+# _adf_resolve_managed <managed-nodes-json> [existing-desc-json]
+#   The shared contract §3 resolution engine (018, T014/T026, data-model.md
+#   §3), independent of what produced the managed-node array — the same
+#   decision serves the story/parent shape (_adf_content_nodes) and the task
+#   tier's own shape (adf_render_task_description) identically:
+#     - No existing-desc-json argument at all: a CREATION. No prior content to
+#       preserve; the result is marker ++ freshly-rendered managed nodes, with
+#       no human prefix and no warning (contract §3 row 5).
+#     - marker_count > 1 (managed_section_panel_split): malformed — the split
+#       cannot tell which region is the mirror's, so nothing is written for
+#       this description (row 1). Status "malformed", no `doc` key.
+#     - marker_count == 1: well-formed. The existing prefix is preserved
+#       verbatim above a freshly-rendered managed panel (row 2).
+#     - marker_count == 0: a description written before this feature, or with
+#       no boundary at all. managed_section_suffix_split (the migration split,
+#       T010/T011) decides whether the existing content ends with the freshly
+#       rendered managed nodes: a match is a clean migration with nothing
+#       duplicated (row 3); no match preserves the WHOLE existing content as
+#       human text above a fresh panel and reports "migrated-warned" so the
+#       caller can name the ticket in a warning (row 4) — nothing is ever
+#       discarded (FR-020a/FR-020b).
+#   Prints canonical {status:"ok"|"malformed"|"migrated-warned", doc:<adf-doc>}
+#   — `doc` is present on every status except "malformed".
+_adf_resolve_managed() {
+  local managed="$1" existing="${2:-}"
+  local marker marker_nodes
+  marker="$(adf_managed_marker)"
+  marker_nodes="$(_adf_marker_nodes)"
 
-  if [[ "${origin}" == "bridge-created" ]]; then
-    jq -cn --argjson c "${managed}" '{type:"doc", version:1, content:$c}' | json_canonical
+  if [[ -z "${existing}" ]]; then
+    jq -cn --argjson m "${marker_nodes}" --argjson c "${managed}" \
+      '{status:"ok", doc:{type:"doc", version:1, content: ($m + $c)}}' | json_canonical
     return 0
   fi
 
-  [[ -z "${existing}" ]] && existing='{}'
-  local existing_content prefix marker_nodes
+  local existing_content split marker_count prefix status="ok"
   existing_content="$(jq -c '.content // []' <<< "${existing}")"
-  prefix="$(printf '%s' "${existing_content}" | managed_section_panel_split "$(adf_managed_marker)" | jq -c '.prefix')"
-  marker_nodes="$(_adf_marker_nodes)"
-  jq -cn --argjson p "${prefix}" --argjson m "${marker_nodes}" --argjson c "${managed}" \
-    '{type:"doc", version:1, content: ($p + $m + $c)}' | json_canonical
+  split="$(printf '%s' "${existing_content}" | managed_section_panel_split "${marker}")"
+  marker_count="$(jq -r '.marker_count' <<< "${split}")"
+
+  if ((marker_count > 1)); then
+    jq -cn '{status:"malformed"}'
+    return 0
+  elif ((marker_count == 1)); then
+    prefix="$(jq -c '.prefix' <<< "${split}")"
+  else
+    local suffix matched
+    suffix="$(printf '%s' "${existing_content}" | managed_section_suffix_split "${managed}")"
+    matched="$(jq -r '.matched' <<< "${suffix}")"
+    prefix="$(jq -c '.prefix' <<< "${suffix}")"
+    [[ "${matched}" != "true" ]] && status="migrated-warned"
+  fi
+
+  jq -cn --argjson p "${prefix}" --argjson m "${marker_nodes}" --argjson c "${managed}" --arg st "${status}" \
+    '{status:$st, doc:{type:"doc", version:1, content: ($p + $m + $c)}}' | json_canonical
+}
+
+# adf_render_managed_description <content-json> [existing-desc-json]
+#   Origin-INDEPENDENT description resolution for the story/parent shape (018,
+#   T014). See _adf_resolve_managed for the contract §3 decision.
+adf_render_managed_description() {
+  local content="$1" existing="${2:-}"
+  local managed
+  managed="$(_adf_content_nodes "${content}")"
+  _adf_resolve_managed "${managed}" "${existing}"
+}
+
+# adf_render_managed_task_description <task-json> [existing-desc-json]
+#   Origin-INDEPENDENT description resolution for the task tier's own shape
+#   (018, T026, FR-006): the sub-task's description (adf_render_task_description
+#   — its own text, identifier, phase, attribution, etc., never the story or the
+#   specification, FR-009) is what the boundary now wraps, resolved through the
+#   SAME §3 decision as every other tier.
+adf_render_managed_task_description() {
+  local task="$1" existing="${2:-}"
+  local managed
+  managed="$(adf_render_task_description "${task}" | jq -c '.content')"
+  _adf_resolve_managed "${managed}" "${existing}"
 }

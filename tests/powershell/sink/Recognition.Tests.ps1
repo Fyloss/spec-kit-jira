@@ -49,6 +49,41 @@ Describe 'Invoke-JiraRecognitionRun — marker verification decision table' {
         @($out.blocked).Count | Should -Be 0
     }
 
+    It '018, T073 — a marker with no origin field defaults to "bridge", never "bridge-created"' {
+        # The origin vocabulary is unified on recognition's own spelling
+        # ("bridge"); a bridge-owned marker predating this field must remain valid.
+        $cfg = New-JiraRecognitionSeedConfig '{"repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111"}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $stories = '[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+        $r = Invoke-JiraRecognitionRun -StoriesJson $stories -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath 'spec.md'
+        $r.ExitCode | Should -Be 0
+        $out = $r.Json | ConvertFrom-Json
+        $out.bound.'1111111111111111'.origin | Should -Be 'bridge'
+    }
+
+    It '018, T039 — a bound entry surfaces last_summary from the identity marker' {
+        $cfg = New-JiraRecognitionSeedConfig '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111","summary":"The Epic, renamed"}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $stories = '[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+        $r = Invoke-JiraRecognitionRun -StoriesJson $stories -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath 'spec.md'
+        $r.ExitCode | Should -Be 0
+        $out = $r.Json | ConvertFrom-Json
+        $out.bound.'1111111111111111'.last_summary | Should -Be 'The Epic, renamed'
+    }
+
+    It '018, T039 — a marker written by a previous release (no summary) omits last_summary entirely' {
+        $cfg = New-JiraRecognitionSeedConfig '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111"}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $stories = '[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+        $r = Invoke-JiraRecognitionRun -StoriesJson $stories -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath 'spec.md'
+        $r.ExitCode | Should -Be 0
+        $out = $r.Json | ConvertFrom-Json
+        ($out.bound.'1111111111111111'.PSObject.Properties.Name -contains 'last_summary') | Should -BeFalse
+    }
+
     It 'a story-kind read carries its Jira-side sub-tasks (key, issuetype_id) — T073, FR-021' {
         $path = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
         @'
