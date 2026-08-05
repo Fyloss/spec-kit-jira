@@ -47,6 +47,12 @@ source "${CONF_DIR}/mock-jira/lib.sh"
 [ -f "${SCENARIO}" ] || { echo "scenario not found: ${SCENARIO}" >&2; exit 1; }
 mkdir -p "${OUTDIR}"
 
+# R9/W3: this leg's own duration — mock start, the port invocation(s), and the
+# workdir snapshot — read back by ci-conformance.sh's run_scenario so the
+# amortised per-scenario cost (SC-009) reflects the harness's real cost rather
+# than a wall-clock estimate.
+_HARNESS_T0="${EPOCHREALTIME}"
+
 # Every scalar this harness reads out of jq goes through here.
 #
 # On Windows the `jq` on PATH is the NATIVE jq.exe, and its stdout is a
@@ -264,5 +270,8 @@ mkdir -p "${OUTDIR}/workdir"
   mkdir -p "${OUTDIR}/workdir/$(dirname "${f}")"
   cp "${f}" "${OUTDIR}/workdir/${f}"
 done )
+
+_HARNESS_T1="${EPOCHREALTIME}"
+awk -v a="${_HARNESS_T0}" -v b="${_HARNESS_T1}" 'BEGIN { printf "%.3f", b - a }' > "${OUTDIR}/duration"
 
 echo "${OUTDIR}"

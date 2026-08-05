@@ -155,9 +155,182 @@ jobs:
                 "$(_ms_count $'a\nb\n' $'\r\n')"
               printf 'igncr: %s%%0A' "$(shopt -o igncr 2>&1 || true)"
             )
-            printf 'end of report'
-          } | { printf '::notice title=Host toolchain::'; cat; printf '\n'; }
+            # Trailing %%0A, unlike this block's original direct-to-::notice::
+            # form: every later step below APPENDS to this same accumulator
+            # file, and each of those blocks is itself %0A-terminated on its
+            # last line — without one here, this step's last line and the
+            # next step's first would run together on one unbroken line.
+            printf 'end of report%%0A'
+          } >> "$(cygpath -u "${RUNNER_TEMP}")/probe-notice.txt"
+
+      # W1–W4 (018): each answers one question only windows-latest can settle
+      # (contracts/windows-probe.md). All four fold into the SAME single
+      # ::notice:: the step above started writing to — per P1, per-scenario
+      # annotations once consumed the ten-per-check-run budget and dropped the
+      # report that carried the actual bytes, and a second notice risks the
+      # same fate.
+      #
+      # continue-on-error on the exploratory steps below (W1, W4, W2): a bug
+      # in THIS new measurement code must never prevent the step after it —
+      # up to and including the real per-shard corpus run — from still
+      # running. It does NOT weaken W2's actual "did the runner survive"
+      # question: a genuine runner loss is an infrastructure-level failure
+      # this setting cannot paper over, and it fails the whole job outright
+      # rather than continuing — which is itself the signal (silence in the
+      # notice, not a graceful "lost" line).
+      - name: Measure W1 — process-spawn cost with Defender exclusions off/on
+        if: matrix.shard == 0
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          ACC="$(cygpath -u "${RUNNER_TEMP}")/probe-notice.txt"
+          N=20
+          _spawn_ms() {
+            local cmd="$1" i t0 t1
+            t0="${EPOCHREALTIME}"
+            for ((i = 0; i < N; i++)); do eval "${cmd}" > /dev/null 2>&1; done
+            t1="${EPOCHREALTIME}"
+            awk -v a="${t0}" -v b="${t1}" -v n="${N}" 'BEGIN { printf "%.2f", (b - a) * 1000 / n }'
+          }
+          jq_off="$(_spawn_ms 'jq -n 1')"
+          fork_off="$(_spawn_ms 'bash -c true')"
+          pwsh_off="$(_spawn_ms 'pwsh -NoProfile -Command exit')"
+
+          # Add-MpPreference needs admin rights and a NATIVE path; scripting
+          # it across a bash-to-pwsh quote boundary inline is not worth the
+          # escaping, so it goes to its own .ps1 file instead.
+          excl_dir="$(mktemp -d)"
+          excl_script="${excl_dir}/exclusions.ps1"
+          {
+            # shellcheck disable=SC2016  # $paths/$p are PowerShell variables
+            # for pwsh to read from this generated .ps1 file, not a shell
+            # expansion — same pattern as the toolchain-report step above.
+            printf '$paths = @("%s","%s","%s","%s")\n' \
+              "$(cygpath -w "$(dirname "$(command -v jq)")")" \
+              "$(cygpath -w "$(dirname "$(command -v bash)")")" \
+              "$(cygpath -w "$(cygpath -u "${RUNNER_TEMP}")")" \
+              "$(cygpath -w "${GITHUB_WORKSPACE}")"
+            # shellcheck disable=SC2016
+            printf 'foreach ($p in $paths) { try { Add-MpPreference -ExclusionPath $p -ErrorAction Stop; Write-Host "excluded: $p" } catch { Write-Host "exclusion FAILED for ${p}: $_" } }\n'
+          } > "${excl_script}"
+          excl_result="$(pwsh -NoProfile -File "$(cygpath -w "${excl_script}")" 2>&1 | tr '\n' ';')"
+          rm -rf "${excl_dir}"
+
+          jq_on="$(_spawn_ms 'jq -n 1')"
+          fork_on="$(_spawn_ms 'bash -c true')"
+          pwsh_on="$(_spawn_ms 'pwsh -NoProfile -Command exit')"
+
+          {
+            printf 'W1 Defender exclusion attempt: %s%%0A' "${excl_result}"
+            printf 'W1 jq.exe spawn ms, excl off/on: %s / %s%%0A' "${jq_off}" "${jq_on}"
+            printf 'W1 git-bash fork ms, excl off/on: %s / %s%%0A' "${fork_off}" "${fork_on}"
+            printf 'W1 pwsh start ms, excl off/on: %s / %s%%0A' "${pwsh_off}" "${pwsh_on}"
+          } >> "${ACC}"
+
+      - name: Measure W4 — MSYS-built jq (LF-emitting) availability and corpus cost
+        if: matrix.shard == 0
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          ACC="$(cygpath -u "${RUNNER_TEMP}")/probe-notice.txt"
+          alt_jq=""
+          # MSYS2's OWN package manager — a separate install from git-bash's
+          # bundled MINGW64 environment — is the one documented source of a
+          # jq build that goes through the POSIX emulation layer rather than
+          # native Win32 text-mode stdio (research.md §3.1 option (a)).
+          pacman_bin=""
+          if command -v pacman > /dev/null 2>&1; then
+            pacman_bin="$(command -v pacman)"
+          elif [ -x /c/msys64/usr/bin/pacman.exe ]; then
+            pacman_bin=/c/msys64/usr/bin/pacman.exe
+          fi
+          if [ -n "${pacman_bin}" ]; then
+            "${pacman_bin}" -Sy --noconfirm jq > /dev/null 2>&1 || true
+            for candidate in /c/msys64/usr/bin/jq.exe /c/msys64/usr/bin/jq; do
+              [ -x "${candidate}" ] && alt_jq="${candidate}" && break
+            done
+          fi
+
+          if [ -z "${alt_jq}" ]; then
+            printf 'W4 MSYS-built jq: not available on this runner (no pacman/MSYS2 jq found)%%0A' >> "${ACC}"
+          else
+            alt_crlf=no
+            [[ "$("${alt_jq}" -rn '"a\nb"' 2> /dev/null)" == *$'\r'* ]] && alt_crlf=yes
+            # A 10-way subset (~8-9 scenarios), not the full 84 — a bounded
+            # add-on rather than doubling this shard's own corpus cost
+            # (contracts/windows-probe.md P3).
+            w4_log="$(mktemp)"
+            t0="${EPOCHREALTIME}"
+            # The env-var-prefix form scopes PATH to this one command only —
+            # the calling shell's own PATH is never touched, so there is
+            # nothing to restore afterward.
+            PATH="$(dirname "${alt_jq}"):${PATH}" \
+              SPEC_KIT_JIRA_SHARD_TOTAL=10 SPEC_KIT_JIRA_SHARD_INDEX=0 \
+              bash tests/conformance/ci-conformance.sh > "${w4_log}" 2>&1
+            w4_status=$?
+            t1="${EPOCHREALTIME}"
+            w4_dur="$(awk -v a="${t0}" -v b="${t1}" 'BEGIN { printf "%.1f", b - a }')"
+            w4_verdicts="$(grep -oE 'verdicts: [0-9]+/[0-9]+' "${w4_log}" | tail -n1)"
+            rm -f "${w4_log}"
+            {
+              printf 'W4 MSYS-built jq: found (%s), emits CRLF: %s%%0A' "${alt_jq}" "${alt_crlf}"
+              printf 'W4 corpus cost with that jq (10-way subset, shard 0): %ss, exit=%s, %s%%0A' \
+                "${w4_dur}" "${w4_status}" "${w4_verdicts:-no verdict line found}"
+            } >> "${ACC}"
+          fi
 
       - name: Run the conformance corpus against both ports and diff the captures
         shell: bash
-        run: bash tests/conformance/ci-conformance.sh
+        run: |
+          if [ "${{ matrix.shard }}" = "0" ]; then
+            bash tests/conformance/ci-conformance.sh | tee "$(cygpath -u "${RUNNER_TEMP}")/corpus-run.log"
+          else
+            bash tests/conformance/ci-conformance.sh
+          fi
+
+      - name: Measure W3 — per-port, per-scenario time split (this shard's real run)
+        if: matrix.shard == 0
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          ACC="$(cygpath -u "${RUNNER_TEMP}")/probe-notice.txt"
+          LOG="$(cygpath -u "${RUNNER_TEMP}")/corpus-run.log"
+          if [ -f "${LOG}" ]; then
+            summary="$(grep -oE 'bash=[0-9.]+s pwsh=[0-9.]+s' "${LOG}" \
+              | sed -E 's/bash=([0-9.]+)s pwsh=([0-9.]+)s/\1 \2/' \
+              | awk '{ b += $1; p += $2; n++ } END { if (n > 0) printf "n=%d bash_total=%.1fs bash_avg=%.2fs pwsh_total=%.1fs pwsh_avg=%.2fs", n, b, b/n, p, p/n; else print "no timing lines found" }')"
+          else
+            summary="corpus-run.log not found — the main corpus step may not have completed"
+          fi
+          printf 'W3 per-port split (shard 0, %s scenarios): %s%%0A' "${SPEC_KIT_JIRA_SHARD_TOTAL:-1}" "${summary}" >> "${ACC}"
+
+      - name: Measure W2 — corpus survival and verdict count at concurrency 3 and 4
+        if: matrix.shard == 0
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          ACC="$(cygpath -u "${RUNNER_TEMP}")/probe-notice.txt"
+          for degree in 3 4; do
+            log="$(mktemp)"
+            t0="${EPOCHREALTIME}"
+            SPEC_KIT_JIRA_CONFORMANCE_JOBS="${degree}" SPEC_KIT_JIRA_SHARD_TOTAL=10 SPEC_KIT_JIRA_SHARD_INDEX=0 \
+              bash tests/conformance/ci-conformance.sh > "${log}" 2>&1
+            status=$?
+            t1="${EPOCHREALTIME}"
+            dur="$(awk -v a="${t0}" -v b="${t1}" 'BEGIN { printf "%.1f", b - a }')"
+            verdicts="$(grep -oE 'verdicts: [0-9]+/[0-9]+' "${log}" | tail -n1)"
+            printf 'W2 concurrency=%s (10-way subset, shard 0): exit=%s, %ss, %s%%0A' \
+              "${degree}" "${status}" "${dur}" "${verdicts:-no verdict line found — check for runner loss}" >> "${ACC}"
+            rm -f "${log}"
+          done
+
+      - name: Emit the Windows probe notice
+        if: always() && matrix.shard == 0
+        shell: bash
+        run: |
+          ACC="$(cygpath -u "${RUNNER_TEMP}")/probe-notice.txt"
+          { printf '::notice title=Host toolchain and W1-W4::'; cat "${ACC}"; printf '\n'; }
