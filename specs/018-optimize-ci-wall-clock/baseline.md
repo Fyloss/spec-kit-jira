@@ -517,6 +517,31 @@ Full local run via `tests/run-bash.sh` itself (dogfooding the change):
 16-core host × 3), `files executed: 154, tests executed: 1455, files
 failed: 0`, `PASSED`.
 
+## T032/T033 — profile capture mechanism built, not yet populated (2026-08-05)
+
+`tests/run-bash.sh` now times each worker (`EPOCHREALTIME` around the
+`bats` call, written to `<log>.dur`) and, when
+`SPEC_KIT_JIRA_BATS_DUMP_TIMINGS=<path>` is set, aggregates every executed
+file's duration into `<seconds>\t<path-relative-to-ROOT>` lines at that
+path — the exact format T031's reader expects. Verified: a small fixture
+run writes exactly one well-formed line per executed file.
+
+**Deliberately not used to produce the real profile from this host.**
+Research §4.2 measured this dev host at load average 167 when the original
+per-file timing was attempted, and this project's standing rule is that a
+budget-relevant number comes from a CI run, never a local wall clock — the
+same rule applies to PRODUCING the profile, not only to citing it. Running
+`SPEC_KIT_JIRA_BATS_DUMP_TIMINGS=tests/bash-suite-timings.txt tests/run-bash.sh`
+locally right now and committing the result would satisfy T032's letter
+while violating the reason it exists.
+
+**T033 not started — flagged rather than made silently**: refreshing this
+profile from `bash-suite-stability.yml`'s nightly means that scheduled job
+committing a file back to the repo, which needs `contents: write`.
+`bash-suite-stability.yml` currently declares `permissions: contents: read`
+— a deliberate minimum this feature should not widen without saying so.
+Raised to the user rather than changed silently, same posture as T015.
+
 ### T015 — the escalated decision (answered by the user, 2026-08-05)
 
 Put to the user with W1's measured number attached (W4's, per above, was not

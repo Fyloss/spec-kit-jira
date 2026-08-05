@@ -208,3 +208,16 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" =~ files\ executed:\ 2 ]]
 }
+
+# --- T032/T033 [018, Phase 4/US2] — profile-producing run (D5, FR-009) -------
+
+@test "SPEC_KIT_JIRA_BATS_DUMP_TIMINGS writes one profile line per executed file" {
+  local out="${FIXDIR}/dumped.txt"
+  run env SPEC_KIT_JIRA_BATS_DUMP_TIMINGS="${out}" "${RUNNER}" "${FIXDIR}"
+  [ "$status" -eq 0 ]
+  [ -f "${out}" ]
+  [ "$(wc -l < "${out}" | tr -d '[:space:]')" -eq 2 ]
+  run awk -F'\t' '{ if ($1 !~ /^[0-9.]+$/ || $2 == "") exit 1 }' "${out}"
+  [ "$status" -eq 0 ]
+  rm -f "${out}"
+}

@@ -41,8 +41,16 @@ if [[ "${1:-}" == "__run_one" ]]; then
   while IFS= read -r v; do unset "${v}"; done < <(compgen -A variable BATS_ || true)
   while IFS= read -r fn; do unset -f "${fn}"; done < <(compgen -A function bats_ || true)
   rc=0
+  _t0="${EPOCHREALTIME}"
   bats "${file}" > "${log}" 2>&1 || rc=$?
+  _t1="${EPOCHREALTIME}"
   printf '%s' "${rc}" > "${log}.rc"
+  # T032/T033 (018): this worker's own duration, so the aggregator below can
+  # build the LPT profile T031 reads — a scheduling hint only, never a
+  # filter or a source of verdicts, and never derived from a local wall
+  # clock for the BUDGET this feature sets (research §4.2) — this capture
+  # exists so a CI run, not a developer's laptop, produces that number.
+  awk -v a="${_t0}" -v b="${_t1}" 'BEGIN { printf "%.3f", b - a }' > "${log}.dur"
   exit 0
 fi
 
@@ -240,6 +248,13 @@ fi
 TOTAL_TESTS=0
 FAILED_FILES=0
 EXECUTED_FILES=0
+# T032/T033 (018): when a caller asks for it, accumulate this run's own
+# per-file durations into the profile format T031 reads — the mechanism a
+# nightly workflow step commits from, never derived from a local wall clock
+# for a budget decision (research §4.2's caveat governs USING the number,
+# not producing it here).
+DUMP_TIMINGS="${SPEC_KIT_JIRA_BATS_DUMP_TIMINGS:-}"
+TIMINGS_OUT=""
 for f in "${FILES[@]}"; do
   safe="$(printf '%s' "${f}" | tr '/' '_')"
   log="${RESULTS_DIR}/${safe}.log"
@@ -254,6 +269,10 @@ for f in "${FILES[@]}"; do
   count="$(grep -m1 -E '^1\.\.[0-9]+$' "${log}" | sed -E 's/^1\.\.//')"
   [[ "${count}" =~ ^[0-9]+$ ]] || count=0
   TOTAL_TESTS=$((TOTAL_TESTS + count))
+  if [[ -n "${DUMP_TIMINGS}" && -f "${log}.dur" ]]; then
+    rel="${f#"${ROOT}/"}"
+    TIMINGS_OUT+="$(cat "${log}.dur")"$'\t'"${rel}"$'\n'
+  fi
   if [[ "${rc}" != "0" ]]; then
     FAILED_FILES=$((FAILED_FILES + 1))
     printf 'run-bash.sh: FAIL %s\n' "${f}"
@@ -262,6 +281,11 @@ for f in "${FILES[@]}"; do
     grep -E '^(not ok|# )' "${log}" | sed 's/^/  /'
   fi
 done
+
+if [[ -n "${DUMP_TIMINGS}" ]]; then
+  printf '%s' "${TIMINGS_OUT}" > "${DUMP_TIMINGS}"
+  printf 'run-bash.sh: wrote per-file timing profile to %s (%d file(s))\n' "${DUMP_TIMINGS}" "${EXECUTED_FILES}"
+fi
 
 printf 'run-bash.sh: summary: files executed: %d, tests executed: %d, files failed: %d\n' \
   "${EXECUTED_FILES}" "${TOTAL_TESTS}" "${FAILED_FILES}"
