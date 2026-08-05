@@ -88,6 +88,62 @@ jobs:
           $r = Invoke-Pester -Path tests/powershell -PassThru -Output Detailed
           if ($r.FailedCount -gt 0) { exit 1 }
 
+      # T015/T025 (018) — Complexity Tracking decision, option (a): the
+      # native jq on windows-latest is CRLF-emitting (docs/10-windows-
+      # portability.md quirk 2), which makes the port's own output.sh guard
+      # install a `sed` wrapper around EVERY jq call — ~1.9x on the corpus's
+      # dominant Windows cost (research.md §3.1), frozen production code
+      # under FR-020. An MSYS2-installed jq goes through the POSIX emulation
+      # layer instead and emits LF (measured: probe run 31036041946), so the
+      # wrapper's own condition reports false and is never installed — zero
+      # production-code change. Deliberately scoped to THIS workflow only:
+      # windows-conformance.yml (the probe) stays on the native jq so the
+      # wrapper's active code path — which found quirks 1 and 7 — is still
+      # exercised on demand (baseline.md's T015 record). Every failure mode
+      # below falls back to the native jq (slower, still correct) rather
+      # than failing the job.
+      - name: Prefer an LF-emitting jq for the corpus (Windows only, T015 option (a))
+        if: runner.os == 'Windows'
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          pacman_bin=""
+          if command -v pacman > /dev/null 2>&1; then
+            pacman_bin="$(command -v pacman)"
+          elif [ -x /c/msys64/usr/bin/pacman.exe ]; then
+            pacman_bin=/c/msys64/usr/bin/pacman.exe
+          fi
+          if [ -z "${pacman_bin}" ]; then
+            echo "no MSYS2 pacman found — falling back to the native jq"
+            exit 0
+          fi
+          # `timeout` is not guaranteed on this host (confirmed absent on the
+          # macOS dev host that authored this step; unconfirmed either way
+          # on windows-latest's git-bash) — used when present, skipped
+          # rather than assumed when not, so its absence alone can never
+          # defeat this guard.
+          sync_cmd=("${pacman_bin}" -Sy --noconfirm jq)
+          command -v timeout > /dev/null 2>&1 && sync_cmd=(timeout 120 "${sync_cmd[@]}")
+          if ! "${sync_cmd[@]}" > /dev/null 2>&1; then
+            echo "pacman jq install failed — falling back to the native jq"
+            exit 0
+          fi
+          alt_jq=""
+          for candidate in /c/msys64/usr/bin/jq.exe /c/msys64/usr/bin/jq; do
+            [ -x "${candidate}" ] && alt_jq="${candidate}" && break
+          done
+          if [ -z "${alt_jq}" ]; then
+            echo "pacman reported success but no jq binary was found — falling back to the native jq"
+            exit 0
+          fi
+          if [[ "$("${alt_jq}" -rn '"a\nb"' 2> /dev/null)" == *$'\r'* ]]; then
+            echo "the MSYS2 jq on this runner emits CRLF too — falling back to the native jq"
+            exit 0
+          fi
+          dirname "${alt_jq}" >> "${GITHUB_PATH}"
+          echo "using LF-emitting jq at ${alt_jq} for the corpus step"
+
       # T103 (008) — the conformance corpus proves byte-identical behaviour on
       # EVERY host this extension ships for, not just Linux: a divergence that
       # only a real Windows or macOS host would expose (path separators, line

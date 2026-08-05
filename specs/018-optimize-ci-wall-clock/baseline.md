@@ -368,6 +368,93 @@ option (a)'s implementation in `ci.yml` needs W4's answer (does an
 LF-emitting `jq` actually exist on this runner) confirmed before it can be
 trusted on a blocking, production workflow.
 
+## T011 — third probe push (run `31036041946`, commit `1fb524c`, 2026-08-05)
+
+**W4, finally answered.** MSYS2's `pacman` exists at
+`/c/msys64/usr/bin/pacman.exe`; `pacman -Sy jq` (exit 0) installs
+`/c/msys64/usr/bin/jq.exe`, and that binary **emits LF, not CRLF** — the
+narrowed, breadcrumbed step completed in seconds this time (no 37-minute
+mystery), confirming the earlier version's cost lived entirely in the
+corpus-re-run half that was cut, not in detection itself. **Option (a) is
+technically feasible on this runner image.**
+
+Shard 3 failed this run with "the hosted runner lost communication with
+server" — an infrastructure flake, not a regression: shard 3 runs no W1-W4
+code (shard-0-only) and its corpus step is byte-identical to the prior two
+runs where it passed cleanly. Not retried — this project's own convention
+(one retry maximum on an inconclusive run) and Constitution VI both treat an
+isolated infra flake as noise, not a finding. Shards 0 and 2 again failed
+on exactly `us2-field-defaults-option-question` and `us2-field-defaults-question`
+respectively — the third consecutive confirmation of an unchanged verdict
+set across all three probe pushes.
+
+**W1/W3 cross-validated against the second push** (same order of magnitude,
+confirming the earlier numbers were not noise):
+
+| Measurement | Push 2 | Push 3 |
+| --- | --- | --- |
+| `jq.exe` spawn, excl off/on | 48.74 / 47.47 ms | 56.64 / 53.40 ms |
+| git-bash fork, excl off/on | 25.31 / 25.08 ms | 27.54 / 28.11 ms |
+| `pwsh` start, excl off/on | 219.83 / 217.51 ms | 255.55 / 269.36 ms |
+| bash leg avg (per scenario) | 76.87s | 94.30s |
+| pwsh leg avg (per scenario) | 4.45s | 6.12s |
+
+Defender's effect stays within measurement noise on both runs (once even
+reversing, i.e. "on" slower than "off") — the ~1.9× lever this feature
+still needs is the CRLF-guard doubling, not Defender exclusions. The
+bash-leg-dominates-cost finding (≈15-17× the pwsh leg) held on both runs.
+
+**All four questions are now answered.** Proceeding to T025.
+
+## T025 — option (a) applied to `ci.yml` (2026-08-05)
+
+A new step, `Prefer an LF-emitting jq for the corpus (Windows only, T015
+option (a))`, added to the `unit` job's Windows leg immediately before the
+conformance-corpus step. Guarded at every point (no `pacman` found, install
+fails, no binary found after a claimed-successful install, binary still
+emits CRLF) — each falls back to the native `jq` via `exit 0` with nothing
+written to `GITHUB_PATH`, matching D3's "degrade to slower-but-correct,
+never fail the job" pattern. Only the success path appends the MSYS2 `jq`'s
+directory to `GITHUB_PATH`, ahead of the native one, for the remainder of
+the job.
+
+**A real bug caught by local testing before this ever reached a real
+runner**: the first draft wrapped the `pacman` sync in `timeout 120 ...`.
+`timeout` is a GNU coreutils command with no confirmed presence on either
+this macOS dev host (confirmed absent) or `windows-latest`'s git-bash
+(unconfirmed either way) — had it been silently assumed, its absence alone
+would have made `pacman -Sy` report as "failed" via `command not found`
+(exit 127) on **every run**, defeating T025 entirely while looking like a
+successful, guarded fallback. Fixed: `timeout` is used only when
+`command -v timeout` finds it, never assumed.
+
+**Every branch verified locally** (macOS, `pacman`/`jq.exe` stubbed — the
+hardcoded `/c/msys64/...` paths themselves cannot be exercised off Windows,
+same category as `cygpath`):
+- no `pacman` on PATH → fallback, `GITHUB_PATH` untouched
+- `pacman` exits non-zero → fallback, `GITHUB_PATH` untouched
+- alt `jq` found but still emits CRLF → fallback, `GITHUB_PATH` untouched
+- alt `jq` found and emits LF → `GITHUB_PATH` gains its directory
+
+Full local bash suite re-run after landing: see T025 entry below for the
+count. `actionlint` clean on both `ci.yml` and `windows-conformance.yml`.
+
+**Deviation from the literal task wording, by the user's own condition**:
+T025 says "install the LF-emitting `jq` in `ci.yml` **and the probe**."
+Applied to `ci.yml` only — `windows-conformance.yml` deliberately keeps the
+runner's native `jq` so the `output.sh` CRLF guard's active branch stays
+exercised on demand (T015's record, above). This is not an oversight; it
+is the condition the user attached when choosing option (a).
+
+**Not yet pushed to the probe or measured on the real runner**: this step
+has been verified by local stub only. Whether it actually shortens the real
+`windows-latest` corpus step by anything close to the ~1.9× research.md
+estimated is unmeasured until a real `unit` job run (on `ci.yml`, not the
+probe) exercises it — that requires either a push to a PR/branch that
+triggers `ci.yml`, or `windows-conformance.yml` temporarily pointed at this
+same guarded step for one measurement run. Recorded here as the next open
+question, not silently assumed.
+
 ### T015 — the escalated decision (answered by the user, 2026-08-05)
 
 Put to the user with W1's measured number attached (W4's, per above, was not
