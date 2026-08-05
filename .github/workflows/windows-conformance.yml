@@ -235,57 +235,51 @@ jobs:
             printf 'W1 pwsh start ms, excl off/on: %s / %s%%0A' "${pwsh_off}" "${pwsh_on}"
           } >> "${ACC}"
 
-      - name: Measure W4 — MSYS-built jq (LF-emitting) availability and corpus cost
+      - name: Measure W4 — MSYS-built jq (LF-emitting) availability
+        # Deliberately narrow (detection only, no corpus re-run): the
+        # earlier, broader version of this step (installing jq AND
+        # re-running a 10-scenario corpus slice under it) ran for 37 minutes
+        # on run 31028591939 and produced no data at all — not diagnosable
+        # further without raw job logs (403, non-admin token). This version
+        # answers only "does an LF-emitting jq exist here", which is what
+        # T015's decision actually needs; a cost comparison, if still wanted
+        # later, is a separate, single-purpose probe of its own.
         if: matrix.shard == 0
         shell: bash
         continue-on-error: true
         run: |
           set -uo pipefail
           ACC="$(cygpath -u "${RUNNER_TEMP}")/probe-notice.txt"
+          # Breadcrumb FIRST: if anything below hangs or errors unexpectedly,
+          # the notice still shows this step at least started — the earlier
+          # version's total silence, even on its safe first line, is exactly
+          # what made it undiagnosable from here.
+          printf 'W4 step started%%0A' >> "${ACC}"
+
           alt_jq=""
-          # MSYS2's OWN package manager — a separate install from git-bash's
-          # bundled MINGW64 environment — is the one documented source of a
-          # jq build that goes through the POSIX emulation layer rather than
-          # native Win32 text-mode stdio (research.md §3.1 option (a)).
           pacman_bin=""
           if command -v pacman > /dev/null 2>&1; then
             pacman_bin="$(command -v pacman)"
           elif [ -x /c/msys64/usr/bin/pacman.exe ]; then
             pacman_bin=/c/msys64/usr/bin/pacman.exe
           fi
+          printf 'W4 pacman: %s%%0A' "${pacman_bin:-not found}" >> "${ACC}"
+
           if [ -n "${pacman_bin}" ]; then
-            "${pacman_bin}" -Sy --noconfirm jq > /dev/null 2>&1 || true
+            sync_rc=0
+            timeout 60 "${pacman_bin}" -Sy --noconfirm jq > /dev/null 2>&1 || sync_rc=$?
+            printf 'W4 pacman -Sy jq exit: %s%%0A' "${sync_rc}" >> "${ACC}"
             for candidate in /c/msys64/usr/bin/jq.exe /c/msys64/usr/bin/jq; do
               [ -x "${candidate}" ] && alt_jq="${candidate}" && break
             done
           fi
 
           if [ -z "${alt_jq}" ]; then
-            printf 'W4 MSYS-built jq: not available on this runner (no pacman/MSYS2 jq found)%%0A' >> "${ACC}"
+            printf 'W4 MSYS-built jq: not available on this runner%%0A' >> "${ACC}"
           else
             alt_crlf=no
             [[ "$("${alt_jq}" -rn '"a\nb"' 2> /dev/null)" == *$'\r'* ]] && alt_crlf=yes
-            # A 10-way subset (~8-9 scenarios), not the full 84 — a bounded
-            # add-on rather than doubling this shard's own corpus cost
-            # (contracts/windows-probe.md P3).
-            w4_log="$(mktemp)"
-            t0="${EPOCHREALTIME}"
-            # The env-var-prefix form scopes PATH to this one command only —
-            # the calling shell's own PATH is never touched, so there is
-            # nothing to restore afterward.
-            PATH="$(dirname "${alt_jq}"):${PATH}" \
-              SPEC_KIT_JIRA_SHARD_TOTAL=10 SPEC_KIT_JIRA_SHARD_INDEX=0 \
-              bash tests/conformance/ci-conformance.sh > "${w4_log}" 2>&1
-            w4_status=$?
-            t1="${EPOCHREALTIME}"
-            w4_dur="$(awk -v a="${t0}" -v b="${t1}" 'BEGIN { printf "%.1f", b - a }')"
-            w4_verdicts="$(grep -oE 'verdicts: [0-9]+/[0-9]+' "${w4_log}" | tail -n1)"
-            rm -f "${w4_log}"
-            {
-              printf 'W4 MSYS-built jq: found (%s), emits CRLF: %s%%0A' "${alt_jq}" "${alt_crlf}"
-              printf 'W4 corpus cost with that jq (10-way subset, shard 0): %ss, exit=%s, %s%%0A' \
-                "${w4_dur}" "${w4_status}" "${w4_verdicts:-no verdict line found}"
-            } >> "${ACC}"
+            printf 'W4 MSYS-built jq: found (%s), emits CRLF: %s%%0A' "${alt_jq}" "${alt_crlf}" >> "${ACC}"
           fi
 
       - name: Run the conformance corpus against both ports and diff the captures

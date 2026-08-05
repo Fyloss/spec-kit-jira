@@ -361,6 +361,31 @@ needed later, the right next step is a narrower, single-purpose probe (just
 the pacman/jq LF-check, no corpus re-run) with a breadcrumb written before
 every step of it — not a repeat of this attempt.
 
+**Update, same day**: after the user chose option (a) for T015 (below), W4
+was rewritten exactly that way — detection only, a breadcrumb written before
+every sub-step, no corpus re-run — and queued for a third push, since
+option (a)'s implementation in `ci.yml` needs W4's answer (does an
+LF-emitting `jq` actually exist on this runner) confirmed before it can be
+trusted on a blocking, production workflow.
+
+### T015 — the escalated decision (answered by the user, 2026-08-05)
+
+Put to the user with W1's measured number attached (W4's, per above, was not
+yet available at the time of asking). **Decision: option (a)** — install an
+LF-emitting `jq` on the Windows runner — **with one condition attached that
+the user approved**: apply it only to the blocking `ci.yml` leg, and
+deliberately leave `windows-conformance.yml` (the probe) on the runner's
+native, CRLF-emitting `jq`. Rationale for the condition, raised before the
+decision was asked and accepted as part of it: option (a) applied
+everywhere would mean the corpus never again exercises the `output.sh` CRLF
+guard's active branch on Windows — the exact code path that found quirks 1
+and 7. Keeping the probe on native `jq` preserves that coverage on demand
+(a manual `ci/windows-probe` push, or a future nightly run) without paying
+its cost on every blocking PR. No FR-020 exception is needed for this
+decision — (a) touches no production code — but it IS recorded here as the
+deliberate, named divergence FR-022/T016 requires between what the blocking
+CI exercises and what a stock Windows git-bash user's `jq` actually does.
+
 ### Consequence for T015
 
 The Complexity Tracking decision can be put to the user with W1's number

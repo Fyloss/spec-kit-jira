@@ -81,7 +81,7 @@ phase genuinely blocks — it is not a warm-up.
 
 ### The escalated decision
 
-- [ ] T015 Put plan.md's Complexity Tracking decision to the user with W1 and W4's measured numbers attached — option (a) an LF-emitting `jq` on the Windows runner (workflow-scoped, FR-020-safe, fidelity trade-off), option (b) a spawn-free guard inside `scripts/bash/lib/output.sh` (production code, frozen by FR-020, and unproven), or relaxing SC-001 to what frozen code delivers. Record the answer in `specs/018-optimize-ci-wall-clock/baseline.md`
+- [X] T015 Put plan.md's Complexity Tracking decision to the user with W1 and W4's measured numbers attached — option (a) an LF-emitting `jq` on the Windows runner (workflow-scoped, FR-020-safe, fidelity trade-off), option (b) a spawn-free guard inside `scripts/bash/lib/output.sh` (production code, frozen by FR-020, and unproven), or relaxing SC-001 to what frozen code delivers. Record the answer in `specs/018-optimize-ci-wall-clock/baseline.md` — **decided: option (a), scoped to `ci.yml` only, probe stays on native `jq`** — see baseline.md
 - [ ] T016 If the user chooses option (a), record it in `docs/10-windows-portability.md` as a deliberate, named divergence between what CI exercises and what a stock Windows host runs — not as an invisible optimisation
 - [ ] T017 Record in `specs/018-optimize-ci-wall-clock/baseline.md` the arithmetic that T011's numbers produce for the Windows corpus step, so US1's target is chased against measured factors rather than research.md's estimates
 
