@@ -63,6 +63,11 @@ _mock_start_shim() {
 
   MOCK_STATE_PATH="${MOCK_TMPDIR}/state.json"
   jq -n --slurpfile cfg "${MOCK_CONFIG_PATH}" '
+    def default_status(pk):
+      (($cfg[0].issueTypeStyle // {})[pk]) as $style
+      | if $style == "french" then {name: "À faire", statusCategory: {key: "new"}}
+        else {name: "To Do", statusCategory: {key: "new"}}
+        end;
     ($cfg[0].issues // {}) as $seed
     | { issues: ($seed | to_entries | map({
           key: .key,
@@ -72,9 +77,10 @@ _mock_start_shim() {
                 summary: (.value.summary // ""),
                 description: (.value.description // null),
                 priority: (.value.priority // null),
-                status: (.value.status // {name: "To Do", statusCategory: {key: "new"}}),
+                status: (.value.status // default_status(.key | sub("-[0-9]+$"; ""))),
                 issuelinks: (.value.issuelinks // []),
-                parent: (.value.parent // null)
+                parent: (.value.parent // null),
+                issuetype: (.value.issuetype // null)
               }
               + (if (.value.flagged // false) then {Flagged: [{value: "Impediment"}]} else {} end)
             ),

@@ -1,0 +1,12 @@
+# Team config for the sub-task mandatory-field conformance fixture (012,
+# T006, US6) — a project whose sub-task type requires one recordable custom
+# field (Definition of Done) and one whose shape cannot be defaulted at all
+# (Affected Teams, an array; feature 011, FR-010).
+projects:
+  - key: TASKM
+    style: company_managed
+    hierarchy:
+      specification: Epic
+      story: Story
+      task: "Sub-task"
+routing_default: TASKM

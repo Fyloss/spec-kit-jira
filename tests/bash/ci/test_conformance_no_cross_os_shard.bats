@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # T017d [009, US2] — Mechanical guard for SC-011/FR-018/FR-019: every OS leg of
-# the `unit` job must run Pester in full AND the complete 74-scenario
+# the `unit` job must run Pester in full AND the complete 84-scenario
 # conformance corpus — never a shard of it. Decision 7 permits sharding the
 # corpus WITHIN one OS (multiple runners of the SAME os value); it explicitly
 # FORBIDS spreading scenarios ACROSS the three OSes, which would leave no host
@@ -13,12 +13,13 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (74)" {
+@test "the conformance corpus has exactly the recorded scenario count (84)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
+  # 012 adds ten task sub-task scenarios (74 -> 84).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 74 ]
+  [ "${count}" -eq 84 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

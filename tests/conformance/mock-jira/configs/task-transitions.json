@@ -1,0 +1,18 @@
+{
+  "projects": {"TASKS": "company"},
+  "transitions": {
+    "TASKS-1": [
+      {"id": "31", "name": "Terminé", "to": {"statusCategory": {"key": "done"}}, "fields": {}}
+    ],
+    "TASKS-2": [
+      {"id": "21", "name": "En cours", "to": {"statusCategory": {"key": "indeterminate"}}, "fields": {}}
+    ],
+    "TASKS-3": [
+      {"id": "31", "name": "Fait", "to": {"statusCategory": {"key": "done"}}, "fields": {}},
+      {"id": "51", "name": "Annulé", "to": {"statusCategory": {"key": "done"}}, "fields": {}}
+    ],
+    "TASKS-4": [
+      {"id": "41", "name": "Fermer", "to": {"statusCategory": {"key": "done"}}, "fields": {"resolution": {"required": true, "name": "Résolution"}}}
+    ]
+  }
+}

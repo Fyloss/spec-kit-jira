@@ -1,0 +1,11 @@
+# Minimal team config for the task-tier reconcile integration suite
+# (012, T042/T043). A `task` role is declared and resolved into the binding
+# below, alongside the specification and story roles.
+projects:
+  - key: TASKP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing_default: TASKP

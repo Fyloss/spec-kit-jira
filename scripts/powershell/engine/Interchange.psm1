@@ -95,6 +95,49 @@ function Test-JiraInterchange {
         }
     }
 
+    # Phase 2, T026/T028, data-model.md §3: the task tier — validated only
+    # for a story that carries a "tasks" property at all (its absence is the
+    # off switch, FR-011).
+    $allTaskLocalIds = [System.Collections.Generic.List[string]]::new()
+    foreach ($s in @((Get-JiraInterchangeProp $d 'stories'))) {
+        if (-not (Test-JiraInterchangeProp $s 'tasks')) { continue }
+        # Direct property access, NOT Get-JiraInterchangeProp: that helper's
+        # `return $Object.$Name` triggers PowerShell's single-element-array
+        # unwrapping (the exact hazard Get-JiraArrayCount above exists to
+        # avoid), which would turn a genuine one-task array into a scalar
+        # PSCustomObject and misreport it as "not an array".
+        $tasksVal = $s.tasks
+        # Twin of the Bash rule `has("tasks") and ((.tasks | type) != "array")`
+        # (interchange.sh): once the key is present, EVERY non-array type is
+        # refused. Testing only for PSCustomObject let `null` and scalars reach
+        # the per-task loop below, where `@($null)` yields a ONE-element array
+        # holding $null — the story-level error went missing and three bogus
+        # task-level ones took its place, while a numeric value threw outright
+        # (Copilot review, PR #17). $null is already caught by -isnot, but is
+        # named explicitly because it is the case that actually shipped.
+        if ($null -eq $tasksVal -or $tasksVal -isnot [System.Array]) {
+            $errors.Add('story.tasks must be an array')
+            continue
+        }
+        foreach ($tk in @($tasksVal)) {
+            $marker = Get-JiraInterchangeProp $tk 'marker'
+            $markerState = [string](Get-JiraInterchangeProp $marker 'state')
+            if ([string]::IsNullOrEmpty($markerState)) { $markerState = 'absent' }
+            $taskLocalId = [string](Get-JiraInterchangeProp $tk 'local_id')
+            if ($markerState -ne 'absent' -and $taskLocalId -notmatch '^[0-9a-f]{16}$') {
+                $errors.Add('task.local_id is required and must be 16 hex characters unless the marker state is absent')
+            }
+            if ([string]::IsNullOrEmpty([string](Get-JiraInterchangeProp $tk 'title'))) { $errors.Add('task.title is required') }
+            if ((Get-JiraArrayCount (Get-JiraInterchangeProp $tk 'description') 'blocks') -lt 1) { $errors.Add('task.description.blocks must be non-empty') }
+            $doneVal = Get-JiraInterchangeProp $tk 'done'
+            if ($doneVal -isnot [bool]) { $errors.Add('task.done must be a boolean') }
+            if (-not [string]::IsNullOrEmpty($taskLocalId)) { $allTaskLocalIds.Add($taskLocalId) }
+        }
+    }
+    if ($allTaskLocalIds.Count -ne (@($allTaskLocalIds | Select-Object -Unique)).Count) {
+        $errors.Add('two tasks share a local_id')
+    }
+
     if ($errors.Count -eq 0) { return $true }
     foreach ($e in $errors) { [Console]::Error.WriteLine("interchange: $e") }
     return $false

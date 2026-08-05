@@ -31,11 +31,17 @@ source "${_cmd_reconcile_dir}/../engine/interchange.sh"
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../engine/story_marker.sh" # R5 step 1 — assign identifiers
 # shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../engine/task_marker.sh" # Phase 3, US1 — the task tier's own identifier
+# shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../engine/tasks_parse.sh" # Phase 3, US1 — the neutral tasks.md reader
+# shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/hierarchy.sh" # the mandatory-field gate (Phase 6, US3)
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/recognition.sh" # R5 step 2 — recognise recorded tickets
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/plan_apply.sh"
+# shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../sink/jira/discovery.sh" # Phase 8, US5 — the completion pass's transitions read
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../hooks/register_hooks.sh" # hook health — READ ONLY (003 FR-022)
 # shellcheck source=/dev/null
@@ -266,13 +272,14 @@ _reconcile_local_binding_for() {
 #   base_url always wins. Returns 2 / 3 exactly as _reconcile_local_binding_for
 #   when no override is set and the binding cannot be read.
 _reconcile_plan_context() {
-  local base="$1" key="$2" dir="$3" cfg="$4" recog="${5:-}" field_values="${6:-}"
+  local base="$1" key="$2" dir="$3" cfg="$4" recog="${5:-}" field_values="${6:-}" tasks_recog="${7:-}"
   # NOT "${5:-{}}" as the default inline: bash's brace-matching for a
   # `${...}` parameter expansion misparses a `{}`-shaped default value,
   # corrupting how the REST OF THE FUNCTION is parsed (a real, reproduced
   # failure — jq calls dozens of lines later raised a phantom "Unmatched
   # '}'"). Default it in a separate, brace-free statement instead.
   [[ -z "${recog}" ]] && recog='{}'
+  [[ -z "${tasks_recog}" ]] && tasks_recog='{}'
   local extra="${SPEC_KIT_JIRA_PLAN_CONTEXT:-}"
   if [[ -n "${extra}" ]]; then
     jq -cn --arg b "${base}" --argjson e "${extra}" '$e + {base_url:$b}'
@@ -344,10 +351,24 @@ _reconcile_plan_context() {
   # corrects.
   ticket_parents="$(jq -c '(.bound // {}) | with_entries(select(.value.current.parent != null)) | with_entries(.value |= .current.parent)' <<< "${recog}")"
 
+  # Phase 3, US1: the task tier's own type id and the recognised sub-tasks'
+  # keys/current content, merged into the SAME tickets map (safe — task and
+  # story local_ids are disjoint by construction) plus a task-only
+  # ticket_current map that plan_writes_tasks compares against for zero
+  # churn (contract §4 rule 3). Both are empty, and task_type_id absent,
+  # when no `task` role resolved — leaving this function's output
+  # byte-identical to before this feature (FR-011).
+  local task_type_id task_tickets ticket_current
+  task_type_id="$(jq -r '.roles.task.id // empty' <<< "${binding}")"
+  task_tickets="$(jq -c '(.bound // {}) | with_entries(.value |= .key)' <<< "${tasks_recog}")"
+  tickets="$(jq -c --argjson tt "${task_tickets}" '. + $tt' <<< "${tickets}")"
+  ticket_current="$(jq -c '(.bound // {}) | with_entries(.value |= .current)' <<< "${tasks_recog}")"
+
   jq -cn --arg b "${base}" --arg st "${story_type}" --argjson pids "${priority_ids}" --arg ef "${est_field}" \
     --arg pt "${parent_type_id}" --argjson psl "${parent_supports_link}" \
     --argjson tk "${tickets}" --argjson to "${ticket_origins}" --argjson td "${ticket_descriptions}" \
-    --argjson tp "${ticket_parents}" --argjson fd "${field_defaults}" '
+    --argjson tp "${ticket_parents}" --argjson fd "${field_defaults}" \
+    --arg tt "${task_type_id}" --argjson tc "${ticket_current}" '
     {base_url:$b}
     + (if $st == "" then {} else {story_type_id:$st} end)
     + (if $pt == "" then {} else {parent_type_id:$pt} end)
@@ -358,7 +379,9 @@ _reconcile_plan_context() {
     + (if ($to|length) == 0 then {} else {ticket_origins:$to} end)
     + (if ($td|length) == 0 then {} else {ticket_descriptions:$td} end)
     + (if ($tp|length) == 0 then {} else {ticket_parents:$tp} end)
-    + (if ($fd|length) == 0 then {} else {field_defaults:$fd} end)'
+    + (if ($fd|length) == 0 then {} else {field_defaults:$fd} end)
+    + (if $tt == "" then {} else {task_type_id:$tt} end)
+    + (if ($tc|length) == 0 then {} else {ticket_current:$tc} end)'
 }
 
 # cmd_reconcile <argv...> — reconcile one specification into its Jira project.
@@ -531,6 +554,12 @@ cmd_reconcile() {
   local gate_resolved="{}" gate_ask="true"
   local gate_binding rc_gate_binding=0
   gate_binding="$(_reconcile_local_binding_for "${project_key}" "${cfg_dir}")" || rc_gate_binding=$?
+  # Phase 3, US1: the task tier's own type id, read from the SAME binding —
+  # its presence is what "a task role is declared" means (FR-011). Reading
+  # tasks.md is gated on this, further down, never on the file's mere
+  # existence.
+  local task_type_id_candidate=""
+  [[ "${rc_gate_binding}" -eq 0 ]] && task_type_id_candidate="$(jq -r '.roles.task.id // empty' <<< "${gate_binding}")"
   if [[ "${rc_gate_binding}" -eq 0 ]]; then
     local gate_child_type; gate_child_type="$(jq -r '.child_type.id // empty' <<< "${gate_binding}")"
     if [[ -n "${gate_child_type}" ]]; then
@@ -695,13 +724,202 @@ cmd_reconcile() {
   doc_for_write="$(jq -c --argjson bids "${blocked_ids}" \
     '.stories |= [.[] | . as $s | select(($bids | index($s.local_id)) == null)]' <<< "${doc}")"
 
+  # Phase 3, US1 (contract §1-§3): the task tier. `tasks.md` is read ONLY
+  # when a `task` role resolved in the binding (task_type_id_candidate) —
+  # its mere presence on disk is never enough (FR-011). Its absence, once
+  # the role IS declared, is a silent no-op (FR-001).
+  local tasks_file="" tasks_actions="[]" tasks_recog='{"bound":{},"new":[],"blocked":[]}'
+  local task_role_active="false" task_warns="[]" task_withheld_count=0
+  local task_skip_notes="[]"
+  # Edge Cases, T084: a task checked before its sub-task has ever been
+  # created — the completion pass below has no key to read transitions for
+  # yet, so it defers here; resolved once the create below (if it completes)
+  # stamps a key into tasks_file.
+  local pending_create_complete_ids="[]"
+  if [[ -n "${task_type_id_candidate}" ]]; then
+    local candidate_tasks_file
+    candidate_tasks_file="$(dirname "${spec_file}")/tasks.md"
+    if [[ -f "${candidate_tasks_file}" ]]; then
+      task_role_active="true"
+      tasks_file="${candidate_tasks_file}"
+      local tasks_raw
+      tasks_raw="$(cat "${tasks_file}" 2> /dev/null; printf x)"; tasks_raw="${tasks_raw%x}"
+
+      # Task-tier verdict (Phase 5, US6, T065; data-model.md §5): a THIRD
+      # gate, separate from hierarchy_mandatory_gate, over the single type
+      # carrying the `task` role alone. Run BEFORE any marker is assigned
+      # or spliced into tasks.md, so a withheld task is never given a
+      # durable identifier (FR-039) — and before the lifecycle filter, so
+      # the whole tier is dropped by construction (FR-038) rather than by
+      # omission further down.
+      local task_gate_result task_gate_status
+      task_gate_result="$(hierarchy_task_gate "${gate_binding}" "${project_key}" "${fd_defaults_by_type}")"
+      task_gate_status="$(jq -r '.status' <<< "${task_gate_result}")"
+
+      if [[ "${task_gate_status}" != "ok" ]]; then
+        # Attribute against the RAW, unmarked text — purely to learn
+        # whether any task would actually have been written this run. A
+        # tier with nothing to mirror in the first place is not "withheld"
+        # (T056): the note, and the per-field detail below, fire only when
+        # at least one task is attributed.
+        local tasks_parsed_raw
+        tasks_parsed_raw="$(printf '%s' "${tasks_raw}" | tasks_parse_document)"
+        task_withheld_count="$(jq --argjson tp "${tasks_parsed_raw}" -r '
+          ($tp.tasks // []) as $all
+          | (.stories | length) as $n
+          | [$all[] | select(.attribution.story_ordinal != null
+                              and .attribution.story_ordinal >= 1
+                              and .attribution.story_ordinal <= $n)] | length
+        ' <<< "${doc_for_write}")"
+        if ((task_withheld_count > 0)); then
+          local task_type_name
+          task_type_name="$(jq -r '.roles.task.logical_name' <<< "${gate_binding}")"
+          local task_gate_fields task_gate_field_count i=0
+          task_gate_fields="$(jq -c '.fields' <<< "${task_gate_result}")"
+          task_gate_field_count="$(jq 'length' <<< "${task_gate_fields}")"
+          while ((i < task_gate_field_count)); do
+            local field_entry field_name field_line
+            field_entry="$(jq -c ".[${i}]" <<< "${task_gate_fields}")"
+            field_name="$(jq -r '.logical_name' <<< "${field_entry}")"
+            if [[ "$(jq -r 'has("reason")' <<< "${field_entry}")" == "true" ]]; then
+              local field_reason; field_reason="$(jq -r '.reason' <<< "${field_entry}")"
+              field_line="$(hierarchy_task_field_undefaultable_line "${field_name}" "${field_reason}" "${task_type_name}")"
+            else
+              field_line="$(hierarchy_task_field_unsatisfiable_line "${field_name}" "${project_key}" "${task_type_name}")"
+            fi
+            task_warns="$(jq -c --arg l "${field_line}" '. + [$l]' <<< "${task_warns}")"
+            # Not `((i++))`: its VALUE is the pre-increment 0 on the first
+            # pass, which `set -e` treats as failure and aborts the run.
+            i=$((i + 1))
+          done
+          task_warns="$(jq -c '. + ["reconcile: the task tier was withheld this run — a required field of its issue type could not be satisfied; the specification and story tiers still reconciled"]' <<< "${task_warns}")"
+        fi
+      else
+        local tasks_assigned tasks_for_doc
+        tasks_assigned="$(printf '%s' "${tasks_raw}" | task_marker_assign; printf x)"; tasks_assigned="${tasks_assigned%x}"
+        if [[ "${tasks_assigned}" != "${tasks_raw}" && "${dry_run}" != "true" ]]; then
+          marker_splice_write_file "${tasks_file}" "${tasks_assigned}" > /dev/null 2>&1 || true
+        fi
+        tasks_for_doc="${tasks_raw}"
+        [[ "${dry_run}" != "true" ]] && tasks_for_doc="${tasks_assigned}"
+
+        local tasks_parsed
+        tasks_parsed="$(printf '%s' "${tasks_for_doc}" | tasks_parse_document)"
+
+        # Attribution resolves against the specification's OWN stories, in
+        # document order (contract §3): an ordinal outside that range is
+        # dangling (FR-004), no ordinal at all is unattributed (FR-028) —
+        # neither ever reaches the document. Nesting a task under its
+        # story's own `tasks` array is what makes "attributed to a story
+        # this specification does not contain" unrepresentable downstream.
+        doc_for_write="$(jq -c --argjson tp "${tasks_parsed}" '
+          ($tp.tasks // []) as $all
+          | (.stories | length) as $n
+          | ($all | map(select(.attribution.story_ordinal != null
+                                and .attribution.story_ordinal >= 1
+                                and .attribution.story_ordinal <= $n))) as $attributed
+          | .stories |= (to_entries | map(
+              (.key + 1) as $ord | .value as $s
+              | ($attributed | map(select(.attribution.story_ordinal == $ord))) as $ts
+              | if ($ts | length) > 0 then ($s + {tasks: $ts}) else $s end
+            ))
+        ' <<< "${doc_for_write}")"
+
+        # Neither an unattributed nor a dangling task ever reaches the
+        # document (contract §3): this is the only place either can still be
+        # named, by task_ref, with its reason (FR-004, FR-028).
+        task_skip_notes="$(jq -cn --argjson tp "${tasks_parsed}" --argjson n "$(jq '.stories | length' <<< "${doc_for_write}")" \
+          --arg tf "${candidate_tasks_file}" --arg sf "${spec_file}" '
+          [ ($tp.tasks // [])[]
+            | if (.attribution.story_ordinal == null) then
+                "\(.task_ref) in \($tf) carries no story attribution and was not mirrored."
+              elif (.attribution.story_ordinal < 1 or .attribution.story_ordinal > $n) then
+                "\(.task_ref) in \($tf) is attributed to User Story \(.attribution.story_ordinal), which \($sf) does not contain, and was not mirrored."
+              else empty
+              end
+          ]')"
+
+        # A task-tier schema violation (FR-018's duplicate identifier, most
+        # commonly) withholds the WHOLE tier rather than the whole run —
+        # declaring a `task` role must never make the mirror worse than not
+        # declaring one. The specification and story tiers keep reconciling.
+        if ! printf '%s' "${doc_for_write}" | interchange_validate > /dev/null 2>&1; then
+          doc_for_write="$(jq -c '.stories |= map(del(.tasks))' <<< "${doc_for_write}")"
+          task_warns="$(jq -c '. + ["reconcile: the task tier could not be validated (a malformed or duplicate task identifier) and was withheld this run; the specification and story tiers still reconciled"]' <<< "${task_warns}")"
+          task_role_active="false"
+        else
+          # R5 step 2c — recognise the tasks, on the SAME terms as a story
+          # (Phase 2, T029/T030): one read per recorded key, verified
+          # against the SAME identity marker the read returns.
+          local tasks_slim rc_tasks_recog=0
+          tasks_slim="$(jq -c '[.stories[] | (.tasks // [])[] | {local_id, marker}]' <<< "${doc_for_write}")"
+          if [[ "$(jq 'length' <<< "${tasks_slim}")" -gt 0 ]]; then
+            tasks_recog="$(recognition_run "${tasks_slim}" "${spec_ref}" "${project_key}" "${tasks_file}" "task")" || rc_tasks_recog=$?
+            if ((rc_tasks_recog != 0)); then
+              _reconcile_fault "${rc_tasks_recog}" 'reconcile: a sub-task could not be recognised (zero writes)'
+              return $?
+            fi
+            local tasks_blocked_ids
+            tasks_blocked_ids="$(jq -c '[.blocked[].story]' <<< "${tasks_recog}")"
+            doc_for_write="$(jq -c --argjson bids "${tasks_blocked_ids}" \
+              '.stories |= [.[] | if has("tasks") then .tasks |= [.[] | . as $t | select(($bids | index($t.local_id)) == null)] else . end]' \
+              <<< "${doc_for_write}")"
+            task_warns="$(jq -c --argjson bw "$(jq -c '[.blocked[].detail]' <<< "${tasks_recog}")" '. + $bw' <<< "${task_warns}")"
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  # US3 (T073): orphan (FR-021) and re-attribution (FR-022) reporting — both
+  # pure notes, never a write. Scoped to a story already bound in Jira
+  # (`recog`'s `subtasks` extra, story-kind only) and to this run's OWN task
+  # issue type, so a genuinely unrelated hand-made sub-task is never mistaken
+  # for one this bridge created (contracts/task-tier.md §8 "never adopts a
+  # hand-made sub-task"). Runs whenever the project has a task role bound —
+  # independent of task_role_active, so a sub-task orphaned by deleting
+  # tasks.md itself (the most extreme case of "removed from tasks.md") is
+  # still caught, not only one orphaned by deleting its own entry.
+  local task_notes="[]"
+  if [[ -n "${task_type_id_candidate}" ]]; then
+    local orphan_notes
+    orphan_notes="$(jq -cn --argjson recog "${recog}" --argjson doc "${doc_for_write}" --argjson trecog "${tasks_recog}" \
+      --arg ttid "${task_type_id_candidate}" --arg tf "${candidate_tasks_file}" '
+      [ ($doc.stories // [])[] as $s
+        | ($recog.bound[$s.local_id].key // null) as $skey
+        | select($skey != null)
+        | ($recog.bound[$s.local_id].subtasks // []) as $subs
+        | ([($s.tasks // [])[] as $t | ($trecog.bound[$t.local_id].key // null)] | map(select(. != null))) as $expected
+        | $subs[] as $sub
+        | select($sub.issuetype_id == $ttid)
+        | select(($expected | index($sub.key)) == null)
+        | "\($sub.key) is recorded in Jira as a sub-task of \($skey), but \($tf) no longer attributes any task to it; nothing was changed in Jira."
+      ]')"
+
+    local reattribution_notes
+    reattribution_notes="$(jq -cn --argjson recog "${recog}" --argjson doc "${doc_for_write}" --argjson trecog "${tasks_recog}" \
+      --arg tf "${candidate_tasks_file}" '
+      [ ($doc.stories // [])[] as $s
+        | ($recog.bound[$s.local_id].key // null) as $target_key
+        | select($target_key != null)
+        | ($s.tasks // [])[] as $t
+        | ($trecog.bound[$t.local_id].key // null) as $tkey
+        | ($trecog.bound[$t.local_id].current.parent // null) as $cur_parent
+        | select($tkey != null and $cur_parent != null and $cur_parent != $target_key)
+        | "\($tkey) is attributed to \($target_key) in \($tf), but is recorded in Jira under \($cur_parent); nothing was re-parented."
+      ]')"
+
+    task_notes="$(jq -c --argjson b "${reattribution_notes}" '. + $b' <<< "${orphan_notes}")"
+  fi
+  task_notes="$(jq -c --argjson s "${task_skip_notes}" '. + $s' <<< "${task_notes}")"
+
   # SINK: the plan context (US2, FR-007–FR-011; Phase 3, US1: tickets/
   # ticket_origins/ticket_descriptions now come from recognition's `bound`
   # map instead of only from the override). An explicit
   # SPEC_KIT_JIRA_PLAN_CONTEXT overrides the derived object wholesale;
   # otherwise it is built from the resolved project's persisted binding.
   local plan_ctx rc_pc=0
-  plan_ctx="$(_reconcile_plan_context "${base}" "${project_key}" "${cfg_dir}" "${cfg}" "${recog}" "${field_values}")" || rc_pc=$?
+  plan_ctx="$(_reconcile_plan_context "${base}" "${project_key}" "${cfg_dir}" "${cfg}" "${recog}" "${field_values}" "${tasks_recog}")" || rc_pc=$?
   if [[ "${rc_pc}" -eq 2 ]]; then
     _reconcile_notice \
       'Jira mirror skipped: this repository is not bound to a Jira project yet.' \
@@ -741,6 +959,87 @@ cmd_reconcile() {
   local parent_action actions
   parent_action="$(jq -c '.parent' <<< "${plan}")"
   actions="$(jq -c '.stories' <<< "${plan}")"
+
+  # Phase 3, US1 (contract §4): the task tier's own plan, over the SAME
+  # document and context — never through plan_lifecycle, which only knows
+  # the two existing tiers. Skipped whenever the tier is inactive, so
+  # `tasks_actions` stays the "[]" it was initialised to and every
+  # downstream read of it is a no-op (FR-011).
+  if [[ "${task_role_active}" == "true" ]]; then
+    if ! tasks_actions="$(plan_writes_tasks "${doc_for_write}" "${plan_ctx}")"; then
+      task_warns="$(jq -c '. + ["reconcile: the task tier'"'"'s write plan could not be assembled and was withheld this run"]' <<< "${task_warns}")"
+      tasks_actions="[]"
+    fi
+  fi
+
+  # Phase 8, US5 (contract §6; research R5): the task tier's own completion
+  # pass. Scoped to a task ALREADY bound this run (tasks_recog.bound) — a
+  # task whose sub-task does not yet exist is skipped entirely (a future run
+  # completes it once it does; T084 is the same-run case, not yet resolved).
+  # A task whose `done` bit already agrees with its sub-task's classification
+  # contributes no entry at all, so this loop issues zero reads for it
+  # (FR-031's "an unchanged re-run issues none"). The backward pull is
+  # resolved here, never inside the PURE plan_lifecycle_tasks: only the
+  # command layer knows --on-drift.
+  if [[ "${task_role_active}" == "true" ]]; then
+    local completion_tasks='{}' completion_ids completion_id
+    completion_ids="$(jq -r '[.stories[] | (.tasks // [])[] | .local_id] | .[]' <<< "${doc_for_write}")"
+    while IFS= read -r completion_id; do
+      [[ -z "${completion_id}" ]] && continue
+      local c_bound; c_bound="$(jq -c --arg id "${completion_id}" '.bound[$id] // null' <<< "${tasks_recog}")"
+      if [[ "${c_bound}" == "null" ]]; then
+        local c_pending_done
+        c_pending_done="$(jq -r --arg id "${completion_id}" \
+          '[.stories[] | (.tasks // [])[] | select(.local_id == $id) | .done] | first' <<< "${doc_for_write}")"
+        if [[ "${c_pending_done}" == "true" ]]; then
+          pending_create_complete_ids="$(jq -c --arg id "${completion_id}" '. + [$id]' <<< "${pending_create_complete_ids}")"
+        fi
+        continue
+      fi
+      local c_key c_status_category c_blockers c_done c_entry
+      c_key="$(jq -r '.key' <<< "${c_bound}")"
+      c_status_category="$(jq -r '.status_category // ""' <<< "${c_bound}")"
+      c_blockers="$(jq -c '.blockers // []' <<< "${c_bound}")"
+      c_done="$(jq -r --arg id "${completion_id}" \
+        '[.stories[] | (.tasks // [])[] | select(.local_id == $id) | .done] | first' <<< "${doc_for_write}")"
+      c_entry="null"
+
+      if [[ "${c_done}" == "true" && "${c_status_category}" != "done" ]]; then
+        local c_fwd rc_fwd=0
+        c_fwd="$(discovery_task_transition "${c_key}" forward)" || rc_fwd=$?
+        if ((rc_fwd != 0)); then
+          _reconcile_fault "${rc_fwd}" "reconcile: sub-task ${c_key}'s available transitions could not be read (zero writes)"
+          return $?
+        fi
+        c_entry="$(jq -cn --arg k "${c_key}" --argjson b "${c_blockers}" --argjson f "${c_fwd}" '{key:$k, blockers:$b, forward:$f}')"
+      elif [[ "${c_done}" == "false" && "${c_status_category}" == "done" ]]; then
+        local c_bwd="null"
+        if [[ "${on_drift}" == "proceed" ]]; then
+          local rc_bwd=0
+          c_bwd="$(discovery_task_transition "${c_key}" backward)" || rc_bwd=$?
+          if ((rc_bwd != 0)); then
+            _reconcile_fault "${rc_bwd}" "reconcile: sub-task ${c_key}'s available transitions could not be read (zero writes)"
+            return $?
+          fi
+        fi
+        c_entry="$(jq -cn --arg k "${c_key}" --argjson b "${c_blockers}" --argjson bw "${c_bwd}" \
+          '{key:$k, blockers:$b, already_done_diverged:true, backward:$bw}')"
+      fi
+
+      if [[ "${c_entry}" != "null" ]]; then
+        completion_tasks="$(jq -c --arg id "${completion_id}" --argjson e "${c_entry}" '. + {($id):$e}' <<< "${completion_tasks}")"
+      fi
+    done <<< "${completion_ids}"
+
+    if [[ "$(jq 'length' <<< "${completion_tasks}")" -gt 0 ]]; then
+      local completion_ctx completion_result
+      completion_ctx="$(jq -cn --arg b "${base}" --argjson t "${completion_tasks}" '{base_url:$b, tasks:$t}')"
+      completion_result="$(plan_lifecycle_tasks "${tasks_actions}" "${completion_ctx}")"
+      tasks_actions="$(jq -c '.actions' <<< "${completion_result}")"
+      task_warns="$(jq -c --argjson w "$(jq -c '.warnings' <<< "${completion_result}")" '. + $w' <<< "${task_warns}")"
+      task_notes="$(jq -c --argjson n "$(jq -c '.notes' <<< "${completion_result}")" '. + $n' <<< "${task_notes}")"
+    fi
+  fi
 
   # US6 lifecycle safety (Phase 4, US2): the lifecycle context is now built
   # from recognition's `bound` map on EVERY run — not only under the
@@ -810,6 +1109,12 @@ cmd_reconcile() {
   # lifecycle rules use, so a reader sees every reason a story's Jira write
   # did not happen in one place.
   warns="$(jq -c --argjson bw "$(jq -c '[.blocked[].detail]' <<< "${recog}")" '. + $bw' <<< "${warns}")"
+  # Phase 3, US1: the task tier's own warnings — a withheld tier, a
+  # recognition block, or a plan failure — join the same channel.
+  warns="$(jq -c --argjson tw "${task_warns}" '. + $tw' <<< "${warns}")"
+  # T073 (FR-021, FR-022): orphan and re-attribution reports join the notes
+  # channel — reported once, never acted on.
+  notes="$(jq -c --argjson tn "${task_notes}" '. + $tn' <<< "${notes}")"
 
   # created/updated count only their own endpoints; a transition is also a
   # POST but is not a ticket creation, so it is excluded from the created
@@ -829,8 +1134,9 @@ cmd_reconcile() {
   local recognised_count; recognised_count="$(jq '.bound | length' <<< "${recog}")"
   local skipped_count; skipped_count="$(jq --argjson u "${updated}" '(.bound | length) - $u' <<< "${recog}")"
   ((skipped_count < 0)) && skipped_count=0
+  local note_count; note_count="$(jq 'length' <<< "${notes}")"
   local has_lifecycle="${has_override_lifecycle}"
-  [[ "${warn_count}" -gt 0 ]] && has_lifecycle="true"
+  [[ "${warn_count}" -gt 0 || "${note_count}" -gt 0 ]] && has_lifecycle="true"
 
   # The consolidated question (Phase 4, US2, T065/T067; contract §3.3/§3.4;
   # data-model.md §4): fired only now that recognition and planning show
@@ -840,23 +1146,32 @@ cmd_reconcile() {
   # (never a type the project merely offers — FR-028). Zero writes on this
   # path: neither the marker file (deferred above) nor any Jira call has
   # happened yet.
-  if [[ "${fd_ask_pending}" == "true" && "${created}" -gt 0 ]]; then
+  local fd_task_creates_pending
+  fd_task_creates_pending="$(jq '[.[] | select(.method=="POST" and (.url|endswith("/issue")))] | length' <<< "${tasks_actions}")"
+  if [[ "${fd_ask_pending}" == "true" && ( "${created}" -gt 0 || "${fd_task_creates_pending}" -gt 0 ) ]]; then
     local fd_pending_types
     fd_pending_types="$(jq -c '[.[] | select(.method=="POST" and (.url|endswith("/issue"))) | .body.fields.issuetype.id] | unique' <<< "${actions}")"
     if [[ "${parent_action}" != "null" && "$(jq -r '.method' <<< "${parent_action}")" == "POST" ]]; then
       fd_pending_types="$(jq -c --argjson p "${parent_action}" '. + [$p.body.fields.issuetype.id] | unique' <<< "${fd_pending_types}")"
     fi
+    # T066a (FR-040): the task tier's own pending creations join the SAME
+    # set of types the confirmation is scoped to — a run creating all three
+    # tiers still asks exactly one question, naming every tier's field.
+    fd_pending_types="$(jq -c --argjson t "${tasks_actions}" \
+      '. + [$t[] | select(.method=="POST" and (.url|endswith("/issue"))) | .body.fields.issuetype.id] | unique' \
+      <<< "${fd_pending_types}")"
     local fd_fields; fd_fields="$(plan_confirmation_fields "${fd_itypes}" "${fd_df}" "${fd_defaults_by_type}" "${fd_pending_types}")"
     if [[ "$(jq -r 'length' <<< "${fd_fields}")" -gt 0 ]]; then
-      local fd_confirmation
-      fd_confirmation="$(jq -cn --arg proj "${project_key}" --argjson f "${fd_fields}" --argjson cp "${created}" \
+      local fd_confirmation fd_creations_pending
+      fd_creations_pending=$((created + fd_task_creates_pending))
+      fd_confirmation="$(jq -cn --arg proj "${project_key}" --argjson f "${fd_fields}" --argjson cp "${fd_creations_pending}" \
         --arg rw "/speckit.jira.reconcile ${spec_file} --accept-defaults" \
         '{status:"confirmation-pending", project:$proj, fields:$f, creations_pending:$cp, resume_with:$rw}' | json_canonical)"
       if [[ "${json}" == "true" ]]; then
         printf '%s\n' "${fd_confirmation}"
       else
         local fd_labels; fd_labels="$(jq -r '[.fields[].label] | join(", ")' <<< "${fd_confirmation}")"
-        printf 'Jira mirror paused: confirm %s before %s creation(s) are written.\n' "${fd_labels}" "${created}"
+        printf 'Jira mirror paused: confirm %s before %s creation(s) are written.\n' "${fd_labels}" "${fd_creations_pending}"
         printf 'Resume with: %s\n' "$(jq -r '.resume_with' <<< "${fd_confirmation}")"
       fi
       return 0
@@ -891,14 +1206,79 @@ cmd_reconcile() {
     local apply_plan known_parent_key="" apply_outcome=""
     apply_plan="$(jq -cn --argjson p "${parent_action}" --argjson s "${actions}" '{parent:$p, stories:$s}')"
     [[ "${parent_state}" == "bound" ]] && known_parent_key="$(jq -r '.key' <<< "${recog_parent}")"
-    apply_outcome="$(apply_writes_with_recognition "${apply_plan}" "${spec_ref}" "${spec_file}" "${known_parent_key}" "[]" "${fd_df}")" || rc=$?
+    # Phase 3, US1: the task tier's own writes join the SAME apply call —
+    # the pre-write privacy sweep must cover every payload of the run
+    # before any of them is written (FR-025) — never a second call.
+    # known_story_keys seeds the parent-key resolution with every story
+    # ALREADY recognised; a story created in this same run is added to the
+    # map as the apply pass reaches it.
+    local known_story_keys='{}'
+    [[ "${task_role_active}" == "true" ]] && known_story_keys="$(jq -c '.bound | with_entries(.value |= .key)' <<< "${recog}")"
+    apply_outcome="$(apply_writes_with_recognition "${apply_plan}" "${spec_ref}" "${spec_file}" "${known_parent_key}" "[]" "${fd_df}" \
+      "${tasks_actions}" "${tasks_file}" "${known_story_keys}")" || rc=$?
     # 015, research R4, contract §4.3/§5: `created` now reports what Jira
     # actually confirmed, not what was merely planned — empty stdout (the
-    # two pre-write privacy-guard returns) reads as zero created.
+    # three pre-write privacy-guard returns, the task sweep included) reads
+    # as zero created. The
+    # `parent`/`story` filter keeps 012's sub-tasks out of this tier's tally:
+    # they are counted separately in `counts.tasks.created` (012 FR-011).
     if [[ -z "${apply_outcome}" ]]; then
       created=0
     else
-      created="$(jq '(.created // []) | length' <<< "${apply_outcome}")"
+      created="$(jq '[(.created // [])[] | select(.role == "parent" or .role == "story")] | length' <<< "${apply_outcome}")"
+    fi
+  fi
+
+  # Edge Cases (contract §6, final line; T084): a task checked before its
+  # sub-task ever existed is created and transitioned in this SAME run. The
+  # completion pass above deferred it — no key existed yet to read
+  # transitions for. Resolved now that the create above (if it completed)
+  # stamped a key into tasks_file; pending_create_complete_ids stays empty
+  # whenever nothing qualifies, so this block is a no-op otherwise. Never
+  # uses _reconcile_fault here: a write has already happened by this point,
+  # so the run summary must still print rather than early-return.
+  if [[ "${dry_run}" != "true" ]] && [[ "$(jq 'length' <<< "${pending_create_complete_ids}")" -gt 0 ]]; then
+    local pcc_doc pcc_ctx_tasks='{}' pcc_id
+    pcc_doc="$(tasks_parse_document < "${tasks_file}")"
+    for pcc_id in $(jq -r '.[]' <<< "${pending_create_complete_ids}"); do
+      local pcc_key
+      pcc_key="$(jq -r --arg id "${pcc_id}" \
+        '[.tasks[] | select(.local_id == $id) | .marker.ticket // empty] | first // empty' <<< "${pcc_doc}")"
+      [[ -z "${pcc_key}" ]] && continue
+      local pcc_fwd rc_pcc_fwd=0
+      pcc_fwd="$(discovery_task_transition "${pcc_key}" forward)" || rc_pcc_fwd=$?
+      if ((rc_pcc_fwd != 0)); then
+        ((rc_pcc_fwd > rc)) && rc="${rc_pcc_fwd}"
+        continue
+      fi
+      pcc_ctx_tasks="$(jq -c --arg id "${pcc_id}" --arg k "${pcc_key}" --argjson f "${pcc_fwd}" \
+        '. + {($id): {key:$k, blockers:[], forward:$f}}' <<< "${pcc_ctx_tasks}")"
+    done
+
+    if [[ "$(jq 'length' <<< "${pcc_ctx_tasks}")" -gt 0 ]]; then
+      local pcc_ctx pcc_result pcc_actions
+      pcc_ctx="$(jq -cn --arg b "${base}" --argjson t "${pcc_ctx_tasks}" '{base_url:$b, tasks:$t}')"
+      pcc_result="$(plan_lifecycle_tasks '[]' "${pcc_ctx}")"
+      pcc_actions="$(jq -c '.actions' <<< "${pcc_result}")"
+      if [[ "$(jq 'length' <<< "${pcc_actions}")" -gt 0 ]]; then
+        local pcc_rc=0
+        # 015 contract §4.2: the apply prints its confirmed-creation outcome on
+        # stdout. This pass only transitions already-created sub-tasks, so the
+        # outcome carries nothing this tier counts — but it MUST still be
+        # captured, or it would land in the middle of the run summary.
+        apply_writes_with_recognition '{"parent":null,"stories":[]}' "${spec_ref}" "${spec_file}" "" "[]" "${fd_df}" \
+          "${pcc_actions}" "${tasks_file}" '{}' > /dev/null || pcc_rc=$?
+        if ((pcc_rc == 0)); then
+          tasks_actions="$(jq -c --argjson a "${pcc_actions}" '. + $a' <<< "${tasks_actions}")"
+        else
+          ((pcc_rc > rc)) && rc="${pcc_rc}"
+        fi
+      fi
+      warns="$(jq -c --argjson w "$(jq -c '.warnings' <<< "${pcc_result}")" '. + $w' <<< "${warns}")"
+      notes="$(jq -c --argjson n "$(jq -c '.notes' <<< "${pcc_result}")" '. + $n' <<< "${notes}")"
+      warn_count="$(jq 'length' <<< "${warns}")"
+      note_count="$(jq 'length' <<< "${notes}")"
+      [[ "${warn_count}" -gt 0 || "${note_count}" -gt 0 ]] && has_lifecycle="true"
     fi
   fi
 
@@ -981,6 +1361,19 @@ cmd_reconcile() {
     rc=0
   fi
 
+  # FR-026: an unattributed or dangling task is never a fault (rc stays 0),
+  # so it is invisible to the block above — but a lifecycle hook still gets
+  # only ONE warning, not one per task. The run summary's own `notes` (below)
+  # keeps naming each one individually; only the stderr side collapses.
+  if [[ -n "${SPEC_KIT_JIRA_HOOK_CONTEXT:-}" && "${rc}" -eq 0 ]]; then
+    local task_skip_count
+    task_skip_count="$(jq 'length' <<< "${task_skip_notes}")"
+    if ((task_skip_count > 0)); then
+      printf 'WARNING: %s task(s) could not be mirrored (no story attribution, or attributed to a story the specification does not contain); see the run summary for detail. This spec-kit command completed normally.\n' \
+        "${task_skip_count}" >&2
+    fi
+  fi
+
   # Field-default provenance (011, T073, contract §4.1/§4.2): every field this
   # run actually sent that came from a recorded default or a this-run answer,
   # attributed to its source, plus the promotion command for an override and
@@ -988,9 +1381,14 @@ cmd_reconcile() {
   # already computed (gate_resolved) — never a second resolution pass, so the
   # preview and the real run cannot disagree (§4.3). Empty when nothing was
   # defaulted this run (FR-028 — the off switch).
-  local fd_notes
+  local fd_notes fd_notes_actions
+  # Phase 3, US1 (FR-042): the task tier's own creations join the SAME
+  # provenance sweep, so a defaulted sub-task field is attributed exactly
+  # like a story's or the parent's — never a second, sub-task-specific
+  # reporting surface.
+  fd_notes_actions="$(jq -c --argjson t "${tasks_actions}" '. + $t' <<< "${actions}")"
   fd_notes="$(_reconcile_field_default_notes "${project_key}" "${fd_itypes}" "${fd_df}" "${gate_resolved}" \
-    "${actions}" "${parent_action}" "${gate_ask}" "${accept_defaults}" "${dry_run}")"
+    "${fd_notes_actions}" "${parent_action}" "${gate_ask}" "${accept_defaults}" "${dry_run}")"
   if [[ -n "${fd_notes}" ]]; then
     notes="$(jq -c --arg n "${fd_notes}" '. + ($n | split("\n"))' <<< "${notes}")"
     has_lifecycle="true"
@@ -1005,10 +1403,55 @@ cmd_reconcile() {
   # is reported first, exactly like any other action, host-relative and
   # stripped of its internal local_id bookkeeping.
   local disp_actions disp_parent
-  disp_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b) | del(.local_id)]' <<< "${actions}")"
+  # A story's own local_id is stripped UNLESS a task role is active — kept
+  # then, it is the only way a --dry-run preview names WHICH story a
+  # sub-task belongs to (FR-024), since `fields.parent.key` stays the
+  # "<resolved at apply time>" placeholder for a same-run story creation.
+  # Never kept for a no-task-role run, so FR-011's byte-identical guarantee
+  # is unaffected.
+  if [[ "${task_role_active}" == "true" ]]; then
+    disp_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b)]' <<< "${actions}")"
+  else
+    disp_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b) | del(.local_id)]' <<< "${actions}")"
+  fi
+  # Phase 3, US1 (Constitution XI): task actions join the SAME displayed
+  # list, last — a --dry-run preview that reports counts.tasks but never
+  # shows what it counted would not be an honest preview. `parent_local_id`
+  # is kept (only the task's own local_id is stripped) so it can be matched
+  # against the story action's local_id kept above.
+  if [[ "${task_role_active}" == "true" ]]; then
+    local disp_task_actions
+    disp_task_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b) | del(.local_id)]' <<< "${tasks_actions}")"
+    disp_actions="$(jq -c --argjson t "${disp_task_actions}" '. + $t' <<< "${disp_actions}")"
+  fi
   if [[ "${parent_action}" != "null" ]]; then
     disp_parent="$(jq -c --arg b "${base}" '.url |= ltrimstr($b) | del(.local_id)' <<< "${parent_action}")"
     disp_actions="$(jq -c --argjson p "${disp_parent}" '[$p] + .' <<< "${disp_actions}")"
+  fi
+
+  # Phase 3, US1 (data-model.md §6, SC-006): the task tier's own nested
+  # counts, emitted ONLY when a `task` role is declared (research R8) —
+  # absence, not a zeroed-out object, is the off switch that keeps a run
+  # with no `task` role byte-for-byte identical to before this feature
+  # (FR-011). created/updated read straight off the plan actions actually
+  # applied (never through plan_lifecycle, which the task tier does not
+  # go through); unchanged is every other attributed task.
+  local task_counts="null"
+  if [[ "${task_role_active}" == "true" ]]; then
+    local task_created task_updated task_transitioned task_total task_unchanged
+    task_created="$(jq '[.[] | select(.method=="POST" and (.url|endswith("/issue")))] | length' <<< "${tasks_actions}")"
+    task_updated="$(jq '[.[] | select(.method=="PUT")] | length' <<< "${tasks_actions}")"
+    # Phase 8, US5: a transition is also a POST, so it is named separately from
+    # `/issue` creations here exactly as it is excluded from `created` above.
+    task_transitioned="$(jq '[.[] | select(.method=="POST" and (.url|endswith("/transitions")))] | length' <<< "${tasks_actions}")"
+    task_total="$(jq '[.stories[] | (.tasks // [])[]] | length' <<< "${doc_for_write}")"
+    task_unchanged=$((task_total - task_created - task_updated))
+    ((task_unchanged < 0)) && task_unchanged=0
+    local task_skipped
+    task_skipped="$(jq 'length' <<< "${task_skip_notes}")"
+    task_counts="$(jq -cn --argjson cr "${task_created}" --argjson up "${task_updated}" --argjson tr "${task_transitioned}" \
+      --argjson un "${task_unchanged}" --argjson wh "${task_withheld_count}" --argjson sk "${task_skipped}" \
+      '{created:$cr, updated:$up, transitioned:$tr, unchanged:$un, skipped:$sk, withheld:$wh}')"
   fi
 
   # The warnings/notes keys appear when the lifecycle facts were supplied OR
@@ -1020,10 +1463,12 @@ cmd_reconcile() {
     --argjson x "${rc}" --argjson actions "${disp_actions}" \
     --argjson wc "${warn_count}" --argjson w "${warns}" --argjson no "${notes}" \
     --argjson hl "${has_lifecycle}" --argjson hooks "${hooks_health}" \
-    --argjson rec "${recognised_count}" --argjson asg "${assigned_count}" --argjson sk "${skipped_count}" '
+    --argjson rec "${recognised_count}" --argjson asg "${assigned_count}" --argjson sk "${skipped_count}" \
+    --argjson tc "${task_counts}" '
     {schema_version:"1.0", command:"reconcile", dry_run:$dry,
-     counts:{created:$c, updated:$u, skipped:$sk, warnings:$wc, errors:0,
-             recognised:$rec, assigned:$asg},
+     counts:({created:$c, updated:$u, skipped:$sk, warnings:$wc, errors:0,
+              recognised:$rec, assigned:$asg}
+             + (if $tc == null then {} else {tasks:$tc} end)),
      actions:$actions}
     + (if $hl then {warnings:$w, notes:$no} else {} end)
     + {hook_health:$hooks, exit_code:$x}' | json_canonical)"

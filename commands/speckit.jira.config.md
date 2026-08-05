@@ -181,8 +181,10 @@ and never trigger the degraded mode — do not retry into it.
    `4`, zero writes, naming the mistake precisely — never silently corrected.
    Likewise a project with no level above the story tier (`no-parent-level`)
    refuses, naming the candidates it does offer.
-9. **Closed questions (field defaults, 011)** — for the `specification` and
-   `story` types (**and no others** — FR-025), plus any type named by
+9. **Closed questions (field defaults, 011/012)** — for the `specification`
+   and `story` types, and — whenever a `task` role is declared — the type
+   carrying it too (**no others** — FR-025; no `task` role means no
+   question about any sub-task type, FR-035), plus any type named by
    `--field-default` this run (FR-026), the entry point asks about every
    field Jira's create metadata marks **required** that the bridge cannot
    supply itself (`summary`, `description`, `issuetype`, `project`,
@@ -198,6 +200,17 @@ and never trigger the degraded mode — do not retry into it.
    value is presented with that value as the current answer; keeping it
    requires no input and reproduces the file byte-for-byte (FR-007). Answer
    with `--field-default`, one flag per field, and re-invoke.
+
+   **The sub-task type is different from the other two in one respect**: an
+   unanswered required field on `specification` or `story` blocks the whole
+   run before any write, but the same gap on the `task` type withholds only
+   the task tier (FR-037) — the specification and its stories still mirror
+   exactly as they would with no `task` role declared, with zero sub-task
+   writes and no durable identifier recorded for any withheld task
+   (FR-038). Recording the missing default (by hand, or with
+   `--field-default`) and re-running reconcile creates exactly the
+   withheld sub-tasks on that next run (FR-039) — there is no cleanup step,
+   no flag, and no repair command.
 10. **Persist (deterministic write)** — the resolved-id table (logical name → id
     for issue types — with hierarchy level and sub-task flag — priorities,
     statuses, `style`/`style_source`, the resolved `roles.<role>` map with each

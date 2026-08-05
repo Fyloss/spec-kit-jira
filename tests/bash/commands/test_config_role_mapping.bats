@@ -132,7 +132,7 @@ boot() {
   [[ "$output" == *'"role":"story"'* ]]
 }
 
-@test "T064/T065 — a declared task role validates, persists, reports §7.4, and creates zero sub-tasks" {
+@test "T064/T065 — a declared task role validates, persists, and no longer reports §7.4 (012, FR-012)" {
   _write_config '    hierarchy:
       specification: Epic
       story: Story
@@ -141,8 +141,9 @@ boot() {
 
   run cmd_config config --json
   [ "$status" -eq 0 ]
-  # §7.4 — recorded, not mirrored yet, never a warning, exit still 0.
-  [[ "$output" == *'task is recorded as "Sous-tâche" but is not mirrored yet'* ]]
+  # §7.4's "recorded, not mirrored yet" note stopped firing once the task
+  # tier shipped (012, FR-012) — the task role is now mirrored.
+  [[ "$output" != *"is not mirrored yet"* ]]
   local localj
   localj="$(config_yaml_to_json "${JIRA_CONFIG_DIR}/config.local.yml")"
   [ "$(jq -r '.resolved_ids.CONSUMER.roles.task.logical_name' <<< "${localj}")" = "Sous-tâche" ]

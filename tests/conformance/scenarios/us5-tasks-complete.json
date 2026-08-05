@@ -1,0 +1,270 @@
+{
+  "name": "us5-tasks-complete",
+  "description": "012, Phase 8, US5: a re-run against a fully-bound task tier whose task was just checked off transitions its already-recognised sub-task to the project's done-category status, counted on its own summary line and never folded into created/updated or read back into tasks.md (contract §6, FR-033).",
+  "fixture": "tests/conformance/fixtures/repo-with-task-tier-completed",
+  "argv": [
+    "reconcile",
+    "specs/001-feature/spec.md",
+    "--json"
+  ],
+  "mock": {
+    "projects": {
+      "TASKP": "company"
+    },
+    "transitions": {
+      "TASKP-3": [
+        {
+          "id": "31",
+          "name": "Terminé",
+          "to": {
+            "statusCategory": {
+              "key": "done"
+            }
+          },
+          "fields": {}
+        },
+        {
+          "id": "21",
+          "name": "À faire",
+          "to": {
+            "statusCategory": {
+              "key": "new"
+            }
+          },
+          "fields": {}
+        }
+      ]
+    },
+    "issues": {
+      "TASKP-1": {
+        "summary": "Task Tier Demo",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "We need a working task tier.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "text": "As a user, I want the first story.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "20701"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-feature",
+            "role": "parent"
+          }
+        }
+      },
+      "TASKP-2": {
+        "summary": "First story",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want the first story.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "text": "**Given** a thing **When** it happens **Then** it works",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "attrs": {
+                "level": 3
+              },
+              "content": [
+                {
+                  "text": "Acceptance Criteria",
+                  "type": "text"
+                }
+              ],
+              "type": "heading"
+            },
+            {
+              "attrs": {
+                "panelType": "info"
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Given a thing",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "When it happens",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "Then it works",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "panel"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "20704"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-feature",
+            "role": "story",
+            "story": "5555555555555555"
+          }
+        }
+      },
+      "TASKP-3": {
+        "summary": "Implement the first story's feature",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Implement the first story's feature",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Identifier: T002",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Phase: Phase 3: User Story 1",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Attribution: User Story 1",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "Parallel-safe: no",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "listItem"
+                }
+              ],
+              "type": "bulletList"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "20705"
+        },
+        "parent": {
+          "key": "TASKP-2"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-feature",
+            "role": "task",
+            "story": "6666666666666666"
+          }
+        }
+      }
+    }
+  },
+  "env": {
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "9999999999999999",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-feature"
+  }
+}

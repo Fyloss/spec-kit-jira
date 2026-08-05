@@ -1,0 +1,15 @@
+# Team config for the task-tier "no role declared" conformance fixture (012,
+# T035, FR-011, SC-005) — the same specification and tasks.md as
+# repo-with-tasks, on a project that never declares a `task` role, proving
+# reconcile's output stays byte-for-byte identical to the pre-012 release.
+projects:
+  - key: TASKS
+    style: company_managed
+    hierarchy:
+      specification: Deliverable
+      story: Story
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing_default: TASKS

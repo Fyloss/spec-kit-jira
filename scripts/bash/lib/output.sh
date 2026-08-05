@@ -59,7 +59,14 @@ if [[ "$(command jq -rn '"a\nb"' 2> /dev/null)" == *$'\r'* ]]; then
     local -
     set -o pipefail
     # `command` is required: without it this function calls itself.
-    command jq "$@" | sed $'s/\r$//'
+    #
+    # MSYS_NO_PATHCONV=1 (012): jq.exe is a native, non-MSYS binary, so MSYS's
+    # fork/exec layer rewrites any argument that LOOKS like a POSIX path before
+    # jq ever sees it — a `--arg` value that happens to start with `/` (a slash
+    # command hint, never a filesystem path) becomes `C:/Program Files/Git/...`.
+    # No jq call in this port passes a real filesystem path as an argument for
+    # jq itself to read, so disabling the rewrite here is safe everywhere.
+    MSYS_NO_PATHCONV=1 command jq "$@" | sed $'s/\r$//'
   }
 fi
 

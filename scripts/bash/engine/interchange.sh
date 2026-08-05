@@ -20,6 +20,7 @@ source "${_interchange_dir}/../lib/output.sh" # json_canonical only — lib/, ne
 # The validation program: emits a JSON array of human-readable error strings
 # (empty array => valid). Kept as a jq program so the rules are declarative.
 # kcov-excl-start — jq literal (string lines are not statements)
+# shellcheck disable=SC2016  # $ids is a jq variable (`as $ids`), not shell expansion
 _INTERCHANGE_ERRORS_JQ='
 [
   (if (.schema_version != "1.0") then "schema_version must be \"1.0\"" else empty end),
@@ -45,7 +46,27 @@ _INTERCHANGE_ERRORS_JQ='
      (.stories[] | if ((.title // "") | length) < 1 then "story.title is required" else empty end),
      (.stories[] | if (.priority_logical | IN("P1","P2","P3") | not) then "story.priority_logical is invalid" else empty end),
      (.stories[] | if ((.description.blocks // []) | length) < 1 then "story.description.blocks must be non-empty" else empty end)
-   end)
+   end),
+  # Phase 2, T025/T027, data-model.md §3: the task tier — validated only for
+  # a story that carries a "tasks" key at all (its absence is the off switch,
+  # FR-011); each rule blocks every write of the run, as the story rules do.
+  # The per-task rules below select on the TYPE of that key as well, not just
+  # its presence. Reason: `.tasks[]?` iterates the VALUES of an object, so an
+  # object-valued `tasks` fed `.title` a boolean and killed the whole jq
+  # program — reported to the operator as "input is not valid JSON" instead of
+  # the story-level error on the next line. A string, a number and null were
+  # already inert here, `[]?` yielding nothing for them (Copilot review, #17).
+  # NOTE: no apostrophes in this comment — it sits inside a single-quoted jq
+  # program, where one would close the string and break the whole file.
+  (.stories[]? | if has("tasks") and ((.tasks | type) != "array") then "story.tasks must be an array" else empty end),
+  (.stories[]? | select(has("tasks") and ((.tasks | type) == "array")) | .tasks[]? |
+    if (((.marker.state // "absent") != "absent") and (((.local_id // "") | test("^[0-9a-f]{16}$")) | not))
+    then "task.local_id is required and must be 16 hex characters unless the marker state is absent" else empty end),
+  (.stories[]? | select(has("tasks") and ((.tasks | type) == "array")) | .tasks[]? | if ((.title // "") | length) < 1 then "task.title is required" else empty end),
+  (.stories[]? | select(has("tasks") and ((.tasks | type) == "array")) | .tasks[]? | if ((.description.blocks // []) | length) < 1 then "task.description.blocks must be non-empty" else empty end),
+  (.stories[]? | select(has("tasks") and ((.tasks | type) == "array")) | .tasks[]? | if (.done | type) != "boolean" then "task.done must be a boolean" else empty end),
+  ( ( [ .stories[]? | select(has("tasks") and ((.tasks | type) == "array")) | .tasks[]? | (.local_id // "") | select(length > 0) ] ) as $ids
+    | if ($ids | length) != ($ids | unique | length) then "two tasks share a local_id" else empty end )
 ]'
 # kcov-excl-stop
 

@@ -1086,14 +1086,22 @@ function Invoke-JiraConfig {
         }
 
         $fdMergedJson = Merge-JiraFieldDefault -RecordedJson $fdRecordedJson -AnswersJson $fdAnswersJson
+        # 012: the task role joins the specification and story types on the
+        # same closed-question terms — a declared sub-task role's own
+        # required field is asked about too (FR-035).
         $askTypeNames = [System.Collections.Generic.List[string]]::new()
         if ($result.Roles.Contains('specification')) { $askTypeNames.Add([string]$result.Roles['specification'].logical_name) }
         if ($result.Roles.Contains('story')) { $askTypeNames.Add([string]$result.Roles['story'].logical_name) }
+        if ($result.Roles.Contains('task')) { $askTypeNames.Add([string]$result.Roles['task'].logical_name) }
         foreach ($a in @($fdAnswersJson | ConvertFrom-Json -Depth 100)) { $askTypeNames.Add([string]$a.type) }
         $fdAskTypesJson = ConvertTo-JiraJsonValue (@($askTypeNames | Select-Object -Unique))
         $bridgeIds = [System.Collections.Generic.List[string]]::new()
         if ($result.Roles.Contains('specification')) { $bridgeIds.Add([string]$result.Roles['specification'].id) }
         if ($result.Roles.Contains('story')) { $bridgeIds.Add([string]$result.Roles['story'].id) }
+        # 012: the task role joins the bridge-written set now that the tier
+        # ships — a recorded field default for the sub-task type is
+        # consumed, not merely recorded (FR-012).
+        if ($result.Roles.Contains('task')) { $bridgeIds.Add([string]$result.Roles['task'].id) }
         $fdBridgeIdsJson = ConvertTo-JiraJsonValue (@($bridgeIds))
         $fdReportJson = Get-JiraFieldDefaultsReport -IssueTypesJson $itypesJson -DefaultableFieldsByTypeJson $dfMapJson `
             -AskTypesJson $fdAskTypesJson -MergedJson $fdMergedJson -BridgeTypeIdsJson $fdBridgeIdsJson
@@ -1156,10 +1164,11 @@ function Invoke-JiraConfig {
             return $script:ExitConfig
         }
 
-        # §7.2/§7.3/§7.4 notes: supersession (a committed declaration
-        # overriding a recorded operator answer), promotion (any role
-        # resolved from an operator answer this run) and the task role's
-        # "recorded, not yet mirrored" status line.
+        # §7.2/§7.3 notes: supersession (a committed declaration overriding
+        # a recorded operator answer) and promotion (any role resolved from
+        # an operator answer this run). §7.4's "task recorded, not yet
+        # mirrored" status line stopped firing (012, FR-012): the task tier
+        # ships now.
         $priorRoles = $null
         if ($existing -is [System.Management.Automation.PSCustomObject]) {
             $existingResolvedIds = Get-CmdProp $existing 'resolved_ids'
@@ -1185,9 +1194,6 @@ function Invoke-JiraConfig {
             }
             if ($newSource -eq 'operator') {
                 $roleNotes.Add((Get-JiraRolePromotionNote -ProjectKey $pkey -Role $roleKey -Name $newName))
-            }
-            if ($roleKey -eq 'task') {
-                $roleNotes.Add((Get-JiraRoleTaskRecordedNote -ProjectKey $pkey -Name $newName))
             }
         }
         $projRoles[$pkey] = $result.Roles
@@ -1322,8 +1328,8 @@ function Invoke-JiraConfig {
         field_defaults = [ordered]@{ status = $fdWriteStatus; detail = 'recorded field defaults in config.yml' }
     }
 
-    # §7.2/§7.3/§7.4 notes (supersession, promotion, task-recorded): never a
-    # warning, never a non-zero exit — the run succeeded.
+    # §7.2/§7.3 notes (supersession, promotion): never a warning, never a
+    # non-zero exit — the run succeeded.
     foreach ($note in $roleNotes) { [Console]::Error.WriteLine($note) }
 
     $summaryObj = [ordered]@{

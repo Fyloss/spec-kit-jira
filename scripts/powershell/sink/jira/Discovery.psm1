@@ -654,6 +654,62 @@ function Get-JiraMentionedFetchResult {
     return [pscustomobject]@{ ExitCode = 0; Fetch = (ConvertTo-JiraJsonValue $doc) }
 }
 
+function Get-JiraDiscoveryTaskTransitionResult {
+    <#
+    .SYNOPSIS
+      The task tier's only new read (012, research R5, contract §6). Mirror of
+      discovery_task_transition: reads the sub-task's available transitions and
+      selects a destination by the destination's own statusCategory alone —
+      never a status name, in any spelling (Constitution VII; FR-030). Direction
+      "forward" selects statusCategory "done" destinations; "backward" selects
+      everything else (FR-032's operator-authorised pull back). Returns
+      { ExitCode; Transition } where Transition is the canonical
+      { candidates; transition_id; withheld_field } JSON string.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $IssueKey, [string] $Direction = 'forward')
+
+    $base = $env:SPEC_KIT_JIRA_BASE_URL
+    if (-not $base) {
+        [Console]::Error.WriteLine('discovery: SPEC_KIT_JIRA_BASE_URL is not set')
+        return [pscustomobject]@{ ExitCode = (Get-JiraExitCode 'fail_closed'); Transition = '' }
+    }
+    $api = "$base/rest/api/3"
+    $r = Invoke-JiraRequest -Method GET -Url "$api/issue/$IssueKey/transitions?expand=transitions.fields"
+    if ($r.ExitCode -ne 0) { return [pscustomobject]@{ ExitCode = [int] $r.ExitCode; Transition = '' } }
+    $resp = $r.Body | ConvertFrom-Json -Depth 100
+    $transitions = @(Get-DiscProp $resp 'transitions')
+
+    $matching = @($transitions | Where-Object {
+        $cat = [string](Get-DiscProp (Get-DiscProp $_ 'to') 'statusCategory' | ForEach-Object { Get-DiscProp $_ 'key' })
+        ($cat -eq 'done') -eq ($Direction -eq 'forward')
+    })
+    $candidates = @($matching | ForEach-Object { [ordered]@{ id = $_.id; name = $_.name } })
+
+    $transitionId = $null
+    $withheldField = $null
+    if ($candidates.Count -eq 1) {
+        $fields = Get-DiscProp $matching[0] 'fields'
+        $requiredEntry = $null
+        if ($null -ne $fields) {
+            foreach ($prop in $fields.PSObject.Properties) {
+                if ([bool](Get-DiscProp $prop.Value 'required')) { $requiredEntry = $prop; break }
+            }
+        }
+        if ($null -eq $requiredEntry) {
+            $transitionId = $matching[0].id
+        }
+        else {
+            $logicalName = Get-DiscProp $requiredEntry.Value 'name'
+            if (-not $logicalName) { $logicalName = $requiredEntry.Name }
+            $withheldField = [ordered]@{ logical_name = $logicalName; field_id = $requiredEntry.Name }
+        }
+    }
+
+    $doc = [ordered]@{ candidates = $candidates; transition_id = $transitionId; withheld_field = $withheldField }
+    return [pscustomobject]@{ ExitCode = 0; Transition = (ConvertTo-JiraJsonValue $doc) }
+}
+
 function Get-JiraMentionedFetch {
     <#
     .SYNOPSIS
@@ -668,4 +724,5 @@ function Get-JiraMentionedFetch {
 Export-ModuleMember -Function Get-JiraDiscoveryBinding, Get-JiraDiscoveryBindingResult, `
     Get-JiraDiscoveryStyle, Get-JiraDiscoveryFlaggedField, Get-JiraDiscoveryProjectList, `
     Get-JiraDiscoveryPrioritiesForProject, Get-JiraDiscoveryDefaultableFields, `
-    Get-JiraMentionedFetch, Get-JiraMentionedFetchResult, Get-JiraDiscoveryTypeMetadataResult
+    Get-JiraMentionedFetch, Get-JiraMentionedFetchResult, Get-JiraDiscoveryTypeMetadataResult, `
+    Get-JiraDiscoveryTaskTransitionResult

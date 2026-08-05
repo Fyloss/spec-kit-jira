@@ -162,7 +162,7 @@ _shim_get_style() {
 
 _shim_get_meta_style() {
   case "$1" in
-    company | team | french | safe | nonlatin | flat | hier-ambiguous | consumer | linebreak) printf '%s' "$1" ;;
+    company | team | french | safe | nonlatin | flat | hier-ambiguous | consumer | linebreak | taskm) printf '%s' "$1" ;;
     *) printf 'company' ;;
   esac
 }
@@ -242,20 +242,24 @@ _shim_create_issue() {
   local body_json="$1"
   [[ -z "${body_json}" ]] && body_json='{}'
   jq -e . > /dev/null 2>&1 <<< "${body_json}" || body_json='{}'
-  local project_key created_key wrap
+  local project_key created_key style wrap
   project_key="$(jq -r '.fields.project.key // "COMP"' <<< "${body_json}")"
   created_key="$(jq -r '.createdKey // ""' "${MOCK_CONFIG_PATH}")"
-  wrap="$(jq -c --arg pk "${project_key}" --arg ck "${created_key}" --argjson body "${body_json}" '
+  style="$(jq -r --arg pk "${project_key}" '(.issueTypeStyle // {})[$pk] // ""' "${MOCK_CONFIG_PATH}")"
+  wrap="$(jq -c --arg pk "${project_key}" --arg ck "${created_key}" --arg style "${style}" --argjson body "${body_json}" '
     (.counters[$pk] // 0) as $c
     | ($c + 1) as $next
     | (if $ck != "" then $ck else ($pk + "-" + ($next | tostring)) end) as $key
     | (if $ck == "" then (.counters[$pk] = $next) else . end) as $withCounter
     | ($body.fields // {}) as $sf
+    | (if $style == "french" then {name: "À faire", statusCategory: {key: "new"}}
+       else {name: "To Do", statusCategory: {key: "new"}}
+       end) as $defaultStatus
     | {
         summary: ($sf.summary // ""),
         description: ($sf.description // null),
         priority: ($sf.priority // null),
-        status: {name: "To Do", statusCategory: {key: "new"}},
+        status: $defaultStatus,
         issuelinks: [],
         parent: ($sf.parent // null),
         issuetype: ($sf.issuetype // null)
@@ -289,16 +293,26 @@ _shim_issue_put() {
 }
 
 _shim_issue_get() {
-  local key="$1" props_csv="" exists
+  local key="$1" props_csv="" fields_csv="" want_subtasks="false" exists
   if [[ "${query}" =~ (^|\&)properties=([^\&]+) ]]; then
     props_csv="${BASH_REMATCH[2]}"
   fi
+  if [[ "${query}" =~ (^|\&)fields=([^\&]+) ]]; then
+    fields_csv="${BASH_REMATCH[2]}"
+  fi
+  [[ ",${fields_csv}," == *",subtasks,"* ]] && want_subtasks="true"
   exists="$(jq -r --arg k "${key}" '(.issues | has($k))' "${MOCK_STATE_PATH}")"
   if [[ "${exists}" == "true" ]]; then
     RESP_STATUS=200
-    RESP_BODY="$(jq -c --arg k "${key}" --arg props "${props_csv}" '
+    RESP_BODY="$(jq -c --arg k "${key}" --arg props "${props_csv}" --argjson want_sub "${want_subtasks}" '
       .issues[$k] as $i
-      | {key: $k, fields: $i.fields}
+      | ($i.fields
+          + (if $want_sub then
+              {subtasks: [ .issues | to_entries[] | select(.value.fields.parent.key == $k)
+                | {key: .key, fields: {issuetype: (.value.fields.issuetype // {id: null})}} ]}
+            else {} end)
+        ) as $flds
+      | {key: $k, fields: $flds}
       + (if $props != "" then
           {properties: ( ($props | split(",")) as $names
             | reduce $names[] as $n ({}; . + (if ($i.properties | has($n)) then {($n): $i.properties[$n]} else {} end)) )}
@@ -324,6 +338,10 @@ _shim_property_put() {
   mv "${tmp}" "${MOCK_STATE_PATH}"
   RESP_STATUS=204
   RESP_BODY=""
+}
+
+_shim_get_transitions() {
+  jq -c --arg k "$1" '(.transitions // {})[$k] // []' "${MOCK_CONFIG_PATH}"
 }
 
 _shim_get_identity_marker() {
@@ -383,8 +401,17 @@ if [[ "${fault_json}" != "null" ]]; then
 else
   # ---- route resolution (mirrors mock-server.ps1 Resolve-Route) ---------------
   style="$(_shim_get_style "${path}")"
-  status_style="$(_shim_get_meta_style "${style}")"
   meta_style="$(_shim_get_meta_style "$(_shim_get_issuetype_style "${path}" "${style}")")"
+  # 012, T006a: the same per-project override issue-type names use also
+  # picks the project statuses fixture, when a dedicated one exists — falling
+  # back to the base style otherwise, so every pre-existing override without
+  # its own statuses fixture keeps behaving exactly as before. See
+  # mock-server.ps1's mirror of this comment for why.
+  if [[ -f "${MOCK_FIXTURE_DIR}/statuses-${meta_style}.json" ]]; then
+    status_style="${meta_style}"
+  else
+    status_style="$(_shim_get_meta_style "${style}")"
+  fi
 
   if [[ "${path}" == "/__mock/health" ]]; then
     RESP_STATUS=200
@@ -405,9 +432,15 @@ else
     _read_fixture 'field'
   elif [[ "${path}" == "/rest/api/3/issue" && "${method}" == "POST" ]]; then
     _shim_create_issue "${body}"
-  elif [[ "${path}" =~ ^/rest/api/3/issue/[^/]+/transitions$ && "${method}" == "POST" ]]; then
-    RESP_STATUS=204
-    RESP_BODY=""
+  elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)/transitions$ ]]; then
+    ikey="${BASH_REMATCH[1]}"
+    if [[ "${method}" == "POST" ]]; then
+      RESP_STATUS=204
+      RESP_BODY=""
+    elif [[ "${method}" == "GET" ]]; then
+      RESP_STATUS=200
+      RESP_BODY="$(jq -cn --argjson t "$(_shim_get_transitions "${ikey}")" '{expand:"transitions", transitions:$t}')"
+    fi
   elif [[ "${path}" =~ ^/rest/api/3/issue/[^/]+/remotelink$ && "${method}" == "GET" ]]; then
     _read_fixture 'remotelinks'
   elif [[ ( "${path}" == "/rest/api/3/search" || "${path}" == "/rest/api/3/search/jql" ) && "${method}" == "GET" ]]; then

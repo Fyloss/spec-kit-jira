@@ -26,6 +26,8 @@ flowchart TB
         E5["naming"]
         E6["managed_section"]
         E7["story_marker"]
+        E8["task_marker (012)"]
+        E9["tasks_parse (012)"]
     end
 
     subgraph SinkLayer["sink/jira/ — ALL Jira knowledge"]
@@ -115,6 +117,13 @@ mindmap
       story_marker
         durable story identifier
         byte-preserving splice into spec.md
+      task_marker
+        durable task identifier (012)
+        byte-preserving splice into tasks.md
+      tasks_parse
+        neutral tasks.md reader (012)
+        checkbox, reference, story attribution
+        never a Jira identifier, never a sub-task type
       drift
         transition or withhold or halt
       idempotency

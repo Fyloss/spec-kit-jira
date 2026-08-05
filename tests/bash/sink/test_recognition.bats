@@ -45,6 +45,33 @@ EOF
   [ "$(jq '.blocked | length' <<< "$output")" -eq 0 ]
 }
 
+@test "a story-kind read carries its Jira-side sub-tasks (key, issuetype_id) — T073, FR-021" {
+  cat > "${BATS_TEST_TMPDIR}/cfg.json" << 'EOF'
+{"issues": {
+  "COMP-1": {"summary": "S", "properties": {"spec-kit-jira": {"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111"}}},
+  "COMP-2": {"summary": "orphan sub-task", "parent": {"key": "COMP-1"}, "issuetype": {"id": "10099"}}
+}}
+EOF
+  mock_start "${BATS_TEST_TMPDIR}/cfg.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local stories='[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+  run recognition_run "${stories}" "${SPEC_REF}" "COMP" "spec.md"
+  [ "$status" -eq 0 ]
+  [ "$(jq '.bound["1111111111111111"].subtasks | length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.bound["1111111111111111"].subtasks[0].key' <<< "$output")" = "COMP-2" ]
+  [ "$(jq -r '.bound["1111111111111111"].subtasks[0].issuetype_id' <<< "$output")" = "10099" ]
+}
+
+@test "a task-kind read carries no sub-tasks — the extra fetch is story-only" {
+  local cfg; cfg="$(_seed_config '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111"}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local tasks='[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+  run recognition_run "${tasks}" "${SPEC_REF}" "COMP" "spec.md" "task"
+  [ "$status" -eq 0 ]
+  [ "$(jq '.bound["1111111111111111"].subtasks | length' <<< "$output")" -eq 0 ]
+}
+
 @test "marker-mismatch: story present, matches a SIBLING story of this same spec, not this one" {
   local cfg; cfg="$(_seed_config '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"9999999999999999"}')"
   mock_start "${cfg}"
@@ -209,6 +236,47 @@ EOF
     Import-Module '${PS_SINK}/Recognition.psm1' -Force
     [Console]::Out.Write((Invoke-JiraRecognitionRun -StoriesJson '${stories}' -SpecRefJson '${SPEC_REF}' -ProjectKey 'COMP' -SpecPath 'spec.md').Json)")"
   [ "${b}" = "${p}" ]
+}
+
+# --- Phase 2, T029/T030: the task tier, on the same terms as a story --------
+
+@test "the task tier: a recorded sub-task key is read back with its identity, status_category, and origin" {
+  local cfg; cfg="$(_seed_config '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111","role":"task"}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local tasks='[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+  run recognition_run "${tasks}" "${SPEC_REF}" "COMP" "tasks.md" "task"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.bound["1111111111111111"].key' <<< "$output")" = "COMP-1" ]
+  [ "$(jq -r '.bound["1111111111111111"] | has("status_category")' <<< "$output")" = "true" ]
+  [ "$(jq -r '.bound["1111111111111111"].origin' <<< "$output")" = "bridge" ]
+}
+
+@test "the task tier: a recorded key that 404s blocks that task alone (reported as new)" {
+  cat > "${BATS_TEST_TMPDIR}/faults.json" << 'EOF'
+{"faults": {"issue/COMP-404": {"status": 404}}}
+EOF
+  mock_start "${BATS_TEST_TMPDIR}/faults.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local tasks='[{"local_id":"9999999999999999","marker":{"state":"bound","id":"9999999999999999","ticket":"COMP-404"}}]'
+  run recognition_run "${tasks}" "${SPEC_REF}" "COMP" "tasks.md" "task"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.new[0]' <<< "$output")" = "9999999999999999" ]
+}
+
+@test "the task tier: diagnostics say 'task' and the task= grammar, not 'story'" {
+  local tasks='[{"local_id":"3333333333333333","marker":{"state":"malformed","id":"3333333333333333","lines":[9]}}]'
+  run recognition_run "${tasks}" "${SPEC_REF}" "COMP" "tasks.md" "task"
+  [ "$status" -eq 0 ]
+  [[ "$(jq -r '.blocked[0].detail' <<< "$output")" == *"for that task"* ]]
+  [[ "$(jq -r '.blocked[0].detail' <<< "$output")" == *"speckit-jira task=<16 hex>"* ]]
+  [[ "$(jq -r '.blocked[0].detail' <<< "$output")" != *"story"* ]]
+}
+
+@test "recognition_run defaults kind to 'story' — existing call sites are unaffected" {
+  local stories='[{"local_id":"3333333333333333","marker":{"state":"malformed","id":"3333333333333333","lines":[9]}}]'
+  run recognition_run "${stories}" "${SPEC_REF}" "COMP" "spec.md"
+  [[ "$(jq -r '.blocked[0].detail' <<< "$output")" == *"speckit-jira story=<16 hex>"* ]]
 }
 
 @test "T056: every diagnostic reason's wording matches the catalogue and leaks nothing, at --verbose" {

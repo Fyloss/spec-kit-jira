@@ -20,17 +20,20 @@ flowchart TD
     Avail -->|"yes"| Route["1 · Resolve routing<br/>folder → project key, or an explicit override"]
     Route --> Validate["2 · Refuse a missing, malformed,<br/>placeholder, or undeclared project key"]
     Validate --> Assign["3 · ASSIGN durable story identifiers<br/>splice the marker line into spec.md"]
-    Assign --> Parse["4 · PARSE — neutral content, engine only"]
-    Parse --> Build["5 · ASSEMBLE + schema-VALIDATE<br/>the neutral interchange document"]
-    Build --> Recognise["6 · RECOGNISE — read every recorded ticket back by key"]
+    Assign --> AssignTasks["3a · ASSIGN durable task identifiers<br/>splice the marker line into tasks.md, when task role declared (012)"]
+    AssignTasks --> Parse["4 · PARSE — neutral content, engine only"]
+    Parse --> ParseTasks["4a · PARSE tasks.md — neutral task content,<br/>attributed to its story (012)"]
+    ParseTasks --> Build["5 · ASSEMBLE + schema-VALIDATE<br/>the neutral interchange document"]
+    Build --> Recognise["6 · RECOGNISE — read every recorded ticket back by key<br/>parent, story AND sub-task"]
     Recognise --> Context["7 · Build the plan context from the local binding"]
-    Context --> Plan["8 · PLAN the ordered action set"]
+    Context --> Plan["8 · PLAN the ordered action set<br/>epic → stories → tasks"]
     Plan --> Lifecycle["9 · LIFECYCLE filter<br/>drift, halted states, flagged, zero-churn drop"]
     Lifecycle --> Apply{"--dry-run?"}
 
     Apply -->|"yes"| Summary
     Apply -->|"no"| Write["10 · APPLY — privacy guard, then write<br/>stamp and record each created key immediately"]
-    Write --> Summary["11 · Run summary<br/>counts · actions · warnings · notes · hook health"]
+    Write --> Complete["10a · COMPLETE — for each checked task,<br/>transition its recognised sub-task to a done-category status (012)"]
+    Complete --> Summary["11 · Run summary<br/>counts · actions · warnings · notes · hook health"]
     Summary --> Hook{"Running inside a hook<br/>with a non-zero exit?"}
     Hook -->|"yes"| Downgrade(["one WARNING, exit downgraded to 0"])
     Hook -->|"no"| Exit(["exit with the mapped code"])
@@ -79,12 +82,15 @@ sequenceDiagram
     autonumber
     participant Cmd as commands/reconcile
     participant Marker as engine/story_marker
+    participant TMarker as engine/task_marker (012)
     participant Parse as engine/parse
+    participant TParse as engine/tasks_parse (012)
     participant Inter as engine/interchange
     participant Recog as sink/recognition
     participant Adf as sink/adf
     participant Guard as sink/privacy_guard
     participant Apply as sink/plan_apply
+    participant Disc as sink/jira/discovery (012)
     participant Jira as Jira Cloud
 
     Cmd->>Marker: assign an identifier to every unmarked story
@@ -92,8 +98,15 @@ sequenceDiagram
     Note over Marker: a dry run computes the SAME assignment<br/>but never writes it
     Marker-->>Cmd: assigned document text
 
+    Cmd->>TMarker: assign an identifier to every unmarked task (when task role declared)
+    TMarker->>TMarker: byte-preserving splice into tasks.md
+    TMarker-->>Cmd: assigned tasks.md text
+
     Cmd->>Parse: parse the assigned text
     Parse-->>Cmd: title ladder, description blocks, Gherkin, design, priority, estimation
+
+    Cmd->>TParse: parse tasks.md — checkbox, reference, story attribution
+    TParse-->>Cmd: neutral task content, nested under its story
 
     Cmd->>Inter: assemble + validate against the schema
     alt invalid
@@ -115,10 +128,18 @@ sequenceDiagram
         Guard-->>Apply: refuse
         Apply-->>Cmd: exit 9, zero writes
     else clean
-        Apply->>Jira: POST /issue · PUT /issue/KEY · POST transitions
+        Apply->>Jira: POST /issue · PUT /issue/KEY (epic → stories → tasks)
         Jira-->>Apply: created keys
         Apply->>Apply: stamp the identity marker and record the key, per ticket, immediately
     end
+
+    Note over Cmd,Jira: Completion pass (012, §6) — planned only for a checked task
+    Cmd->>Disc: for each checked task's recognised sub-task not already done
+    Disc->>Jira: GET available transitions
+    Jira-->>Disc: transitions, each with a destination statusCategory
+    Disc-->>Cmd: the one done-category transition, or none/ambiguous (reported, never guessed)
+    Cmd->>Apply: POST /issue/KEY/transitions
+    Apply->>Jira: transition the sub-task
 ```
 
 The ordering in the last block is the invariant: **guard, then write**. A single
@@ -217,7 +238,19 @@ classDiagram
         +int assigned
         +int warnings
         +int errors
+        +TaskCounts tasks
     }
+
+    class TaskCounts {
+        +int created
+        +int updated
+        +int transitioned
+        +int unchanged
+        +int skipped
+        +int withheld
+    }
+
+    Counts *-- "0..1" TaskCounts
 
     class Action {
         +string method
@@ -246,3 +279,8 @@ Two details that make the summary trustworthy:
 - **A second, unchanged run reads `created: 0`, `updated: 0`, `recognised` equal
   to the story count, and `skipped` equal to it too.** That is the correct
   signature of an idempotent re-run, not a failure to mirror anything.
+- **`counts.tasks` appears only when a `task` role is declared** — absence,
+  not a zeroed-out object, is the off switch that keeps a run with no task
+  tier byte-for-byte identical to before feature 012 (FR-011). Its own
+  `transitioned` count is never folded into `updated`: a completion is a
+  transition, not a content change (research R5).
