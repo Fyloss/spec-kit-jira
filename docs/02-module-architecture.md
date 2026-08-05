@@ -40,6 +40,7 @@ flowchart TB
         S6["adf"]
         S7["privacy_guard"]
         S8["plan_apply"]
+        S9["duplicate_probe (017, US4, droppable)"]
     end
 
     subgraph LibLayer["lib/ — port infrastructure, no Jira knowledge"]

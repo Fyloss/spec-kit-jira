@@ -68,8 +68,11 @@ _mock_configs() {
 
   local after; after="$(cat "${TASKS}")"
   [ "${before}" = "${after}" ]
+  # 017's duplicate probe is a read-only GET fired in the planning pass, so a
+  # --dry-run over a specification with no parent marker legitimately reaches
+  # the double. The dry-run invariant is zero WRITES, not zero requests.
   run mock_calls
-  [ -z "$output" ]
+  [ "$(grep -cE '^(POST|PUT|DELETE) ' <<< "$output")" -eq 0 ]
 }
 
 @test "a --dry-run preview shows the summary and description of a created sub-task" {

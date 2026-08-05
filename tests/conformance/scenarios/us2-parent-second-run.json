@@ -1,16 +1,1 @@
-{
-  "name": "us2-parent-second-run",
-  "description": "US2 (T062) — quickstart Step 8: a second run over an already-mirrored hierarchy reads the parent and every story (one GET each) and writes nothing — zero POST, zero PUT, zero DELETE. The summary reports created: 0, updated: 0, and spec.md is byte-identical to the first run's result.",
-  "mock": { "projects": { "COMP": "company" } },
-  "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec",
-  "runs": [
-    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] },
-    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] }
-  ],
-  "env": {
-    "JIRA_EMAIL": "user@example.com",
-    "JIRA_API_TOKEN": "RAWSECRETXYZ",
-    "JIRA_NO_SLEEP": "1",
-    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111 2222222222222222 3333333333333333"
-  }
-}
+{"name":"us2-parent-second-run","description":"US2 (T062) \u2014 quickstart Step 8: a second run over an already-mirrored hierarchy reads the parent and every story (one GET each) and writes nothing \u2014 zero POST, zero PUT, zero DELETE. The summary reports created: 0, updated: 0, and spec.md is byte-identical to the first run's result.","mock":{"projects":{"COMP":"company"}},"fixture":"tests/conformance/fixtures/repo-with-mirrored-spec","runs":[{"argv":["reconcile","--json","specs/001-billing-invoices/spec.md"]},{"argv":["reconcile","--json","specs/001-billing-invoices/spec.md"]},{"argv":["reconcile","--json","specs/001-billing-invoices/spec.md"]}],"env":{"JIRA_EMAIL":"user@example.com","JIRA_API_TOKEN":"RAWSECRETXYZ","JIRA_NO_SLEEP":"1","SPEC_KIT_JIRA_ID_SOURCE":"aaaaaaaaaaaaaaaa 1111111111111111 2222222222222222 3333333333333333"}}

@@ -115,6 +115,23 @@ Describe 'Invoke-JiraRecognitionParentRun — bound reads' {
     }
 }
 
+Describe '017, US2 -- labels are read and unique-normalised' {
+    AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
+
+    It 'the parent recognition read requests labels and current.labels is unique-normalised' {
+        $cfg = New-JiraMockConfig '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","role":"parent"}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        Invoke-RestMethod -Uri "$($script:M.BaseUrl)/rest/api/3/issue/COMP-412" -Method Put -ContentType 'application/json' `
+            -Body '{"fields":{"labels":["zeta","alpha","alpha"]}}' | Out-Null
+
+        $minfo = '{"state":"bound","id":"3f2a91c04b7e6d18","ticket":"COMP-412","lines":[2]}'
+        $r = Invoke-JiraRecognitionParentRun -MarkerInfoJson $minfo -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath $script:SpecPath
+        $j = $r.Json | ConvertFrom-Json
+        (@($j.current.labels) -join ',') | Should -Be 'alpha,zeta'
+    }
+}
+
 Describe 'T055 — an inconclusive read is NEVER downgraded to "no parent exists"' {
     AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
 

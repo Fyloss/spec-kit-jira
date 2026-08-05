@@ -220,6 +220,24 @@ EOF
   [[ "$output" != *"RAWSECRETXYZ"* ]]
 }
 
+# --- T021 [017, US2] — labels are read and unique-normalised -----------------
+
+@test "017 — the recognition read requests labels and current.labels is unique-normalised" {
+  local cfg; cfg="$(_seed_config '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111"}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  # A real Jira response with a duplicate and out-of-order labels array —
+  # `unique` both dedupes and sorts (research R4).
+  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-1" \
+    -H 'Content-Type: application/json' \
+    -d '{"fields":{"labels":["zeta","alpha","alpha"]}}' > /dev/null
+
+  local stories='[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+  run recognition_run "${stories}" "${SPEC_REF}" "COMP" "spec.md"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.bound["1111111111111111"].current.labels | join(",")' <<< "$output")" = "alpha,zeta" ]
+}
+
 # --- Cross-port parity -------------------------------------------------------
 
 @test "the PowerShell port produces an identical recognition result (NFR-1)" {

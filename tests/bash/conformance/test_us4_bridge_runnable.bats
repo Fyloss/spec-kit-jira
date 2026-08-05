@@ -110,7 +110,12 @@ snapshot_environment() {
   # The state a developer is actually in one second after install: installed, not
   # configured. The host command must complete and the notice must be short.
   harness_install "${REPO}"
-  run bash -c "cd '${REPO}' && ./${BASH_ENTRY} reconcile --json .specify/extensions/jira/README.md 2>&1"
+  # 017's target guard refuses anything not literally named spec.md — a
+  # feature folder's own spec.md, not the extension's README, is what this
+  # scenario must point at.
+  mkdir -p "${REPO}/specs/001-x"
+  printf '# Feature Specification: X\n' > "${REPO}/specs/001-x/spec.md"
+  run bash -c "cd '${REPO}' && ./${BASH_ENTRY} reconcile --json specs/001-x/spec.md 2>&1"
   [ "$status" -eq 0 ]
   [[ "$output" == *"not bound to a Jira project yet"* ]]
   [[ "$output" == *"/speckit.jira.config"* ]]

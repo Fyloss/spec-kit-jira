@@ -140,6 +140,13 @@ stays the same. Change the slug and reconcile blocks the parent — naming the
 slug that already claims the ticket — rather than opening a second one. Leave
 the comment lines where reconcile put them.
 
+Every ticket the mirror creates or manages also carries a `speckit-<slug>`
+label naming its specification folder, so the whole specification is one
+search away on the board — filtering, say, `labels = "speckit-001-billing"`.
+The label is added alongside any you apply by hand and is restored if you
+remove it; it is never sent on the single ticket a feature-creation ceremony
+opens directly, since that ticket predates its specification folder.
+
 ## Step-by-step setup on Linux
 
 Same three settings. The token's secret-manager rung is libsecret, queried as

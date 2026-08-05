@@ -24,14 +24,16 @@ setup() {
   export JIRA_CONFIG_DIR="${ROOT}/tests/conformance/fixtures/repo-with-reconcile-legacy/.specify/jira"
   unset SPEC_KIT_JIRA_PLAN_CONTEXT
 
-  SPEC_WITH="${BATS_TEST_TMPDIR}/with.md"
+  mkdir -p "${BATS_TEST_TMPDIR}/with"
+  SPEC_WITH="${BATS_TEST_TMPDIR}/with/spec.md"
   printf '%s\n' \
     '# Feature Specification: Rich Tickets' '' 'We need a reconcile bridge for specs.' '' \
     '### User Story 1 - The core story (Priority: P1)' '' 'Estimation: 5' '' \
     '- **Given** a signed-in user' '- **When** they open the board' '- **Then** the widgets load' \
     > "${SPEC_WITH}"
 
-  SPEC_NOSUMMARY="${BATS_TEST_TMPDIR}/nosummary.md"
+  mkdir -p "${BATS_TEST_TMPDIR}/nosummary"
+  SPEC_NOSUMMARY="${BATS_TEST_TMPDIR}/nosummary/spec.md"
   printf '%s\n' '# Only A Title' > "${SPEC_NOSUMMARY}"
 }
 
@@ -106,13 +108,13 @@ setup() {
   # which must resolve identically instead of failing the interchange schema.
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local b p
-  b="$(cd "${BATS_TEST_TMPDIR}" && cmd_reconcile reconcile --dry-run --json with.md)"
-  p="$(cd "${BATS_TEST_TMPDIR}" && \
+  b="$(cd "${BATS_TEST_TMPDIR}/with" && cmd_reconcile reconcile --dry-run --json spec.md)"
+  p="$(cd "${BATS_TEST_TMPDIR}/with" && \
        SPEC_KIT_JIRA_BASE_URL='https://mock' SPEC_KIT_JIRA_SPEC_SLUG='001-feature' \
        SPEC_KIT_JIRA_REPO='acme/app' SPEC_KIT_JIRA_PROJECT_KEY='TEST' \
        pwsh -NoProfile -Command "
         Import-Module '${PS_CMD}/Reconcile.psm1' -Force
-        \$null = Invoke-JiraReconcile -Arguments @('reconcile','--dry-run','--json','with.md')")"
+        \$null = Invoke-JiraReconcile -Arguments @('reconcile','--dry-run','--json','spec.md')")"
   [ -n "${b}" ]
   [ "${b}" = "${p}" ]
 }
@@ -129,7 +131,7 @@ setup() {
 #
 # The causes must also be told apart. The reported defect's message named a
 # machine-wide CLI that was never how this extension is delivered, which sent the
-# developer to install something that does not exist. FR-017 lists six causes and
+# developer to install something that does not exist. FR-017 lists seven causes and
 # requires the message to name the true one; the sixth — the entry point missing
 # — is the one the bridge cannot report from inside a run that never started, so
 # what is testable here is the half-broken install it CAN detect.

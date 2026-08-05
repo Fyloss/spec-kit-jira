@@ -112,3 +112,39 @@ setup() {
 @test "a hook-fired run is documented as not an unreachable-operator caller (contract §3.10)" {
   grep -q 'is not such a caller' "${DOC}"
 }
+
+# --- 017, US3 [T039] — the single-target rule, documented normatively ------
+
+@test "017 — step 1 states the single-target rule once for all six events (FR-019–FR-021)" {
+  grep -qi "target is always that feature's own \`spec.md\`" "${DOC}"
+}
+
+@test "017 — the document names plan, tasks, research, data-model, quickstart, contracts and analysis output as never targets" {
+  grep -qF 'plan.md' "${DOC}"
+  grep -qF 'tasks.md' "${DOC}"
+  grep -qF 'research.md' "${DOC}"
+  grep -qF 'data-model.md' "${DOC}"
+  grep -qF 'quickstart.md' "${DOC}"
+  grep -qF 'contracts/' "${DOC}"
+  grep -qi 'analysis output' "${DOC}"
+}
+
+@test "017 — the message-discipline table carries the rejected-target row, exit 1, one reported line" {
+  grep -qi 'Rejected target' "${DOC}"
+  grep -qE '\| Rejected target \| Exit `1`' "${DOC}"
+}
+
+@test "017 — the section heading's stated cause count matches the number of table rows" {
+  local heading_n row_n
+  heading_n="$(grep -oE '## Message discipline — the [a-z]+ distinguished causes' "${DOC}" | sed -E 's/.*the ([a-z]+) distinguished.*/\1/')"
+  [ "${heading_n}" = "eight" ]
+  # Every data row, header and separator excluded — a row may start with a
+  # bold cause name (`| **Bridge unavailable** |`), so match on the leading
+  # pipe alone and subtract the two fixed header lines.
+  row_n="$(awk '/^## Message discipline/ { f = 1; next } f && /^## / { f = 0 } f && /^\|/' "${DOC}" | wc -l | tr -d ' ')"
+  [ "$((row_n - 2))" -eq 8 ]
+}
+
+@test "017 — the <SPEC-FILE> positional is documented as accepting a feature specification file only" {
+  grep -qi 'accepting a feature specification' "${DOC}"
+}

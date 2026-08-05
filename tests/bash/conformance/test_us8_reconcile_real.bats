@@ -32,7 +32,10 @@ _report_lines() {
   # Phase 3, US1: a real creation now stamps the identity marker immediately
   # afterward (research R5 step 6) — a write a dry run correctly never
   # predicts, since it never creates the ticket the stamp would apply to.
-  local performed; performed="$(grep -v '/properties/' "${TMP}/real/calls.log")"
+  # The duplicate probe's read (017, US4) is excluded too: it is a
+  # best-effort side read, never a planned write action, so --dry-run's
+  # own action set never lists it either.
+  local performed; performed="$(grep -vE '/properties/|search/jql' "${TMP}/real/calls.log")"
 
   [ "${reported}" = "${performed}" ]
 }

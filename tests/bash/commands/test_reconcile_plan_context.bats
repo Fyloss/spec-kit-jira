@@ -55,6 +55,38 @@ setup() {
   [ "$(jq -r '.estimation_field_id' <<< "$output")" = "customfield_20011" ]
 }
 
+@test "017, T031 twin — issue_types is threaded into the context from the binding, for the label-decision helpers" {
+  run _reconcile_plan_context "https://mock" "COMP" "${FIXTURE}" "${CFG}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.issue_types | length' <<< "$output")" -eq 2 ]
+  [ "$(jq -r '[.issue_types[] | select(.logical_name=="Story")][0].id' <<< "$output")" = "10004" ]
+}
+
+@test "017 — defaultable_fields_by_type is omitted when the binding predates it (R6's absent branch)" {
+  run _reconcile_plan_context "https://mock" "COMP" "${FIXTURE}" "${CFG}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("defaultable_fields_by_type")' <<< "$output")" = "false" ]
+}
+
+@test "017 — defaultable_fields_by_type is threaded into the context from the binding when recorded" {
+  local cfg binding_dir
+  binding_dir="${BATS_TEST_TMPDIR}/with-defaultable/.specify/jira"
+  mkdir -p "${binding_dir}"
+  cp "${FIXTURE}/config.yml" "${binding_dir}/config.yml"
+  cp "${FIXTURE}/config.local.yml" "${binding_dir}/config.local.yml"
+  cat >> "${binding_dir}/config.local.yml" <<'YAML'
+    defaultable_fields:
+      "10004":
+        - logical_name: "Labels"
+          field_id: "labels"
+          defaultable: false
+YAML
+  cfg="$(config_load "${binding_dir}")"
+  run _reconcile_plan_context "https://mock" "COMP" "${binding_dir}" "${cfg}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.defaultable_fields_by_type."10004"[0].field_id' <<< "$output")" = "labels" ]
+}
+
 @test "the project has no persisted binding: refused, distinct cause (FR-010)" {
   run _reconcile_plan_context "https://mock" "NOPE" "${FIXTURE}" "${CFG}"
   [ "$status" -eq 3 ]
@@ -74,7 +106,8 @@ setup() {
 @test "cmd_reconcile reads config.yml for priority_map even when only project key and epic strategy are overridden (T057, FR-008 partial)" {
   local legacy spec
   legacy="${ROOT}/tests/conformance/fixtures/repo-with-reconcile-legacy/.specify/jira"
-  spec="${BATS_TEST_TMPDIR}/priority.md"
+  mkdir -p "${BATS_TEST_TMPDIR}/priority"
+  spec="${BATS_TEST_TMPDIR}/priority/spec.md"
   printf '%s\n' \
     '# Feature Specification: Priority Wiring' '' \
     '### User Story 1 - The core story (Priority: P1)' '' \

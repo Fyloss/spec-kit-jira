@@ -43,6 +43,37 @@ Describe 'Creation context resolution (US2)' {
         ($r.Json | ConvertFrom-Json).estimation_field_id | Should -Be 'customfield_20011'
     }
 
+    It '017, T031 twin -- issue_types is threaded into the context from the binding, for the label-decision helpers' {
+        $r = Get-JiraReconcilePlanContextFromBinding -BaseUrl 'https://mock' -ProjectKey 'COMP' -ConfigDir $script:Fixture -ConfigJson $script:Cfg
+        $obj = $r.Json | ConvertFrom-Json
+        @($obj.issue_types).Count | Should -Be 2
+        (@($obj.issue_types) | Where-Object { $_.logical_name -eq 'Story' })[0].id | Should -Be '10004'
+    }
+
+    It '017 -- defaultable_fields_by_type is omitted when the binding predates it (R6''s absent branch)' {
+        $r = Get-JiraReconcilePlanContextFromBinding -BaseUrl 'https://mock' -ProjectKey 'COMP' -ConfigDir $script:Fixture -ConfigJson $script:Cfg
+        $obj = $r.Json | ConvertFrom-Json
+        ($obj.PSObject.Properties.Name -contains 'defaultable_fields_by_type') | Should -BeFalse
+    }
+
+    It '017 -- defaultable_fields_by_type is threaded into the context from the binding when recorded' {
+        $bindingDir = Join-Path $TestDrive 'with-defaultable/.specify/jira'
+        New-Item -ItemType Directory -Path $bindingDir -Force | Out-Null
+        Copy-Item -Path (Join-Path $script:Fixture 'config.yml') -Destination (Join-Path $bindingDir 'config.yml')
+        Copy-Item -Path (Join-Path $script:Fixture 'config.local.yml') -Destination (Join-Path $bindingDir 'config.local.yml')
+        Add-Content -LiteralPath (Join-Path $bindingDir 'config.local.yml') -Value @'
+    defaultable_fields:
+      "10004":
+        - logical_name: "Labels"
+          field_id: "labels"
+          defaultable: false
+'@
+        $cfg = (Import-JiraConfig -ConfigDir $bindingDir).Json
+        $r = Get-JiraReconcilePlanContextFromBinding -BaseUrl 'https://mock' -ProjectKey 'COMP' -ConfigDir $bindingDir -ConfigJson $cfg
+        $obj = $r.Json | ConvertFrom-Json
+        $obj.defaultable_fields_by_type.'10004'[0].field_id | Should -Be 'labels'
+    }
+
     It 'the project has no persisted binding: refused, distinct cause (FR-010)' {
         $r = Get-JiraReconcilePlanContextFromBinding -BaseUrl 'https://mock' -ProjectKey 'NOPE' -ConfigDir $script:Fixture -ConfigJson $script:Cfg
         $r.ExitCode | Should -Be 3
@@ -72,7 +103,8 @@ Describe 'Creation context resolution (US2)' {
 
     It 'Invoke-JiraReconcile reads config.yml for priority_map even when only project key and epic strategy are overridden (T057, FR-008 partial)' {
         $legacy = Join-Path $Root 'tests/conformance/fixtures/repo-with-reconcile-legacy/.specify/jira'
-        $spec = Join-Path $TestDrive 'priority.md'
+        New-Item -ItemType Directory -Path (Join-Path $TestDrive 'priority') -Force | Out-Null
+        $spec = Join-Path $TestDrive 'priority/spec.md'
         @(
             '# Feature Specification: Priority Wiring', '',
             '### User Story 1 - The core story (Priority: P1)', '',
