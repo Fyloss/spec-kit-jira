@@ -80,12 +80,22 @@ _setup_mirrored() {
   mock_start "${MOCK}/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 
-  # Prime: create COMP-1/2/3 and write their markers into SPEC. The shim's
-  # CREATE handler does not persist `labels` into its issue store (an
-  # allowlisted subset of fields — contracts/curl-shim.md), so the primed
-  # tickets land exactly where an existing consumer's pre-017 tickets would:
-  # recognised, marker-bound, and carrying no provenance label yet.
+  # Prime: create COMP-1/2/3 and write their markers into SPEC.
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
+
+  # The shim persists `labels` on create, exactly as Jira does, so the priming
+  # run above leaves its tickets already labelled. Strip the label back off, so
+  # they land where an existing consumer's pre-017 tickets actually are:
+  # recognised, marker-bound, and carrying no provenance label yet. This used
+  # to happen by itself, because the shim's CREATE handler dropped `labels`;
+  # relying on that made the zero-churn claim unprovable (a labelled creation
+  # read back unlabelled forever), so the shim was made faithful and the
+  # pre-017 state is now set up explicitly.
+  local k
+  for k in COMP-1 COMP-2 COMP-3 COMP-4; do
+    curl -s -X PUT -H 'Content-Type: application/json' \
+      -d '{"fields":{"labels":[]}}' "${MOCK_BASE_URL}/rest/api/3/issue/${k}" > /dev/null
+  done
 }
 
 @test "T3 — a recognised ticket missing the label is updated exactly once; counts.updated reflects it" {

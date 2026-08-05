@@ -330,6 +330,7 @@ function Resolve-Route {
                     issuelinks  = @()
                     parent      = if ($suppliedFields.ContainsKey('parent')) { $suppliedFields.parent } else { $null }
                     issuetype   = if ($suppliedFields.ContainsKey('issuetype')) { $suppliedFields.issuetype } else { $null }
+                    labels      = if ($suppliedFields.ContainsKey('labels')) { @($suppliedFields.labels) } else { @() }
                 }
                 $script:Issues[$key] = @{ fields = $fields; properties = @{} }
                 return @{ status = 201; body = "{`"id`":`"99001`",`"key`":`"$key`",`"self`":`"/rest/api/3/issue/99001`"}" }

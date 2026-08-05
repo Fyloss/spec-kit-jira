@@ -86,12 +86,22 @@ Describe 'Invoke-JiraReconcile -- provenance label on a mirrored corpus (017, co
         $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
         $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
 
-        # Prime: create COMP-1/2/3 and write their markers into SPEC. The
-        # mock's CREATE handler does not persist `labels` (an allowlisted
-        # subset of fields), so the primed tickets land exactly where an
-        # existing consumer's pre-017 tickets would: recognised, marker-bound,
-        # and carrying no provenance label yet.
+        # Prime: create COMP-1/2/3 and write their markers into SPEC.
         $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
+
+        # The mock persists `labels` on create, exactly as Jira does, so the
+        # priming run above leaves its tickets already labelled. Strip the
+        # label back off, so they land where an existing consumer's pre-017
+        # tickets actually are: recognised, marker-bound, and carrying no
+        # provenance label yet. This used to happen by itself, because the
+        # mock's CREATE handler dropped `labels`; relying on that made the
+        # zero-churn claim unprovable (a labelled creation read back
+        # unlabelled forever), so the mock was made faithful and the pre-017
+        # state is now set up explicitly.
+        foreach ($k in @('COMP-1', 'COMP-2', 'COMP-3', 'COMP-4')) {
+            Invoke-RestMethod -Uri "$($script:M.BaseUrl)/rest/api/3/issue/$k" -Method Put `
+                -ContentType 'application/json' -Body '{"fields":{"labels":[]}}' | Out-Null
+        }
     }
     AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
 

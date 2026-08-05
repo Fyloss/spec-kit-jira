@@ -286,7 +286,8 @@ _shim_create_issue() {
         status: $defaultStatus,
         issuelinks: [],
         parent: ($sf.parent // null),
-        issuetype: ($sf.issuetype // null)
+        issuetype: ($sf.issuetype // null),
+        labels: ($sf.labels // [])
       } as $fields
     | ($withCounter | .issues[$key] = {fields: $fields, properties: {}}) as $state
     | {state: $state, key: $key}
