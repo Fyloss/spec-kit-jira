@@ -88,6 +88,7 @@ sequenceDiagram
     alt no active feature
         Agent-->>Dev: nothing at all — the step is inert
     else
+        Note over Agent,Bridge: the target is ALWAYS the active feature's own<br/>spec.md — never plan.md, the artifact this<br/>host command just produced (017, the target guard)
         Agent->>Bridge: .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile spec.md --json
         Bridge->>Jira: read, then write only what changed
         Jira-->>Bridge: responses
@@ -107,15 +108,16 @@ Three properties are worth stating explicitly:
 - **The bridge's exit code never becomes the host's exit code.** It is
   reported, not propagated.
 
-## The six distinguished causes of a degraded run
+## The seven distinguished causes of a degraded run
 
 ```mermaid
 flowchart TD
     Start["Bridge invoked"] --> Exists{"Entry point exists<br/>and is executable?"}
-    Exists -->|"no"| Cause6["Bridge unavailable<br/>emit the verbatim fallback block<br/>the bridge cannot report this itself"]
+    Exists -->|"no"| Cause7["Bridge unavailable<br/>emit the verbatim fallback block<br/>the bridge cannot report this itself"]
     Exists -->|"yes"| Run["Run"]
 
     Run --> Code{"Exit code"}
+    Code -->|"1, rejected target"| Cause0["Rejected target (017)<br/>relay the entry point's own message —<br/>this is a caller defect, not a degraded Jira state"]
     Code -->|"0, no binding"| Cause1["Not yet configured<br/>run /speckit.jira.config"]
     Code -->|"5"| Cause4["Prerequisite missing<br/>relay the entry point's own message"]
     Code -->|"4"| Cause2["Credentials absent<br/>no token on any of the three rungs"]

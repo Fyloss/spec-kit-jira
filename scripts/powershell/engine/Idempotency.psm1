@@ -39,7 +39,17 @@ function Get-JiraIdempotentFieldStatus {
     if ($des -is [System.Management.Automation.PSCustomObject]) {
         foreach ($p in $des.PSObject.Properties) {
             $curMember = if ($cur -is [System.Management.Automation.PSCustomObject]) { $cur.PSObject.Properties[$p.Name] } else { $null }
-            $curVal = if ($null -eq $curMember) { $null } else { $curMember.Value }
+            # NOT `$curVal = if (...) {$null} else {$curMember.Value}` — an
+            # if/else USED AS AN EXPRESSION streams its branch's result, and
+            # PowerShell unrolls a one-element array into its bare scalar
+            # when a single value streams through an expression. A
+            # one-element `labels` array would silently become a bare
+            # string, comparing unequal to its own array-shaped desired
+            # value on every run (017, the R4 regression's PowerShell twin).
+            # Plain imperative assignment does not stream and keeps the
+            # array intact.
+            $curVal = $null
+            if ($null -ne $curMember) { $curVal = $curMember.Value }
             $desCanon = ConvertTo-JiraJsonValue $p.Value
             $curCanon = if ($null -eq $curVal) { 'null' } else { ConvertTo-JiraJsonValue $curVal }
             if (-not [System.String]::Equals($desCanon, $curCanon, [System.StringComparison]::Ordinal)) {

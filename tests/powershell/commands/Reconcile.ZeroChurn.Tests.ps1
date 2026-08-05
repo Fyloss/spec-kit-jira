@@ -50,6 +50,7 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
 
     It 'an unchanged re-run issues ZERO POST and ZERO PUT, skipped equals the story count' {
         $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
+        $null = Invoke-Captured @('reconcile', $script:Spec, '--json') # back-fills the provenance label once
         Clear-Content -LiteralPath $script:M.CallLog
 
         $r = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
@@ -62,6 +63,7 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
 
     It "a change to one story out of several produces exactly one PUT, naming that story's ticket" {
         $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
+        $null = Invoke-Captured @('reconcile', $script:Spec, '--json') # back-fills the provenance label once
 
         $content = Get-Content -Raw -LiteralPath $script:Spec
         $content = $content -replace [regex]::Escape('As a customer, I want to export every invoice in a date range.'), 'As a customer, I want to export every invoice in a chosen date range.'
@@ -77,6 +79,7 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
 
     It 'spec.md is byte-identical after an unchanged re-run' {
         $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
+        $null = Invoke-Captured @('reconcile', $script:Spec, '--json') # back-fills the provenance label once
         $before = Get-Content -Raw -LiteralPath $script:Spec
         $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
         (Get-Content -Raw -LiteralPath $script:Spec) | Should -Be $before
@@ -87,7 +90,10 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
         $r = Invoke-Captured @('reconcile', $script:Spec, '--dry-run', '--json') | ConvertFrom-Json
         $r.counts.created | Should -Be 4
         (Get-Content -Raw -LiteralPath $script:Spec) | Should -Be $before
-        @(Get-JiraMockCallLog -Mock $script:M).Count | Should -Be 0
+        # The one read this run makes: the duplicate probe (017, US4)
+        # predicting the parent's creation. Read-only — zero writes either way.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match 'search/jql' }).Count | Should -Be 1
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 0
     }
 
     It "a human-origin ticket's churn is computed on the managed section alone: its prose above the panel is never rewritten (T072)" {
@@ -132,6 +138,7 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
         $env:SPEC_KIT_JIRA_BASE_URL = $m.BaseUrl
         try {
             $null = Invoke-JiraReconcile -Arguments @('reconcile', $spec, '--json')
+            $null = Invoke-JiraReconcile -Arguments @('reconcile', $spec, '--json') # back-fills the provenance label once
             Clear-Content -LiteralPath $m.CallLog
 
             $sw = [System.IO.StringWriter]::new(); $orig = [Console]::Out; [Console]::SetOut($sw)

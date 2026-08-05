@@ -11,7 +11,9 @@ flowchart TD
     Guard -->|"disabled"| Inert(["exit 0, silently — no config read, no network"])
     Guard -->|"active"| Spec{"Readable spec file argument?"}
     Spec -->|"no"| Usage(["exit 1"])
-    Spec -->|"yes"| Bound{"Base URL set and config.yml present?"}
+    Spec -->|"yes"| TargetGuard{"basename == spec.md?<br/>(017, target guard)"}
+    TargetGuard -->|"no"| RejectedTarget(["exit 1 — rejected target<br/>zero requests, zero writes"])
+    TargetGuard -->|"yes"| Bound{"Base URL set and config.yml present?"}
 
     Bound -->|"no"| Notice(["Not bound yet — 3-line notice, exit 0"])
     Bound -->|"yes"| Avail{"Bridge entry points intact?"}
@@ -276,6 +278,12 @@ Two details that make the summary trustworthy:
 
 - **The base URL is stripped** from every reported action URL. The site host is
   a coordinate that must never appear in output.
+- **Stray markers warn, never block** (017, FR-007): on every valid target,
+  `--dry-run` included, the run scans its folder's other top-level files for
+  the bridge's marker comment and — when it finds one — adds a single
+  `warnings` entry naming every file, changing nothing else. The scan opens
+  nothing for writing; a marker left in `plan.md` by a defect the target guard
+  now prevents is reported, never touched.
 - **A second, unchanged run reads `created: 0`, `updated: 0`, `recognised` equal
   to the story count, and `skipped` equal to it too.** That is the correct
   signature of an idempotent re-run, not a failure to mirror anything.

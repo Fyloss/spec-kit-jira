@@ -210,6 +210,42 @@ Describe 'Invoke-JiraRecognitionRun — the task tier (Phase 2, T029/T030), on t
     }
 }
 
+Describe '017, US2 -- labels are read and unique-normalised' {
+    AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
+
+    It 'the recognition read requests labels and current.labels is unique-normalised (multi-element)' {
+        $cfg = New-JiraRecognitionSeedConfig '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111"}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        Invoke-RestMethod -Uri "$($script:M.BaseUrl)/rest/api/3/issue/COMP-1" -Method Put -ContentType 'application/json' `
+            -Body '{"fields":{"labels":["zeta","alpha","alpha"]}}' | Out-Null
+
+        $stories = '[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+        $r = Invoke-JiraRecognitionRun -StoriesJson $stories -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath 'spec.md'
+        $r.ExitCode | Should -Be 0
+        (@(($r.Json | ConvertFrom-Json).bound.'1111111111111111'.current.labels) -join ',') | Should -Be 'alpha,zeta'
+    }
+
+    It '017 regression -- a SINGLE label survives as a one-element array, not a bare string (return unrolling)' {
+        $cfg = New-JiraRecognitionSeedConfig '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111"}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        Invoke-RestMethod -Uri "$($script:M.BaseUrl)/rest/api/3/issue/COMP-1" -Method Put -ContentType 'application/json' `
+            -Body '{"fields":{"labels":["speckit-001-billing"]}}' | Out-Null
+
+        $stories = '[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+        $r = Invoke-JiraRecognitionRun -StoriesJson $stories -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath 'spec.md'
+        $obj = $r.Json | ConvertFrom-Json
+        $labels = $obj.bound.'1111111111111111'.current.labels
+        # NOT `$labels | Should -BeOfType ...` — piping a ONE-element array
+        # itself unrolls it to its bare scalar before Should ever sees it,
+        # which would make this assertion pass even on the unfixed code.
+        ($labels.GetType().IsArray) | Should -BeTrue
+        @($labels).Count | Should -Be 1
+        $labels[0] | Should -Be 'speckit-001-billing'
+    }
+}
+
 Describe 'Fault matrix: zero creation, every read failure fails the run closed' {
     AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
 

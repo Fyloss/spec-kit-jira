@@ -142,6 +142,30 @@ _reason_phrase() {
   esac
 }
 
+# _shim_urldecode <percent-encoded> — the inverse of jq's `@uri` (017,
+# duplicate_probe's jql query), test-infrastructure only.
+_shim_urldecode() {
+  local data="${1//+/ }"
+  printf '%b' "${data//%/\\x}"
+}
+
+# _shim_label_search <query-string> — 017, contracts/duplicate-probe.md §3/§4:
+# a jql search keyed on `labels = "<label>"` (the duplicate probe's own
+# query shape, distinct from discovery's `parent=<key>` sibling search,
+# which keeps routing to the static search-siblings fixture unchanged).
+# Looks the decoded label up in the active config's `.labelSearch` map
+# (label -> array of keys); unconfigured or unmatched ⇒ zero issues (the
+# "clear" verdict) — today's behaviour for every test that never sets it.
+_shim_label_search() {
+  local decoded label keys
+  decoded="$(_shim_urldecode "$1")"
+  label="$(printf '%s' "${decoded}" | sed -nE 's/.*labels = "([^"]*)".*/\1/p')"
+  keys="$(jq -c --arg l "${label}" '(.labelSearch[$l] // [])' "${MOCK_CONFIG_PATH}" 2> /dev/null)"
+  [[ -z "${keys}" || "${keys}" == "null" ]] && keys='[]'
+  RESP_STATUS=200
+  RESP_BODY="$(jq -cn --argjson k "${keys}" '{issues: ($k | map({key: .}))}')"
+}
+
 _read_fixture() {
   local name="$1" file="${MOCK_FIXTURE_DIR}/$1.json"
   if [[ -f "${file}" ]]; then
@@ -443,6 +467,8 @@ else
     fi
   elif [[ "${path}" =~ ^/rest/api/3/issue/[^/]+/remotelink$ && "${method}" == "GET" ]]; then
     _read_fixture 'remotelinks'
+  elif [[ ( "${path}" == "/rest/api/3/search" || "${path}" == "/rest/api/3/search/jql" ) && "${method}" == "GET" && "${query}" == *"labels"* ]]; then
+    _shim_label_search "${query}"
   elif [[ ( "${path}" == "/rest/api/3/search" || "${path}" == "/rest/api/3/search/jql" ) && "${method}" == "GET" ]]; then
     _read_fixture 'search-siblings'
   elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)/properties/([^/]+)$ ]]; then

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A lifecycle hook that mirrored the wrong artifact (`plan.md` instead of the
+  active feature's `spec.md`) created duplicate tickets: `reconcile` now
+  refuses before any request when its target's basename is not `spec.md`,
+  naming the correct file when one exists in the same folder, and reports
+  stray `speckit-jira` marker comments left behind in sibling artifacts by the
+  earlier defect (never touching them).
+- Every ticket the mirror creates or manages now carries a `speckit-<slug>`
+  label naming its specification folder, back-filled once on tickets that
+  predate this release and merged with any labels an operator already added.
+  An existing consumer will see this back-fill as ordinary `updated` counts on
+  its next run — see INSTALL.md.
+- Before creating a parent a specification holds no marker for, `reconcile`
+  now looks for tickets already carrying that specification's provenance
+  label and refuses rather than risking a duplicate — a best-effort,
+  read-only mitigation on top of the marker-line fix above, droppable
+  independently of it.
+
 ## [0.11.0] - 2026-08-04
 
 ### Added

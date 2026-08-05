@@ -143,6 +143,16 @@ candidate, and then `reconcile` proceeds normally. Tickets already mirrored
 flat (no parent, created before this release) are left exactly as they are —
 they are not migrated; see the CHANGELOG's Migration note.
 
+### Upgrading to the provenance-label release
+
+Every ticket the mirror manages now carries a `speckit-<slug>` label. An
+existing consumer's first `reconcile` after upgrading back-fills it onto
+every ticket that predates this release — one `PUT` per ticket, counted in
+`counts.updated` exactly like an ordinary content change. This is expected,
+not a sign anything else changed: any labels an operator already applied by
+hand are kept, and a specification with nothing else to reconcile will still
+report updates for this reason alone, once.
+
 ## Verifying the install
 
 - Inspect `.specify/extensions.yml` straight after installing: seven events, one

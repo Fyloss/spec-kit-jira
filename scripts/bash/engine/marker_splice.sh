@@ -5,7 +5,8 @@
 # these; neither owns them, so a second marker key never duplicates a splice
 # routine (contracts/parent-marker.md).
 #
-# NEUTRAL layer: no marker grammar lives here, only the byte-level mechanics.
+# NEUTRAL layer: only the byte-level mechanics and the marker framing
+# comment's own grammar live here — zero tracker vocabulary (017, FR-007).
 
 [[ -n ${_JIRA_ENGINE_MARKER_SPLICE:-} ]] && return 0
 _JIRA_ENGINE_MARKER_SPLICE=1
@@ -99,4 +100,29 @@ marker_splice_write_file() {
   mv "${tmp}" "${path}"
   printf 'written'
   return 0
+}
+
+# marker_splice_stray_files <folder> — the top-level files of <folder>,
+# excluding spec.md, that carry the bridge's marker framing comment
+# (`<!-- speckit-jira … -->`), sorted as bare file names and joined ", " —
+# empty when none (FR-007, research R9). No recursion into subdirectories;
+# every file is only ever opened for reading, never for writing.
+marker_splice_stray_files() {
+  local folder="$1" f base line
+  local generic_re='^<!--[[:space:]]+speckit-jira[[:space:]]+(.*)-->[[:space:]]*$'
+  local -a hits=()
+  for f in "${folder}"/*; do
+    [[ -f "${f}" ]] || continue
+    base="$(basename "${f}")"
+    [[ "${base}" == "spec.md" ]] && continue
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+      line="${line%$'\r'}"
+      if [[ "${line}" =~ ${generic_re} ]]; then
+        hits+=("${base}")
+        break
+      fi
+    done < "${f}"
+  done
+  ((${#hits[@]} == 0)) && return 0
+  printf '%s\n' "${hits[@]}" | jq -R -s -r 'split("\n") | map(select(length>0)) | sort | join(", ")'
 }

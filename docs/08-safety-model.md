@@ -175,7 +175,7 @@ the exact text it covers and can never disable detection of unrelated tokens.
 ```mermaid
 flowchart LR
     E0["0<br/>success, inert run,<br/>or reported degraded state"]
-    E1["1<br/>usage"]
+    E1["1<br/>usage — a missing or unreadable<br/>argument, OR a rejected target (017):<br/>two causes, one code; the message<br/>distinguishes them, not the code"]
     E2["2<br/>fail-closed read<br/>Jira unreachable"]
     E3["3<br/>auth rejected"]
     E4["4<br/>config refusal"]

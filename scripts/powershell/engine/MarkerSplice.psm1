@@ -91,6 +91,32 @@ function Write-JiraMarkerSpliceFile {
     return 'written'
 }
 
+function Get-JiraMarkerSpliceStrayFile {
+    <#
+    .SYNOPSIS
+      The top-level files of <Folder>, excluding spec.md, that carry the
+      bridge's marker framing comment (`<!-- speckit-jira … -->`), sorted as
+      bare file names and joined ", " — empty when none (FR-007, research
+      R9). Mirror of marker_splice_stray_files. No recursion into
+      subdirectories; every file is only ever opened for reading.
+    #>
+    param([Parameter(Mandatory)] [string] $Folder)
+    $genericRe = '^<!--\s+speckit-jira\s+(.*)-->\s*$'
+    $hits = [System.Collections.Generic.List[string]]::new()
+    foreach ($item in Get-ChildItem -LiteralPath $Folder -File) {
+        if ($item.Name -eq 'spec.md') { continue }
+        $lines = Get-Content -LiteralPath $item.FullName -ErrorAction SilentlyContinue
+        foreach ($line in $lines) {
+            if ($line -match $genericRe) {
+                $hits.Add($item.Name)
+                break
+            }
+        }
+    }
+    if ($hits.Count -eq 0) { return '' }
+    return (($hits | Sort-Object) -join ', ')
+}
+
 Export-ModuleMember -Function Get-JiraMarkerSpliceOffsetAfterLine, Get-JiraMarkerSpliceLineCount, `
     Add-JiraMarkerSpliceAfterLine, Set-JiraMarkerSpliceReplaceLine, Get-JiraMarkerSpliceDominantNl, `
-    Write-JiraMarkerSpliceFile
+    Write-JiraMarkerSpliceFile, Get-JiraMarkerSpliceStrayFile

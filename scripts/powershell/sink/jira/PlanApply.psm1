@@ -28,6 +28,56 @@ Import-Module (Join-Path $PSScriptRoot '../../engine/SpecMarker.psm1') -Force # 
 Import-Module (Join-Path $PSScriptRoot '../../engine/TaskMarker.psm1') -Force -Global # Phase 3, US1 — the task tier's own marker grammar, same seam (bare -Force here strips a caller's -Global load — see StoryMarker.psm1's import above)
 Import-Module (Join-Path $PSScriptRoot 'Identity.psm1') -Force # stamp the identity marker on each created ticket (R5 step 6)
 
+# 017, contracts/provenance-label.md §4: Jira Cloud's documented label-length
+# cap. One named constant so a tracker that differs is a one-line correction.
+$script:JiraLabelMaxLength = 255
+
+function Get-JiraPlanApplyLabelDecision {
+    <#
+    .SYNOPSIS
+      017, contract §4's two degradation triggers. Mirror of
+      _plan_apply_label_decision. Returns [ordered]@{ Label; Warning } —
+      Warning is '' when the label is sent unchanged. Neither trigger ever
+      refuses or drops a write — the label is simply omitted, with one
+      named warning.
+    #>
+    param(
+        $DefaultableByType,
+        [string] $TypeId,
+        [string] $TypeName,
+        [string] $ProjectKey,
+        [string] $Provenance,
+        [string] $Slug
+    )
+    if ([string]::IsNullOrEmpty($Provenance)) { return [ordered]@{ Label = ''; Warning = '' } }
+
+    # (b) The label is too long — checked first: an over-long label is never
+    # sent regardless of the type's own capability, and its warning names
+    # the SLUG (the operator's remedy), never the type.
+    if ($Provenance.Length -gt $script:JiraLabelMaxLength) {
+        $warning = "the provenance label for `"$Slug`" is $($Provenance.Length) characters, past the tracker's $($script:JiraLabelMaxLength)-character limit; every ticket was mirrored without it"
+        return [ordered]@{ Label = ''; Warning = $warning }
+    }
+
+    # (a) The type cannot hold labels — "present" means the key EXISTS in
+    # the type's defaultable_fields entry (recorded `defaultable: false`
+    # included), never whether it is itself defaultable (research
+    # R6/contract §4): that entry is exactly discovery's evidence that the
+    # type's create screen OFFERS labels at all. A type with no
+    # defaultable_fields entry recorded predates the metadata and must not
+    # gain a second refusal — it sends.
+    $entryProp = if ($null -ne $DefaultableByType) { $DefaultableByType.PSObject.Properties[$TypeId] } else { $null }
+    if ($null -ne $entryProp) {
+        $hasLabels = $false
+        foreach ($f in @($entryProp.Value)) { if ([string]$f.field_id -eq 'labels') { $hasLabels = $true; break } }
+        if (-not $hasLabels) {
+            $warning = "the provenance label `"$Provenance`" could not be applied to $TypeName in $ProjectKey; every ticket was mirrored without it"
+            return [ordered]@{ Label = ''; Warning = $warning }
+        }
+    }
+    return [ordered]@{ Label = $Provenance; Warning = '' }
+}
+
 function Get-JiraPlanProp {
     # Safe property read: an EMPTY PSCustomObject's `.PSObject.Properties.Name`
     # throws under StrictMode, so index the member collection instead.
@@ -252,6 +302,34 @@ function Get-JiraPlanWriteSet {
     # disagree with the run summary's resolved project (research R2, FR-023).
     $project = [string](Get-JiraPlanProp (Get-JiraPlanProp $doc 'routing') 'project_key')
 
+    # Provenance label (017, contracts/provenance-label.md §1/§4): derived
+    # once per run, from the document's own validated spec_ref — the
+    # "speckit-" prefix is a sink literal, the engine never learns the word
+    # "label". The degradation decision (§4's two triggers) is resolved
+    # ONCE for the story type here and reused by every story this run
+    # creates or updates, so at most one warning is ever emitted for it.
+    $slug = [string](Get-JiraPlanProp (Get-JiraPlanProp $doc 'spec_ref') 'spec_slug')
+    $provenanceLabel = if ($slug -ne '') { "speckit-$slug" } else { '' }
+    $defaultableByType = Get-JiraPlanProp $ctx 'defaultable_fields_by_type'
+    # @() around a $null property wraps it into a ONE-element array holding
+    # $null, not an empty array — filter it explicitly, or an absent
+    # issue_types key (a binding that predates it) throws under StrictMode
+    # instead of leaving the label decision to fall through to the type id.
+    $issueTypesRaw = Get-JiraPlanProp $ctx 'issue_types'
+    $issueTypesList = if ($null -eq $issueTypesRaw) { @() } else { @($issueTypesRaw) }
+    function Resolve-JiraPlanTypeName([string] $TypeId) {
+        foreach ($t in $issueTypesList) { if ([string]$t.id -eq $TypeId) { return [string]$t.logical_name } }
+        return $TypeId
+    }
+    $storyLabel = ''
+    $planWarnings = [System.Collections.Generic.List[string]]::new()
+    if ($provenanceLabel -ne '') {
+        $storyDecision = Get-JiraPlanApplyLabelDecision -DefaultableByType $defaultableByType -TypeId $storyType `
+            -TypeName (Resolve-JiraPlanTypeName $storyType) -ProjectKey $project -Provenance $provenanceLabel -Slug $slug
+        $storyLabel = $storyDecision.Label
+        if ($storyDecision.Warning -ne '') { $planWarnings.Add($storyDecision.Warning) }
+    }
+
     $stories = @()
     $storyProp = Get-JiraPlanProp $doc 'stories'
     if ($null -ne $storyProp) { $stories = @($storyProp) }
@@ -281,7 +359,7 @@ function Get-JiraPlanWriteSet {
             # resolved once the parent's create response is read. A
             # bridge-created ticket owns its whole description (no delimiter,
             # FR-040).
-            $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $title -IssueTypeId $storyType -FieldDefaultsByTypeJson $fieldDefaultsJson | ConvertFrom-Json
+            $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $title -IssueTypeId $storyType -FieldDefaultsByTypeJson $fieldDefaultsJson -Provenance $storyLabel | ConvertFrom-Json
             $fields = [ordered]@{}
             foreach ($p in $baseFields.PSObject.Properties) { $fields[$p.Name] = $p.Value }
             $fields['description'] = $adf
@@ -308,6 +386,26 @@ function Get-JiraPlanWriteSet {
             }
             if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
 
+            # Provenance label union (017, contract §2/§3): the desired list
+            # is the ticket's CURRENT labels plus the provenance token —
+            # Jira's PUT replaces the whole array, so the union is
+            # simultaneously the merge rule (FR-012) and the zero-churn
+            # rule (FR-013). Omitted entirely when the label is degraded
+            # (empty $storyLabel) — an existing label set is never touched
+            # on a project that cannot hold the token.
+            if ($storyLabel -ne '') {
+                $ticketLabels = Get-JiraPlanProp $ctx 'ticket_labels'
+                # @() around a $null property wraps it into a ONE-element
+                # array holding $null, not an empty array — a ticket with no
+                # current labels (exactly the back-fill case T3 covers) would
+                # otherwise union in a spurious "" label.
+                $existingLabelsRaw = Get-JiraPlanProp $ticketLabels $sid
+                $existingLabels = if ($null -eq $existingLabelsRaw) { @() } else { @($existingLabelsRaw) }
+                $labels = [string[]]@(@($existingLabels) + @($storyLabel) | ForEach-Object { [string]$_ } | Select-Object -Unique)
+                [System.Array]::Sort($labels, [System.StringComparer]::Ordinal)
+                $fields['labels'] = $labels
+            }
+
             # Parent-link correction (T109): a child ALREADY linked to a
             # parent (never a flat mirror carrying none — that is Out of
             # Scope, "no migration") whose current parent disagrees with the
@@ -332,8 +430,22 @@ function Get-JiraPlanWriteSet {
         }
     }
 
-    $parent = Get-JiraPlanWriteSetParent -DocObject $doc -CtxObject $ctx -Base $base
-    return (ConvertTo-JiraJsonValue ([ordered]@{ parent = $parent; stories = $actions }))
+    # The parent type's own label decision (017, contract §4) — resolved
+    # here, independently of the story type's, and reused whether the
+    # parent is created or updated this run. At most one further warning.
+    $parentTypeForLabel = [string](Get-JiraPlanProp $ctx 'parent_type_id')
+    $parentLabel = ''
+    if ($provenanceLabel -ne '' -and $parentTypeForLabel -ne '') {
+        $parentDecision = Get-JiraPlanApplyLabelDecision -DefaultableByType $defaultableByType -TypeId $parentTypeForLabel `
+            -TypeName (Resolve-JiraPlanTypeName $parentTypeForLabel) -ProjectKey $project -Provenance $provenanceLabel -Slug $slug
+        $parentLabel = $parentDecision.Label
+        if ($parentDecision.Warning -ne '') { $planWarnings.Add($parentDecision.Warning) }
+    }
+
+    $parent = Get-JiraPlanWriteSetParent -DocObject $doc -CtxObject $ctx -Base $base -ParentLabel $parentLabel
+    $result = [ordered]@{ parent = $parent; stories = $actions }
+    if ($planWarnings.Count -gt 0) { $result['warnings'] = $planWarnings }
+    return (ConvertTo-JiraJsonValue $result)
 }
 
 function Get-JiraPlanWriteSetParent {
@@ -343,7 +455,7 @@ function Get-JiraPlanWriteSetParent {
       T072/T076). Mirror of _plan_writes_parent.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] $DocObject, [Parameter(Mandatory)] $CtxObject, [Parameter(Mandatory)] [string] $Base)
+    param([Parameter(Mandatory)] $DocObject, [Parameter(Mandatory)] $CtxObject, [Parameter(Mandatory)] [string] $Base, [string] $ParentLabel = '')
     $doc = $DocObject
     $ctx = $CtxObject
     $parentType = [string](Get-JiraPlanProp $ctx 'parent_type_id')
@@ -363,7 +475,7 @@ function Get-JiraPlanWriteSetParent {
         # type by the shared builder itself.
         $fieldDefaultsProp = Get-JiraPlanProp $ctx 'field_defaults'
         $fieldDefaultsJson = if ($null -eq $fieldDefaultsProp) { '' } else { ConvertTo-JiraJsonValue $fieldDefaultsProp }
-        $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $epicTitle -IssueTypeId $parentType -FieldDefaultsByTypeJson $fieldDefaultsJson | ConvertFrom-Json
+        $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $epicTitle -IssueTypeId $parentType -FieldDefaultsByTypeJson $fieldDefaultsJson -Provenance $ParentLabel | ConvertFrom-Json
         $fields = [ordered]@{}
         foreach ($p in $baseFields.PSObject.Properties) { $fields[$p.Name] = $p.Value }
         $fields['description'] = $epicAdf
@@ -384,6 +496,24 @@ function Get-JiraPlanWriteSetParent {
         $epicAdf = ConvertTo-JiraManagedAdfDocument -ContentJson $epicJson -Origin $origin -ExistingJson $existingJson | ConvertFrom-Json -Depth 100
     }
     $desiredFields = [ordered]@{ summary = $epicTitle; description = $epicAdf }
+
+    # Provenance label union (017, contract §2/§3), on the recognised-parent
+    # branch — same union rule as the story branch, folded into
+    # $desiredFields BEFORE the zero-churn comparison below so a settled
+    # parent's label participates in it exactly like every other field.
+    if ($ParentLabel -ne '') {
+        # @() around a $null property wraps it into a ONE-element array
+        # holding $null, not an empty array — a parent with no current
+        # labels would otherwise union in a spurious "" label.
+        $existingParentLabels = @()
+        if ($null -ne $current) {
+            $existingParentLabelsRaw = Get-JiraPlanProp $current 'labels'
+            $existingParentLabels = if ($null -eq $existingParentLabelsRaw) { @() } else { @($existingParentLabelsRaw) }
+        }
+        $labels = [string[]]@(@($existingParentLabels) + @($ParentLabel) | ForEach-Object { [string]$_ } | Select-Object -Unique)
+        [System.Array]::Sort($labels, [System.StringComparer]::Ordinal)
+        $desiredFields['labels'] = $labels
+    }
 
     if ($null -eq $current) {
         $status = 'changed'

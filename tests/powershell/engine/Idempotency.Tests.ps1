@@ -32,6 +32,18 @@ Describe 'Get-JiraIdempotentFieldStatus' {
     It 'is changed when a desired key is absent from current' {
         Get-JiraIdempotentFieldStatus -CurrentFieldsJson '{"summary":"Title"}' -DesiredFieldsJson '{"priority":{"id":"2"}}' | Should -Be 'changed'
     }
+
+    It '017 -- is unchanged for a ONE-element array field that already matches (regression: an if/else expression assignment silently unwraps a single-element array to a bare scalar)' {
+        $cur = '{"labels":["speckit-001-x"]}'
+        $des = '{"labels":["speckit-001-x"]}'
+        Get-JiraIdempotentFieldStatus -CurrentFieldsJson $cur -DesiredFieldsJson $des | Should -Be 'unchanged'
+    }
+
+    It '017 -- is unchanged for a multi-element array field in a different order (both sides arrive pre-sorted; R4)' {
+        $cur = '{"labels":["alpha","speckit-001-x"]}'
+        $des = '{"labels":["alpha","speckit-001-x"]}'
+        Get-JiraIdempotentFieldStatus -CurrentFieldsJson $cur -DesiredFieldsJson $des | Should -Be 'unchanged'
+    }
 }
 
 Describe 'Get-JiraIdempotentManagedStatus' {

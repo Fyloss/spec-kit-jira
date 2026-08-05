@@ -43,6 +43,8 @@ source "${_cmd_reconcile_dir}/../sink/jira/plan_apply.sh"
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/discovery.sh" # Phase 8, US5 — the completion pass's transitions read
 # shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../sink/jira/duplicate_probe.sh" # US4, droppable — the second, best-effort guard
+# shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../hooks/register_hooks.sh" # hook health — READ ONLY (003 FR-022)
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../lib/config.sh"          # the operator disable record
@@ -350,6 +352,21 @@ _reconcile_plan_context() {
   # migration"); a child linked to the wrong parent is what plan_writes
   # corrects.
   ticket_parents="$(jq -c '(.bound // {}) | with_entries(select(.value.current.parent != null)) | with_entries(.value |= .current.parent)' <<< "${recog}")"
+  # ticket_labels (017, US2, contracts/provenance-label.md §2/§3): each
+  # recognised ticket's CURRENT labels, already unique-normalised by
+  # recognition — omitted entirely when empty, like every neighbouring map.
+  local ticket_labels
+  ticket_labels="$(jq -c '(.bound // {}) | with_entries(.value |= .current.labels)' <<< "${recog}")"
+
+  # defaultable_fields_by_type / issue_types (017, contract §4): the RAW
+  # per-type map discovery already records, plus the type-id -> logical-name
+  # list — read here only so plan_writes can answer "does this type's
+  # create screen offer labels at all", and name the type in its warning,
+  # without a second discovery pass. Omitted when the binding predates them
+  # (R6's "not recorded at all ⇒ send" branch reads this same absence).
+  local defaultable_fields_by_type issue_types_list
+  defaultable_fields_by_type="$(jq -c '.defaultable_fields // {}' <<< "${binding}")"
+  issue_types_list="$(jq -c '.issue_types // []' <<< "${binding}")"
 
   # Phase 3, US1: the task tier's own type id and the recognised sub-tasks'
   # keys/current content, merged into the SAME tickets map (safe — task and
@@ -367,7 +384,8 @@ _reconcile_plan_context() {
   jq -cn --arg b "${base}" --arg st "${story_type}" --argjson pids "${priority_ids}" --arg ef "${est_field}" \
     --arg pt "${parent_type_id}" --argjson psl "${parent_supports_link}" \
     --argjson tk "${tickets}" --argjson to "${ticket_origins}" --argjson td "${ticket_descriptions}" \
-    --argjson tp "${ticket_parents}" --argjson fd "${field_defaults}" \
+    --argjson tp "${ticket_parents}" --argjson fd "${field_defaults}" --argjson tl "${ticket_labels}" \
+    --argjson dft "${defaultable_fields_by_type}" --argjson itl "${issue_types_list}" \
     --arg tt "${task_type_id}" --argjson tc "${ticket_current}" '
     {base_url:$b}
     + (if $st == "" then {} else {story_type_id:$st} end)
@@ -379,6 +397,9 @@ _reconcile_plan_context() {
     + (if ($to|length) == 0 then {} else {ticket_origins:$to} end)
     + (if ($td|length) == 0 then {} else {ticket_descriptions:$td} end)
     + (if ($tp|length) == 0 then {} else {ticket_parents:$tp} end)
+    + (if ($tl|length) == 0 then {} else {ticket_labels:$tl} end)
+    + (if ($dft|length) == 0 then {} else {defaultable_fields_by_type:$dft} end)
+    + (if ($itl|length) == 0 then {} else {issue_types:$itl} end)
     + (if ($fd|length) == 0 then {} else {field_defaults:$fd} end)
     + (if $tt == "" then {} else {task_type_id:$tt} end)
     + (if ($tc|length) == 0 then {} else {ticket_current:$tc} end)'
@@ -432,6 +453,27 @@ cmd_reconcile() {
   done
   if [[ -z "${spec_file}" || ! -f "${spec_file}" ]]; then
     _reconcile_fault "$(cli_exit_code usage)" 'reconcile: a readable spec file argument is required'
+    return $?
+  fi
+
+  # TARGET GUARD (User Story 1, FR-001–FR-008, contracts/target-guard.md
+  # §1–§3): only a feature folder's own spec.md is ever mirrored. This runs
+  # before any configuration read, any network call and any file write — the
+  # earliest point at which the target is known (research R1: after the
+  # dispatch guard above, so an event the operator disabled stays silent).
+  # Basename comparison ONLY — never a glob, a suffix test or a substring
+  # search (research R3; the MSYS pattern hazard is why, see
+  # docs/10-windows-portability.md). Byte equality, case-sensitive.
+  local target_name; target_name="$(basename "${spec_file}")"
+  if [[ "${target_name}" != "spec.md" ]]; then
+    local sibling_spec target_msg
+    sibling_spec="$(dirname "${spec_file}")/spec.md"
+    if [[ -f "${sibling_spec}" ]]; then
+      target_msg="reconcile: \"${spec_file}\" is not a feature specification — only a feature folder's spec.md is ever mirrored (zero writes); the target for this folder is \"${sibling_spec}\""
+    else
+      target_msg="reconcile: \"${spec_file}\" is not a feature specification — only a feature folder's spec.md is ever mirrored (zero writes); no spec.md exists in that folder"
+    fi
+    _reconcile_fault "$(cli_exit_code usage)" "${target_msg}"
     return $?
   fi
 
@@ -530,6 +572,11 @@ cmd_reconcile() {
   local spec_ref
   spec_ref="$(jq -cn --arg r "${repo}" --arg s "${slug}" --arg f "${folder}" \
     '{repo:$r, spec_slug:$s, folder:$f}')"
+
+  # Stray-marker scan (FR-007, contracts/target-guard.md §4): runs on every
+  # valid target, dry-run included, and never changes the exit code. Computed
+  # once, here, and folded into the run summary's warnings array below.
+  local stray_files; stray_files="$(marker_splice_stray_files "${folder}")"
 
   # Phase 6, US4: the phase->status map and halted-status list this run's
   # lifecycle-safety rules resolve against — declared per project, exactly
@@ -702,6 +749,8 @@ cmd_reconcile() {
     _reconcile_fault "${EXIT_CONFIG}" "reconcile: ${parent_detail}"
     return $?
   fi
+
+  local dup_probe_warning=""
 
   # R5 step 2b — RECOGNISE the stories (Phase 3, US1;
   # contracts/recognition-contract.md): one read per recorded ticket,
@@ -951,14 +1000,42 @@ cmd_reconcile() {
       '. + {parent_key:$k, parent_current:$c, parent_origin:$o}' <<< "${plan_ctx}")"
   fi
 
+  # DUPLICATE PROBE (User Story 4, P3, droppable; FR-022–FR-026,
+  # contracts/duplicate-probe.md §2): fires only when about to CREATE a
+  # parent — parent_state "new" (no marker recorded) AND the plan context
+  # actually resolved a parent_type_id (a hierarchy with no parent type
+  # never creates one) — and only once every OTHER pre-write refusal above
+  # (routing, project validity, the stale-binding read) has already cleared,
+  # so a run that was going to refuse anyway never issues this read first.
+  # At most one request per run. Read-only, best-effort — a false negative
+  # here leaves today's behaviour unchanged (SC-001 rests on the marker
+  # line, not on this).
+  if [[ "${parent_state}" == "new" && -n "$(jq -r '.parent_type_id // ""' <<< "${plan_ctx}")" ]]; then
+    local dup_label dup_result dup_verdict
+    dup_label="speckit-${slug}"
+    dup_result="$(duplicate_probe_check "${base}" "${project_key}" "${dup_label}")"
+    dup_verdict="$(jq -r '.verdict' <<< "${dup_result}")"
+    if [[ "${dup_verdict}" == "hit" ]]; then
+      local dup_keys
+      dup_keys="$(jq -r '.keys | join(", ")' <<< "${dup_result}")"
+      _reconcile_fault "${EXIT_CONFIG}" "reconcile: project ${project_key} already holds tickets labelled \"${dup_label}\" (${dup_keys}) but this specification records no ticket of its own — bind each with the bridge's \`mention <issue-key>\` command, or remove the label from them (zero writes)"
+      return $?
+    elif [[ "${dup_verdict}" == "unavailable" ]]; then
+      dup_probe_warning="the duplicate-label check could not be performed on this site; the run proceeded on its recorded markers alone"
+    fi
+  fi
+
   local plan
   if ! plan="$(plan_writes "${doc_for_write}" "${plan_ctx}")"; then
     _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the write plan could not be assembled (zero writes)'
     return $?
   fi
-  local parent_action actions
+  local parent_action actions plan_label_warnings
   parent_action="$(jq -c '.parent' <<< "${plan}")"
   actions="$(jq -c '.stories' <<< "${plan}")"
+  # Label-degradation warnings (017, contract §4): at most one per type, per
+  # run — never an exit-code change, never a refusal.
+  plan_label_warnings="$(jq -c '.warnings // []' <<< "${plan}")"
 
   # Phase 3, US1 (contract §4): the task tier's own plan, over the SAME
   # document and context — never through plan_lifecycle, which only knows
@@ -1115,6 +1192,21 @@ cmd_reconcile() {
   # T073 (FR-021, FR-022): orphan and re-attribution reports join the notes
   # channel — reported once, never acted on.
   notes="$(jq -c --argjson tn "${task_notes}" '. + $tn' <<< "${notes}")"
+
+  # Stray-marker warning (FR-007, contracts/target-guard.md §4): one entry
+  # naming every match, computed above, before the plan or Jira were even
+  # reached — never blocks, never changes the exit code.
+  if [[ -n "${stray_files}" ]]; then
+    warns="$(jq -c --arg w "spec-kit-jira markers were found in files this mirror never writes: ${stray_files} — they are inert, were left untouched, and can be removed by hand" \
+      '. + [$w]' <<< "${warns}")"
+  fi
+  warns="$(jq -c --argjson lw "${plan_label_warnings}" '. + $lw' <<< "${warns}")"
+  # Duplicate-probe "unavailable" warning (User Story 4, contract §4):
+  # computed above, on the planning pass — never blocks, never changes the
+  # exit code.
+  if [[ -n "${dup_probe_warning}" ]]; then
+    warns="$(jq -c --arg w "${dup_probe_warning}" '. + [$w]' <<< "${warns}")"
+  fi
 
   # created/updated count only their own endpoints; a transition is also a
   # POST but is not a ticket creation, so it is excluded from the created

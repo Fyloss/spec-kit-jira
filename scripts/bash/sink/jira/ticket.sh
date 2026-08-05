@@ -48,7 +48,8 @@ ticket_validate() {
     '{key: $k, project: ($r.fields.project.key // null)}' | json_canonical
 }
 
-# jira_create_fields_base <project> <summary> <issue-type-id> [<field_defaults_by_type_json>]
+# jira_create_fields_base <project> <summary> <issue-type-id>
+#   [<field_defaults_by_type_json>] [<provenance-label>]
 # — the mandatory base every creation path must produce: {project, issuetype,
 # summary} (research R3, FR-025), plus (011, research R2) any recorded
 # defaults for the type actually being created. Both `_ticket_create_body`
@@ -61,11 +62,24 @@ ticket_validate() {
 # so a caller cannot get FR-018 wrong by passing the wrong sub-map: a
 # default recorded for a different issue type never reaches this payload.
 # Omitted or empty ⇒ the merge is a no-op (FR-028, research R6).
+#
+# provenance-label (017, contracts/provenance-label.md §2) is OPTIONAL and
+# passed by `plan_writes` (the mirror) ONLY — `_ticket_create_body` (the
+# feature ceremony) never passes it, because in the normal `before_specify`
+# state the specification folder does not exist yet and `commands/feature.sh`
+# builds `spec_ref.spec_slug` as the literal fallback "spec"; passing it
+# through would stamp `speckit-spec` — a label naming no specification — onto
+# every ceremony ticket. When given, it is merged into `labels` AFTER the
+# field-defaults spread above, as a union with whatever default the type
+# records, so a recorded `labels` default is preserved rather than
+# overwritten (contract §2 "Merge order on creation is load-bearing"). When
+# empty, no `labels` key is produced at all.
 jira_create_fields_base() {
-  local project="$1" summary="$2" typeid="$3" defaults_by_type="${4:-}"
+  local project="$1" summary="$2" typeid="$3" defaults_by_type="${4:-}" provenance="${5:-}"
   [[ -z "${defaults_by_type}" ]] && defaults_by_type='{}'
-  jq -cn --arg p "${project}" --arg s "${summary}" --arg t "${typeid}" --argjson dbt "${defaults_by_type}" \
-    '{project: {key: $p}, issuetype: {id: $t}, summary: $s} + (($dbt[$t]) // {})'
+  jq -cn --arg p "${project}" --arg s "${summary}" --arg t "${typeid}" --argjson dbt "${defaults_by_type}" --arg prov "${provenance}" \
+    '{project: {key: $p}, issuetype: {id: $t}, summary: $s} + (($dbt[$t]) // {})
+     + (if $prov == "" then {} else {labels: (((($dbt[$t]) // {}).labels // []) + [$prov] | unique)} end)'
 }
 
 # ticket_field_rejection_message <defaultable_fields_by_type_json> <action_json>
@@ -99,7 +113,10 @@ ticket_field_rejection_message() {
 }
 
 # _ticket_create_body <project> <summary> <story-type-id> — the canonical create
-# payload: wraps jira_create_fields_base unchanged.
+# payload: wraps jira_create_fields_base unchanged. Deliberately passes NO
+# provenance argument (017, contract §2): the feature ceremony's single-item
+# creation stays unlabelled at creation, and its specification's first
+# reconcile back-fills the label like any other unlabelled ticket.
 _ticket_create_body() {
   local project="$1" summary="$2" typeid="$3"
   jq -cn --argjson base "$(jira_create_fields_base "${project}" "${summary}" "${typeid}")" \

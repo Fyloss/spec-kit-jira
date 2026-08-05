@@ -36,6 +36,7 @@ teardown() {
   mock_start "${MOCK}/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
+  cmd_reconcile reconcile "${SPEC}" --json > /dev/null # back-fills the provenance label once
 
   : > "${MOCK_CALLLOG}"
   run cmd_reconcile reconcile "${SPEC}" --json
@@ -51,6 +52,7 @@ teardown() {
   mock_start "${MOCK}/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
+  cmd_reconcile reconcile "${SPEC}" --json > /dev/null # back-fills the provenance label once
 
   sed -i.bak 's/As a customer, I want to export every invoice in a date range\./As a customer, I want to export every invoice in a chosen date range./' "${SPEC}"
 
@@ -67,6 +69,7 @@ teardown() {
   mock_start "${MOCK}/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
+  cmd_reconcile reconcile "${SPEC}" --json > /dev/null # back-fills the provenance label once
   cp "${SPEC}" "${BATS_TEST_TMPDIR}/before.md"
 
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
@@ -84,8 +87,11 @@ teardown() {
   [ "$(jq -r '.counts.created' <<< "$output")" -eq 4 ]
   run cmp "${SPEC}" "${BATS_TEST_TMPDIR}/before-any-run.md"
   [ "$status" -eq 0 ]
+  # The one read this run makes: the duplicate probe (017, US4) predicting
+  # the parent's creation. Read-only — zero writes either way.
   run mock_calls
-  [ -z "$output" ]
+  [ "$(grep -c 'search/jql' <<< "$output")" -eq 1 ]
+  [ "$(grep -cE '^(POST|PUT) ' <<< "$output")" -eq 0 ]
 }
 
 @test "a human-origin ticket's churn is computed on the managed section alone: its prose above the panel is never rewritten (T072)" {
@@ -136,6 +142,7 @@ teardown() {
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 
   cmd_reconcile reconcile "${spec}" --json > /dev/null
+  cmd_reconcile reconcile "${spec}" --json > /dev/null # back-fills the provenance label once
 
   : > "${MOCK_CALLLOG}"
   run cmd_reconcile reconcile "${spec}" --json
@@ -161,6 +168,11 @@ teardown() {
       Import-Module '${PS_CMD}/Reconcile.psm1' -Force
       \$null = Invoke-JiraReconcile -Arguments @('reconcile','--json','${pspec}')
     " > /dev/null 2>/dev/null
+
+  JIRA_CONFIG_DIR="${pwork}/.specify/jira" pwsh -NoProfile -Command "
+      Import-Module '${PS_CMD}/Reconcile.psm1' -Force
+      \$null = Invoke-JiraReconcile -Arguments @('reconcile','--json','${pspec}')
+    " > /dev/null 2>/dev/null # back-fills the provenance label once
 
   local second
   second="$(JIRA_CONFIG_DIR="${pwork}/.specify/jira" pwsh -NoProfile -Command "

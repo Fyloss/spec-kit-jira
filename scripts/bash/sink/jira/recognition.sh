@@ -33,7 +33,7 @@ source "${_recognition_dir}/client.sh"
 _recognition_read() {
   local key="$1" extra="${2:-}" base url fields_param resp rc tmp
   base="${SPEC_KIT_JIRA_BASE_URL:-}"
-  fields_param="summary,description,priority,status,issuelinks,parent"
+  fields_param="summary,description,priority,status,issuelinks,parent,labels"
   [[ -n "${extra}" ]] && fields_param="${fields_param},${extra}"
   url="${base}/rest/api/3/issue/${key}?properties=${SPEC_KIT_JIRA_IDENTITY_KEY}&fields=${fields_param}"
   tmp="$(mktemp)"
@@ -68,7 +68,7 @@ _recognition_project_of() {
 _recognition_read_parent() {
   local key="$1" base url resp rc tmp
   base="${SPEC_KIT_JIRA_BASE_URL:-}"
-  url="${base}/rest/api/3/issue/${key}?properties=${SPEC_KIT_JIRA_IDENTITY_KEY}&fields=summary,description"
+  url="${base}/rest/api/3/issue/${key}?properties=${SPEC_KIT_JIRA_IDENTITY_KEY}&fields=summary,description,labels"
   tmp="$(mktemp)"
   jira_request GET "${url}" > "${tmp}"
   rc=$?
@@ -172,7 +172,7 @@ recognition_parent_run() {
 
       local fields current origin
       fields="$(jq -c '.fields' <<< "${read_result}")"
-      current="$(jq -c '{summary:(.summary // ""), description:(.description // {})}' <<< "${fields}")"
+      current="$(jq -c '{summary:(.summary // ""), description:(.description // {}), labels:((.labels // []) | unique)}' <<< "${fields}")"
       origin="$(jq -r '.origin // "bridge"' <<< "${marker}")"
       jq -cn --arg k "${key}" --argjson c "${current}" --arg o "${origin}" '{state:"bound", key:$k, current:$c, origin:$o}' | json_canonical
       return 0
@@ -370,7 +370,7 @@ recognition_run() {
     # migration" boundary (plan.md "Scope boundaries worth stating") leaves
     # untouched. A non-null value that disagrees with the resolved parent is
     # a different case, and IS in scope: plan_writes corrects it (T109).
-    current="$(jq -c '{summary:(.summary // ""), description:(.description // {}), priority:(.priority // null), parent:(.parent.key // null)}' <<< "${fields}")"
+    current="$(jq -c '{summary:(.summary // ""), description:(.description // {}), priority:(.priority // null), parent:(.parent.key // null), labels:((.labels // []) | unique)}' <<< "${fields}")"
     status="$(jq -r '.status.name // ""' <<< "${fields}")"
     status_category="$(jq -r '.status.statusCategory.key // ""' <<< "${fields}")"
     flagged="$(jq -r 'if (.["Flagged"]? // [] | length) > 0 then true else false end' <<< "${fields}")"

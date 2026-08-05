@@ -35,8 +35,12 @@ in a consuming repository, and assuming it does is what produced the reported
 
 1. **Locate the feature** — read `.specify/feature.json` for the active feature
    directory and use its `spec.md`, unless a spec file path was passed as the
-   argument. **With no active feature the step is inert**: do nothing and report
-   nothing.
+   argument. **The target is always that feature's own `spec.md` — never any
+   other artifact, whichever host command just produced it.** `plan.md`,
+   `tasks.md`, `research.md`, `data-model.md`, `quickstart.md`,
+   `contracts/api.md`, and an analysis output are never targets, for this event
+   or any other: this rule holds identically across all six `after_*` events.
+   **With no active feature the step is inert**: do nothing and report nothing.
 
 2. **Invoke the bridge** by the repository-relative path above, passing the spec
    file and `--json`:
@@ -68,12 +72,13 @@ in a consuming repository, and assuming it does is what produced the reported
    mirror that could not run is never a reason for `/speckit.plan` or
    `/speckit.implement` to fail.
 
-## Message discipline — the six distinguished causes
+## Message discipline — the eight distinguished causes
 
 At most **one** message per host command run, naming the **true** cause:
 
 | Cause | Distinguishing signal | What to say |
 | --- | --- | --- |
+| Rejected target | Exit `1`, message says a file "is not a feature specification" | Relay the entry point's own message verbatim — it names the rejected path and, when one exists, the correct `spec.md` for that folder. This is a caller defect (this procedure invoked the wrong artifact), not a degraded Jira state |
 | Not yet configured | The bridge exits `0` and reports no binding | At most three lines: this repository is not yet bound to a Jira project; run `/speckit.jira.config` |
 | Binding predates this release | Exit `4`, message says the binding "predates parent support" | The project is already bound; its local binding is a version behind. Run `/speckit.jira.config` to refresh it (see INSTALL.md, "Upgrading to the parent-hierarchy release") |
 | Credentials absent | Exit `4`, no token on any of the three resolution rungs | The token resolved through none of env, OS secret manager, or `.specify/jira/.env` |
@@ -296,8 +301,12 @@ waits.
 
 ## Flags
 
-- `<SPEC-FILE>` — optional positional: the specification to mirror; defaults to
-  the active feature's `spec.md`.
+- `<SPEC-FILE>` — optional positional, accepting a feature specification file
+  only: the target must be a feature folder's own `spec.md`; defaults to the
+  active feature's `spec.md` when omitted. Any other path — `plan.md`,
+  `tasks.md`, a research or analysis artifact, a differently named file —
+  is refused before any read, write, or network call (the rejected-target
+  cause above).
 - `--json` — emit the machine-readable run summary (`run-summary.schema.json`).
 - `--dry-run` — compute the full action set and report it, writing nothing to
   Jira. The dry-run action set equals the real run's exactly.

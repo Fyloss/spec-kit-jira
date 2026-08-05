@@ -25,9 +25,10 @@ teardown() {
   [ "$(cat "${TMP}/out/exit")" = "0" ]
 
   local calls; calls="$(cat "${TMP}/out/calls.log")"
-  # The parent is created first.
-  [ "$(sed -n '1p' <<< "${calls}")" = "POST /rest/api/3/issue" ]
-  [ "$(sed -n '2p' <<< "${calls}")" = "PUT /rest/api/3/issue/COMP-1/properties/spec-kit-jira" ]
+  # The duplicate probe (017, US4) reads first, then the parent is created.
+  [[ "$(sed -n '1p' <<< "${calls}")" == GET*search/jql* ]]
+  [ "$(sed -n '2p' <<< "${calls}")" = "POST /rest/api/3/issue" ]
+  [ "$(sed -n '3p' <<< "${calls}")" = "PUT /rest/api/3/issue/COMP-1/properties/spec-kit-jira" ]
   # Every child creation follows, each stamped immediately.
   [ "$(grep -c '^POST /rest/api/3/issue$' <<< "${calls}")" -eq 4 ]
   [ "$(grep -c '^PUT /rest/api/3/issue/COMP-[0-9]*/properties/spec-kit-jira$' <<< "${calls}")" -eq 4 ]
@@ -49,12 +50,15 @@ teardown() {
   [ "$(jq -r '.counts.created' "${TMP}/out/stdout")" = "0" ]
   [ "$(jq -r '.counts.updated' "${TMP}/out/stdout")" = "0" ]
 
-  # Only the SECOND run's calls matter here — the harness captures both runs'
-  # calls in one cumulative log. Zero write verbs anywhere in the log AFTER
-  # the first run's last identity stamp (its final write) isolates exactly
-  # the second run's contribution.
-  local last_stamp_line; last_stamp_line="$(grep -n '^PUT .*properties/spec-kit-jira$' "${TMP}/out/calls.log" | tail -1 | cut -d: -f1)"
-  local after; after="$(tail -n "+$((last_stamp_line + 1))" "${TMP}/out/calls.log")"
+  # Three runs now share the one cumulative log: the first creates the
+  # hierarchy, the second back-fills the provenance label onto every
+  # ticket the first run's mock CREATE dropped it from (017, US2 — a
+  # one-time, expected write), and the assertion above already confirms
+  # the THIRD run's own summary is created:0/updated:0. Zero write verbs
+  # anywhere in the log AFTER the second run's own last write isolates
+  # exactly the third run's contribution.
+  local last_write_line; last_write_line="$(grep -nE '^(POST|PUT|DELETE) ' "${TMP}/out/calls.log" | tail -1 | cut -d: -f1)"
+  local after; after="$(tail -n "+$((last_write_line + 1))" "${TMP}/out/calls.log")"
   [ -z "$(grep -E '^(POST|PUT|DELETE) ' <<< "${after}")" ]
 }
 
