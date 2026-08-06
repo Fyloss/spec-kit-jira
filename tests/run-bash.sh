@@ -224,14 +224,21 @@ trap 'rm -rf "${RESULTS_DIR}"' EXIT
 # `-P core-count` leaves a 4-vCPU runner idle a large fraction of the time.
 # SPEC_KIT_JIRA_BATS_JOBS is the probe's own knob (may exceed the core
 # count deliberately); unset, the default oversubscribes by 3x.
+CORES="$(getconf _NPROCESSORS_ONLN 2> /dev/null || printf '1')"
+[[ "${CORES}" =~ ^[0-9]+$ ]] || CORES=1
+[[ "${CORES}" -lt 1 ]] && CORES=1
 JOBS="${SPEC_KIT_JIRA_BATS_JOBS:-}"
 if [[ ! "${JOBS}" =~ ^[0-9]+$ ]] || [[ "${JOBS}" -lt 1 ]]; then
-  JOBS="$(getconf _NPROCESSORS_ONLN 2> /dev/null || printf '1')"
-  [[ "${JOBS}" =~ ^[0-9]+$ ]] || JOBS=1
-  [[ "${JOBS}" -lt 1 ]] && JOBS=1
-  JOBS=$((JOBS * 3))
+  JOBS=$((CORES * 3))
 fi
 printf 'run-bash.sh: jobs: %s\n' "${JOBS}"
+# 018 diagnostic (macOS timing question, baseline.md): cheap enough to leave
+# in permanently, and this is the only channel that survives a non-admin
+# token when the question is "what did this CI run actually compute".
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+  printf '::notice title=run-bash.sh scheduling::os=%s cores=%s jobs=%s files=%s\n' \
+    "$(uname -s 2> /dev/null || printf 'unknown')" "${CORES}" "${JOBS}" "${TOTAL_FILES}"
+fi
 
 if command -v xargs > /dev/null 2>&1; then
   printf '%s\n' "${FILES[@]}" | xargs -P "${JOBS}" -I{} bash -c '
