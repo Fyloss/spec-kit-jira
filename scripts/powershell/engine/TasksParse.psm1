@@ -198,7 +198,7 @@ function ConvertTo-JiraTasksParseDocument {
         # tokenized into marked spans here rather than shipped as a raw string.
         # $title itself stays verbatim — it becomes the Jira summary, a
         # plain-text field where no rich text is possible (data-model.md §3).
-        $descSpans = @(ConvertTo-JiraMarkdownInlineSpans -Text $title | ConvertFrom-Json -Depth 100)
+        $descSpans = @(ConvertTo-JiraMarkdownInlineSpanList -Text $title | ConvertFrom-Json -Depth 100)
         $descBlocks = @([ordered]@{ type = 'paragraph'; spans = $descSpans })
 
         $ordinalValue = if ($tagOrdinal) { [int]$tagOrdinal } else { $null }

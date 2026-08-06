@@ -367,7 +367,7 @@ function Invoke-JiraMarkdownScan {
     if ($run.Length -gt 0) { Add-JiraMarkdownSpan -Text $run.ToString() -Marks $Marks -Href $Href }
 }
 
-function ConvertTo-JiraMarkdownInlineSpans {
+function ConvertTo-JiraMarkdownInlineSpanList {
     <#
     .SYNOPSIS
       Part C + Part D. Returns a JSON array of spans ({text, marks}), D1-merged
@@ -425,7 +425,7 @@ function Split-JiraMarkdownLine {
     return (($Text -replace "`r`n", "`n") -replace "`r", "`n") -split "`n"
 }
 
-function ConvertTo-JiraMarkdownBlocks {
+function ConvertTo-JiraMarkdownBlockList {
     <#
     .SYNOPSIS
       Part B, B1-B8 (the B9 cap is the caller's — data-model.md §4). Returns a
@@ -444,10 +444,10 @@ function ConvertTo-JiraMarkdownBlocks {
 
     $closeOpen = {
         if ($mode -eq 'paragraph' -and $para -ne '') {
-            $blocksOut.Add('{"type":"paragraph","spans":' + (ConvertTo-JiraMarkdownInlineSpans -Text $para) + '}')
+            $blocksOut.Add('{"type":"paragraph","spans":' + (ConvertTo-JiraMarkdownInlineSpanList -Text $para) + '}')
         }
         elseif (($mode -eq 'bullet_list' -or $mode -eq 'ordered_list') -and $liLines.Count -gt 0) {
-            $items = ($liLines | ForEach-Object { ConvertTo-JiraMarkdownInlineSpans -Text $_ }) -join ','
+            $items = ($liLines | ForEach-Object { ConvertTo-JiraMarkdownInlineSpanList -Text $_ }) -join ','
             $typeName = if ($mode -eq 'bullet_list') { 'bullet_list' } else { 'ordered_list' }
             $blocksOut.Add('{"type":"' + $typeName + '","items":[' + $items + ']}')
         }
@@ -498,7 +498,7 @@ function ConvertTo-JiraMarkdownBlocks {
             $level = $hm.Groups[1].Value.Length
             $htext = $hm.Groups[2].Value -replace '\s*#+\s*$', ''
             $htext = $htext.Trim()
-            $blocksOut.Add('{"type":"heading","level":' + $level + ',"spans":' + (ConvertTo-JiraMarkdownInlineSpans -Text $htext) + '}')
+            $blocksOut.Add('{"type":"heading","level":' + $level + ',"spans":' + (ConvertTo-JiraMarkdownInlineSpanList -Text $htext) + '}')
             continue
         }
 
@@ -556,7 +556,7 @@ function ConvertTo-JiraMarkdownBlocks {
             }
             if ($isDelim -and $hasDash) { continue }
             $joined = ($trimmedCells -join ' — ')
-            $blocksOut.Add('{"type":"paragraph","spans":' + (ConvertTo-JiraMarkdownInlineSpans -Text $joined) + '}')
+            $blocksOut.Add('{"type":"paragraph","spans":' + (ConvertTo-JiraMarkdownInlineSpanList -Text $joined) + '}')
             continue
         }
 
@@ -577,4 +577,4 @@ function ConvertTo-JiraMarkdownBlocks {
     return '[' + ($blocksOut -join ',') + ']'
 }
 
-Export-ModuleMember -Function ConvertTo-JiraMarkdownInlineSpans, Get-JiraMarkdownInlinePlain, ConvertTo-JiraMarkdownBlocks
+Export-ModuleMember -Function ConvertTo-JiraMarkdownInlineSpanList, Get-JiraMarkdownInlinePlain, ConvertTo-JiraMarkdownBlockList

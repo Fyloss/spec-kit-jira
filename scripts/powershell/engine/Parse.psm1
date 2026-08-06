@@ -164,7 +164,7 @@ function Get-JiraParsedDescription {
     }
 
     $regionText = if ($region.Count -gt 0) { $region -join "`n" } else { '' }
-    $allBlocks = @(ConvertTo-JiraMarkdownBlocks -Text $regionText | ConvertFrom-Json -Depth 100)
+    $allBlocks = @(ConvertTo-JiraMarkdownBlockList -Text $regionText | ConvertFrom-Json -Depth 100)
 
     # B9 cap: content blocks are kept up to the first two; headings are always
     # carried through, then a heading left trailing is dropped.
@@ -209,7 +209,7 @@ function Get-JiraParsedAcceptance {
     $when = [System.Collections.Generic.List[object]]::new()
     $then = [System.Collections.Generic.List[object]]::new()
 
-    $tok = { param($S) ConvertTo-JiraMarkdownInlineSpans -Text $S | ConvertFrom-Json -Depth 20 }
+    $tok = { param($S) ConvertTo-JiraMarkdownInlineSpanList -Text $S | ConvertFrom-Json -Depth 20 }
     # @(...) at EVERY call site below, not inside $tok: a scriptblock's own
     # @()-wrapped output still unwraps to a bare object when captured through
     # `& $tok ...` (PowerShell's pipeline auto-unwrapping — the same defect
@@ -330,7 +330,7 @@ function Get-JiraParsedDesign {
             if ($t -match 'figma\.com') { continue }
             $t = (Remove-JiraParseMarker $t).Trim()
             if ([string]::IsNullOrEmpty($t)) { continue }
-            $spans = @(ConvertTo-JiraMarkdownInlineSpans -Text $t | ConvertFrom-Json -Depth 20)
+            $spans = @(ConvertTo-JiraMarkdownInlineSpanList -Text $t | ConvertFrom-Json -Depth 20)
             $items.Add([ordered]@{ kind = 'guidance'; value = $spans })
         }
     }
@@ -429,8 +429,8 @@ function Get-JiraParsedEpicExtraBlocks {
         if ($hm.Success) {
             if (-not [string]::IsNullOrEmpty($cur)) {
                 $trimmed = $cur.Trim()
-                if ($mode -eq 'sc') { $scItems.Add(@(ConvertTo-JiraMarkdownInlineSpans -Text (Remove-JiraParseSCLabel -Text $trimmed) | ConvertFrom-Json -Depth 20)) }
-                elseif ($mode -eq 'oos') { $oosItems.Add(@(ConvertTo-JiraMarkdownInlineSpans -Text $trimmed | ConvertFrom-Json -Depth 20)) }
+                if ($mode -eq 'sc') { $scItems.Add(@(ConvertTo-JiraMarkdownInlineSpanList -Text (Remove-JiraParseSCLabel -Text $trimmed) | ConvertFrom-Json -Depth 20)) }
+                elseif ($mode -eq 'oos') { $oosItems.Add(@(ConvertTo-JiraMarkdownInlineSpanList -Text $trimmed | ConvertFrom-Json -Depth 20)) }
             }
             $cur = ''
             $mode = ''
@@ -455,8 +455,8 @@ function Get-JiraParsedEpicExtraBlocks {
             if ($bm.Success) {
                 if (-not [string]::IsNullOrEmpty($cur)) {
                     $trimmed = $cur.Trim()
-                    if ($mode -eq 'sc') { $scItems.Add(@(ConvertTo-JiraMarkdownInlineSpans -Text (Remove-JiraParseSCLabel -Text $trimmed) | ConvertFrom-Json -Depth 20)) }
-                    elseif ($mode -eq 'oos') { $oosItems.Add(@(ConvertTo-JiraMarkdownInlineSpans -Text $trimmed | ConvertFrom-Json -Depth 20)) }
+                    if ($mode -eq 'sc') { $scItems.Add(@(ConvertTo-JiraMarkdownInlineSpanList -Text (Remove-JiraParseSCLabel -Text $trimmed) | ConvertFrom-Json -Depth 20)) }
+                    elseif ($mode -eq 'oos') { $oosItems.Add(@(ConvertTo-JiraMarkdownInlineSpanList -Text $trimmed | ConvertFrom-Json -Depth 20)) }
                 }
                 $mode = if ($section -eq 'sc-outcomes') { 'sc' } else { 'oos' }
                 $cur = $bm.Groups[2].Value
@@ -468,8 +468,8 @@ function Get-JiraParsedEpicExtraBlocks {
     }
     if (-not [string]::IsNullOrEmpty($cur)) {
         $trimmed = $cur.Trim()
-        if ($mode -eq 'sc') { $scItems.Add(@(ConvertTo-JiraMarkdownInlineSpans -Text (Remove-JiraParseSCLabel -Text $trimmed) | ConvertFrom-Json -Depth 20)) }
-        elseif ($mode -eq 'oos') { $oosItems.Add(@(ConvertTo-JiraMarkdownInlineSpans -Text $trimmed | ConvertFrom-Json -Depth 20)) }
+        if ($mode -eq 'sc') { $scItems.Add(@(ConvertTo-JiraMarkdownInlineSpanList -Text (Remove-JiraParseSCLabel -Text $trimmed) | ConvertFrom-Json -Depth 20)) }
+        elseif ($mode -eq 'oos') { $oosItems.Add(@(ConvertTo-JiraMarkdownInlineSpanList -Text $trimmed | ConvertFrom-Json -Depth 20)) }
     }
 
     $blocks = [System.Collections.Generic.List[object]]::new()
@@ -531,7 +531,7 @@ function Get-JiraParsedPlanSummary {
     $planHeading = @(Get-JiraMarkdownInlinePlain -Text 'Implementation Plan' | ConvertFrom-Json -Depth 20)
     $blocks.Add([ordered]@{ type = 'heading'; level = 3; spans = $planHeading })
     foreach ($p in $paras) {
-        $spans = @(ConvertTo-JiraMarkdownInlineSpans -Text $p | ConvertFrom-Json -Depth 20)
+        $spans = @(ConvertTo-JiraMarkdownInlineSpanList -Text $p | ConvertFrom-Json -Depth 20)
         $blocks.Add([ordered]@{ type = 'paragraph'; spans = $spans })
     }
     return (ConvertTo-JiraJsonValue $blocks)

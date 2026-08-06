@@ -71,7 +71,7 @@ function New-JiraAdfParagraph {
     return [ordered]@{ type = 'paragraph'; content = $content }
 }
 
-function New-JiraAdfParagraphFromSpans {
+function New-JiraAdfParagraphFromSpanList {
     <# A paragraph node whose content is a rendered neutral inline sequence. #>
     param([object[]] $Spans)
     return [ordered]@{ type = 'paragraph'; content = @(ConvertTo-JiraAdfTextNodeList -Spans $Spans) }
@@ -82,10 +82,10 @@ function New-JiraAdfListItem {
     return [ordered]@{ type = 'listItem'; content = @((New-JiraAdfParagraph $Text)) }
 }
 
-function New-JiraAdfListItemFromSpans {
+function New-JiraAdfListItemFromSpanList {
     <# A listItem node whose paragraph content is a rendered inline sequence. #>
     param([object[]] $Spans)
-    return [ordered]@{ type = 'listItem'; content = @((New-JiraAdfParagraphFromSpans -Spans $Spans)) }
+    return [ordered]@{ type = 'listItem'; content = @((New-JiraAdfParagraphFromSpanList -Spans $Spans)) }
 }
 
 function ConvertTo-JiraAdfBlockNode {
@@ -106,12 +106,12 @@ function ConvertTo-JiraAdfBlockNode {
         }
         elseif ($type -eq 'paragraph') {
             $spans = if ($b.PSObject.Properties.Name -contains 'spans' -and $null -ne $b.spans) { @($b.spans) } else { @() }
-            $nodes.Add((New-JiraAdfParagraphFromSpans -Spans $spans))
+            $nodes.Add((New-JiraAdfParagraphFromSpanList -Spans $spans))
         }
         elseif ($type -eq 'bullet_list' -or $type -eq 'ordered_list') {
             $items = if ($b.PSObject.Properties.Name -contains 'items' -and $null -ne $b.items) { @($b.items) } else { @() }
             $li = [System.Collections.Generic.List[object]]::new()
-            foreach ($it in $items) { $li.Add((New-JiraAdfListItemFromSpans -Spans @($it))) }
+            foreach ($it in $items) { $li.Add((New-JiraAdfListItemFromSpanList -Spans @($it))) }
             $adfType = if ($type -eq 'bullet_list') { 'bulletList' } else { 'orderedList' }
             $nodes.Add([ordered]@{ type = $adfType; content = $li })
         }
@@ -185,7 +185,7 @@ function New-JiraAdfDesignNode {
             $items.Add((New-JiraAdfListItem $line))
         }
         else {
-            $items.Add((New-JiraAdfListItemFromSpans -Spans @($d.value)))
+            $items.Add((New-JiraAdfListItemFromSpanList -Spans @($d.value)))
         }
     }
     $nodes.Add([ordered]@{ type = 'bulletList'; content = $items })

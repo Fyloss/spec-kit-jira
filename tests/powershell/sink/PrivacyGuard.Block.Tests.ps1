@@ -63,7 +63,7 @@ Describe 'Privacy guard fail-open regressions (case bypass + allowlist shredding
 
 Describe '016 research §4 — a BLOCK-tier host inside a Markdown link' {
     It 'still blocks once rendered to ADF' {
-        $spans = @(ConvertTo-JiraMarkdownInlineSpans -Text '[docs](https://acme-corp.atlassian.net/wiki/x)' | ConvertFrom-Json -Depth 20)
+        $spans = @(ConvertTo-JiraMarkdownInlineSpanList -Text '[docs](https://acme-corp.atlassian.net/wiki/x)' | ConvertFrom-Json -Depth 20)
         $content = ConvertTo-JiraJsonValue ([ordered]@{
                 description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; spans = $spans }) }
             })
