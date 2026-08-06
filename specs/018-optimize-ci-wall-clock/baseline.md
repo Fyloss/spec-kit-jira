@@ -655,4 +655,31 @@ before the decision is presented, since it materially lowers the frozen-code
 ceiling and therefore strengthens the case for options (a)/(b)/(c) over
 "levers alone get there."
 
+### macOS regression — the A/B run (2026-08-06)
+
+Per the "not acted on without more evidence" note above, PR #26 CI got one
+more push: `ci.yml`'s "Run the Bash suite" step now pins
+`SPEC_KIT_JIRA_BATS_JOBS` to the pre-T031 default (1x cores, no
+oversubscription) on macOS only — Linux keeps the 3x default unchanged, an
+env-var-only, test-only change (`ci.yml`, not `tests/run-bash.sh`; FR-020
+untouched). This is the "one more data point" the earlier entry asked for.
+
+Before this run, a detour: tried to get per-host `cores`/`jobs` numbers out
+of the real `Unit suites` job via a `run-bash.sh`-emitted `::notice::`
+(same mechanism `windows-conformance.yml` uses successfully). It never
+surfaced on that job's Checks-API annotations, despite six increasingly
+exact reproductions in the fast `Lint` job all succeeding (identical
+`run-bash.sh` code, full 159-file suite, the job's exact preceding steps
+byte-for-byte including `astral-sh/setup-uv@v5` and `actions/cache@v4`, and
+two jobs emitting the identical notice concurrently to rule out cross-job
+collision). Every mechanism-level hypothesis tested (buffering, a
+stop-commands toggle left open by an earlier action, cross-job title
+collision) came back negative. Root cause not found — logged here as an
+open, low-priority puzzle, not blocking this feature. All temporary
+diagnostic steps were reverted; `ci.yml` diffed clean against the
+pre-detour commit before this A/B change was applied.
+
+Result: **pending** — waiting on the real run's `Unit suites (macos-latest)`
+duration.
+
 ---

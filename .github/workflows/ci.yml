@@ -69,7 +69,17 @@ jobs:
         # Dependency-free parallel runner (Decision 3): shards via `xargs -P`,
         # no GNU parallel, no PowerShell for this step. Every mock-driving test
         # runs against the curl shim — zero pwsh processes.
-        run: tests/run-bash.sh
+        #
+        # TEMP A/B probe (018, baseline.md macOS regression): pin macOS back
+        # to the pre-T031 default (1x cores, no oversubscription) for one
+        # real run, to test the hypothesis that T031's uniform 3x multiplier
+        # is what pushed macOS from 42m25s to ~51-55m while Linux held
+        # steady. Revert this block once the run's timing is read.
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            export SPEC_KIT_JIRA_BATS_JOBS="$(getconf _NPROCESSORS_ONLN 2> /dev/null || printf '1')"
+          fi
+          tests/run-bash.sh
 
       - name: Cache the Pester module
         id: cache-pester
@@ -165,15 +175,9 @@ jobs:
     # enforced by anything — shellcheck was installed on the unit job above
     # and never invoked, and PSScriptAnalyzer was installed nowhere.
     name: Lint (shellcheck, PSScriptAnalyzer)
-    strategy:
-      matrix:
-        dup: [1, 2]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: TEMP concurrent-emission collision check (revert before merge)
-        run: printf '::notice title=run-bash.sh scheduling::os=Linux cores=4 jobs=12 files=159\n'
 
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
