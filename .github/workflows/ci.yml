@@ -171,8 +171,8 @@ jobs:
 
       - name: TEMP diagnostic (018 annotation mechanism check — revert before merge)
         run: |
-          sudo apt-get update && sudo apt-get install -y bats
-          GITHUB_ACTIONS=true tests/run-bash.sh tests/bash/ci/test_mtime_helper.bats
+          sudo apt-get update && sudo apt-get install -y bats jq
+          GITHUB_ACTIONS=true tests/run-bash.sh
 
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
