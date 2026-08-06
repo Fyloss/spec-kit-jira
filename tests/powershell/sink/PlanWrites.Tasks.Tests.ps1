@@ -272,9 +272,14 @@ Describe 'Get-JiraPlanTaskWriteSet' {
     }
 
     It '017 [US2] real content drift still names its divergent field, and labels are never named' {
+        # 016 moved a task's own full text from .title to .description.blocks
+        # (the title is now a plain-text summary source only), so reworking
+        # the title ALONE no longer touches the rendered description — both
+        # must change to exercise the description's own content drift.
         $desc = AlreadyMigratedTaskDesc
         $task = $script:Task1 | ConvertFrom-Json -Depth 100
         $task.title = 'Implement the parser, reworded'
+        $task.description.blocks[0].spans[0].text = 'Implement the parser, reworded'
         $doc = $script:DocOneTask | ConvertFrom-Json -Depth 100
         $doc.stories[0].tasks = @($task)
         $docJson = $doc | ConvertTo-Json -Depth 100 -Compress

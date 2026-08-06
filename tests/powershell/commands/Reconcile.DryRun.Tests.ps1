@@ -135,7 +135,9 @@ Describe 'Invoke-JiraReconcile --dry-run — T060 [016, US3] the rendered descri
         $desc | Should -BeLike '*"type":"strong"*'
         $desc.Contains('**FR-012**') | Should -BeFalse
 
-        @(Get-JiraMockCallLog -Mock $script:M).Count | Should -Be 0
+        # 017's duplicate-probe search runs even under --dry-run — FR-014's
+        # "no write issued" means no POST/PUT, not zero calls.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
     }
 }
 

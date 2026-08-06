@@ -167,11 +167,13 @@ teardown() {
 
   # Simulate a ticket written by the pre-016 renderer: the intro paragraph
   # carries the raw Markdown as one unmarked text node instead of a bold span.
+  # content[0] is the 018 boundary marker; content[1] is the body paragraph
+  # the pre-016 renderer would have left unmarked.
   local current raw healed
   current="$(jira_request GET "${MOCK_BASE_URL}/rest/api/3/issue/COMP-2?fields=description" | jq -c '.fields.description')"
   raw='As a customer, I want to export one invoice as a PDF, per **FR-012**.'
   healed="$(jq -c --arg raw "${raw}" \
-    '.content[0] = {type:"paragraph", content:[{type:"text", text:$raw}]}' <<< "${current}")"
+    '.content[1] = {type:"paragraph", content:[{type:"text", text:$raw}]}' <<< "${current}")"
   jira_request PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-2" \
     "$(jq -cn --argjson d "${healed}" '{fields:{description:$d}}')" > /dev/null
 
@@ -180,7 +182,10 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.counts.updated' <<< "$output")" -eq 1 ]
   [ "$(grep -c '^PUT /rest/api/3/issue/COMP-2$' "${MOCK_CALLLOG}")" -eq 1 ]
-  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 1 ]
+  # 018, US3: the story's whole-object update always carries `summary`, so the
+  # write is followed by exactly one identity-property PUT recording it.
+  [ "$(grep -c '^PUT /rest/api/3/issue/COMP-2/properties/spec-kit-jira$' "${MOCK_CALLLOG}")" -eq 1 ]
+  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 2 ]
 
   : > "${MOCK_CALLLOG}"
   run cmd_reconcile reconcile "${SPEC}" --json

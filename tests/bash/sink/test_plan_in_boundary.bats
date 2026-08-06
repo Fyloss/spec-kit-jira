@@ -41,12 +41,12 @@ _doc() {
   jq -cn --argjson pb "${plan_blocks}" '{routing:{project_key:"COMP"},
     epic:{title:"The Epic", local_id:"3f2a91c04b7e6d18",
           marker:{state:"assigned", id:"3f2a91c04b7e6d18", lines:[2]},
-          description:{blocks:([{type:"paragraph", text:"Epic overview."}] + $pb)}},
+          description:{blocks:([{type:"paragraph", spans:[{text:"Epic overview.",marks:[]}]}] + $pb)}},
     stories:[]}'
 }
 
-PLAN_A='[{"type":"heading","level":3,"text":"Implementation Plan"},{"type":"paragraph","text":"Use a shared library."}]'
-PLAN_B='[{"type":"heading","level":3,"text":"Implementation Plan"},{"type":"paragraph","text":"Use a different approach."}]'
+PLAN_A='[{"type":"heading","level":3,"spans":[{"text":"Implementation Plan","marks":[]}]},{"type":"paragraph","spans":[{"text":"Use a shared library.","marks":[]}]}]'
+PLAN_B='[{"type":"heading","level":3,"spans":[{"text":"Implementation Plan","marks":[]}]},{"type":"paragraph","spans":[{"text":"Use a different approach.","marks":[]}]}]'
 NO_PLAN='[]'
 
 @test "FR-001 — the plan section sits inside the managed region, below a preserved prefix" {

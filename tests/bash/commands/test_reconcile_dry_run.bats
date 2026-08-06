@@ -152,8 +152,14 @@ boot_declared_hierarchy() {
   [[ "${desc}" == *'"type":"strong"'* ]]
   [[ "${desc}" != *'**FR-012**'* ]]
 
+  # 017's duplicate-probe search runs even under --dry-run (T022a establishes
+  # this pattern) — FR-014's "no write issued" means no POST/PUT, not zero
+  # calls.
   run mock_calls
-  [ -z "$output" ]
+  while IFS= read -r line; do
+    [ -z "${line}" ] && continue
+    [[ "${line}" == GET\ * ]]
+  done <<< "$output"
 }
 
 # --- T061 [US2] — dry-run/real-run agreement for field defaults (011, ------

@@ -285,11 +285,15 @@ _already_migrated_task_desc() {
 
 @test "017 [US2] real content drift still names its divergent field, and labels are never named" {
   local task doc ctx
-  task="$(jq -c '.title="Implement the parser, reworded"' <<< "${TASK1}")"
+  # 016 moved a task's own full text from .title to .description.blocks (the
+  # title is now a plain-text summary source only), so reworking the title
+  # ALONE no longer touches the rendered description — both must change to
+  # exercise the description's own content drift.
+  task="$(jq -c '.title="Implement parser, reworded" | .description.blocks[0].spans[0].text="Implement parser, reworded"' <<< "${TASK1}")"
   doc="$(jq -c --argjson t "${task}" '.stories[0].tasks=[$t]' <<< "${DOC_ONE_TASK}")"
   ctx='{"base_url":"https://mock","task_type_id":"10099",
         "tickets":{"1111111111111111":"COMP-9"},
-        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(_already_migrated_task_desc)"',"labels":[]}}}'
+        "ticket_current":{"1111111111111111":{"summary":"Implement parser","description":'"$(_already_migrated_task_desc)"',"labels":[]}}}'
   run plan_writes_tasks "${doc}" "${ctx}" "speckit-001-x"
   local actions; actions="$(jq -c '.actions' <<< "$output")"
   # 018, T026: description's OWN divergence is reported through the boundary's
@@ -299,7 +303,7 @@ _already_migrated_task_desc() {
   # warning, and no OTHER field diverges (labels are never named either), so
   # this action carries no generic warning at all.
   [ "$(jq -r '.[0] | has("warning")' <<< "${actions}")" = "false" ]
-  [ "$(jq -r '.[0].body.fields.summary' <<< "${actions}")" = "Implement the parser, reworded" ]
+  [ "$(jq -r '.[0].body.fields.summary' <<< "${actions}")" = "Implement parser, reworded" ]
   [ "$(jq -r '.[0].body.fields | has("description")' <<< "${actions}")" = "true" ]
   [ "$(jq -c '.[0].body.fields.labels' <<< "${actions}")" = '["speckit-001-x"]' ]
   [ "$(jq '.warnings // [] | length' <<< "$output")" -eq 0 ]

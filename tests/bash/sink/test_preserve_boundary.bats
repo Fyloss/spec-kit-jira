@@ -64,42 +64,42 @@ _two_marker_desc() {
 DOC='{"routing":{"project_key":"COMP"},
       "epic":{"title":"The Epic","local_id":"3f2a91c04b7e6d18",
               "marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},
-              "description":{"blocks":[{"type":"paragraph","text":"Epic overview."}]}},
+              "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Epic overview.","marks":[]}]}]}},
       "stories":[{"local_id":"s1","title":"Story One","priority_logical":"P2",
-                  "description":{"blocks":[{"type":"paragraph","text":"Story body."}]}}]}'
+                  "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Story body.","marks":[]}]}]}}]}'
 
 # A parent-only document (no stories) for tests that must isolate the parent
 # tier without a story creation also needing resolution.
 DOC_PARENT_ONLY='{"routing":{"project_key":"COMP"},
       "epic":{"title":"The Epic","local_id":"3f2a91c04b7e6d18",
               "marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},
-              "description":{"blocks":[{"type":"paragraph","text":"Epic overview."}]}},
+              "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Epic overview.","marks":[]}]}]}},
       "stories":[]}'
 
 DOC_PARENT_ONLY_CHANGED='{"routing":{"project_key":"COMP"},
       "epic":{"title":"The Epic","local_id":"3f2a91c04b7e6d18",
               "marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},
-              "description":{"blocks":[{"type":"paragraph","text":"Epic overview, revised."}]}},
+              "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Epic overview, revised.","marks":[]}]}]}},
       "stories":[]}'
 
 TASK='{"local_id":"1111111111111111","task_ref":"T001","title":"Do the thing",
-       "description":{"blocks":[{"type":"paragraph","text":"Do the thing"}]},
+       "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Do the thing","marks":[]}]}]},
        "attribution":{"story_ordinal":1,"source":"tag"},"phase":"Phase 1","parallel":false,
        "files":[],"depends_on":[],"done":false,
        "marker":{"state":"assigned","id":"1111111111111111","ticket":"","lines":[10]}}'
 
 DOC_WITH_TASK='{"routing":{"project_key":"COMP"},
       "epic":{"title":"The Epic","local_id":"e1","marker":{"state":"assigned","id":"e1","lines":[1]},
-              "description":{"blocks":[{"type":"paragraph","text":"Epic overview."}]}},
+              "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Epic overview.","marks":[]}]}]}},
       "stories":[{"local_id":"s1","title":"Story One","priority_logical":"P2",
-                  "description":{"blocks":[{"type":"paragraph","text":"Story body."}]},
+                  "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Story body.","marks":[]}]}]},
                   "tasks":['"${TASK}"']}]}'
 
 # --- FR-007: preservation across parent, story and sub-task -----------------
 
 @test "FR-007 — the story tier preserves the human prefix verbatim" {
   local managed existing ctx
-  managed="$(_adf_content_nodes '{"description":{"blocks":[{"type":"paragraph","text":"Story body."}]}}')"
+  managed="$(_adf_content_nodes '{"description":{"blocks":[{"type":"paragraph","spans":[{"text":"Story body.","marks":[]}]}]}}')"
   existing="$(_human_desc "A PO wrote this on the story." "${managed}")"
   ctx="$(jq -cn --argjson ex "${existing}" '{base_url:"https://mock", parent_type_id:"10101", parent_local_id:"3f2a91c04b7e6d18", tickets:{s1:"PROJ-1"}, ticket_descriptions:{s1:$ex}}')"
   run plan_writes "${DOC}" "${ctx}"
@@ -112,7 +112,7 @@ DOC_WITH_TASK='{"routing":{"project_key":"COMP"},
   # The managed body changes (forcing a write) while the human prefix stays
   # put — proving preservation is visible in the emitted payload.
   local managed existing ctx
-  managed="$(_adf_content_nodes '{"description":{"blocks":[{"type":"paragraph","text":"Epic overview."}]}}')"
+  managed="$(_adf_content_nodes '{"description":{"blocks":[{"type":"paragraph","spans":[{"text":"Epic overview.","marks":[]}]}]}}')"
   existing="$(_human_desc "A PO wrote this on the epic." "${managed}")"
   ctx="$(jq -cn --argjson ex "${existing}" '{base_url:"https://mock", parent_type_id:"10101", parent_key:"PROJ-1", parent_current:{summary:"The Epic", description:$ex}, tickets:{}}')"
   run plan_writes "${DOC_PARENT_ONLY_CHANGED}" "${ctx}"
@@ -123,12 +123,14 @@ DOC_WITH_TASK='{"routing":{"project_key":"COMP"},
 }
 
 @test "FR-007 — the sub-task tier preserves the human prefix verbatim" {
-  # The task's title changes (forcing a write) while the human prefix stays
-  # put — proving preservation is visible in the emitted payload.
+  # The task's own text changes (forcing a write of the description — 016
+  # moved a task's body from .title to .description.blocks, so the title
+  # alone no longer does) while the human prefix stays put — proving
+  # preservation is visible in the emitted payload.
   local managed existing task_reworded doc ctx
   managed="$(adf_render_task_description "${TASK}" | jq -c '.content')"
   existing="$(_human_desc "A PO wrote this on the sub-task." "${managed}")"
-  task_reworded="$(jq -c '.title="Do the thing, reworded"' <<< "${TASK}")"
+  task_reworded="$(jq -c '.title="Do the thing, reworded" | .description.blocks[0].spans[0].text="Do the thing, reworded"' <<< "${TASK}")"
   doc="$(jq -c --argjson t "${task_reworded}" '.stories[0].tasks=[$t]' <<< "${DOC_WITH_TASK}")"
   ctx="$(jq -cn --argjson ex "${existing}" '{base_url:"https://mock", task_type_id:"10099", tickets:{"1111111111111111":"PROJ-9"}, ticket_current:{"1111111111111111":{summary:"Do the thing", description:$ex}}}')"
   run plan_writes_tasks "${doc}" "${ctx}"
@@ -152,7 +154,7 @@ DOC_WITH_TASK='{"routing":{"project_key":"COMP"},
 
 @test "FR-009 — the parent's prefix-only edit produces zero writes" {
   local managed existing ctx
-  managed="$(_adf_content_nodes '{"description":{"blocks":[{"type":"paragraph","text":"Epic overview."}]}}')"
+  managed="$(_adf_content_nodes '{"description":{"blocks":[{"type":"paragraph","spans":[{"text":"Epic overview.","marks":[]}]}]}}')"
   existing="$(_human_desc "A DIFFERENT human note." "${managed}")"
   ctx="$(jq -cn --argjson ex "${existing}" '{base_url:"https://mock", parent_type_id:"10101", parent_key:"PROJ-1", parent_current:{summary:"The Epic", description:$ex}, tickets:{}}')"
   run plan_writes "${DOC_PARENT_ONLY}" "${ctx}"
@@ -182,7 +184,7 @@ DOC_WITH_TASK='{"routing":{"project_key":"COMP"},
 
 @test "FR-012 — a story with two boundary markers warns by key, writes no description, but still updates other fields" {
   local managed existing ctx
-  managed="$(_adf_content_nodes '{"description":{"blocks":[{"type":"paragraph","text":"Story body."}]}}')"
+  managed="$(_adf_content_nodes '{"description":{"blocks":[{"type":"paragraph","spans":[{"text":"Story body.","marks":[]}]}]}}')"
   existing="$(_two_marker_desc "${managed}")"
   ctx="$(jq -cn --argjson ex "${existing}" '{base_url:"https://mock", parent_type_id:"10101", parent_local_id:"3f2a91c04b7e6d18", tickets:{s1:"PROJ-1"}, ticket_descriptions:{s1:$ex}, priority_ids:{P2:"2"}}')"
   run plan_writes "${DOC}" "${ctx}"

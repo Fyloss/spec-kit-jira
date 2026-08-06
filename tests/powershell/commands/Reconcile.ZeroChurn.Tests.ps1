@@ -139,7 +139,9 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
         $current = Invoke-JiraRequest -Method GET -Url "$($script:M.BaseUrl)/rest/api/3/issue/COMP-2?fields=description"
         $currentDesc = ($current.Body | ConvertFrom-Json -Depth 100).fields.description
         $raw = 'As a customer, I want to export one invoice as a PDF, per **FR-012**.'
-        $healedContent = @([ordered]@{ type = 'paragraph'; content = @([ordered]@{ type = 'text'; text = $raw }) }) + @($currentDesc.content | Select-Object -Skip 1)
+        # content[0] is the 018 boundary marker; content[1] is the body
+        # paragraph the pre-016 renderer would have left unmarked.
+        $healedContent = @($currentDesc.content[0]) + @([ordered]@{ type = 'paragraph'; content = @([ordered]@{ type = 'text'; text = $raw }) }) + @($currentDesc.content | Select-Object -Skip 2)
         $healedDesc = [ordered]@{ type = 'doc'; version = 1; content = $healedContent }
         $body = ConvertTo-Json ([ordered]@{ fields = [ordered]@{ description = $healedDesc } }) -Depth 100 -Compress
         $null = Invoke-JiraRequest -Method PUT -Url "$($script:M.BaseUrl)/rest/api/3/issue/COMP-2" -Body $body
@@ -148,7 +150,10 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
         $r = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
         $r.counts.updated | Should -Be 1
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-2' }).Count | Should -Be 1
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 1
+        # 018, US3: the story's whole-object update always carries `summary`,
+        # so the write is followed by exactly one identity-property PUT.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-2/properties/spec-kit-jira' }).Count | Should -Be 1
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 2
 
         Clear-Content -LiteralPath $script:M.CallLog
         $r2 = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
