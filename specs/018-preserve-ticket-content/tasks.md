@@ -384,11 +384,18 @@ ports; what is missing is the *shared* cross-port proof Constitution VI and FR-0
       fixture plus a mock config seeding a sub-task with a human prefix above the delimiter and a diverging
       recorded summary, in `tests/conformance/scenarios/` and
       `tests/conformance/mock-jira/configs/` per FR-006, FR-027, SC-008, contracts/managed-description.md §7
-      row 1 and contracts/summary-record.md §5/§6 row 8. Added `<!-- speckit-jira -->` binding markers to the
-      fixture's spec.md/tasks.md (previously unbound), `configs/preserve-task-tier.json`, and
-      `scenarios/sc008-task-tier-boundary.json` — verified byte-identical across ports via `run-scenario.sh`
-      (a fixed `SPEC_KIT_JIRA_ID_SOURCE` was required for T001's still-unbound task marker to be
-      deterministic).
+      row 1 and contracts/summary-record.md §5/§6 row 8. **Corrected after CI surfaced a regression**: the
+      first pass added `<!-- speckit-jira -->` binding markers directly to the SHARED
+      `repo-with-task-tier` fixture, which nine other bash/powershell test files
+      (`test_reconcile_tasks*.bats`, `test_reconcile_task_completion.bats`, `Reconcile.Tasks*.Tests.ps1`,
+      `Reconcile.TaskCompletion.Tests.ps1`) and three other conformance scenarios also depend on for their
+      own "fresh, unbound spec" fixtures — binding it broke all of them (`recognition.sh`'s
+      "carries no spec-kit-jira parent identity" refusal, since the mock config those tests use never seeds
+      TASKP-1). Fixed by reverting the shared fixture to its original unbound state and adding the markers
+      to a new, dedicated `tests/conformance/fixtures/repo-with-task-tier-boundary` copy instead, referenced
+      only by `scenarios/sc008-task-tier-boundary.json` — verified byte-identical across ports via
+      `run-scenario.sh`, and all nine previously-broken bash/PowerShell test files pass again (a fixed
+      `SPEC_KIT_JIRA_ID_SOURCE` was required for T001's still-unbound task marker to be deterministic).
 - [X] T075 [P] Add the oversized-description conformance scenario — the `ifFieldPresent` fault primitive was
       built into **both** harness halves for exactly this row (`tests/conformance/mock-jira/mock-server.ps1`
       and `tests/conformance/mock-jira/curl-shim.sh`, both annotated "018, T069, FR-011") but no config or
