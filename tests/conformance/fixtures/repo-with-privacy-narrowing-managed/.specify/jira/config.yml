@@ -1,0 +1,10 @@
+# Minimal team config for the boundary-preservation conformance scenario
+# (018, T028).
+projects:
+  - key: PRSV
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing_default: PRSV

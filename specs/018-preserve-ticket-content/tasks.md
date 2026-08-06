@@ -248,7 +248,7 @@ exists to protect.
 - [X] T063 Run the full suites — `tests/run-bash.sh`, the Pester suite, and `bash tests/conformance/ci-conformance.sh` — and compare the pass counts against T001's baseline. Final state: bash 1556/1556 (0 failed), Pester 1238/1238 (0 failed), conformance 96/96 scenarios byte-identical across ports (0 divergence). All three suites grew monotonically across this phase's work with zero regressions.
 - [X] T064 Confirm statement coverage stays at or above 80% on both ports; the description-resolution decision and the summary-drift decision are critical paths and target close to 100%. PowerShell (Pester `CodeCoverage`, run locally): **92.92%**, well above the gate. Bash (`tests/coverage/bash-coverage.sh`): kcov structurally cannot instrument a bash ≥ 4 target on macOS (`--mode full`/`--mode conformance` refuse to run here by design — see the script's own guard) — this side of the gate only runs meaningfully on the Linux "Bash coverage" CI job, which memory already records as red on `main` since 2026-07-28 for an unrelated timeout reason predating this feature; deferred to CI verification alongside T066, not fabricated locally.
 - [X] T065 Walk `quickstart.md` end to end, including Scenario 4 (a Jira link in a human's prose must not block the run). Confirmed: the pointer test at `test_us7_plan_apply.bats:47` passes in its post-fix (inverted) form; the inner loop, Scenario 1-3 conformance scenarios, and cross-port equivalence are all covered by the clean full-suite/conformance runs above; Scenario 4 reconfirmed directly via `test_privacy_block.bats` (18/18, including the three dedicated R4 cases). Windows and Dogfooding sections deferred to T066/T067 (require explicit user confirmation before pushing/using real credentials).
-- [ ] T066 Push to `ci/windows-probe` and read the resulting check-run annotations; diff them against `main`'s, since `main` is already red on `windows-latest` and the baseline is not green. One retry maximum on a flake, then hand the result back
+- [X] T066 Push to `ci/windows-probe` and read the resulting check-run annotations; diff them against `main`'s, since `main` is already red on `windows-latest` and the baseline is not green. One retry maximum on a flake, then hand the result back. Pushed `a718729` (run 31046919016): 2/4 shards green, 2/4 red — but the only failures are `us1-field-defaults-idempotent`, `us2-field-defaults-question`, `us2-field-defaults-option-question` (byte-identical CRLF divergences at the same offsets as a prior, unrelated push to this same shared branch), all pre-existing feature 011/015 scenarios with no connection to this feature's scope. Every one of 018's own six scenarios (`us1-plan-added-not-replaced`, `us2-preserve-human-prefix`, `us3-summary-rename-withheld`, `us3-summary-rename-proceed`, `us4-migration-clean`, `us4-migration-ambiguous`) is absent from both failure lists — clean on every shard that ran it. Matches the documented `main`-is-already-red-on-`windows-latest` baseline; not a regression this feature introduced, so no retry was needed.
 - [ ] T067 Dogfood against a real Jira instance: `/speckit.specify` → type two paragraphs into the Epic in Jira → `/speckit.plan` → `/speckit.tasks`, asserting the paragraphs survive, exactly one implementation-plan section exists, and nothing was renamed. Anonymise every field, option, and project name before any of it reaches a spec or a fixture.
 
 ---
@@ -366,3 +366,121 @@ under the exceptions above. US1 is one phase behind it and adds almost no code.
 - Use `tests/run-bash.sh`, not bare `bats -r tests/bash` — the latter is serial and ~15 minutes. If you do
   use raw `bats`, the `-r` is load-bearing: without it bats silently runs nothing and reports success.
 - Commit after each task or logical pair; stop at any checkpoint to validate a story on its own.
+
+---
+
+## Phase 8: Convergence
+
+**Purpose**: Close the gap between the two contracts' "the scenarios that must exist" tables and the
+scenarios the corpus actually carries. Every behaviour below is already implemented and unit-tested in both
+ports; what is missing is the *shared* cross-port proof Constitution VI and FR-027 require. The bash suite
+(1556/1556) and `ci-conformance.sh` (exit 0, zero divergence) are green as of this convergence pass.
+
+- [X] T074 [P] Add a task-tier conformance scenario proving the boundary and the summary record on
+      `role:"task"` sub-tasks — no 018 scenario seeds one today (`preserve-human-prefix.json` seeds a parent
+      and a story, `preserve-pre-release.json` a parent and three stories, us3's inline mock a parent and a
+      story), so the sub-task tier's prefix preservation and summary-drift decision are proven only by
+      per-port unit tests. Compose it from the existing `tests/conformance/fixtures/repo-with-task-tier`
+      fixture plus a mock config seeding a sub-task with a human prefix above the delimiter and a diverging
+      recorded summary, in `tests/conformance/scenarios/` and
+      `tests/conformance/mock-jira/configs/` per FR-006, FR-027, SC-008, contracts/managed-description.md §7
+      row 1 and contracts/summary-record.md §5/§6 row 8. Added `<!-- speckit-jira -->` binding markers to the
+      fixture's spec.md/tasks.md (previously unbound), `configs/preserve-task-tier.json`, and
+      `scenarios/sc008-task-tier-boundary.json` — verified byte-identical across ports via `run-scenario.sh`
+      (a fixed `SPEC_KIT_JIRA_ID_SOURCE` was required for T001's still-unbound task marker to be
+      deterministic).
+- [X] T075 [P] Add the oversized-description conformance scenario — the `ifFieldPresent` fault primitive was
+      built into **both** harness halves for exactly this row (`tests/conformance/mock-jira/mock-server.ps1`
+      and `tests/conformance/mock-jira/curl-shim.sh`, both annotated "018, T069, FR-011") but no config or
+      scenario uses it; the refusal is proven only in `tests/bash/sink/test_preserve_boundary.bats` and
+      `tests/powershell/sink/PreserveBoundary.Tests.ps1`. Assert one warning naming the ticket key, no
+      description written, every other field of that ticket written, nothing truncated, and the host exit
+      code unaffected, in `tests/conformance/scenarios/` per FR-011 and
+      contracts/managed-description.md §2/§7 row 12. Added
+      `configs/preserve-oversized-description.json` (a fault on `PRSV-2` reusing
+      `preserve-human-prefix`'s seed) and `scenarios/sc008-oversized-description-refused.json` — confirmed
+      two PUTs to PRSV-2 (rejected, then retried without `description`), the warning lands on stderr (not
+      the JSON `warnings` channel), summary/labels/priority still write, and the run is byte-identical
+      across ports.
+- [X] T076 [P] Add the two-delimiter conformance scenario — seed a description carrying two marker-bearing
+      nodes and assert the description write is skipped for that ticket, one warning names the ticket key,
+      and every other field still reconciles, byte-identically across ports, in
+      `tests/conformance/scenarios/` and `tests/conformance/mock-jira/configs/` per FR-012 and
+      contracts/managed-description.md §3 row 1 / §7 row 9. Added `configs/preserve-two-delimiters.json`
+      (PRSV-1 well-formed, PRSV-2 with two marker nodes) and `scenarios/sc008-two-delimiters-refused.json` —
+      confirmed PRSV-2's `description` key is absent from the payload entirely, one JSON `warnings` entry
+      names PRSV-2, summary/labels/priority still write on PRSV-2, PRSV-1 reconciles normally in the same
+      run, and the run is byte-identical across ports.
+- [X] T077 [P] Add the privacy-narrowing conformance proof, both halves — an `*.atlassian.net` link seeded
+      **only** in a preserved human prefix must not block the run, and the same host composed into the
+      managed region must still refuse with the existing exit code and zero writes. Neither half is in the
+      corpus today: the sole `reconcile`-path evidence is `tests/bash/sink/test_privacy_block.bats` and its
+      Pester twin, and `tests/conformance/scenarios/us11-block-tier.json` runs `config`, not `reconcile` —
+      its own description records that it "runs as a benign config read". This is the cross-port safety
+      proof for the feature's one deliberate narrowing of a security control, in
+      `tests/conformance/scenarios/` per FR-024, FR-024a, contracts/managed-description.md §5/§7 rows 10–11
+      and plan.md's Complexity Tracking (research R4). Added `scenarios/sc008-privacy-prefix-allowed.json`
+      (reuses `repo-with-preserve-prefix-spec`, an atlassian.net link only in PRSV-2's prefix — exit 0,
+      normal writes) and a new fixture `repo-with-privacy-narrowing-managed` + `configs/preserve-privacy-composed-blocked.json`
+      + `scenarios/sc008-privacy-composed-blocked.json` (the atlassian.net host lives in the story text
+      itself, so the mirror composes it into the managed region — exit 9, zero write calls, the existing
+      BLOCK stderr message). Both confirmed byte-identical across ports.
+- [X] T078 [P] Add the deleted-managed-region conformance scenario — seed a ticket whose delimiter is
+      present with nothing below it and assert the managed region is restored in full while the human
+      prefix above it is preserved byte-for-byte, in `tests/conformance/scenarios/` and
+      `tests/conformance/mock-jira/configs/` per FR-008 and contracts/managed-description.md §7 row 5.
+      Added `configs/preserve-deleted-managed-region.json` (PRSV-1/PRSV-2 with the delimiter as the last
+      content node) and `scenarios/sc008-deleted-managed-region-restored.json` — confirmed the prefix node
+      survives unchanged at index 0, the full managed region is rendered back below the delimiter, and the
+      run is byte-identical across ports.
+- [X] T079 [P] Add the summary-record edge conformance scenario covering the four uncovered rows of
+      contracts/summary-record.md §6 — a specification retitle whose record matches the current summary
+      updates silently with no warning (FR-017); a human rename to exactly the specification's title
+      produces no write and no warning; a divergence that is whitespace-only never warns (§3
+      normalisation); a settled ticket writes zero fields **and** zero entity properties (FR-019). All four
+      are statically seedable in one mock config, in `tests/conformance/scenarios/` and
+      `tests/conformance/mock-jira/configs/` per FR-017, FR-019 and contracts/summary-record.md §3/§6 rows
+      2, 5, 6, 7. Added a new fixture `repo-with-summary-record-edges` (a parent + three stories, seeded via
+      a priming run so each story's description is already exactly what the mirror renders — isolating
+      `summary` as the only field under test) and `scenarios/sc008-summary-record-edges.json`, covering rows
+      2 (record equals current, silent retitle), the exact-match row (current already equals the
+      specification's title though the record is stale — never treated as drift, resent unchanged, no
+      warning), and the whitespace-only row (§3 normalisation, silent retitle) — zero warnings, byte-identical
+      across ports. Row 7 (a fully settled ticket writes zero fields **and** zero entity properties, FR-019)
+      is not a new scenario: it is already proven, cross-port, by `us2-preserve-human-prefix.json`'s existing
+      second run — its accumulated `calls.log` shows two `GET`s and **no** `PUT`s at all on that run,
+      including the identity-property write, which is exactly FR-019's guarantee. Traced (not built new)
+      because seeding a story whose desired `priority`/`labels` provably equal its current ones is
+      orthogonal to this feature: `recognition.sh`'s `current` object (used for the zero-churn comparison)
+      never carries `priority`, a pre-existing shape unrelated to 018, so a single-run "already exactly
+      matching" fixture for THIS field cannot by itself prove zero HTTP writes — only a second, genuinely
+      settled run can, which the existing scenario already supplies.
+- [X] T080 Obtain the Bash port's statement-coverage figure, or record an explicit waiver. T064 measured
+      PowerShell at 92.92% but left the Bash side — the plan's own stated *primary* coverage gate —
+      unmeasured: kcov structurally cannot instrument a Bash ≥ 4 target on macOS, and the Linux
+      "Bash coverage" CI job has been red on `main` since 2026-07-28 for an unrelated timeout, so the 80%
+      floor is unverified on the primary port for this feature. Either read the figure from a CI run on
+      this branch, or state in the PR description why the gate cannot report and what compensates for it,
+      per Constitution XIII and plan.md's Technical Context "Testing". **Explicit waiver, no fresh figure
+      obtained**: confirmed locally (`tests/coverage/bash-coverage.sh`'s own `require_kcov()`, lines
+      443-463) that kcov cannot drive a non-Apple Bash on this macOS host — "Failed to exchange stderr for
+      pipe" — and Apple's shipped `/bin/bash` is 3.2, below the project's Bash ≥ 4 floor, so no local kcov
+      run is possible on this branch at all. Confirmed via `gh run view` / `gh api .../check-runs/.../
+      annotations` on the latest `gates.yml` run on `main` (run 31006298069, check-run 92307053925) that
+      the "Bash coverage >= 80%" job fails there too, independently of this branch, with "The action
+      'Measure statement coverage with kcov' has timed out after 15 minutes" — matching the pre-existing
+      memory record dated since 2026-07-28. A `--mode bats` local traceability-only run (the script's own
+      suggested fallback for "measure only what runs anywhere") was attempted as compensating evidence but
+      did not produce output before the process ended, so no partial local figure is available either.
+      Compensating evidence instead: T064's PowerShell run (identical logic, both ports built and tested
+      together against the shared conformance corpus per Constitution VI) measured 92.92%, and all 190s of
+      `tests/run-bash.sh` plus the full conformance corpus (Phase 8, T074-T079) pass on this branch. The
+      80% floor is asserted, not measured, for the Bash port on this branch — reviewers should treat CI's
+      red gate on `main` itself as pre-existing infrastructure debt, not a regression introduced by 018.
+
+**Note on the two documented deviations, left as-is**: contracts/managed-description.md §7's
+"plan changed, then deleted" row is already resolved at the `plan_apply` unit level with a written
+rationale (T035 — `run-scenario.sh`'s `runs[]` share one workdir and mock with no per-run file-mutation
+primitive, following the precedent `us5-plan-on-parent.json` set for the identical concern), and §7's
+"prefix edited, nothing else" row is covered in substance by `us2-preserve-human-prefix.json`'s second run,
+which settles to zero writes with a human prefix present. Neither is re-opened here.
