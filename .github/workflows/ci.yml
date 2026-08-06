@@ -165,29 +165,15 @@ jobs:
     # enforced by anything — shellcheck was installed on the unit job above
     # and never invoked, and PSScriptAnalyzer was installed nowhere.
     name: Lint (shellcheck, PSScriptAnalyzer)
+    strategy:
+      matrix:
+        dup: [1, 2]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: TEMP Install Bash toolchain (Linux)
-        run: sudo apt-get update && sudo apt-get install -y bats jq shellcheck curl
-
-      - name: TEMP Install the Spec Kit CLI (install-harness dependency)
-        uses: astral-sh/setup-uv@v5
-
-      - name: TEMP Cache specify-cli (uv tool)
-        id: cache-specify-cli
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/uv/tools/specify-cli
-          key: specify-cli-${{ runner.os }}-github-spec-kit-main
-
-      - name: TEMP Install specify-cli
-        if: steps.cache-specify-cli.outputs.cache-hit != 'true'
-        run: uv tool install specify-cli --from git+https://github.com/github/spec-kit.git
-
-      - name: TEMP diagnostic (018 annotation mechanism check — revert before merge)
-        run: tests/run-bash.sh
+      - name: TEMP concurrent-emission collision check (revert before merge)
+        run: printf '::notice title=run-bash.sh scheduling::os=Linux cores=4 jobs=12 files=159\n'
 
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
