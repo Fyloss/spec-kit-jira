@@ -69,8 +69,21 @@ fi
 # carrying the actual bytes, and the only channel that survives a job log
 # needing admin rights to read — was dropped on the floor.
 REPORT_DIR="$(mktemp -d)"
-trap 'rm -rf "${REPORT_DIR}"' EXIT
-export REPORT_DIR
+# One empty marker file per scenario that actually completed inside
+# run_scenario, written unconditionally on both the pass and the fail path
+# (R5/R6). This is deliberately independent of REPORT_DIR, which only ever
+# held failures: a worker that is killed mid-flight — by the host, not by a
+# scenario divergence — leaves no marker here, so a verdict shortfall is
+# detected even when nothing about the diff itself went wrong.
+VERDICT_DIR="$(mktemp -d)"
+# One "<bash> <pwsh>" line per scenario, in seconds, read from the duration
+# file run-scenario.sh writes per port leg (R9). SC-009's amortised cost is
+# derived from this directory's total, published beside the wall-clock rather
+# than left for the next corpus growth to discover the hard way.
+TIMING_DIR="$(mktemp -d)"
+trap 'rm -rf "${REPORT_DIR}" "${VERDICT_DIR}" "${TIMING_DIR}"' EXIT
+export REPORT_DIR VERDICT_DIR TIMING_DIR
+SCRIPT_T0="${EPOCHREALTIME}"
 
 # Portable core count: nproc (Linux), sysctl (macOS), NUMBER_OF_PROCESSORS
 # (set by every GitHub-hosted Windows runner) — falls back to 4 rather than
@@ -85,6 +98,14 @@ export REPORT_DIR
 # the divergences after that point were never reported at all, and a partial
 # log read as a short list of failures rather than a truncated one.
 core_count() {
+  # R4 (NEW): an explicit override always wins, on every host — this is the
+  # probe's own knob for asking "does concurrency N survive" without moving
+  # the MSYS default, and is unused by ci.yml (guarded by
+  # test_conformance_no_cross_os_shard.bats's cross-OS-shard sibling check).
+  if [[ "${SPEC_KIT_JIRA_CONFORMANCE_JOBS:-}" =~ ^[0-9]+$ ]] && [ "${SPEC_KIT_JIRA_CONFORMANCE_JOBS}" -gt 0 ]; then
+    printf '%s' "${SPEC_KIT_JIRA_CONFORMANCE_JOBS}"
+    return 0
+  fi
   case "$(uname -s 2> /dev/null || true)" in
     MINGW* | MSYS* | CYGWIN*) printf '2'; return 0 ;;
   esac
@@ -143,12 +164,20 @@ export -f _size _byte_at byte_diff
 # if any invocation of run_scenario fails, which this script turns into its
 # own failure below — no manual result-collection needed.
 run_scenario() {
-  local scenario="$1" name out_bash out_ps failed=0 detail="" line f rel
+  local scenario="$1" name out_bash out_ps failed=0 detail="" line f rel bash_dur ps_dur
   name="$(basename "${scenario}" .json)"
   out_bash="$(mktemp -d)"
   out_ps="$(mktemp -d)"
   "${harness}" "${scenario}" bash "${out_bash}"
   "${harness}" "${scenario}" powershell "${out_ps}"
+  # R9/W3: each leg's own duration, as run-scenario.sh recorded it — read
+  # here rather than timed around the call above, so the number reflects the
+  # harness's cost (mock start, the port invocation, the workdir snapshot),
+  # not this function's own overhead.
+  bash_dur="$(cat "${out_bash}/duration" 2> /dev/null || printf '?')"
+  ps_dur="$(cat "${out_ps}/duration" 2> /dev/null || printf '?')"
+  printf 'timing: %s bash=%ss pwsh=%ss\n' "${name}" "${bash_dur}" "${ps_dur}"
+  printf '%s %s\n' "${bash_dur}" "${ps_dur}" > "${TIMING_DIR}/${name}"
   # The observable contract: stdout, exit code, Jira call sequence, and the
   # written repository tree must be byte-identical across ports.
   for artifact in stdout exit calls.log; do
@@ -176,6 +205,10 @@ run_scenario() {
   if [ "${failed}" -ne 0 ]; then
     { printf '%s\n' "${name}"; printf '%s' "${detail}"; } > "${REPORT_DIR}/${name}"
   fi
+  # Written LAST, and unconditionally on both the pass and the fail path: a
+  # worker killed before reaching this line (R5's "produces no result") leaves
+  # no marker, which is exactly the shortfall R6 counts against the corpus.
+  : > "${VERDICT_DIR}/${name}"
   return "${failed}"
 }
 export -f run_scenario
@@ -184,6 +217,39 @@ export harness
 status=0
 printf '%s\n' "${scenarios[@]}" \
   | xargs -P "$(core_count)" -I{} bash -c 'run_scenario "$@"' _ {} || status=$?
+
+# R6: the verdict count is printed and checked against the corpus size,
+# independent of `status` above — a worker that xargs itself lost (killed,
+# never scheduled) would otherwise report only through xargs's own exit code,
+# with nothing naming which scenario went missing.
+verdicts=("${VERDICT_DIR}"/*)
+verdict_count=${#verdicts[@]}
+scenario_count=${#scenarios[@]}
+printf 'verdicts: %s/%s\n' "${verdict_count}" "${scenario_count}"
+if [ "${verdict_count}" -lt "${scenario_count}" ]; then
+  missing=()
+  for s in "${scenarios[@]}"; do
+    n="$(basename "${s}" .json)"
+    [ -e "${VERDICT_DIR}/${n}" ] || missing+=("${n}")
+  done
+  printf '::error title=Conformance worker accounting::%s of %s scenarios reported no verdict: %s\n' \
+    "$((scenario_count - verdict_count))" "${scenario_count}" "${missing[*]}"
+  status=1
+fi
+
+# SC-009: the amortised per-scenario cost, published beside the wall-clock so
+# the next corpus growth can be sized before it turns a budget red. Summed
+# from TIMING_DIR rather than re-derived from the wall-clock alone, since the
+# wall-clock reflects the chosen concurrency and the per-scenario figure must
+# not.
+SCRIPT_T1="${EPOCHREALTIME}"
+wall_clock="$(awk -v a="${SCRIPT_T0}" -v b="${SCRIPT_T1}" 'BEGIN { printf "%.3f", b - a }')"
+if [ "${scenario_count}" -gt 0 ]; then
+  amortised="$(cat "${TIMING_DIR}"/* 2> /dev/null \
+    | awk -v n="${scenario_count}" '{ sum += $1 + $2 } END { printf "%.3f", (n > 0 ? sum / n : 0) }')"
+  printf 'amortised per-scenario cost: %ss (wall-clock %ss / %s scenarios)\n' \
+    "${amortised}" "${wall_clock}" "${scenario_count}"
+fi
 
 # One annotation carrying the whole report. A workflow command is a single
 # line, so the newlines are percent-encoded (`%` first, or the encoding would

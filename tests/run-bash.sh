@@ -41,8 +41,16 @@ if [[ "${1:-}" == "__run_one" ]]; then
   while IFS= read -r v; do unset "${v}"; done < <(compgen -A variable BATS_ || true)
   while IFS= read -r fn; do unset -f "${fn}"; done < <(compgen -A function bats_ || true)
   rc=0
+  _t0="${EPOCHREALTIME}"
   bats "${file}" > "${log}" 2>&1 || rc=$?
+  _t1="${EPOCHREALTIME}"
   printf '%s' "${rc}" > "${log}.rc"
+  # T032/T033 (018): this worker's own duration, so the aggregator below can
+  # build the LPT profile T031 reads — a scheduling hint only, never a
+  # filter or a source of verdicts, and never derived from a local wall
+  # clock for the BUDGET this feature sets (research §4.2) — this capture
+  # exists so a CI run, not a developer's laptop, produces that number.
+  awk -v a="${_t0}" -v b="${_t1}" 'BEGIN { printf "%.3f", b - a }' > "${log}.dur"
   exit 0
 fi
 
@@ -160,6 +168,47 @@ if [[ "${TOTAL_FILES}" -eq 0 ]]; then
   exit 1
 fi
 
+# --- D5 (018, FR-009): LPT ordering from a committed timing profile ----------
+#
+# 149 uneven files on N workers leaves the makespan hostage to whichever
+# heavy file starts last (research.md §4.1) — longest-processing-time-first
+# ordering is the classic fix. The profile is a scheduling HINT ONLY: an
+# absent or unreadable one falls back to the discovered (alphabetical)
+# order rather than failing, and every discovered file still runs either
+# way — this can reorder FILES, never filter it.
+TIMINGS_PATH="${SPEC_KIT_JIRA_BATS_TIMINGS:-${ROOT}/tests/bash-suite-timings.txt}"
+declare -A LPT_DURATIONS=()
+if [[ -r "${TIMINGS_PATH}" ]]; then
+  while IFS=$'\t' read -r _dur _path || [[ -n "${_dur}" ]]; do
+    [[ -n "${_dur}" && -n "${_path}" ]] || continue
+    LPT_DURATIONS["${_path}"]="${_dur}"
+  done < "${TIMINGS_PATH}"
+fi
+
+if [[ "${#LPT_DURATIONS[@]}" -gt 0 ]]; then
+  _lpt_duration() {
+    local f="$1" rel
+    if [[ -v "LPT_DURATIONS[${f}]" ]]; then
+      printf '%s' "${LPT_DURATIONS[${f}]}"
+      return
+    fi
+    rel="${f#"${ROOT}/"}"
+    if [[ -v "LPT_DURATIONS[${rel}]" ]]; then
+      printf '%s' "${LPT_DURATIONS[${rel}]}"
+      return
+    fi
+    printf '0' # unprofiled (new since the profile was refreshed): unknown cost, sorts last
+  }
+  _lpt_lines=""
+  for _f in "${FILES[@]}"; do
+    _lpt_lines+="$(_lpt_duration "${_f}")"$'\t'"${_f}"$'\n'
+  done
+  mapfile -t FILES < <(printf '%s' "${_lpt_lines}" | sort -t $'\t' -k1,1 -rn | cut -f2-)
+  printf 'run-bash.sh: ordering: LPT from %s (%d file(s) profiled)\n' "${TIMINGS_PATH}" "${#LPT_DURATIONS[@]}"
+else
+  printf 'run-bash.sh: ordering: no timing profile at %s — discovered order\n' "${TIMINGS_PATH}"
+fi
+
 printf 'run-bash.sh: mode: %s (%s)\n' "${RUN_LABEL}" "$(bats --version 2> /dev/null || printf 'bats not found')"
 if [[ "${RUN_LABEL}" == "PARTIAL RUN" ]]; then
   printf 'run-bash.sh: selected %d file(s) (this is a PARTIAL RUN, not a full-suite verdict):\n' "${TOTAL_FILES}"
@@ -171,9 +220,25 @@ fi
 RESULTS_DIR="$(mktemp -d)"
 trap 'rm -rf "${RESULTS_DIR}"' EXIT
 
-JOBS="$(getconf _NPROCESSORS_ONLN 2> /dev/null || printf '1')"
-[[ "${JOBS}" =~ ^[0-9]+$ ]] || JOBS=1
-[[ "${JOBS}" -lt 1 ]] && JOBS=1
+# D5: workers are process-creation/IO-bound, not CPU-bound (research §4.1) —
+# `-P core-count` leaves a 4-vCPU runner idle a large fraction of the time.
+# SPEC_KIT_JIRA_BATS_JOBS is the probe's own knob (may exceed the core
+# count deliberately); unset, the default oversubscribes by 3x.
+CORES="$(getconf _NPROCESSORS_ONLN 2> /dev/null || printf '1')"
+[[ "${CORES}" =~ ^[0-9]+$ ]] || CORES=1
+[[ "${CORES}" -lt 1 ]] && CORES=1
+JOBS="${SPEC_KIT_JIRA_BATS_JOBS:-}"
+if [[ ! "${JOBS}" =~ ^[0-9]+$ ]] || [[ "${JOBS}" -lt 1 ]]; then
+  JOBS=$((CORES * 3))
+fi
+printf 'run-bash.sh: jobs: %s\n' "${JOBS}"
+# 018 diagnostic (macOS timing question, baseline.md): cheap enough to leave
+# in permanently, and this is the only channel that survives a non-admin
+# token when the question is "what did this CI run actually compute".
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+  printf '::notice title=run-bash.sh scheduling::os=%s cores=%s jobs=%s files=%s\n' \
+    "$(uname -s 2> /dev/null || printf 'unknown')" "${CORES}" "${JOBS}" "${TOTAL_FILES}"
+fi
 
 if command -v xargs > /dev/null 2>&1; then
   printf '%s\n' "${FILES[@]}" | xargs -P "${JOBS}" -I{} bash -c '
@@ -190,6 +255,13 @@ fi
 TOTAL_TESTS=0
 FAILED_FILES=0
 EXECUTED_FILES=0
+# T032/T033 (018): when a caller asks for it, accumulate this run's own
+# per-file durations into the profile format T031 reads — the mechanism a
+# nightly workflow step commits from, never derived from a local wall clock
+# for a budget decision (research §4.2's caveat governs USING the number,
+# not producing it here).
+DUMP_TIMINGS="${SPEC_KIT_JIRA_BATS_DUMP_TIMINGS:-}"
+TIMINGS_OUT=""
 for f in "${FILES[@]}"; do
   safe="$(printf '%s' "${f}" | tr '/' '_')"
   log="${RESULTS_DIR}/${safe}.log"
@@ -204,6 +276,10 @@ for f in "${FILES[@]}"; do
   count="$(grep -m1 -E '^1\.\.[0-9]+$' "${log}" | sed -E 's/^1\.\.//')"
   [[ "${count}" =~ ^[0-9]+$ ]] || count=0
   TOTAL_TESTS=$((TOTAL_TESTS + count))
+  if [[ -n "${DUMP_TIMINGS}" && -f "${log}.dur" ]]; then
+    rel="${f#"${ROOT}/"}"
+    TIMINGS_OUT+="$(cat "${log}.dur")"$'\t'"${rel}"$'\n'
+  fi
   if [[ "${rc}" != "0" ]]; then
     FAILED_FILES=$((FAILED_FILES + 1))
     printf 'run-bash.sh: FAIL %s\n' "${f}"
@@ -212,6 +288,11 @@ for f in "${FILES[@]}"; do
     grep -E '^(not ok|# )' "${log}" | sed 's/^/  /'
   fi
 done
+
+if [[ -n "${DUMP_TIMINGS}" ]]; then
+  printf '%s' "${TIMINGS_OUT}" > "${DUMP_TIMINGS}"
+  printf 'run-bash.sh: wrote per-file timing profile to %s (%d file(s))\n' "${DUMP_TIMINGS}" "${EXECUTED_FILES}"
+fi
 
 printf 'run-bash.sh: summary: files executed: %d, tests executed: %d, files failed: %d\n' \
   "${EXECUTED_FILES}" "${TOTAL_TESTS}" "${FAILED_FILES}"

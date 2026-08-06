@@ -88,6 +88,26 @@ filesystem path for jq itself to read, so disabling the rewrite is safe
 everywhere; a future call that ever needs MSYS to resolve a real path for a
 *different* native binary must set the variable back locally for that call.
 
+### 8. A bare `\r` embedded in a `::notice::` message truncates the annotation
+
+`pwsh`'s own multi-line `Write-Host` output is CRLF on this host, the same
+lesson as quirk 2 but for a different tool. Folding that output onto one
+line for a workflow-command payload with `tr '\n' ';'` alone strips only the
+`\n`, leaving a bare `\r` before every folded segment. GitHub's own
+annotation renderer treats that embedded `\r` as an end-of-line, and
+everything after it in the message is silently dropped — not an error, not a
+shorter message, just gone, with the step it came from still reporting
+`success`.
+
+Measured (probe run `31023793448`, `windows-latest`): a `::notice::`
+accumulator that should have carried the host-profile report plus four
+`W1`/`W4`/`W3`/`W2` measurement blocks arrived holding only the host profile
+and the FIRST line of `W1`'s `Add-MpPreference` result — the exact point
+where `pwsh`'s CRLF output first entered the message.
+
+Rule: same seam as quirks 2 and 7 — strip `\r` before folding, never after:
+`... | tr -d '\r' | tr '\n' ';'`, not `... | tr '\n' ';'`.
+
 ## The probe loop — how to ask Windows a question
 
 `.github/workflows/windows-conformance.yml` runs the conformance corpus alone

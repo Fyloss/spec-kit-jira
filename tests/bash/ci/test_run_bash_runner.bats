@@ -159,3 +159,65 @@ teardown() {
   run grep -rn 'run-bash.sh --since' "${ROOT}/.github/workflows"
   [ "$status" -ne 0 ]
 }
+
+# --- T030 [018, Phase 4/US2] — oversubscription + LPT ordering (D5, FR-009) --
+#
+# Measured (research.md §4.1): 149 uneven files on `-P core-count` leaves
+# alphabetical order hostage to whichever heavy file starts last. Written and
+# observed to FAIL before T031 existed (Constitution XIII TDD).
+
+@test "SPEC_KIT_JIRA_BATS_JOBS overrides the host default, and may exceed cores" {
+  run env SPEC_KIT_JIRA_BATS_JOBS=97 "${RUNNER}" "${FIXDIR}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"jobs: 97"* ]]
+}
+
+@test "an absent profile falls back to the current order, never fails" {
+  run env SPEC_KIT_JIRA_BATS_JOBS=1 SPEC_KIT_JIRA_BATS_TIMINGS="${FIXDIR}/does-not-exist.txt" "${RUNNER}" "${FIXDIR}"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ tests\ executed:\ [1-9] ]]
+  [[ "$output" == *"no timing profile"* ]]
+}
+
+@test "a committed profile orders files longest-first (LPT), forced serial to observe it" {
+  local order_log="${FIXDIR}/order.log"
+  : > "${order_log}"
+  # Three fixture files whose ALPHABETICAL order (a, b, c) is the exact
+  # REVERSE of their profiled duration (light, medium, heavy) — alphabetical
+  # execution and LPT execution can only agree by coincidence, not by
+  # construction, so this proves the profile is actually driving the order.
+  printf '#!/usr/bin/env bats\n%s "light" { printf "a\\n" >> "%s"; }\n' "${T}" "${order_log}" > "${FIXDIR}/test_a_light.bats"
+  printf '#!/usr/bin/env bats\n%s "medium" { printf "b\\n" >> "%s"; }\n' "${T}" "${order_log}" > "${FIXDIR}/test_b_medium.bats"
+  printf '#!/usr/bin/env bats\n%s "heavy" { printf "c\\n" >> "%s"; }\n' "${T}" "${order_log}" > "${FIXDIR}/test_c_heavy.bats"
+  local profile="${FIXDIR}/timings.txt"
+  {
+    printf '1\t%s/test_a_light.bats\n' "${FIXDIR}"
+    printf '5\t%s/test_b_medium.bats\n' "${FIXDIR}"
+    printf '10\t%s/test_c_heavy.bats\n' "${FIXDIR}"
+  } > "${profile}"
+  run env SPEC_KIT_JIRA_BATS_JOBS=1 SPEC_KIT_JIRA_BATS_TIMINGS="${profile}" "${RUNNER}" "${FIXDIR}"
+  [ "$status" -eq 0 ]
+  # heavy, medium, light — LPT order, not alphabetical (a, b, c would be
+  # light-medium-heavy, the wrong direction).
+  [ "$(tr -d '\n' < "${order_log}")" = "cba" ]
+  rm -f "${FIXDIR}/test_a_light.bats" "${FIXDIR}/test_b_medium.bats" "${FIXDIR}/test_c_heavy.bats" "${profile}" "${order_log}"
+}
+
+@test "the executed file set is unchanged whether a profile is present or absent" {
+  run env SPEC_KIT_JIRA_BATS_TIMINGS="${FIXDIR}/does-not-exist.txt" "${RUNNER}" "${FIXDIR}"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ files\ executed:\ 2 ]]
+}
+
+# --- T032/T033 [018, Phase 4/US2] — profile-producing run (D5, FR-009) -------
+
+@test "SPEC_KIT_JIRA_BATS_DUMP_TIMINGS writes one profile line per executed file" {
+  local out="${FIXDIR}/dumped.txt"
+  run env SPEC_KIT_JIRA_BATS_DUMP_TIMINGS="${out}" "${RUNNER}" "${FIXDIR}"
+  [ "$status" -eq 0 ]
+  [ -f "${out}" ]
+  [ "$(wc -l < "${out}" | tr -d '[:space:]')" -eq 2 ]
+  run awk -F'\t' '{ if ($1 !~ /^[0-9.]+$/ || $2 == "") exit 1 }' "${out}"
+  [ "$status" -eq 0 ]
+  rm -f "${out}"
+}
