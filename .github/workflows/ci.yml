@@ -169,6 +169,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: TEMP diagnostic (018 annotation mechanism check — revert before merge)
+        run: |
+          printf '::notice title=diag-test::hello-notice\n'
+          printf '::warning title=diag-test::hello-warning\n'
+          printf '::error title=diag-test::hello-error\n'
+
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
