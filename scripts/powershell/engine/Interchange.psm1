@@ -32,6 +32,118 @@ function Get-JiraArrayCount {
     return @($value).Count
 }
 
+function Get-JiraMarkErrorList {
+    <#
+    .SYNOPSIS
+      data-model.md §5 rule 4: mark.kind in the enum, href present iff
+      kind == 'link'. Mirror of interchange.sh's mark_errors.
+    #>
+    param($Mark)
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $kind = [string](Get-JiraInterchangeProp $Mark 'kind')
+    if (@('bold', 'italic', 'monospace', 'strikethrough', 'link') -cnotcontains $kind) {
+        $errors.Add('mark.kind is invalid')
+    }
+    $hasHref = Test-JiraInterchangeProp $Mark 'href'
+    if ($kind -eq 'link') {
+        if (-not $hasHref) { $errors.Add('mark.href is required for a link mark') }
+        elseif ([string](Get-JiraInterchangeProp $Mark 'href') -notmatch '^https?://\S+$') {
+            $errors.Add('mark.href must be an absolute http(s) URL')
+        }
+    }
+    elseif ($hasHref) {
+        $errors.Add('mark.href is forbidden for a non-link mark')
+    }
+    return $errors
+}
+
+function Get-JiraSpanErrorList {
+    <#
+    .SYNOPSIS
+      data-model.md §5 rule 3: every span has text (string) and marks (array).
+      Mirror of interchange.sh's span_errors.
+    #>
+    param($Span)
+    $errors = [System.Collections.Generic.List[string]]::new()
+    if ((Get-JiraInterchangeProp $Span 'text') -isnot [string]) { $errors.Add('span.text is required') }
+    # Twin of the Bash rule `(.marks | type) != "array"` (interchange.sh): a
+    # present-but-wrong-type value is refused exactly like an absent one.
+    if (-not (Test-JiraInterchangeProp $Span 'marks')) {
+        $errors.Add('span.marks is required')
+    }
+    else {
+        # Direct property access, NOT Get-JiraInterchangeProp, and a PLAIN
+        # assignment statement — never the value of an if/else expression:
+        # either form routes the value through PowerShell's output stream,
+        # which unwraps a one-element array to a scalar AND collapses a
+        # zero-element array to $null, either way misreporting a genuine
+        # array as "not an array" (same hazard as story.tasks below —
+        # Copilot review).
+        $marksVal = $Span.marks
+        if ($null -eq $marksVal -or $marksVal -isnot [System.Array]) {
+            $errors.Add('span.marks is required')
+        }
+        else {
+            foreach ($m in $marksVal) {
+                if ($null -eq $m) { continue }
+                foreach ($e in (Get-JiraMarkErrorList $m)) { $errors.Add($e) }
+            }
+        }
+    }
+    return $errors
+}
+
+function Get-JiraInlineErrorList {
+    <# data-model.md §5: every span in an inline sequence. #>
+    param($Inline)
+    $errors = [System.Collections.Generic.List[string]]::new()
+    foreach ($s in @($Inline)) {
+        if ($null -eq $s) { continue }
+        foreach ($e in (Get-JiraSpanErrorList $s)) { $errors.Add($e) }
+    }
+    return $errors
+}
+
+function Get-JiraBlockErrorList {
+    <#
+    .SYNOPSIS
+      data-model.md §5 rules 1-2: block-type enum (including ordered_list) and
+      the per-type required field. Mirror of interchange.sh's block_errors.
+    #>
+    param($Block)
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $t = [string](Get-JiraInterchangeProp $Block 'type')
+    if (@('heading', 'paragraph', 'bullet_list', 'ordered_list', 'code', 'panel_ref') -cnotcontains $t) {
+        $errors.Add('block.type is invalid')
+    }
+    if ($t -eq 'heading' -or $t -eq 'paragraph') {
+        if (-not (Test-JiraInterchangeProp $Block 'spans')) { $errors.Add("block.spans is required for a $t block") }
+        else { foreach ($e in (Get-JiraInlineErrorList (Get-JiraInterchangeProp $Block 'spans'))) { $errors.Add($e) } }
+    }
+    if ($t -eq 'bullet_list' -or $t -eq 'ordered_list') {
+        if (-not (Test-JiraInterchangeProp $Block 'items')) { $errors.Add("block.items is required for a $t block") }
+        else {
+            foreach ($item in @(Get-JiraInterchangeProp $Block 'items')) {
+                foreach ($e in (Get-JiraInlineErrorList $item)) { $errors.Add($e) }
+            }
+        }
+    }
+    if ($t -eq 'code' -and -not (Test-JiraInterchangeProp $Block 'text')) { $errors.Add('block.text is required for a code block') }
+    if ($t -eq 'panel_ref' -and -not (Test-JiraInterchangeProp $Block 'ref')) { $errors.Add('block.ref is required for a panel_ref block') }
+    return $errors
+}
+
+function Get-JiraBlockListErrorList {
+    <# data-model.md §5: walk a content_blocks value's blocks[]. #>
+    param($Description)
+    $errors = [System.Collections.Generic.List[string]]::new()
+    foreach ($b in @(Get-JiraInterchangeProp $Description 'blocks')) {
+        if ($null -eq $b) { continue }
+        foreach ($e in (Get-JiraBlockErrorList $b)) { $errors.Add($e) }
+    }
+    return $errors
+}
+
 function Test-JiraInterchange {
     <#
     .SYNOPSIS
@@ -72,6 +184,7 @@ function Test-JiraInterchange {
     else {
         if ([string]::IsNullOrEmpty([string](Get-JiraInterchangeProp $epic 'title'))) { $errors.Add('epic.title is required') }
         if ((Get-JiraArrayCount (Get-JiraInterchangeProp $epic 'description') 'blocks') -lt 1) { $errors.Add('epic.description.blocks must be non-empty') }
+        foreach ($e in (Get-JiraBlockListErrorList (Get-JiraInterchangeProp $epic 'description'))) { $errors.Add($e) }
         $marker = Get-JiraInterchangeProp $epic 'marker'
         $markerState = [string](Get-JiraInterchangeProp $marker 'state')
         if ([string]::IsNullOrEmpty($markerState)) { $markerState = 'absent' }
@@ -92,6 +205,20 @@ function Test-JiraInterchange {
             if ([string]::IsNullOrEmpty([string](Get-JiraInterchangeProp $s 'title'))) { $errors.Add('story.title is required') }
             if (@('P1', 'P2', 'P3') -cnotcontains (Get-JiraInterchangeProp $s 'priority_logical')) { $errors.Add('story.priority_logical is invalid') }
             if ((Get-JiraArrayCount (Get-JiraInterchangeProp $s 'description') 'blocks') -lt 1) { $errors.Add('story.description.blocks must be non-empty') }
+            foreach ($e in (Get-JiraBlockListErrorList (Get-JiraInterchangeProp $s 'description'))) { $errors.Add($e) }
+            foreach ($ac in @(Get-JiraInterchangeProp $s 'acceptance_criteria')) {
+                if ($null -eq $ac) { continue }
+                foreach ($clauseSet in @('given', 'when', 'then')) {
+                    foreach ($clause in @(Get-JiraInterchangeProp $ac $clauseSet)) {
+                        if ($null -eq $clause) { continue }
+                        foreach ($e in (Get-JiraInlineErrorList $clause)) { $errors.Add($e) }
+                    }
+                }
+            }
+            foreach ($d2 in @(Get-JiraInterchangeProp $s 'design')) {
+                if ($null -eq $d2 -or (Get-JiraInterchangeProp $d2 'kind') -ne 'guidance') { continue }
+                foreach ($e in (Get-JiraInlineErrorList (Get-JiraInterchangeProp $d2 'value'))) { $errors.Add($e) }
+            }
         }
     }
 
@@ -129,6 +256,11 @@ function Test-JiraInterchange {
             }
             if ([string]::IsNullOrEmpty([string](Get-JiraInterchangeProp $tk 'title'))) { $errors.Add('task.title is required') }
             if ((Get-JiraArrayCount (Get-JiraInterchangeProp $tk 'description') 'blocks') -lt 1) { $errors.Add('task.description.blocks must be non-empty') }
+            # 016, FR-019: a task description obeys the SAME inline model every
+            # other description position obeys. Without this rule the task tier
+            # was the one place a pre-016 raw-string paragraph could pass
+            # validation and render as literal punctuation.
+            foreach ($e in (Get-JiraBlockListErrorList (Get-JiraInterchangeProp $tk 'description'))) { $errors.Add($e) }
             $doneVal = Get-JiraInterchangeProp $tk 'done'
             if ($doneVal -isnot [bool]) { $errors.Add('task.done must be a boolean') }
             if (-not [string]::IsNullOrEmpty($taskLocalId)) { $allTaskLocalIds.Add($taskLocalId) }

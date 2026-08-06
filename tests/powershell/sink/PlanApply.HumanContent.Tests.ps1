@@ -8,8 +8,11 @@ BeforeAll {
     # session; import the directly-called Adf LAST so Get-JiraManagedMarker resolves.
     Import-Module (Join-Path $SinkDir 'PlanApply.psm1') -Force
     Import-Module (Join-Path $SinkDir 'Adf.psm1') -Force
+    # -Global, and LAST: nested -Force imports re-scope Output.psm1 out of the
+    # session — see PlanApply.Parent.Tests.ps1's note for the general rule.
+    Import-Module (Join-Path $SinkDir '../../lib/Output.psm1') -Force -Global
     $script:Marker = Get-JiraManagedMarker
-    $script:Doc = '{"routing":{"project_key":"COMP"},"epic":{"title":"The Epic","local_id":"3f2a91c04b7e6d18","marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},"description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},"stories":[{"local_id":"s1","title":"Story One","priority_logical":"P2","description":{"blocks":[{"type":"paragraph","text":"New managed body."}]}}]}'
+    $script:Doc = '{"routing":{"project_key":"COMP"},"epic":{"title":"The Epic","local_id":"3f2a91c04b7e6d18","marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},"description":{"blocks":[{"type":"paragraph","spans":[{"text":"Overview.","marks":[]}]}]}},"stories":[{"local_id":"s1","title":"Story One","priority_logical":"P2","description":{"blocks":[{"type":"paragraph","spans":[{"text":"New managed body.","marks":[]}]}]}}]}'
     $m = $script:Marker
     $script:Existing = @"
 {"type":"doc","version":1,"content":[
@@ -45,6 +48,28 @@ Describe 'Get-JiraPlanWriteSet (US7 human origin)' {
         $out | Should -BeLike '*do not edit below this line*'
         $out | Should -Not -BeLike '*stale managed body*'
         $out | Should -BeLike '*New managed body.*'
+    }
+
+    It 'T059 [016, US3] — a human-authored prefix carrying Markdown-like syntax survives the rewrite byte-for-byte, untouched by the renderer (FR-013)' {
+        $humanPrefix = '**PO** note with `raw` markup and a [link](https://ex.invalid) — never rendered, never touched.'
+        $m = $script:Marker
+        $existing = @"
+{"type":"doc","version":1,"content":[
+  {"type":"paragraph","content":[{"type":"text","text":"$humanPrefix"}]},
+  {"type":"paragraph","content":[{"type":"text","text":"$m","marks":[{"type":"strong"}]}]},
+  {"type":"paragraph","content":[{"type":"text","text":"stale managed body"}]}
+]}
+"@
+        $ctx = @"
+{"base_url":"https://mock","parent_type_id":"10101","parent_local_id":"3f2a91c04b7e6d18","tickets":{"s1":"PROJ-1"},"ticket_origins":{"s1":"human"},"ticket_descriptions":{"s1":$existing}}
+"@
+
+        $r = Get-JiraPlanWriteSet -NeutralDocJson $script:Doc -PlanContextJson $ctx | ConvertFrom-Json
+        $desc = $r.stories[0].body.fields.description
+        $desc.content[0].content[0].text | Should -Be $humanPrefix
+        $gotCanon = ConvertTo-JiraCanonicalJson (ConvertTo-Json -InputObject $desc.content[0] -Depth 100 -Compress)
+        $wantCanon = ConvertTo-JiraCanonicalJson (ConvertTo-Json -InputObject ($existing | ConvertFrom-Json).content[0] -Depth 100 -Compress)
+        $gotCanon | Should -Be $wantCanon
     }
 }
 

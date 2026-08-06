@@ -15,6 +15,7 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force # canonical 
 Import-Module (Join-Path $PSScriptRoot 'MarkerSplice.psm1') -Force # Get-JiraMarkerSpliceLineCount — a nested import inside StoryMarker.psm1 is not enough
 Import-Module (Join-Path $PSScriptRoot 'SpecMarker.psm1') -Force # Get-JiraSpecMarkerDocumentInfo, ConvertTo-JiraSpecMarkerInfo (Phase 5, US2)
 Import-Module (Join-Path $PSScriptRoot 'StoryMarker.psm1') -Force -Global # the durable identifier's grammar (Phase 2)
+Import-Module (Join-Path $PSScriptRoot 'Markdown.psm1') -Force # the Markdown subset tokenizer (016, contracts/markdown-subset.md)
 
 function Remove-JiraParseMarkerLines {
     <#
@@ -121,117 +122,161 @@ function Get-JiraParsedTitle {
 function Get-JiraParsedDescription {
     <#
     .SYNOPSIS
-      Synthesise a never-empty structured description (FR 014). Mirror of
-      parse_description_blocks.
+      Synthesise a never-empty structured description (FR 014, FR-008,
+      FR-009). Mirror of parse_description_blocks: collects the overview
+      REGION preceding the first Acceptance/Design/Tasks/Scenario/User Story
+      section, segments it into real blocks, then keeps the first two CONTENT
+      blocks — headings ride free and a trailing heading with no following
+      content is dropped (data-model.md §4, the B9 cap). The document's own
+      H1 stays out of the body (it is the title); any other heading level
+      becomes a real heading block (US2 acceptance scenario 4).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
     $lines = Split-JiraParseLine $Text
 
-    $paras = [System.Collections.Generic.List[string]]::new()
-    $para = ''
+    $region = [System.Collections.Generic.List[string]]::new()
     $h1 = ''
+    $firstLine = $true
     foreach ($line in $lines) {
+        $wasFirst = $firstLine
+        $firstLine = $false
         $t = $line.Trim()
-        if ([string]::IsNullOrEmpty($t)) {
-            if ($para -ne '') { $paras.Add($para); $para = '' }
-            continue
-        }
-        $hm = [regex]::Match($t, '^#{1,6}\s+(.*)$')
+        $hm = [regex]::Match($t, '^(#{1,6})\s+(.*)$')
         if ($hm.Success) {
-            $ht = $hm.Groups[1].Value
-            if ([string]::IsNullOrEmpty($h1) -and ($line -match '^#\s')) {
-                $h1 = ($ht -replace '^Feature Specification: ', '').Trim()
+            $hl = $hm.Groups[1].Value.Length
+            $ht = $hm.Groups[2].Value
+            if ($hl -eq 1 -and $h1 -eq '') { $h1 = ($ht -replace '^Feature Specification: ', '').Trim() }
+            # "User Story" also closes the region — see the Bash port's
+            # comment on the same branch (FR-011 vs FR-008's new heading blocks).
+            # When it IS the very first line, it is the story section's OWN
+            # heading (Get-JiraParsedSpec's split keeps it as line 1 of the
+            # section for Get-JiraParsedTitle to read) — skip it like the H1
+            # case rather than closing an empty region.
+            if ($ht -match '^(Acceptance|Design|Task|Scenario|Requirement|Success|Edge|User\s+Story)') {
+                if ($wasFirst -and $ht -match '^User\s+Story') { continue }
+                break
             }
-            if ($ht -match '^(Acceptance|Design|Task|Scenario|Requirement|Success|Edge)') { break }
-            if ($para -ne '') { $paras.Add($para); $para = '' }
-            continue
+            if ($hl -eq 1) { continue } # the document's own H1 stays out of the body
         }
         if ($t -match '^Title:') { continue }
-        $t = (Remove-JiraParseMarker $t).Trim()
-        if ($para -ne '') { $para = "$para $t" } else { $para = $t }
-    }
-    if ($para -ne '') { $paras.Add($para) }
-
-    if ($paras.Count -eq 0) {
-        if ($h1 -ne '') { $paras.Add($h1) } else { $paras.Add('This ticket tracks the linked specification.') }
+        [void]$region.Add($line)
     }
 
-    $blocks = [System.Collections.Generic.List[object]]::new()
-    $idx = 0
-    foreach ($p in $paras) {
-        if ($idx -ge 2) { break }
-        $blocks.Add([ordered]@{ type = 'paragraph'; text = $p })
-        $idx++
+    $regionText = if ($region.Count -gt 0) { $region -join "`n" } else { '' }
+    $allBlocks = @(ConvertTo-JiraMarkdownBlockList -Text $regionText | ConvertFrom-Json -Depth 100)
+
+    # B9 cap: content blocks are kept up to the first two; headings are always
+    # carried through, then a heading left trailing is dropped.
+    $kept = [System.Collections.Generic.List[object]]::new()
+    $contentCount = 0
+    foreach ($blk in $allBlocks) {
+        if ($blk.type -eq 'heading') {
+            [void]$kept.Add($blk)
+            continue
+        }
+        if ($contentCount -ge 2) { continue }
+        [void]$kept.Add($blk)
+        $contentCount++
     }
-    return (ConvertTo-JiraJsonValue ([ordered]@{ blocks = $blocks }))
+    while ($kept.Count -gt 0 -and $kept[$kept.Count - 1].type -eq 'heading') {
+        $kept.RemoveAt($kept.Count - 1)
+    }
+
+    if ($kept.Count -eq 0) {
+        $fallback = if ($h1 -ne '') { $h1 } else { 'This ticket tracks the linked specification.' }
+        $spans = @(Get-JiraMarkdownInlinePlain -Text $fallback | ConvertFrom-Json -Depth 20)
+        [void]$kept.Add([ordered]@{ type = 'paragraph'; spans = $spans })
+    }
+
+    return (ConvertTo-JiraJsonValue ([ordered]@{ blocks = $kept }))
 }
 
 function Get-JiraParsedAcceptance {
     <#
     .SYNOPSIS
-      Extract Given/When/Then scenarios (FR 015). Mirror of
-      parse_acceptance_criteria.
+      Extract Given/When/Then scenarios (FR 015), each clause an inline
+      sequence (data-model.md §3, feature 016 — replaces the crude global
+      asterisk strip that used to sit here as a partial workaround; full
+      tokenization subsumes it). Mirror of parse_acceptance_criteria.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
     $lines = Split-JiraParseLine $Text
 
     $blocks = [System.Collections.Generic.List[object]]::new()
-    $given = [System.Collections.Generic.List[string]]::new()
-    $when = [System.Collections.Generic.List[string]]::new()
-    $then = [System.Collections.Generic.List[string]]::new()
+    $given = [System.Collections.Generic.List[object]]::new()
+    $when = [System.Collections.Generic.List[object]]::new()
+    $then = [System.Collections.Generic.List[object]]::new()
+
+    $tok = { param($S) ConvertTo-JiraMarkdownInlineSpanList -Text $S | ConvertFrom-Json -Depth 20 }
+    # @(...) at EVERY call site below, not inside $tok: a scriptblock's own
+    # @()-wrapped output still unwraps to a bare object when captured through
+    # `& $tok ...` (PowerShell's pipeline auto-unwrapping — the same defect
+    # class documented in sink/jira/Adf.psm1) — a single-span result must
+    # stay a one-element ARRAY, or given/when/then's per-clause value
+    # collapses from `[[{...}]]` to `[{...}]`.
 
     $flush = {
         if ($then.Count -gt 0) {
             $blocks.Add([ordered]@{
-                    given = [System.Collections.Generic.List[string]]::new($given)
-                    when  = [System.Collections.Generic.List[string]]::new($when)
-                    then  = [System.Collections.Generic.List[string]]::new($then)
+                    given = [System.Collections.Generic.List[object]]::new($given)
+                    when  = [System.Collections.Generic.List[object]]::new($when)
+                    then  = [System.Collections.Generic.List[object]]::new($then)
                 })
         }
         $given.Clear(); $when.Clear(); $then.Clear(); $script:acLast = ''
     }
     $script:acLast = ''
+    # A keyword is often itself emphasised ("**Given** ..."). The wrapper is
+    # matched and discarded only immediately around the keyword — everything
+    # else in the clause reaches the tokenizer with its markdown intact.
+    $kwWrap = '(\*\*|__|\*|_)?'
 
     foreach ($line in $lines) {
         $t = $line.Trim()
-        $t = $t -replace '\*\*', ''
         $t = (Remove-JiraParseMarker $t).Trim()
         if ([string]::IsNullOrEmpty($t)) { continue }
 
-        if (($t -cmatch '[Gg]iven\s') -and ($t -cmatch '[Ww]hen\s') -and ($t -cmatch '[Tt]hen\s')) {
+        if (($t -cmatch "[Gg]iven$kwWrap\s") -and ($t -cmatch "[Ww]hen$kwWrap\s") -and ($t -cmatch "[Tt]hen$kwWrap\s")) {
             & $flush
             # Prefer explicit clause boundaries (", When" / ", Then") so a Given
             # clause that itself contains the word "when" survives intact; only a
-            # delimiter-free line falls back to the first-keyword split.
-            $m = [regex]::Match($t, '[Gg]iven\s+(.+)[,;]\s*[Ww]hen\s+(.+)[,;]\s*[Tt]hen\s+(.+)$')
-            if (-not $m.Success) { $m = [regex]::Match($t, '[Gg]iven\s+(.*?)\s+[Ww]hen\s+(.*?)\s+[Tt]hen\s+(.+)') }
+            # delimiter-free line falls back to the (unadorned-keyword) first-split.
+            $m = [regex]::Match($t, "[Gg]iven$kwWrap\s+(.+)[,;]\s*[Ww]hen$kwWrap\s+(.+)[,;]\s*[Tt]hen$kwWrap\s+(.+)$")
             if ($m.Success) {
-                $given.Add($m.Groups[1].Value.Trim())
-                $when.Add($m.Groups[2].Value.Trim())
-                $then.Add($m.Groups[3].Value.Trim())
+                $given.Add(@(& $tok $m.Groups[2].Value.Trim()))
+                $when.Add(@(& $tok $m.Groups[4].Value.Trim()))
+                $then.Add(@(& $tok $m.Groups[6].Value.Trim()))
+            }
+            else {
+                $m2 = [regex]::Match($t, '[Gg]iven\s+(.*?)\s+[Ww]hen\s+(.*?)\s+[Tt]hen\s+(.+)')
+                if ($m2.Success) {
+                    $given.Add(@(& $tok $m2.Groups[1].Value.Trim()))
+                    $when.Add(@(& $tok $m2.Groups[2].Value.Trim()))
+                    $then.Add(@(& $tok $m2.Groups[3].Value.Trim()))
+                }
             }
             & $flush
             continue
         }
 
-        $gm = [regex]::Match($t, '^[Gg]iven\s+(.+)$')
-        $wm = [regex]::Match($t, '^[Ww]hen\s+(.+)$')
-        $tm = [regex]::Match($t, '^[Tt]hen\s+(.+)$')
-        $am = [regex]::Match($t, '^([Aa]nd|[Bb]ut)\s+(.+)$')
+        $gm = [regex]::Match($t, "^${kwWrap}[Gg]iven${kwWrap}\s+(.+)$")
+        $wm = [regex]::Match($t, "^${kwWrap}[Ww]hen${kwWrap}\s+(.+)$")
+        $tm = [regex]::Match($t, "^${kwWrap}[Tt]hen${kwWrap}\s+(.+)$")
+        $am = [regex]::Match($t, "^${kwWrap}([Aa]nd|[Bb]ut)${kwWrap}\s+(.+)$")
         if ($gm.Success) {
             if ($then.Count -gt 0) { & $flush }
-            $given.Add($gm.Groups[1].Value.Trim()); $script:acLast = 'g'
+            $given.Add(@(& $tok $gm.Groups[3].Value.Trim())); $script:acLast = 'g'
         }
         elseif ($wm.Success) {
-            $when.Add($wm.Groups[1].Value.Trim()); $script:acLast = 'w'
+            $when.Add(@(& $tok $wm.Groups[3].Value.Trim())); $script:acLast = 'w'
         }
         elseif ($tm.Success) {
-            $then.Add($tm.Groups[1].Value.Trim()); $script:acLast = 't'
+            $then.Add(@(& $tok $tm.Groups[3].Value.Trim())); $script:acLast = 't'
         }
         elseif ($am.Success) {
-            $v = $am.Groups[2].Value.Trim()
+            $v = @(& $tok $am.Groups[4].Value.Trim())
             switch ($script:acLast) {
                 'g' { $given.Add($v) }
                 'w' { $when.Add($v) }
@@ -285,7 +330,8 @@ function Get-JiraParsedDesign {
             if ($t -match 'figma\.com') { continue }
             $t = (Remove-JiraParseMarker $t).Trim()
             if ([string]::IsNullOrEmpty($t)) { continue }
-            $items.Add([ordered]@{ kind = 'guidance'; value = $t })
+            $spans = @(ConvertTo-JiraMarkdownInlineSpanList -Text $t | ConvertFrom-Json -Depth 20)
+            $items.Add([ordered]@{ kind = 'guidance'; value = $spans })
         }
     }
 
@@ -371,8 +417,8 @@ function Get-JiraParsedEpicExtraBlocks {
     [CmdletBinding()]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
     $lines = Split-JiraParseLine $Text
-    $scItems = [System.Collections.Generic.List[string]]::new()
-    $oosItems = [System.Collections.Generic.List[string]]::new()
+    $scItems = [System.Collections.Generic.List[object]]::new()
+    $oosItems = [System.Collections.Generic.List[object]]::new()
     $mode = ''
     $cur = ''
     $section = ''
@@ -383,8 +429,8 @@ function Get-JiraParsedEpicExtraBlocks {
         if ($hm.Success) {
             if (-not [string]::IsNullOrEmpty($cur)) {
                 $trimmed = $cur.Trim()
-                if ($mode -eq 'sc') { $scItems.Add((Remove-JiraParseSCLabel -Text $trimmed)) }
-                elseif ($mode -eq 'oos') { $oosItems.Add($trimmed) }
+                if ($mode -eq 'sc') { $scItems.Add(@(ConvertTo-JiraMarkdownInlineSpanList -Text (Remove-JiraParseSCLabel -Text $trimmed) | ConvertFrom-Json -Depth 20)) }
+                elseif ($mode -eq 'oos') { $oosItems.Add(@(ConvertTo-JiraMarkdownInlineSpanList -Text $trimmed | ConvertFrom-Json -Depth 20)) }
             }
             $cur = ''
             $mode = ''
@@ -409,8 +455,8 @@ function Get-JiraParsedEpicExtraBlocks {
             if ($bm.Success) {
                 if (-not [string]::IsNullOrEmpty($cur)) {
                     $trimmed = $cur.Trim()
-                    if ($mode -eq 'sc') { $scItems.Add((Remove-JiraParseSCLabel -Text $trimmed)) }
-                    elseif ($mode -eq 'oos') { $oosItems.Add($trimmed) }
+                    if ($mode -eq 'sc') { $scItems.Add(@(ConvertTo-JiraMarkdownInlineSpanList -Text (Remove-JiraParseSCLabel -Text $trimmed) | ConvertFrom-Json -Depth 20)) }
+                    elseif ($mode -eq 'oos') { $oosItems.Add(@(ConvertTo-JiraMarkdownInlineSpanList -Text $trimmed | ConvertFrom-Json -Depth 20)) }
                 }
                 $mode = if ($section -eq 'sc-outcomes') { 'sc' } else { 'oos' }
                 $cur = $bm.Groups[2].Value
@@ -422,17 +468,19 @@ function Get-JiraParsedEpicExtraBlocks {
     }
     if (-not [string]::IsNullOrEmpty($cur)) {
         $trimmed = $cur.Trim()
-        if ($mode -eq 'sc') { $scItems.Add((Remove-JiraParseSCLabel -Text $trimmed)) }
-        elseif ($mode -eq 'oos') { $oosItems.Add($trimmed) }
+        if ($mode -eq 'sc') { $scItems.Add(@(ConvertTo-JiraMarkdownInlineSpanList -Text (Remove-JiraParseSCLabel -Text $trimmed) | ConvertFrom-Json -Depth 20)) }
+        elseif ($mode -eq 'oos') { $oosItems.Add(@(ConvertTo-JiraMarkdownInlineSpanList -Text $trimmed | ConvertFrom-Json -Depth 20)) }
     }
 
     $blocks = [System.Collections.Generic.List[object]]::new()
     if ($scItems.Count -gt 0) {
-        $blocks.Add([ordered]@{ type = 'heading'; level = 3; text = 'Success Criteria' })
+        $scHeading = @(Get-JiraMarkdownInlinePlain -Text 'Success Criteria' | ConvertFrom-Json -Depth 20)
+        $blocks.Add([ordered]@{ type = 'heading'; level = 3; spans = $scHeading })
         $blocks.Add([ordered]@{ type = 'bullet_list'; items = @($scItems) })
     }
     if ($oosItems.Count -gt 0) {
-        $blocks.Add([ordered]@{ type = 'heading'; level = 3; text = 'Out of Scope' })
+        $oosHeading = @(Get-JiraMarkdownInlinePlain -Text 'Out of Scope' | ConvertFrom-Json -Depth 20)
+        $blocks.Add([ordered]@{ type = 'heading'; level = 3; spans = $oosHeading })
         $blocks.Add([ordered]@{ type = 'bullet_list'; items = @($oosItems) })
     }
     return $blocks
@@ -480,9 +528,11 @@ function Get-JiraParsedPlanSummary {
     }
 
     $blocks = [System.Collections.Generic.List[object]]::new()
-    $blocks.Add([ordered]@{ type = 'heading'; level = 3; text = 'Implementation Plan' })
+    $planHeading = @(Get-JiraMarkdownInlinePlain -Text 'Implementation Plan' | ConvertFrom-Json -Depth 20)
+    $blocks.Add([ordered]@{ type = 'heading'; level = 3; spans = $planHeading })
     foreach ($p in $paras) {
-        $blocks.Add([ordered]@{ type = 'paragraph'; text = $p })
+        $spans = @(ConvertTo-JiraMarkdownInlineSpanList -Text $p | ConvertFrom-Json -Depth 20)
+        $blocks.Add([ordered]@{ type = 'paragraph'; spans = $spans })
     }
     return (ConvertTo-JiraJsonValue $blocks)
 }

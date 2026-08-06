@@ -187,7 +187,7 @@ Describe '015 field-default encoding, end to end through Get-JiraCreateFieldsBas
         $resolved = Get-JiraPlanResolveFieldDefault -IssueTypesJson $itypes -DefaultableFieldsByTypeJson $df -RecordedJson $recorded -AnswersJson '[]' | ConvertFrom-Json -Depth 100
         $encoded = $resolved.field_defaults_encoded | ConvertTo-Json -Compress -Depth 100
 
-        $doc = '{"routing":{"project_key":"CONSUMER"},"epic":{"local_id":"E1","title":"New epic","description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},"stories":[{"local_id":"S1","title":"New story","priority_logical":null,"estimation":null}]}'
+        $doc = '{"routing":{"project_key":"CONSUMER"},"epic":{"local_id":"E1","title":"New epic","description":{"blocks":[{"type":"paragraph","spans":[{"text":"Overview.","marks":[]}]}]}},"stories":[{"local_id":"S1","title":"New story","priority_logical":null,"estimation":null}]}'
         $ctx = '{"base_url":"https://example.atlassian.net","story_type_id":"10102","parent_type_id":"10101","field_defaults":' + $encoded + '}'
         $out = Get-JiraPlanWriteSet -NeutralDocJson $doc -PlanContextJson $ctx | ConvertFrom-Json -Depth 100
         $out.stories[0].body.fields.customfield_1.value | Should -Be 'EMEA'

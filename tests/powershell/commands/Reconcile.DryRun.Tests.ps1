@@ -107,6 +107,40 @@ Describe 'Invoke-JiraReconcile --dry-run — the declared-hierarchy fixture (010
     }
 }
 
+Describe 'Invoke-JiraReconcile --dry-run — T060 [016, US3] the rendered description in the preview' {
+    BeforeEach {
+        $script:Work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse (Join-Path $Root 'tests/conformance/fixtures/repo-with-markdown-prose') $script:Work
+        $script:Spec = Join-Path $script:Work 'specs/001-markdown-prose/spec.md'
+        $env:JIRA_CONFIG_DIR = Join-Path $script:Work '.specify/jira'
+        $env:SPEC_KIT_JIRA_REPO = 'acme/app'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-markdown-prose'
+        $env:SPEC_KIT_JIRA_ID_SOURCE = 'aaaaaaaaaaaaaaaa 1111111111111111'
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+    }
+    AfterEach {
+        if ($script:M) { Stop-JiraMock -Mock $script:M }
+        Remove-Item -Recurse -Force $script:Work -ErrorAction SilentlyContinue
+    }
+
+    It 'T060 — the rendered description appears in the dry-run preview with no write issued (FR-014)' {
+        $r = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--dry-run', '--json')
+        $r.ExitCode | Should -Be 0
+        $obj = $r.Out | ConvertFrom-Json
+        $obj.dry_run | Should -Be $true
+
+        $storyAction = @($obj.actions | Where-Object { $_.role -eq 'story' })[0]
+        $desc = $storyAction.body.fields.description | ConvertTo-Json -Depth 20 -Compress
+        $desc | Should -BeLike '*"type":"strong"*'
+        $desc.Contains('**FR-012**') | Should -BeFalse
+
+        # 017's duplicate-probe search runs even under --dry-run — FR-014's
+        # "no write issued" means no POST/PUT, not zero calls.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
+    }
+}
+
 Describe 'Invoke-JiraReconcile --dry-run — field defaults (011, contract §4.3, FR-023)' {
     BeforeEach {
         $script:Work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())

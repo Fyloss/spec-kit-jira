@@ -134,6 +134,43 @@ teardown() {
   [ "$(grep -c 'LEGACY-42' "${MOCK_CALLLOG}")" -eq 0 ]
 }
 
+@test "T061 [016] — FR-000/FR-000a: a real run leaves every byte of the spec file unchanged except the speckit-jira marker lines" {
+  local pristine="${ROOT}/tests/conformance/fixtures/repo-with-markdown-prose/specs/001-markdown-prose/spec.md"
+  local work="${BATS_TEST_TMPDIR}/repo-markdown-prose-durability"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-markdown-prose" "${work}"
+  local spec="${work}/specs/001-markdown-prose/spec.md"
+  export JIRA_CONFIG_DIR="${work}/.specify/jira"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-markdown-prose"
+  export SPEC_KIT_JIRA_ID_SOURCE="aaaaaaaaaaaaaaaa 1111111111111111"
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  cmd_reconcile reconcile "${spec}" --json > /dev/null
+
+  run diff <(grep -v 'speckit-jira ' "${pristine}") <(grep -v 'speckit-jira ' "${spec}")
+  [ "$status" -eq 0 ]
+  grep -q 'speckit-jira ' "${spec}"
+}
+
+@test "T061 [016] — FR-000/FR-000a: a --dry-run leaves the spec file byte-identical, including its marker lines (there are none to add)" {
+  local pristine="${ROOT}/tests/conformance/fixtures/repo-with-markdown-prose/specs/001-markdown-prose/spec.md"
+  local work="${BATS_TEST_TMPDIR}/repo-markdown-prose-durability-dry"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-markdown-prose" "${work}"
+  local spec="${work}/specs/001-markdown-prose/spec.md"
+  export JIRA_CONFIG_DIR="${work}/.specify/jira"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-markdown-prose"
+  export SPEC_KIT_JIRA_ID_SOURCE="aaaaaaaaaaaaaaaa 1111111111111111"
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  cmd_reconcile reconcile "${spec}" --dry-run --json > /dev/null
+
+  run cmp "${spec}" "${pristine}"
+  [ "$status" -eq 0 ]
+}
+
 @test "a story whose recorded ticket lives outside the routed project is mirrored into the routed project, not blocked" {
   mock_start "${ROOT}/tests/conformance/mock-jira/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"

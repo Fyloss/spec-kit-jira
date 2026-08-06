@@ -65,15 +65,15 @@
         "description": { "$ref": "#/$defs/content_blocks" },
         "acceptance_criteria": {
           "type": "array",
-          "description": "Given/When/Then blocks (FR-015).",
+          "description": "Given/When/Then blocks (FR-015). Each clause is an inline sequence (feature 016), not a plain string — this replaces the crude global asterisk strip at engine/parse.sh:199, the partial workaround for the reported defect.",
           "items": {
             "type": "object",
             "additionalProperties": false,
             "required": ["given", "when", "then"],
             "properties": {
-              "given": { "type": "array", "items": { "type": "string" } },
-              "when": { "type": "array", "items": { "type": "string" } },
-              "then": { "type": "array", "items": { "type": "string" } }
+              "given": { "type": "array", "items": { "$ref": "#/$defs/inline" } },
+              "when": { "type": "array", "items": { "$ref": "#/$defs/inline" } },
+              "then": { "type": "array", "items": { "$ref": "#/$defs/inline" } }
             }
           }
         },
@@ -87,7 +87,10 @@
             "properties": {
               "kind": { "enum": ["figma_link", "guidance"] },
               "label": { "type": "string" },
-              "value": { "type": "string", "minLength": 1 }
+              "value": {
+                "description": "An inline sequence when kind is 'guidance' (feature 016); stays a plain string URL when kind is 'figma_link' (a URL is not prose).",
+                "oneOf": [{ "$ref": "#/$defs/inline" }, { "type": "string", "minLength": 1 }]
+              }
             }
           }
         },
@@ -109,13 +112,45 @@
     "task": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["local_id", "title", "relation"],
+      "required": ["local_id", "title", "description", "done", "marker"],
+      "description": "A mirrored tasks.md line (feature 012). The `relation`/`link_type_logical` pair below is feature 001's original, never-implemented shape; 012 mirrors every task as a sub-task, so both stay optional rather than being invented as required.",
       "properties": {
-        "local_id": { "type": "string", "minLength": 1 },
+        "local_id": {
+          "type": "string",
+          "description": "16 hex characters, or empty when the marker state is 'absent'."
+        },
+        "task_ref": {
+          "type": "string",
+          "description": "The task's own reference as written in tasks.md (T014, T014a)."
+        },
         "title": { "type": "string", "minLength": 1 },
+        "description": {
+          "$ref": "#/$defs/content_blocks",
+          "description": "The task's own text as marked spans. Feature 016 FR-017: a task line is author prose and obeys the same inline model every other description position obeys — a paragraph here carries `spans`, never a raw `text` string."
+        },
+        "attribution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "story_ordinal": { "type": ["integer", "null"] },
+            "source": { "enum": ["tag", "heading", "none"] }
+          }
+        },
+        "phase": { "type": "string" },
+        "parallel": { "type": "boolean" },
+        "files": { "type": "array", "items": { "type": "string" } },
+        "depends_on": { "type": "array", "items": { "type": "string" } },
+        "done": {
+          "type": "boolean",
+          "description": "The checkbox state in tasks.md; drives the completion transition (012 FR-033)."
+        },
+        "marker": {
+          "type": "object",
+          "description": "The durable task identifier spliced into tasks.md, in the shape engine/task_marker emits."
+        },
         "relation": {
           "enum": ["subtask", "linked_story"],
-          "description": "Task strategy chosen explicitly in config (FR-009)."
+          "description": "Task strategy chosen explicitly in config (001 FR-009). Not emitted by 012, which always mirrors as a sub-task."
         },
         "link_type_logical": {
           "type": "string",
@@ -123,6 +158,55 @@
         }
       }
     },
+
+    "mark": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["bold", "italic", "monospace", "strikethrough", "link"],
+          "description": "Neutral formatting vocabulary (feature 016). Deliberately lexically distinct from ADF's strong/em/code/strike (Constitution VIII)."
+        },
+        "href": {
+          "type": "string",
+          "pattern": "^https?://[^\\s]+$",
+          "description": "Absolute http(s) target. Required iff kind is 'link'. The pattern is the schema-level backstop for FR-006: a non-http target can never reach Jira as a live link, because a validation failure blocks every downstream write."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "link" } }, "required": ["kind"] },
+          "then": { "required": ["href"] },
+          "else": { "not": { "required": ["href"] } }
+        }
+      ]
+    },
+
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "marks"],
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "Literal characters a reader sees. Never carries the syntax of a converted construct (FR-002)."
+        },
+        "marks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/mark" },
+          "description": "Always present, [] when unmarked, sorted alphabetically by kind. Always-emitted and always-sorted so the two ports cannot differ by an omitted key or by source nesting order (FR-015).",
+          "uniqueItems": true
+        }
+      }
+    },
+
+    "inline": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/span" },
+      "description": "A sequence of marked runs (feature 016). Empty array represents empty text. Invariant not expressible in JSON Schema and enforced by the tokenizer instead (contract D1): no two consecutive spans carry equal marks."
+    },
+
     "content_blocks": {
       "type": "object",
       "additionalProperties": false,
@@ -138,14 +222,40 @@
             "required": ["type"],
             "properties": {
               "type": {
-                "enum": ["heading", "paragraph", "bullet_list", "code", "panel_ref"],
-                "description": "Neutral block kinds. 'panel_ref' marks where the sink should place a panel (e.g. acceptance criteria); the engine does not know what a Jira panel is."
+                "enum": ["heading", "paragraph", "bullet_list", "ordered_list", "code", "panel_ref"],
+                "description": "Neutral block kinds. 'ordered_list' is new in feature 016 (FR-008). 'panel_ref' marks where the sink should place a panel (e.g. acceptance criteria); the engine does not know what a Jira panel is."
               },
               "level": { "type": "integer", "minimum": 1, "maximum": 6 },
-              "text": { "type": "string" },
-              "items": { "type": "array", "items": { "type": "string" } },
+              "spans": { "$ref": "#/$defs/inline" },
+              "items": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/inline" },
+                "description": "List items. Each item is an inline sequence (feature 016; was an array of plain strings before it)."
+              },
+              "text": {
+                "type": "string",
+                "description": "Code block body ONLY. Deliberately plain: FR-007 forbids interpreting markup inside code, and keeping this position a string makes that a property of the schema rather than a rule the tokenizer must remember."
+              },
               "ref": { "type": "string", "description": "For panel_ref: a logical section name, e.g. 'acceptance_criteria' or 'design'." }
-            }
+            },
+            "allOf": [
+              {
+                "if": { "properties": { "type": { "enum": ["heading", "paragraph"] } }, "required": ["type"] },
+                "then": { "required": ["spans"] }
+              },
+              {
+                "if": { "properties": { "type": { "enum": ["bullet_list", "ordered_list"] } }, "required": ["type"] },
+                "then": { "required": ["items"] }
+              },
+              {
+                "if": { "properties": { "type": { "const": "code" } }, "required": ["type"] },
+                "then": { "required": ["text"] }
+              },
+              {
+                "if": { "properties": { "type": { "const": "panel_ref" } }, "required": ["type"] },
+                "then": { "required": ["ref"] }
+              }
+            ]
           }
         }
       }

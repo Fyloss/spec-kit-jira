@@ -22,9 +22,9 @@ setup() {
 }
 
 CONTENT='{
-  "description": {"blocks": [{"type":"paragraph","text":"The need statement."}]},
-  "acceptance_criteria": [{"given":["a user"],"when":["they click"],"then":["it opens"]}],
-  "design": [{"kind":"guidance","value":"Use the blue accent."},{"kind":"figma_link","label":"Board","value":"https://www.figma.com/file/abc"}]
+  "description": {"blocks": [{"type":"paragraph","spans":[{"text":"The need statement.","marks":[]}]}]},
+  "acceptance_criteria": [{"given":[[{"text":"a user","marks":[]}]],"when":[[{"text":"they click","marks":[]}]],"then":[[{"text":"it opens","marks":[]}]]}],
+  "design": [{"kind":"guidance","value":[{"text":"Use the blue accent.","marks":[]}]},{"kind":"figma_link","label":"Board","value":"https://www.figma.com/file/abc"}]
 }'
 
 @test "renders a valid ADF doc envelope" {
@@ -42,12 +42,14 @@ CONTENT='{
 @test "acceptance criteria render into a dedicated panel with Given/When/Then (FR-015)" {
   run adf_render_description "${CONTENT}"
   [ "$(jq '[.content[] | select(.type=="panel")] | length' <<< "$output")" -eq 1 ]
-  # The panel carries the Given/When/Then clauses.
+  # The panel carries the Given/When/Then clauses. The keyword prefix and the
+  # clause's own (tokenized) spans are separate text nodes within one
+  # paragraph — joined here without a separator to read as the whole clause.
   local panel
   panel="$(jq -c '.content[] | select(.type=="panel")' <<< "$output")"
-  [[ "$(jq -r '[.content[].content[].text] | join("|")' <<< "$panel")" == *"Given a user"* ]]
-  [[ "$(jq -r '[.content[].content[].text] | join("|")' <<< "$panel")" == *"When they click"* ]]
-  [[ "$(jq -r '[.content[].content[].text] | join("|")' <<< "$panel")" == *"Then it opens"* ]]
+  [[ "$(jq -r '[.content[] | [.content[].text] | join("")] | join("|")' <<< "$panel")" == *"Given a user"* ]]
+  [[ "$(jq -r '[.content[] | [.content[].text] | join("")] | join("|")' <<< "$panel")" == *"When they click"* ]]
+  [[ "$(jq -r '[.content[] | [.content[].text] | join("")] | join("|")' <<< "$panel")" == *"Then it opens"* ]]
 }
 
 @test "figma links and UX guidance render into a distinct Design section (FR-016)" {
@@ -60,7 +62,7 @@ CONTENT='{
 }
 
 @test "no acceptance criteria => no panel node" {
-  local c='{"description":{"blocks":[{"type":"paragraph","text":"x"}]}}'
+  local c='{"description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}}'
   run adf_render_description "${c}"
   [ "$(jq '[.content[] | select(.type=="panel")] | length' <<< "$output")" -eq 0 ]
 }
@@ -72,7 +74,7 @@ CONTENT='{
   # a one-element array (PowerShell's pipeline auto-unwrapping), producing
   # `"content":{...}` instead of `"content":[{...}]`.
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
-  local c='{"description":{"blocks":[{"type":"paragraph","text":"Overview."}]}}'
+  local c='{"description":{"blocks":[{"type":"paragraph","spans":[{"text":"Overview.","marks":[]}]}]}}'
   local b p
   b="$(adf_render_description "${c}")"
   [ "$(jq -r '.content | type' <<< "${b}")" = "array" ]

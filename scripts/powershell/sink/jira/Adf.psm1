@@ -18,6 +18,52 @@ function New-JiraAdfText {
     return [ordered]@{ type = 'text'; text = $Text }
 }
 
+function ConvertTo-JiraAdfMark {
+    <#
+    .SYNOPSIS
+      The neutral mark -> ADF mark map (research §1, feature 016). THE ONLY
+      place ADF mark names may appear (Constitution VIII). Mirror of
+      adf.sh's marks_to_adf.
+    #>
+    param($Mark)
+    switch ($Mark.kind) {
+        'bold' { return [ordered]@{ type = 'strong' } }
+        'italic' { return [ordered]@{ type = 'em' } }
+        'monospace' { return [ordered]@{ type = 'code' } }
+        'strikethrough' { return [ordered]@{ type = 'strike' } }
+        'link' { return [ordered]@{ type = 'link'; attrs = [ordered]@{ href = $Mark.href } } }
+        default { return $null }
+    }
+}
+
+function ConvertTo-JiraAdfTextNode {
+    <#
+    .SYNOPSIS
+      Render one neutral span ({text, marks}) as an ADF text node, with an
+      ADF `marks` array present only when the span carries any. Mirror of
+      adf.sh's spans_to_adf (per element).
+    #>
+    param($Span)
+    $node = [ordered]@{ type = 'text'; text = [string]$Span.text }
+    $marks = @(@($Span.marks) | Where-Object { $null -ne $_ })
+    if ($marks.Count -gt 0) {
+        $adfMarks = @($marks | ForEach-Object { ConvertTo-JiraAdfMark $_ })
+        $node['marks'] = $adfMarks
+    }
+    return $node
+}
+
+function ConvertTo-JiraAdfTextNodeList {
+    <# Render a neutral inline sequence (array of spans) to ADF text nodes. #>
+    param([object[]] $Spans)
+    $nodes = [System.Collections.Generic.List[object]]::new()
+    foreach ($s in @($Spans)) {
+        if ($null -eq $s) { continue }
+        $nodes.Add((ConvertTo-JiraAdfTextNode $s))
+    }
+    return $nodes
+}
+
 function New-JiraAdfParagraph {
     param([string] $Text)
     $content = [System.Collections.Generic.List[object]]::new()
@@ -25,31 +71,49 @@ function New-JiraAdfParagraph {
     return [ordered]@{ type = 'paragraph'; content = $content }
 }
 
+function New-JiraAdfParagraphFromSpanList {
+    <# A paragraph node whose content is a rendered neutral inline sequence. #>
+    param([object[]] $Spans)
+    return [ordered]@{ type = 'paragraph'; content = @(ConvertTo-JiraAdfTextNodeList -Spans $Spans) }
+}
+
 function New-JiraAdfListItem {
     param([string] $Text)
     return [ordered]@{ type = 'listItem'; content = @((New-JiraAdfParagraph $Text)) }
 }
 
+function New-JiraAdfListItemFromSpanList {
+    <# A listItem node whose paragraph content is a rendered inline sequence. #>
+    param([object[]] $Spans)
+    return [ordered]@{ type = 'listItem'; content = @((New-JiraAdfParagraphFromSpanList -Spans $Spans)) }
+}
+
 function ConvertTo-JiraAdfBlockNode {
-    # Render neutral content blocks to ADF nodes. Mirror of _adf_blocks_to_nodes.
+    <#
+    .SYNOPSIS
+      Render neutral content blocks to ADF nodes. code stays a plain-string
+      body (FR-007: no markup interpretation inside code). Mirror of
+      _adf_blocks_to_nodes.
+    #>
     param([object[]] $Blocks)
     $nodes = [System.Collections.Generic.List[object]]::new()
     foreach ($b in $Blocks) {
         $type = $b.type
         if ($type -eq 'heading') {
             $level = if ($b.PSObject.Properties.Name -contains 'level' -and $null -ne $b.level) { [int]$b.level } else { 3 }
-            $text = if ($b.PSObject.Properties.Name -contains 'text') { [string]$b.text } else { '' }
-            $nodes.Add([ordered]@{ type = 'heading'; attrs = [ordered]@{ level = $level }; content = @((New-JiraAdfText $text)) })
+            $spans = if ($b.PSObject.Properties.Name -contains 'spans' -and $null -ne $b.spans) { @($b.spans) } else { @() }
+            $nodes.Add([ordered]@{ type = 'heading'; attrs = [ordered]@{ level = $level }; content = @(ConvertTo-JiraAdfTextNodeList -Spans $spans) })
         }
         elseif ($type -eq 'paragraph') {
-            $text = if ($b.PSObject.Properties.Name -contains 'text') { [string]$b.text } else { '' }
-            $nodes.Add((New-JiraAdfParagraph $text))
+            $spans = if ($b.PSObject.Properties.Name -contains 'spans' -and $null -ne $b.spans) { @($b.spans) } else { @() }
+            $nodes.Add((New-JiraAdfParagraphFromSpanList -Spans $spans))
         }
-        elseif ($type -eq 'bullet_list') {
+        elseif ($type -eq 'bullet_list' -or $type -eq 'ordered_list') {
             $items = if ($b.PSObject.Properties.Name -contains 'items' -and $null -ne $b.items) { @($b.items) } else { @() }
             $li = [System.Collections.Generic.List[object]]::new()
-            foreach ($it in $items) { $li.Add((New-JiraAdfListItem ([string]$it))) }
-            $nodes.Add([ordered]@{ type = 'bulletList'; content = $li })
+            foreach ($it in $items) { $li.Add((New-JiraAdfListItemFromSpanList -Spans @($it))) }
+            $adfType = if ($type -eq 'bullet_list') { 'bulletList' } else { 'orderedList' }
+            $nodes.Add([ordered]@{ type = $adfType; content = $li })
         }
         elseif ($type -eq 'code') {
             $text = if ($b.PSObject.Properties.Name -contains 'text') { [string]$b.text } else { '' }
@@ -62,22 +126,53 @@ function ConvertTo-JiraAdfBlockNode {
 }
 
 function New-JiraAdfGherkinPanel {
-    # A dedicated info panel carrying Given/When/Then clauses. Mirror of
-    # _adf_gherkin_panel. Returns $null when there is no acceptance criteria.
+    <#
+    .SYNOPSIS
+      A dedicated info panel carrying Given/When/Then clauses. Each clause is
+      an inline sequence (feature 016): the "Given "/"When "/"Then " prefix is
+      a plain unmarked text node ahead of the clause's own rendered spans.
+      Mirror of _adf_gherkin_panel. Returns $null when there is no AC.
+    #>
     param([object[]] $Acceptance)
     if (@($Acceptance).Count -eq 0) { return $null }
     $paras = [System.Collections.Generic.List[object]]::new()
     foreach ($sc in $Acceptance) {
-        foreach ($g in @($sc.given)) { if ($null -ne $g) { $paras.Add((New-JiraAdfParagraph "Given $g")) } }
-        foreach ($w in @($sc.when)) { if ($null -ne $w) { $paras.Add((New-JiraAdfParagraph "When $w")) } }
-        foreach ($t in @($sc.then)) { if ($null -ne $t) { $paras.Add((New-JiraAdfParagraph "Then $t")) } }
+        foreach ($g in @($sc.given)) {
+            if ($null -ne $g) {
+                $content = [System.Collections.Generic.List[object]]::new()
+                $content.Add((New-JiraAdfText 'Given '))
+                foreach ($n in (ConvertTo-JiraAdfTextNodeList -Spans @($g))) { $content.Add($n) }
+                $paras.Add([ordered]@{ type = 'paragraph'; content = $content })
+            }
+        }
+        foreach ($w in @($sc.when)) {
+            if ($null -ne $w) {
+                $content = [System.Collections.Generic.List[object]]::new()
+                $content.Add((New-JiraAdfText 'When '))
+                foreach ($n in (ConvertTo-JiraAdfTextNodeList -Spans @($w))) { $content.Add($n) }
+                $paras.Add([ordered]@{ type = 'paragraph'; content = $content })
+            }
+        }
+        foreach ($t in @($sc.then)) {
+            if ($null -ne $t) {
+                $content = [System.Collections.Generic.List[object]]::new()
+                $content.Add((New-JiraAdfText 'Then '))
+                foreach ($n in (ConvertTo-JiraAdfTextNodeList -Spans @($t))) { $content.Add($n) }
+                $paras.Add([ordered]@{ type = 'paragraph'; content = $content })
+            }
+        }
     }
     return [ordered]@{ type = 'panel'; attrs = [ordered]@{ panelType = 'info' }; content = $paras }
 }
 
 function New-JiraAdfDesignNode {
-    # A distinct Design section: a level-3 heading + a bullet list of guidance and
-    # Figma links. Mirror of _adf_design_nodes. Returns an empty list when absent.
+    <#
+    .SYNOPSIS
+      A distinct Design section: a level-3 heading + a bullet list of guidance
+      and Figma links. guidance values are inline sequences (feature 016);
+      figma_link stays a plain string URL with its label prefixed as plain
+      text. Mirror of _adf_design_nodes. Returns an empty list when absent.
+    #>
     param([object[]] $Design)
     $nodes = [System.Collections.Generic.List[object]]::new()
     if (@($Design).Count -eq 0) { return $nodes }
@@ -87,11 +182,11 @@ function New-JiraAdfDesignNode {
         if ($d.kind -eq 'figma_link') {
             $label = if ($d.PSObject.Properties.Name -contains 'label' -and $null -ne $d.label) { [string]$d.label } else { 'Figma' }
             $line = "$($label): $($d.value)"
+            $items.Add((New-JiraAdfListItem $line))
         }
         else {
-            $line = [string]$d.value
+            $items.Add((New-JiraAdfListItemFromSpanList -Spans @($d.value)))
         }
-        $items.Add((New-JiraAdfListItem $line))
     }
     $nodes.Add([ordered]@{ type = 'bulletList'; content = $items })
     return $nodes
@@ -302,12 +397,21 @@ function ConvertTo-JiraAdfTaskDescription {
       The sub-task's description: the task's own full (untruncated) text,
       then its identifier, phase, attribution, parallel-safety, files and
       dependencies as a bullet list. Mirror of adf_render_task_description.
+
+      The body comes from .description.blocks through the SAME neutral-block
+      renderer the story tier uses, so a task's markup renders as marks
+      rather than surviving as punctuation (016, FR-017). The metadata
+      bullets are composed by the bridge and stay plain text (FR-018).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $TaskJson)
     $task = $TaskJson | ConvertFrom-Json -Depth 100
 
-    $title = [string]$task.title
+    $blocks = @(if ($task.PSObject.Properties.Name -contains 'description' -and $null -ne $task.description -and
+            $task.description.PSObject.Properties.Name -contains 'blocks' -and $null -ne $task.description.blocks) {
+            $task.description.blocks
+        }
+        else { @() })
     $taskRef = [string]$task.task_ref
     $phase = if ($task.PSObject.Properties.Name -contains 'phase' -and $null -ne $task.phase) { [string]$task.phase } else { '' }
     $parallel = [bool]$task.parallel
@@ -334,7 +438,7 @@ function ConvertTo-JiraAdfTaskDescription {
     if ($deps.Count -gt 0) { $meta.Add("Depends on: $($deps -join ', ')") }
 
     $docContent = [System.Collections.Generic.List[object]]::new()
-    $docContent.Add((New-JiraAdfParagraph $title))
+    foreach ($n in (ConvertTo-JiraAdfBlockNode -Blocks $blocks)) { $docContent.Add($n) }
     $items = [System.Collections.Generic.List[object]]::new()
     foreach ($m in $meta) { $items.Add((New-JiraAdfListItem $m)) }
     $docContent.Add([ordered]@{ type = 'bulletList'; content = $items })

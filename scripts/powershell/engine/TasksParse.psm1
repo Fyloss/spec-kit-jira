@@ -10,6 +10,7 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MarkerSplice.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'StoryMarker.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'TaskMarker.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Markdown.psm1') -Force # a task's own text is author prose (016, FR-017)
 
 $script:JiraTaskLineCaptureRegex = '^-\s+\[([ xX])\]\s+(T[0-9]+[A-Za-z]?)\s*(.*)$'
 $script:JiraPhaseHeadingRegex = '^##\s+(Phase.*)$'
@@ -192,7 +193,13 @@ function ConvertTo-JiraTasksParseDocument {
 
         $doneBool = ($anchorDone[$i] -eq 'x' -or $anchorDone[$i] -eq 'X')
 
-        $descBlocks = @([ordered]@{ type = 'paragraph'; text = $title })
+        # 016, FR-017: the task's own text is author prose and carries the same
+        # markup spec prose does (backtick-quoted paths above all), so it is
+        # tokenized into marked spans here rather than shipped as a raw string.
+        # $title itself stays verbatim — it becomes the Jira summary, a
+        # plain-text field where no rich text is possible (data-model.md §3).
+        $descSpans = @(ConvertTo-JiraMarkdownInlineSpanList -Text $title | ConvertFrom-Json -Depth 100)
+        $descBlocks = @([ordered]@{ type = 'paragraph'; spans = $descSpans })
 
         $ordinalValue = if ($tagOrdinal) { [int]$tagOrdinal } else { $null }
 

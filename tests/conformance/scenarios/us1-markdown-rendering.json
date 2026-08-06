@@ -1,0 +1,14 @@
+{
+  "name": "us1-markdown-rendering",
+  "description": "016 US1/US2 — a specification whose prose exercises every worked example in contracts/markdown-subset.md Part E (bold, code, links, emphasis, strikethrough, escapes, autolinks, images, raw HTML) plus a bullet list, an ordered list, a fenced code block and a table row. Both ports must render byte-identical ADF, exit code, and Jira API call sequence (NFR-1).",
+  "mock": {
+    "projects": { "COMP": "company" }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-markdown-prose",
+  "argv": ["reconcile", "--dry-run", "--json", "specs/001-markdown-prose/spec.md"],
+  "env": {
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-markdown-prose",
+    "SPEC_KIT_JIRA_REPO": "acme/app"
+  }
+}

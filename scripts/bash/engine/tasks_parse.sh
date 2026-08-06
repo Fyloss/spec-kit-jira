@@ -17,6 +17,8 @@ _tp_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_tp_dir}/../lib/output.sh"
 # shellcheck source=/dev/null
 source "${_tp_dir}/task_marker.sh" # the durable identifier's grammar and anchor scan
+# shellcheck source=/dev/null
+source "${_tp_dir}/markdown.sh" # a task's own text is author prose (016, FR-017)
 
 # A task line: checkbox, task reference, then the rest of the line.
 _TP_TASK_LINE_CAPTURE_RE='^-[[:space:]]+\[([ xX])\][[:space:]]+(T[0-9]+[A-Za-z]?)[[:space:]]*(.*)$'
@@ -219,7 +221,13 @@ tasks_parse_document() {
     local done_bool="false"
     [[ "${anchor_done[i]}" == "x" || "${anchor_done[i]}" == "X" ]] && done_bool="true"
 
-    local desc_blocks; desc_blocks="$(jq -cn --arg t "${title}" '[{type:"paragraph", text:$t}]')"
+    # 016, FR-017: the task's own text is author prose and carries the same
+    # markup spec prose does (backtick-quoted paths above all), so it is
+    # tokenized into marked spans here rather than shipped as a raw string.
+    # `title` itself stays verbatim — it becomes the Jira summary, a plain-text
+    # field where no rich text is possible (data-model.md §3, FR-018).
+    local desc_blocks
+    desc_blocks="$(jq -cn --argjson s "$(markdown_tokenize_inline "${title}")" '[{type:"paragraph", spans:$s}]')"
 
     local ordinal_json="null"
     [[ -n "${tag_ordinal}" ]] && ordinal_json="${tag_ordinal}"

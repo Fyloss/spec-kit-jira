@@ -8,13 +8,16 @@
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
     $Sink = Join-Path $Root 'scripts/powershell/sink/jira'
+    $Engine = Join-Path $Root 'scripts/powershell/engine'
     $script:Mock = Join-Path $Root 'tests/conformance/mock-jira'
     # Import PlanApply first: it re-imports PrivacyGuard -Force into its own module
     # scope, so import PrivacyGuard LAST to keep its functions in the test session.
     Import-Module (Join-Path $Sink 'PlanApply.psm1') -Force
     Import-Module (Join-Path $Mock 'Mock.psm1') -Force
     Import-Module (Join-Path $Sink 'PrivacyGuard.psm1') -Force
+    Import-Module (Join-Path $Engine 'Markdown.psm1') -Force
     Import-Module (Join-Path $Sink 'Adf.psm1') -Force
+    Import-Module (Join-Path $Sink '../../lib/Output.psm1') -Force -Global
     $env:JIRA_EMAIL = 'user@example.com'
     $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
     $env:JIRA_NO_SLEEP = '1'
@@ -55,6 +58,17 @@ Describe 'Privacy guard fail-open regressions (case bypass + allowlist shredding
         $env:SPEC_KIT_JIRA_BASE_URL = ''
         Get-JiraApplyKnownCoordinate -ExtraJson '["PROJ-Secret","proj-secret","B","a"]' |
             Should -Be '["B","PROJ-Secret","a","proj-secret"]'
+    }
+}
+
+Describe '016 research §4 — a BLOCK-tier host inside a Markdown link' {
+    It 'still blocks once rendered to ADF' {
+        $spans = @(ConvertTo-JiraMarkdownInlineSpanList -Text '[docs](https://acme-corp.atlassian.net/wiki/x)' | ConvertFrom-Json -Depth 20)
+        $content = ConvertTo-JiraJsonValue ([ordered]@{
+                description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; spans = $spans }) }
+            })
+        $adf = ConvertTo-JiraAdfDocument -ContentJson $content
+        Test-JiraPrivacyBlock -Payload $adf | Should -Be 9
     }
 }
 

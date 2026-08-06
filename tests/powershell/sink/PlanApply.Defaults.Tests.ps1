@@ -116,7 +116,7 @@ Describe 'Get-JiraPlanWriteSet — field defaults (T027/T033)' {
     }
 
     It 'a parent CREATE merges field_defaults, scoped to the parent type' {
-        $doc = '{"routing":{"project_key":"CONSUMER"},"epic":{"local_id":"E1","title":"New epic","description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},"stories":[]}'
+        $doc = '{"routing":{"project_key":"CONSUMER"},"epic":{"local_id":"E1","title":"New epic","description":{"blocks":[{"type":"paragraph","spans":[{"text":"Overview.","marks":[]}]}]}},"stories":[]}'
         $ctx = '{"base_url":"https://example.atlassian.net","parent_type_id":"10101","field_defaults":{"10101":{"customfield_40011":"Platform Team"},"10102":{"customfield_50001":"Payments"}}}'
         $out = Get-JiraPlanWriteSet -NeutralDocJson $doc -PlanContextJson $ctx | ConvertFrom-Json -Depth 100
         $out.parent.body.fields.customfield_40011 | Should -Be 'Platform Team'

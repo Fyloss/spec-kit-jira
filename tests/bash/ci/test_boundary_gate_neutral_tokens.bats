@@ -88,3 +88,29 @@ plant_engine() {
   run run_gate_in "${root}"
   [ "${status}" -ne 0 ]
 }
+
+# --- 016 T003: the ADF node names feature 016 adds (research §1) ------------
+
+@test "the gate fails on the bulletList ADF node name" {
+  root="$(plant_engine bulletlist '# mirrored as bulletList')"
+  run run_gate_in "${root}"
+  [ "${status}" -ne 0 ]
+}
+
+@test "the gate fails on the codeBlock ADF node name" {
+  root="$(plant_engine codeblock '# mirrored as codeBlock')"
+  run run_gate_in "${root}"
+  [ "${status}" -ne 0 ]
+}
+
+@test "the gate fails on the listItem ADF node name" {
+  root="$(plant_engine listitem '# mirrored as listItem')"
+  run run_gate_in "${root}"
+  [ "${status}" -ne 0 ]
+}
+
+@test "the gate fails on the panelType ADF attribute name" {
+  root="$(plant_engine paneltype '# mirrored as panelType')"
+  run run_gate_in "${root}"
+  [ "${status}" -ne 0 ]
+}

@@ -38,7 +38,9 @@ Describe 'Get-JiraParsedDescription' {
     It 'is never empty even with no prose and no ## Summary' {
         $d = Get-JiraParsedDescription -Text "# Only A Title" | ConvertFrom-Json
         @($d.blocks).Count | Should -BeGreaterOrEqual 1
-        ($d.blocks | Where-Object { $_.text.Length -gt 0 }).Count | Should -BeGreaterOrEqual 1
+        # A first non-empty paragraph field is always present (feature 016:
+        # text lives on span[0].text within the paragraph's spans array).
+        ($d.blocks | Where-Object { $_.type -eq 'paragraph' -and @($_.spans).Count -gt 0 -and $_.spans[0].text.Length -gt 0 }).Count | Should -BeGreaterOrEqual 1
     }
 }
 
@@ -46,19 +48,19 @@ Describe 'Get-JiraParsedAcceptance' {
     It 'extracts a one-clause-per-line scenario' {
         $a = Get-JiraParsedAcceptance -Text "- **Given** a signed-in user`n- **When** they open the board`n- **Then** widgets load" | ConvertFrom-Json
         @($a).Count | Should -Be 1
-        $a[0].given[0] | Should -Be 'a signed-in user'
-        $a[0].then[0] | Should -Be 'widgets load'
+        $a[0].given[0][0].text | Should -Be 'a signed-in user'
+        $a[0].then[0][0].text | Should -Be 'widgets load'
     }
     It 'extracts an inline scenario' {
         $a = Get-JiraParsedAcceptance -Text 'Given a user When they click Then it opens' | ConvertFrom-Json
         @($a).Count | Should -Be 1
-        $a[0].then[0] | Should -Be 'it opens'
+        $a[0].then[0][0].text | Should -Be 'it opens'
     }
     It "keeps a Given clause containing the word 'when' intact in an inline triple" {
         $a = Get-JiraParsedAcceptance -Text 'Given the user logs in when prompted, When they click, Then it opens' | ConvertFrom-Json
-        $a[0].given[0] | Should -Be 'the user logs in when prompted'
-        $a[0].when[0] | Should -Be 'they click'
-        $a[0].then[0] | Should -Be 'it opens'
+        $a[0].given[0][0].text | Should -Be 'the user logs in when prompted'
+        $a[0].when[0][0].text | Should -Be 'they click'
+        $a[0].then[0][0].text | Should -Be 'it opens'
     }
     It 'yields an empty array when no Gherkin' {
         Get-JiraParsedAcceptance -Text 'just prose' | Should -Be '[]'

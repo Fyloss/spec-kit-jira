@@ -224,7 +224,7 @@ boot() {
 
   local doc='{
     "routing": {"project_key": "CONSUMER"},
-    "epic": {"local_id":"E1","title":"New epic","description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},
+    "epic": {"local_id":"E1","title":"New epic","description":{"blocks":[{"type":"paragraph","spans":[{"text":"Overview.","marks":[]}]}]}},
     "stories": [ {"local_id":"S1","title":"New story","priority_logical":null,"estimation":null} ]
   }'
   local ctx; ctx="$(jq -cn --argjson fd "${encoded}" \

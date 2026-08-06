@@ -4,7 +4,7 @@
 BeforeAll {
     $SinkDir = Join-Path $PSScriptRoot '../../../scripts/powershell/sink/jira'
     Import-Module (Join-Path $SinkDir 'PlanApply.psm1') -Force
-    $script:Doc = '{"routing":{"project_key":"COMP"},"epic":{"title":"The Epic","local_id":"3f2a91c04b7e6d18","marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},"description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},"stories":[{"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},"acceptance_criteria":[{"given":["g"],"when":["w"],"then":["t"]}],"priority_logical":"P1","estimation":5}]}'
+    $script:Doc = '{"routing":{"project_key":"COMP"},"epic":{"title":"The Epic","local_id":"3f2a91c04b7e6d18","marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},"description":{"blocks":[{"type":"paragraph","spans":[{"text":"Overview.","marks":[]}]}]}},"stories":[{"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","spans":[{"text":"need","marks":[]}]}]},"acceptance_criteria":[{"given":[[{"text":"g","marks":[]}]],"when":[[{"text":"w","marks":[]}]],"then":[[{"text":"t","marks":[]}]]}],"priority_logical":"P1","estimation":5}]}'
     $script:CtxCreate = '{"base_url":"https://mock","story_type_id":"10002","parent_type_id":"10101","parent_local_id":"3f2a91c04b7e6d18","priority_ids":{"P1":"1","P2":"2","P3":"3"},"estimation_field_id":"customfield_30044","tickets":{}}'
     $script:CtxUpdate = '{"base_url":"https://mock","story_type_id":"10002","parent_type_id":"10101","parent_local_id":"3f2a91c04b7e6d18","priority_ids":{"P1":"1","P2":"2","P3":"3"},"estimation_field_id":"customfield_30044","tickets":{"s1":"ABC-1"}}'
 }

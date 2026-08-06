@@ -219,6 +219,44 @@ flowchart LR
 The engine emits *logical* content; the sink resolves logical names to ids and
 renders ADF. `sink/jira/adf.sh` is the only place ADF node names exist.
 
+## Markdown rendering in descriptions
+
+Overview prose, acceptance-criteria clauses, Design guidance lines, and the
+text of every mirrored `tasks.md` line are
+parsed as Markdown before they reach the ticket: `**bold**`, `_italic_`,
+`` `monospace` ``, `~~strikethrough~~`, links, autolinks, headings, bullet and
+ordered lists, and fenced code blocks all render as native Jira formatting
+instead of surviving as literal punctuation. Anything outside that set (raw
+HTML, image targets, table alignment rows) degrades to plain text rather than
+failing the run.
+
+The engine parses this subset itself — `engine/markdown.sh` and its
+PowerShell mirror `engine/Markdown.psm1` — into a neutral tree of blocks and
+marked spans; the sink then maps that neutral vocabulary onto ADF node names.
+It is deliberately a fixed, restricted subset rather than full CommonMark, so
+that both native ports agree on the result byte-for-byte. The exact grammar —
+every rule numbered, with worked examples — is normative in
+[contracts/markdown-subset.md](../specs/016-jira-markdown-rendering/contracts/markdown-subset.md).
+
+Spec files are read-only input to this parser: nothing about formatting is
+ever written back to them (FR-000), and only the two content blocks the
+selection rule already kept before this feature are affected — the set of
+prose selected does not change.
+
+Every description body goes through it, all three tiers alike — specification,
+story, and the sub-task of the task tier (FR-017). A `tasks.md` line is as full
+of backtick-quoted paths as spec prose is, so it would show the same raw
+punctuation otherwise. Two things stay deliberately plain: **summaries** (a
+Jira summary is a plain-text field, so a story title and a task title are both
+sent verbatim) and the **metadata bullets** the bridge composes under a
+sub-task's body — `Identifier:`, `Phase:`, `Attribution:`, `Parallel-safe:`,
+`Files:`, `Depends on:` (FR-018). Those are not author prose, so there is no
+markup in them to honour.
+
+`engine/interchange.sh` enforces this: a description paragraph anywhere in the
+document, task tier included, must carry `spans` rather than a raw `text`
+string, and a validation failure blocks every write of the run.
+
 ## The plan context — the facts the engine cannot know
 
 ```mermaid

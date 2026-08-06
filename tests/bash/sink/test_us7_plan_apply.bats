@@ -16,8 +16,8 @@ setup() {
   DOC='{"routing":{"project_key":"COMP"},
         "epic":{"title":"The Epic","local_id":"3f2a91c04b7e6d18",
                 "marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},
-                "description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},
-        "stories":[{"local_id":"s1","title":"Story One","priority_logical":"P2","description":{"blocks":[{"type":"paragraph","text":"New managed body."}]}}]}'
+                "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Overview.","marks":[]}]}]}},
+        "stories":[{"local_id":"s1","title":"Story One","priority_logical":"P2","description":{"blocks":[{"type":"paragraph","spans":[{"text":"New managed body.","marks":[]}]}]}}]}'
   MARKER="$(adf_managed_marker)"
   # An existing human-origin description: one human paragraph, then a prior panel.
   EXISTING="$(jq -cn --arg m "${MARKER}" '
@@ -89,6 +89,32 @@ setup() {
   b="$(jq -cn --arg m "${MARKER}" '{content:[{type:"paragraph",content:[{type:"text",text:$m}]},{type:"paragraph",content:[{type:"text",text:"new"}]}]}')"
   st="$(plan_managed_description_status "${a}" "${b}")"
   [ "${st}" = "changed" ]
+}
+
+@test "T058 [016, US3] — a human-authored prefix carrying Markdown-like syntax survives the rewrite byte-for-byte, untouched by the renderer (FR-013)" {
+  local marker existing ctx human_prefix
+  marker="$(adf_managed_marker)"
+  human_prefix='**PO** note with `raw` markup and a [link](https://ex.invalid) — never rendered, never touched.'
+  existing="$(jq -cn --arg m "${marker}" --arg h "${human_prefix}" '
+    {type:"doc", version:1, content:[
+      {type:"paragraph", content:[{type:"text", text:$h}]},
+      {type:"paragraph", content:[{type:"text", text:$m, marks:[{type:"strong"}]}]},
+      {type:"paragraph", content:[{type:"text", text:"stale managed body"}]}
+    ]}')"
+  ctx="$(jq -cn --argjson ex "${existing}" '{
+    base_url:"https://mock", parent_type_id:"10101", parent_local_id:"3f2a91c04b7e6d18",
+    tickets:{s1:"PROJ-1"},
+    ticket_origins:{s1:"human"}, ticket_descriptions:{s1:$ex}
+  }')"
+
+  run plan_writes "${DOC}" "${ctx}"
+  [ "$status" -eq 0 ]
+  local desc
+  desc="$(jq -c '.stories[0].body.fields.description' <<< "$output")"
+  # Byte-for-byte: the human prefix node is copied verbatim, no tokenization —
+  # the literal asterisks, backtick and link syntax are still there.
+  [ "$(jq -r '.content[0].content[0].text' <<< "${desc}")" = "${human_prefix}" ]
+  [ "$(jq -cS '.content[0]' <<< "${desc}")" = "$(jq -cS '.content[0]' <<< "${existing}")" ]
 }
 
 @test "plan_writes for a human update is byte-identical across ports (NFR-1)" {

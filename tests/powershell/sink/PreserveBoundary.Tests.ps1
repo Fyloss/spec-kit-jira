@@ -38,39 +38,39 @@ BeforeAll {
     $script:Doc = '{"routing":{"project_key":"COMP"},
       "epic":{"title":"The Epic","local_id":"3f2a91c04b7e6d18",
               "marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},
-              "description":{"blocks":[{"type":"paragraph","text":"Epic overview."}]}},
+              "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Epic overview.","marks":[]}]}]}},
       "stories":[{"local_id":"s1","title":"Story One","priority_logical":"P2",
-                  "description":{"blocks":[{"type":"paragraph","text":"Story body."}]}}]}'
+                  "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Story body.","marks":[]}]}]}}]}'
 
     $script:DocParentOnly = '{"routing":{"project_key":"COMP"},
       "epic":{"title":"The Epic","local_id":"3f2a91c04b7e6d18",
               "marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},
-              "description":{"blocks":[{"type":"paragraph","text":"Epic overview."}]}},
+              "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Epic overview.","marks":[]}]}]}},
       "stories":[]}'
 
     $script:DocParentOnlyChanged = '{"routing":{"project_key":"COMP"},
       "epic":{"title":"The Epic","local_id":"3f2a91c04b7e6d18",
               "marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},
-              "description":{"blocks":[{"type":"paragraph","text":"Epic overview, revised."}]}},
+              "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Epic overview, revised.","marks":[]}]}]}},
       "stories":[]}'
 
     $script:Task = '{"local_id":"1111111111111111","task_ref":"T001","title":"Do the thing",
-       "description":{"blocks":[{"type":"paragraph","text":"Do the thing"}]},
+       "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Do the thing","marks":[]}]}]},
        "attribution":{"story_ordinal":1,"source":"tag"},"phase":"Phase 1","parallel":false,
        "files":[],"depends_on":[],"done":false,
        "marker":{"state":"assigned","id":"1111111111111111","ticket":"","lines":[10]}}'
 
     $script:DocWithTask = '{"routing":{"project_key":"COMP"},
       "epic":{"title":"The Epic","local_id":"e1","marker":{"state":"assigned","id":"e1","lines":[1]},
-              "description":{"blocks":[{"type":"paragraph","text":"Epic overview."}]}},
+              "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Epic overview.","marks":[]}]}]}},
       "stories":[{"local_id":"s1","title":"Story One","priority_logical":"P2",
-                  "description":{"blocks":[{"type":"paragraph","text":"Story body."}]},
+                  "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Story body.","marks":[]}]}]},
                   "tasks":[' + $script:Task + ']}]}'
 }
 
 Describe 'FR-007 — preservation across parent, story and sub-task' {
     It 'the story tier preserves the human prefix verbatim' {
-        $managed = @((ConvertTo-JiraAdfDocument -ContentJson '{"description":{"blocks":[{"type":"paragraph","text":"Story body."}]}}' | ConvertFrom-Json -Depth 100).content)
+        $managed = @((ConvertTo-JiraAdfDocument -ContentJson '{"description":{"blocks":[{"type":"paragraph","spans":[{"text":"Story body.","marks":[]}]}]}}' | ConvertFrom-Json -Depth 100).content)
         $existing = HumanDesc 'A PO wrote this on the story.' $managed
         $existingJson = ConvertTo-Json -InputObject $existing -Depth 100 -Compress
         $ctx = "{`"base_url`":`"https://mock`",`"parent_type_id`":`"10101`",`"parent_local_id`":`"3f2a91c04b7e6d18`",`"tickets`":{`"s1`":`"PROJ-1`"},`"ticket_descriptions`":{`"s1`":$existingJson}}"
@@ -80,7 +80,7 @@ Describe 'FR-007 — preservation across parent, story and sub-task' {
     }
 
     It 'the parent tier preserves the human prefix verbatim' {
-        $managed = @((ConvertTo-JiraAdfDocument -ContentJson '{"description":{"blocks":[{"type":"paragraph","text":"Epic overview."}]}}' | ConvertFrom-Json -Depth 100).content)
+        $managed = @((ConvertTo-JiraAdfDocument -ContentJson '{"description":{"blocks":[{"type":"paragraph","spans":[{"text":"Epic overview.","marks":[]}]}]}}' | ConvertFrom-Json -Depth 100).content)
         $existing = HumanDesc 'A PO wrote this on the epic.' $managed
         $existingJson = ConvertTo-Json -InputObject $existing -Depth 100 -Compress
         $ctx = "{`"base_url`":`"https://mock`",`"parent_type_id`":`"10101`",`"parent_key`":`"PROJ-1`",`"parent_current`":{`"summary`":`"The Epic`",`"description`":$existingJson},`"tickets`":{}}"
@@ -91,11 +91,15 @@ Describe 'FR-007 — preservation across parent, story and sub-task' {
     }
 
     It 'the sub-task tier preserves the human prefix verbatim' {
+        # The task's own text changes (forcing a write of the description —
+        # 016 moved a task's body from .title to .description.blocks, so the
+        # title alone no longer does) while the human prefix stays put.
         $managed = @((ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task | ConvertFrom-Json -Depth 100).content)
         $existing = HumanDesc 'A PO wrote this on the sub-task.' $managed
         $existingJson = ConvertTo-Json -InputObject $existing -Depth 100 -Compress
         $task = $script:Task | ConvertFrom-Json -Depth 100
         $task.title = 'Do the thing, reworded'
+        $task.description.blocks[0].spans[0].text = 'Do the thing, reworded'
         $doc = $script:DocWithTask | ConvertFrom-Json -Depth 100
         $doc.stories[0].tasks = @($task)
         $docJson = $doc | ConvertTo-Json -Depth 100 -Compress
@@ -118,7 +122,7 @@ Describe 'FR-009 — an edit confined to the prefix produces zero writes' {
     }
 
     It "the parent's prefix-only edit produces zero writes" {
-        $managed = @((ConvertTo-JiraAdfDocument -ContentJson '{"description":{"blocks":[{"type":"paragraph","text":"Epic overview."}]}}' | ConvertFrom-Json -Depth 100).content)
+        $managed = @((ConvertTo-JiraAdfDocument -ContentJson '{"description":{"blocks":[{"type":"paragraph","spans":[{"text":"Epic overview.","marks":[]}]}]}}' | ConvertFrom-Json -Depth 100).content)
         $existing = HumanDesc 'A DIFFERENT human note.' $managed
         $existingJson = ConvertTo-Json -InputObject $existing -Depth 100 -Compress
         $ctx = "{`"base_url`":`"https://mock`",`"parent_type_id`":`"10101`",`"parent_key`":`"PROJ-1`",`"parent_current`":{`"summary`":`"The Epic`",`"description`":$existingJson},`"tickets`":{}}"
@@ -147,7 +151,7 @@ Describe 'FR-008 — a deleted managed region is restored in full' {
 
 Describe 'FR-012 — a duplicated delimiter warns and writes no description' {
     It 'a story with two boundary markers warns by key, writes no description, but still updates other fields' {
-        $managed = @((ConvertTo-JiraAdfDocument -ContentJson '{"description":{"blocks":[{"type":"paragraph","text":"Story body."}]}}' | ConvertFrom-Json -Depth 100).content)
+        $managed = @((ConvertTo-JiraAdfDocument -ContentJson '{"description":{"blocks":[{"type":"paragraph","spans":[{"text":"Story body.","marks":[]}]}]}}' | ConvertFrom-Json -Depth 100).content)
         $existing = TwoMarkerDesc $managed
         $existingJson = ConvertTo-Json -InputObject $existing -Depth 100 -Compress
         $ctx = "{`"base_url`":`"https://mock`",`"parent_type_id`":`"10101`",`"parent_local_id`":`"3f2a91c04b7e6d18`",`"tickets`":{`"s1`":`"PROJ-1`"},`"ticket_descriptions`":{`"s1`":$existingJson},`"priority_ids`":{`"P2`":`"2`"}}"

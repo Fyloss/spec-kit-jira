@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-06
+
+### Added
+
+- Ticket descriptions now render Markdown as native Jira formatting instead of
+  leaving the raw syntax visible. Bold, italic, inline code, strikethrough,
+  links, autolinks, headings, bullet and ordered lists, and fenced code blocks
+  all convert; anything outside that subset degrades to plain text rather than
+  failing the run. Tickets synced by an earlier version carry a one-off
+  corrective description rewrite on their next reconcile — after that, an
+  unchanged spec produces zero further writes.
+- All three tiers are covered: specification, story, **and** the sub-task tier
+  added in 0.11.0 (`specs/016-jira-markdown-rendering/`, FR-017). A `tasks.md`
+  line names its files in backticks, so a mirrored sub-task previously showed
+  those backticks to the reader verbatim. Summaries stay plain on every tier —
+  a Jira summary is a plain-text field — as do the identifier, phase,
+  attribution, parallel-safety, files and dependency bullets the bridge itself
+  composes under a sub-task's body (FR-018).
+
+### Fixed
+
+- A description paragraph carrying a raw string instead of marked spans is now
+  refused by interchange validation on every tier rather than rendering
+  silently (FR-019). The sub-task tier was the one description position not
+  checked, which is how the raw-syntax defect reached it unnoticed.
+
 ## [0.11.2] - 2026-08-06
 
 ### Fixed
@@ -106,7 +132,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   naming the field and the accepted values — the same rule the
   `--field-default` flag already enforced, now also applied to values
   already sitting in `config.yml`. The recorded value itself never appears
-  in the refusal. The check applies to recorded *text* only: a value an
+  in the refusal. The check applies to recorded _text_ only: a value an
   operator wrote by hand as a structure — the escape hatch for a field
   shape the bridge does not derive — is still obeyed literally.
 

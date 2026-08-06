@@ -80,6 +80,23 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+# --- 016 research §4: a BLOCK-tier host carried inside a Markdown link -------
+# still blocks, now that the target lives in a structured `href` field rather
+# than inline text — the one privacy regression this feature could plausibly
+# introduce (FR-016).
+
+@test "a BLOCK-tier host inside a Markdown link still blocks once rendered to ADF" {
+  ENGINE_DIR="${ROOT}/scripts/bash/engine"
+  # shellcheck source=/dev/null
+  source "${ENGINE_DIR}/markdown.sh"
+  local spans content adf
+  spans="$(markdown_tokenize_inline '[docs](https://acme-corp.atlassian.net/wiki/x)')"
+  content="$(jq -cn --argjson s "${spans}" '{description:{blocks:[{type:"paragraph",spans:$s}]}}')"
+  adf="$(adf_render_description "${content}")"
+  run privacy_guard_scan "${adf}"
+  [ "$status" -eq 9 ]
+}
+
 # --- Apply path: the mandatory pre-write gate (zero writes on block) ---------
 
 @test "apply_writes blocks before any write and performs ZERO writes (exit 9)" {

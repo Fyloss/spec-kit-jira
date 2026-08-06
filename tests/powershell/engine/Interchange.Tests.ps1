@@ -47,6 +47,18 @@ Describe 'Test-JiraInterchange' {
         Test-JiraInterchange ($bad | ConvertTo-Json -Depth 100) 2>$null | Should -BeFalse
     }
 
+    It 'rejects a span whose marks is present but not an array (data-model.md §5 rule 3)' {
+        $bad = ($script:Valid | ConvertFrom-Json)
+        $bad.stories[0].description.blocks[0].spans[0].marks = 'oops'
+        $sw = [System.IO.StringWriter]::new()
+        $prev = [Console]::Error
+        [Console]::SetError($sw)
+        try { $result = Test-JiraInterchange ($bad | ConvertTo-Json -Depth 100) }
+        finally { [Console]::SetError($prev) }
+        $result | Should -BeFalse
+        $sw.ToString() | Should -BeLike '*span.marks is required*'
+    }
+
     It 'a document still carrying epic.strategy is not an error — it is simply ignored (008 T024/T026, FR-030)' {
         $bad = ($script:Valid | ConvertFrom-Json)
         $bad.epic | Add-Member -NotePropertyName strategy -NotePropertyValue 'per_repo' -Force
@@ -107,7 +119,7 @@ Describe 'Test-JiraInterchange — the task tier (Phase 2, T026/T028, data-model
         $task = [ordered]@{
             local_id    = ''
             title       = 'T'
-            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; text = 'x' }) }
+            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = 'x'; marks = @() }) }) }
             done        = $false
             marker      = [ordered]@{ state = 'assigned'; id = ''; lines = @() }
         }
@@ -120,7 +132,7 @@ Describe 'Test-JiraInterchange — the task tier (Phase 2, T026/T028, data-model
         $task = [ordered]@{
             local_id    = ''
             title       = 'T'
-            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; text = 'x' }) }
+            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = 'x'; marks = @() }) }) }
             done        = $false
             marker      = [ordered]@{ state = 'absent'; id = ''; lines = @() }
         }
@@ -133,7 +145,7 @@ Describe 'Test-JiraInterchange — the task tier (Phase 2, T026/T028, data-model
         $task = [ordered]@{
             local_id    = '1111111111111111'
             title       = ''
-            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; text = 'x' }) }
+            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = 'x'; marks = @() }) }) }
             done        = $false
             marker      = [ordered]@{ state = 'assigned'; id = '1111111111111111'; lines = @(1) }
         }
@@ -159,7 +171,7 @@ Describe 'Test-JiraInterchange — the task tier (Phase 2, T026/T028, data-model
         $task = [ordered]@{
             local_id    = '1111111111111111'
             title       = 'T'
-            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; text = 'x' }) }
+            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = 'x'; marks = @() }) }) }
             done        = 'false'
             marker      = [ordered]@{ state = 'assigned'; id = '1111111111111111'; lines = @(1) }
         }
@@ -172,7 +184,7 @@ Describe 'Test-JiraInterchange — the task tier (Phase 2, T026/T028, data-model
         $mkTask = { param($title) [ordered]@{
                 local_id    = '1111111111111111'
                 title       = $title
-                description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; text = 'x' }) }
+                description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = 'x'; marks = @() }) }) }
                 done        = $false
                 marker      = [ordered]@{ state = 'assigned'; id = '1111111111111111'; lines = @(1) }
             }
@@ -182,6 +194,68 @@ Describe 'Test-JiraInterchange — the task tier (Phase 2, T026/T028, data-model
         $doc.stories[0] | Add-Member -NotePropertyName tasks -NotePropertyValue @(& $mkTask 'T1') -Force
         $secondStory | Add-Member -NotePropertyName tasks -NotePropertyValue @(& $mkTask 'T2') -Force
         $doc.stories = @($doc.stories) + @($secondStory)
+        Test-JiraInterchange ($doc | ConvertTo-Json -Depth 100) 2>$null | Should -BeFalse
+    }
+
+    # 016, FR-019 — the task tier obeys the inline model. Feature 012 landed
+    # while 016 was in flight and built task descriptions in the PRE-016 shape;
+    # nothing caught it, because task descriptions were the one description
+    # position not run through the block rules.
+    It 'rejects a task description paragraph in the old raw-string shape (FR-019)' {
+        $doc = ($script:Valid | ConvertFrom-Json)
+        $task = [ordered]@{
+            local_id    = '1111111111111111'
+            title       = 'T'
+            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; text = 'raw **bold** string' }) }
+            done        = $false
+            marker      = [ordered]@{ state = 'assigned'; id = '1111111111111111'; lines = @(1) }
+        }
+        $doc.stories[0] | Add-Member -NotePropertyName tasks -NotePropertyValue @($task) -Force
+        $sw = [System.IO.StringWriter]::new()
+        $prev = [Console]::Error
+        [Console]::SetError($sw)
+        try { $result = Test-JiraInterchange ($doc | ConvertTo-Json -Depth 100) }
+        finally { [Console]::SetError($prev) }
+        $result | Should -BeFalse
+        $sw.ToString() | Should -BeLike '*block.spans is required*'
+    }
+
+    It 'accepts a task description carrying marked spans (FR-017)' {
+        $doc = ($script:Valid | ConvertFrom-Json)
+        $task = [ordered]@{
+            local_id    = '1111111111111111'
+            title       = 'T'
+            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = 'engine/x.sh'; marks = @([ordered]@{ kind = 'monospace' }) }) }) }
+            done        = $false
+            marker      = [ordered]@{ state = 'assigned'; id = '1111111111111111'; lines = @(1) }
+        }
+        $doc.stories[0] | Add-Member -NotePropertyName tasks -NotePropertyValue @($task) -Force
+        Test-JiraInterchange ($doc | ConvertTo-Json -Depth 100) | Should -BeTrue
+    }
+
+    It 'rejects an invalid mark kind inside a task description (FR-019)' {
+        $doc = ($script:Valid | ConvertFrom-Json)
+        $task = [ordered]@{
+            local_id    = '1111111111111111'
+            title       = 'T'
+            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = 'x'; marks = @([ordered]@{ kind = 'underline' }) }) }) }
+            done        = $false
+            marker      = [ordered]@{ state = 'assigned'; id = '1111111111111111'; lines = @(1) }
+        }
+        $doc.stories[0] | Add-Member -NotePropertyName tasks -NotePropertyValue @($task) -Force
+        Test-JiraInterchange ($doc | ConvertTo-Json -Depth 100) 2>$null | Should -BeFalse
+    }
+
+    It 'rejects a non-http link target inside a task description (FR-006)' {
+        $doc = ($script:Valid | ConvertFrom-Json)
+        $task = [ordered]@{
+            local_id    = '1111111111111111'
+            title       = 'T'
+            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = 'x'; marks = @([ordered]@{ kind = 'link'; href = 'javascript:alert(1)' }) }) }) }
+            done        = $false
+            marker      = [ordered]@{ state = 'assigned'; id = '1111111111111111'; lines = @(1) }
+        }
+        $doc.stories[0] | Add-Member -NotePropertyName tasks -NotePropertyValue @($task) -Force
         Test-JiraInterchange ($doc | ConvertTo-Json -Depth 100) 2>$null | Should -BeFalse
     }
 }

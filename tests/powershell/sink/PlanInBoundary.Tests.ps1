@@ -22,19 +22,19 @@ BeforeAll {
                 title       = 'The Epic'
                 local_id    = '3f2a91c04b7e6d18'
                 marker      = [ordered]@{ state = 'assigned'; id = '3f2a91c04b7e6d18'; lines = @(2) }
-                description = [ordered]@{ blocks = (@(@{ type = 'paragraph'; text = 'Epic overview.' }) + $PlanBlocks) }
+                description = [ordered]@{ blocks = (@(@{ type = 'paragraph'; spans = @(@{ text = 'Epic overview.'; marks = @() }) }) + $PlanBlocks) }
             }
             stories = @()
         }
     }
 
     $script:PlanA = @(
-        @{ type = 'heading'; level = 3; text = 'Implementation Plan' },
-        @{ type = 'paragraph'; text = 'Use a shared library.' }
+        @{ type = 'heading'; level = 3; spans = @(@{ text = 'Implementation Plan'; marks = @() }) },
+        @{ type = 'paragraph'; spans = @(@{ text = 'Use a shared library.'; marks = @() }) }
     )
     $script:PlanB = @(
-        @{ type = 'heading'; level = 3; text = 'Implementation Plan' },
-        @{ type = 'paragraph'; text = 'Use a different approach.' }
+        @{ type = 'heading'; level = 3; spans = @(@{ text = 'Implementation Plan'; marks = @() }) },
+        @{ type = 'paragraph'; spans = @(@{ text = 'Use a different approach.'; marks = @() }) }
     )
     $script:NoPlan = @()
 

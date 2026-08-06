@@ -17,10 +17,10 @@ DOC='{
   "routing": {"project_key":"COMP"},
   "epic": {"title":"The Epic", "local_id":"3f2a91c04b7e6d18",
            "marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},
-           "description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},
+           "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Overview.","marks":[]}]}]}},
   "stories": [
-    {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},
-     "acceptance_criteria":[{"given":["g"],"when":["w"],"then":["t"]}],
+    {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","spans":[{"text":"need","marks":[]}]}]},
+     "acceptance_criteria":[{"given":[[{"text":"g","marks":[]}]],"when":[[{"text":"w","marks":[]}]],"then":[[{"text":"t","marks":[]}]]}],
      "priority_logical":"P1","estimation":5}
   ]
 }'

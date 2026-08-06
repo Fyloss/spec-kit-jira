@@ -159,7 +159,7 @@ setup() {
 @test "T033 — a parent CREATE merges field_defaults, scoped to the parent type" {
   local doc='{
     "routing": {"project_key": "CONSUMER"},
-    "epic": {"local_id":"E1","title":"New epic","description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},
+    "epic": {"local_id":"E1","title":"New epic","description":{"blocks":[{"type":"paragraph","spans":[{"text":"Overview.","marks":[]}]}]}},
     "stories": []
   }'
   local ctx='{

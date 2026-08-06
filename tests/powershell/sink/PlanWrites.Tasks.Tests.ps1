@@ -16,7 +16,7 @@ BeforeAll {
 
     $script:Task1 = '{
       "local_id":"1111111111111111","task_ref":"T014","title":"Implement the parser",
-      "description":{"blocks":[{"type":"paragraph","text":"Implement the parser"}]},
+      "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Implement the parser","marks":[]}]}]},
       "attribution":{"story_ordinal":1,"source":"tag"},"phase":"Phase 3","parallel":true,
       "files":[],"depends_on":[],"done":false,
       "marker":{"state":"assigned","id":"1111111111111111","ticket":"","lines":[10]}
@@ -25,9 +25,9 @@ BeforeAll {
     $script:DocOneTask = '{
       "routing":{"project_key":"COMP"},
       "epic":{"title":"Epic","local_id":"e1","marker":{"state":"assigned","id":"e1","lines":[1]},
-              "description":{"blocks":[{"type":"paragraph","text":"x"}]}},
+              "description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}},
       "stories":[
-        {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},
+        {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","spans":[{"text":"need","marks":[]}]}]},
          "priority_logical":"P1","tasks":[' + $script:Task1 + ']}
       ]
     }'
@@ -35,9 +35,9 @@ BeforeAll {
     $script:DocNoTasks = '{
       "routing":{"project_key":"COMP"},
       "epic":{"title":"Epic","local_id":"e1","marker":{"state":"assigned","id":"e1","lines":[1]},
-              "description":{"blocks":[{"type":"paragraph","text":"x"}]}},
+              "description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}},
       "stories":[
-        {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},
+        {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","spans":[{"text":"need","marks":[]}]}]},
          "priority_logical":"P1"}
       ]
     }'
@@ -85,7 +85,10 @@ Describe 'Get-JiraPlanTaskWriteSet' {
     It 'an over-long title produces a deterministically shortened summary with the full text in the description' {
         $long = 'x' * 400
         $task = $script:Task1 | ConvertFrom-Json -Depth 100
+        # TasksParse derives title and description blocks from the SAME text, so
+        # a fixture that moves one must move the other (016 FR-017).
         $task.title = $long
+        $task.description.blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = $long; marks = @() }) })
         $doc = $script:DocOneTask | ConvertFrom-Json -Depth 100
         $doc.stories[0].tasks = @($task)
         $docJson = $doc | ConvertTo-Json -Depth 100 -Compress
@@ -110,6 +113,7 @@ Describe 'Get-JiraPlanTaskWriteSet' {
     It 'an already-bound task whose text changed plans a PUT carrying only the differing fields' {
         $task = $script:Task1 | ConvertFrom-Json -Depth 100
         $task.title = 'Implement the parser, reworded'
+        $task.description.blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = 'Implement the parser, reworded'; marks = @() }) })
         $doc = $script:DocOneTask | ConvertFrom-Json -Depth 100
         $doc.stories[0].tasks = @($task)
         $docJson = $doc | ConvertTo-Json -Depth 100 -Compress
@@ -199,7 +203,7 @@ Describe 'Get-JiraPlanTaskWriteSet' {
         $story2 = [ordered]@{
             local_id = 's2'
             title = 'B'
-            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; text = 'n' }) }
+            description = [ordered]@{ blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = 'n'; marks = @() }) }) }
             priority_logical = 'P2'
             tasks = @($task2)
         }
@@ -268,9 +272,14 @@ Describe 'Get-JiraPlanTaskWriteSet' {
     }
 
     It '017 [US2] real content drift still names its divergent field, and labels are never named' {
+        # 016 moved a task's own full text from .title to .description.blocks
+        # (the title is now a plain-text summary source only), so reworking
+        # the title ALONE no longer touches the rendered description — both
+        # must change to exercise the description's own content drift.
         $desc = AlreadyMigratedTaskDesc
         $task = $script:Task1 | ConvertFrom-Json -Depth 100
         $task.title = 'Implement the parser, reworded'
+        $task.description.blocks[0].spans[0].text = 'Implement the parser, reworded'
         $doc = $script:DocOneTask | ConvertFrom-Json -Depth 100
         $doc.stories[0].tasks = @($task)
         $docJson = $doc | ConvertTo-Json -Depth 100 -Compress

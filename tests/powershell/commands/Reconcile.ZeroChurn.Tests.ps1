@@ -130,6 +130,37 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
         $afterDesc.content[0].content[0].text | Should -Be 'Human note above the panel.'
     }
 
+    It 'T057 [016, US3] — a ticket carrying a pre-feature description heals once, then stays quiet (FR-011, FR-012, SC-004)' {
+        $content = Get-Content -Raw -LiteralPath $script:Spec
+        $content = $content -replace [regex]::Escape('As a customer, I want to export one invoice as a PDF.'), 'As a customer, I want to export one invoice as a PDF, per **FR-012**.'
+        Set-Content -NoNewline -Path $script:Spec -Value $content
+        $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
+
+        $current = Invoke-JiraRequest -Method GET -Url "$($script:M.BaseUrl)/rest/api/3/issue/COMP-2?fields=description"
+        $currentDesc = ($current.Body | ConvertFrom-Json -Depth 100).fields.description
+        $raw = 'As a customer, I want to export one invoice as a PDF, per **FR-012**.'
+        # content[0] is the 018 boundary marker; content[1] is the body
+        # paragraph the pre-016 renderer would have left unmarked.
+        $healedContent = @($currentDesc.content[0]) + @([ordered]@{ type = 'paragraph'; content = @([ordered]@{ type = 'text'; text = $raw }) }) + @($currentDesc.content | Select-Object -Skip 2)
+        $healedDesc = [ordered]@{ type = 'doc'; version = 1; content = $healedContent }
+        $body = ConvertTo-Json ([ordered]@{ fields = [ordered]@{ description = $healedDesc } }) -Depth 100 -Compress
+        $null = Invoke-JiraRequest -Method PUT -Url "$($script:M.BaseUrl)/rest/api/3/issue/COMP-2" -Body $body
+
+        Clear-Content -LiteralPath $script:M.CallLog
+        $r = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
+        $r.counts.updated | Should -Be 1
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-2' }).Count | Should -Be 1
+        # 018, US3: the story's whole-object update always carries `summary`,
+        # so the write is followed by exactly one identity-property PUT.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-2/properties/spec-kit-jira' }).Count | Should -Be 1
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 2
+
+        Clear-Content -LiteralPath $script:M.CallLog
+        $r2 = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
+        $r2.counts.updated | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 0
+    }
+
     It 'T080 [Phase 9] — a second reconcile over the declared-hierarchy fixture issues ZERO writes of every kind' {
         $work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
         Copy-Item -Recurse (Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-declared-hierarchy') $work

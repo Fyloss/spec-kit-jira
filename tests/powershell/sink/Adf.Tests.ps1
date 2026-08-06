@@ -6,9 +6,9 @@ BeforeAll {
     Import-Module (Join-Path $SinkDir 'Adf.psm1') -Force
     $script:Content = @'
 {
-  "description": {"blocks": [{"type":"paragraph","text":"The need statement."}]},
-  "acceptance_criteria": [{"given":["a user"],"when":["they click"],"then":["it opens"]}],
-  "design": [{"kind":"guidance","value":"Use the blue accent."},{"kind":"figma_link","label":"Board","value":"https://www.figma.com/file/abc"}]
+  "description": {"blocks": [{"type":"paragraph","spans":[{"text":"The need statement.","marks":[]}]}]},
+  "acceptance_criteria": [{"given":[[{"text":"a user","marks":[]}]],"when":[[{"text":"they click","marks":[]}]],"then":[[{"text":"it opens","marks":[]}]]}],
+  "design": [{"kind":"guidance","value":[{"text":"Use the blue accent.","marks":[]}]},{"kind":"figma_link","label":"Board","value":"https://www.figma.com/file/abc"}]
 }
 '@
 }
@@ -27,7 +27,7 @@ Describe 'ConvertTo-JiraAdfDocument' {
         $d = ConvertTo-JiraAdfDocument -ContentJson $script:Content | ConvertFrom-Json
         $panels = @($d.content | Where-Object { $_.type -eq 'panel' })
         $panels.Count | Should -Be 1
-        $texts = ($panels[0].content | ForEach-Object { $_.content[0].text }) -join '|'
+        $texts = ($panels[0].content | ForEach-Object { ($_.content | ForEach-Object { $_.text }) -join '' }) -join '|'
         $texts | Should -BeLike '*Given a user*'
         $texts | Should -BeLike '*When they click*'
         $texts | Should -BeLike '*Then it opens*'
@@ -37,7 +37,7 @@ Describe 'ConvertTo-JiraAdfDocument' {
         @($d.content | Where-Object { $_.type -eq 'heading' -and $_.content[0].text -eq 'Design' }).Count | Should -Be 1
     }
     It 'omits the panel when there is no acceptance criteria' {
-        $c = '{"description":{"blocks":[{"type":"paragraph","text":"x"}]}}'
+        $c = '{"description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}}'
         $d = ConvertTo-JiraAdfDocument -ContentJson $c | ConvertFrom-Json
         @($d.content | Where-Object { $_.type -eq 'panel' }).Count | Should -Be 0
     }

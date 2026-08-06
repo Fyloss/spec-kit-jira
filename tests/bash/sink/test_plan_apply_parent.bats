@@ -16,9 +16,9 @@ DOC='{
   "routing": {"project_key":"COMP"},
   "epic": {"title":"The Epic Title", "local_id":"3f2a91c04b7e6d18",
            "marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},
-           "description":{"blocks":[{"type":"paragraph","text":"Overview."}]}},
+           "description":{"blocks":[{"type":"paragraph","spans":[{"text":"Overview.","marks":[]}]}]}},
   "stories": [
-    {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","text":"need"}]},
+    {"local_id":"s1","title":"A story","description":{"blocks":[{"type":"paragraph","spans":[{"text":"need","marks":[]}]}]},
      "priority_logical":"P2"}
   ]
 }'
@@ -149,9 +149,9 @@ DOC_WITH_PLAN='{
   "epic": {"title":"The Epic Title", "local_id":"3f2a91c04b7e6d18",
            "marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},
            "description":{"blocks":[
-             {"type":"paragraph","text":"Overview."},
-             {"type":"heading","level":3,"text":"Implementation Plan"},
-             {"type":"paragraph","text":"The original plan summary."}
+             {"type":"paragraph","spans":[{"text":"Overview.","marks":[]}]},
+             {"type":"heading","level":3,"spans":[{"text":"Implementation Plan","marks":[]}]},
+             {"type":"paragraph","spans":[{"text":"The original plan summary.","marks":[]}]}
            ]}},
   "stories": []
 }'
@@ -161,9 +161,9 @@ DOC_WITH_CHANGED_PLAN='{
   "epic": {"title":"The Epic Title", "local_id":"3f2a91c04b7e6d18",
            "marker":{"state":"assigned","id":"3f2a91c04b7e6d18","lines":[2]},
            "description":{"blocks":[
-             {"type":"paragraph","text":"Overview."},
-             {"type":"heading","level":3,"text":"Implementation Plan"},
-             {"type":"paragraph","text":"A revised plan summary."}
+             {"type":"paragraph","spans":[{"text":"Overview.","marks":[]}]},
+             {"type":"heading","level":3,"spans":[{"text":"Implementation Plan","marks":[]}]},
+             {"type":"paragraph","spans":[{"text":"A revised plan summary.","marks":[]}]}
            ]}},
   "stories": []
 }'

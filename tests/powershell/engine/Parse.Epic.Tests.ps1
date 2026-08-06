@@ -39,20 +39,20 @@ Describe 'Get-JiraParsedSpec — epic sections (data-model.md §7)' {
     It 'gains a named Success Criteria section as a bullet list, SC-00N labels stripped' {
         $r = Get-JiraParsedSpec -Text $script:Doc -FolderSlug '001-billing' | ConvertFrom-Json
         $blocks = $r.epic.description.blocks
-        @($blocks | Where-Object { $_.type -eq 'heading' -and $_.text -eq 'Success Criteria' }).Count | Should -Be 1
+        @($blocks | Where-Object { $_.type -eq 'heading' -and $_.spans[0].text -eq 'Success Criteria' }).Count | Should -Be 1
         $bl = @($blocks | Where-Object { $_.type -eq 'bullet_list' })[0]
-        $bl.items[0] | Should -Be 'A customer exports an invoice in under 5 seconds.'
-        $bl.items[1] | Should -Be 'Support tickets about missing invoices drop by half.'
+        $bl.items[0][0].text | Should -Be 'A customer exports an invoice in under 5 seconds.'
+        $bl.items[1][0].text | Should -Be 'Support tickets about missing invoices drop by half.'
         (ConvertTo-Json $blocks -Compress -Depth 10) | Should -Not -BeLike '*SC-001*'
     }
 
     It 'gains a named Out of Scope section as a bullet list' {
         $r = Get-JiraParsedSpec -Text $script:Doc -FolderSlug '001-billing' | ConvertFrom-Json
         $blocks = $r.epic.description.blocks
-        @($blocks | Where-Object { $_.type -eq 'heading' -and $_.text -eq 'Out of Scope' }).Count | Should -Be 1
+        @($blocks | Where-Object { $_.type -eq 'heading' -and $_.spans[0].text -eq 'Out of Scope' }).Count | Should -Be 1
         $bl = @($blocks | Where-Object { $_.type -eq 'bullet_list' })[1]
-        $bl.items[0] | Should -BeLike '*Refunds.*'
-        $bl.items[1] | Should -BeLike '*Bulk import.*'
+        $bl.items[0][0].text | Should -BeLike '*Refunds.*'
+        $bl.items[1][0].text | Should -BeLike '*Bulk import.*'
     }
 
     It 'carries no list of user stories (FR-011)' {

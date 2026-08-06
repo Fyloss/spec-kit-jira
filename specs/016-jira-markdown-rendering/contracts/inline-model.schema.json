@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-kit-jira/contracts/016/inline-model.schema.json",
+  "title": "Neutral inline model — fragment to merge into neutral-interchange.schema.json",
+  "description": "Feature 016. Replaces the plain-string text positions of $defs.content_blocks with marked spans, and adds the ordered_list block kind. Merge target: specs/001-jira-reconcile-engine/contracts/neutral-interchange.schema.json (edited in place — it is the living contract; see research.md section 5). NO ADF node or mark names appear here: neutral bold/italic/monospace/strikethrough map to ADF strong/em/code/strike in the sink, and only in the sink.",
+
+  "$defs": {
+    "mark": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["bold", "italic", "monospace", "strikethrough", "link"],
+          "description": "Neutral formatting vocabulary. Deliberately lexically distinct from ADF's strong/em/code/strike (Constitution VIII)."
+        },
+        "href": {
+          "type": "string",
+          "pattern": "^https?://[^\\s]+$",
+          "description": "Absolute http(s) target. Required iff kind is 'link'. The pattern is the schema-level backstop for FR-006: a non-http target can never reach Jira as a live link, because a validation failure blocks every downstream write."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "link" } }, "required": ["kind"] },
+          "then": { "required": ["href"] },
+          "else": { "not": { "required": ["href"] } }
+        }
+      ]
+    },
+
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "marks"],
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "Literal characters a reader sees. Never carries the syntax of a converted construct (FR-002)."
+        },
+        "marks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/mark" },
+          "description": "Always present, [] when unmarked, sorted alphabetically by kind. Always-emitted and always-sorted so the two ports cannot differ by an omitted key or by source nesting order (FR-015).",
+          "uniqueItems": true
+        }
+      }
+    },
+
+    "inline": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/span" },
+      "description": "A sequence of marked runs. Empty array represents empty text. Invariant not expressible in JSON Schema and enforced by the tokenizer instead (contract D1): no two consecutive spans carry equal marks."
+    },
+
+    "content_blocks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blocks"],
+      "description": "A neutral, Jira-agnostic block tree. The sink renders it to ADF. NO ADF node names appear here.",
+      "properties": {
+        "blocks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "enum": ["heading", "paragraph", "bullet_list", "ordered_list", "code", "panel_ref"],
+                "description": "Neutral block kinds. 'ordered_list' is new in feature 016 (FR-008). 'panel_ref' marks where the sink should place a panel; the engine does not know what a Jira panel is."
+              },
+              "level": { "type": "integer", "minimum": 1, "maximum": 6 },
+              "spans": { "$ref": "#/$defs/inline" },
+              "items": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/inline" },
+                "description": "List items. Each item is an inline sequence — was an array of plain strings before feature 016."
+              },
+              "text": {
+                "type": "string",
+                "description": "Code block body ONLY. Deliberately plain: FR-007 forbids interpreting markup inside code, and keeping this position a string makes that a property of the schema rather than a rule the tokenizer must remember."
+              },
+              "ref": {
+                "type": "string",
+                "description": "For panel_ref: a logical section name, e.g. 'acceptance_criteria' or 'design'."
+              }
+            },
+            "allOf": [
+              {
+                "if": { "properties": { "type": { "enum": ["heading", "paragraph"] } }, "required": ["type"] },
+                "then": { "required": ["spans"] }
+              },
+              {
+                "if": { "properties": { "type": { "enum": ["bullet_list", "ordered_list"] } }, "required": ["type"] },
+                "then": { "required": ["items"] }
+              },
+              {
+                "if": { "properties": { "type": { "const": "code" } }, "required": ["type"] },
+                "then": { "required": ["text"] }
+              },
+              {
+                "if": { "properties": { "type": { "const": "panel_ref" } }, "required": ["type"] },
+                "then": { "required": ["ref"] }
+              }
+            ]
+          }
+        }
+      }
+    },
+
+    "acceptance_criterion_clause": {
+      "$ref": "#/$defs/inline",
+      "description": "Feature 016: acceptance_criteria given/when/then entries become inline sequences instead of plain strings. This replaces the crude global asterisk strip at engine/parse.sh:199, which was the partial workaround for this defect."
+    },
+
+    "design_item_value": {
+      "description": "Feature 016: design[].value becomes an inline sequence when kind is 'guidance', and stays a plain string URL when kind is 'figma_link' (a URL is not prose).",
+      "oneOf": [
+        { "$ref": "#/$defs/inline" },
+        { "type": "string" }
+      ]
+    }
+  }
+}
