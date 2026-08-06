@@ -441,20 +441,32 @@ function Get-JiraReconcilePlanContextFromBinding {
     # recognised ticket's CURRENT labels, already unique-normalised by
     # recognition — omitted entirely when empty, like every neighbouring map.
     $ticketLabels = [ordered]@{}
+    # ticket_summaries / ticket_last_summaries (018, T047; contracts/
+    # summary-record.md §2/§3): the CURRENT summary Jira holds, and the
+    # summary this mirror last WROTE (from the identity marker), per bound
+    # ticket. ticketLastSummaries omits an entry for a marker predating the
+    # record, exactly as Recognition.psm1's own last_summary is omitted.
+    $ticketSummaries = [ordered]@{}
+    $ticketLastSummaries = [ordered]@{}
     if ($boundVal) {
         foreach ($p in $boundVal.PSObject.Properties) {
             $tickets[$p.Name] = [string](Get-JiraPlanPropSafe $p.Value 'key')
-            # Populated ONLY for a non-bridge origin (FR-038): a "bridge"
-            # origin means plan_writes owns the whole description (the US3
-            # behaviour, unchanged) — the same meaning an absent map entry
-            # has always had.
+            # 018, T025: populated for EVERY recognised ticket now — the
+            # managed-panel splice is origin-independent (contract §3) and
+            # routes through the SAME resolution regardless of "bridge" or
+            # "human". Before this feature, "bridge" was excluded here
+            # because Get-JiraPlanWriteSet owned the whole description on
+            # that origin; that discriminator is gone.
             $originVal = [string](Get-JiraPlanPropSafe $p.Value 'origin')
-            if ($originVal -ne 'bridge') { $ticketOrigins[$p.Name] = $originVal }
+            $ticketOrigins[$p.Name] = $originVal
             $current = Get-JiraPlanPropSafe $p.Value 'current'
             $ticketDescriptions[$p.Name] = Get-JiraPlanPropSafe $current 'description'
             $currentParent = Get-JiraPlanPropSafe $current 'parent'
             if ($null -ne $currentParent) { $ticketParents[$p.Name] = [string]$currentParent }
             $ticketLabels[$p.Name] = @(Get-JiraPlanPropSafe $current 'labels')
+            $ticketSummaries[$p.Name] = [string](Get-JiraPlanPropSafe $current 'summary')
+            $lastSummaryVal = Get-JiraPlanPropSafe $p.Value 'last_summary'
+            if ($null -ne $lastSummaryVal) { $ticketLastSummaries[$p.Name] = [string]$lastSummaryVal }
         }
     }
 
@@ -473,7 +485,13 @@ function Get-JiraReconcilePlanContextFromBinding {
     if ($tasksBoundVal) {
         foreach ($p in $tasksBoundVal.PSObject.Properties) {
             $tickets[$p.Name] = [string](Get-JiraPlanPropSafe $p.Value 'key')
-            $ticketCurrent[$p.Name] = Get-JiraPlanPropSafe $p.Value 'current'
+            $taskCurrent = Get-JiraPlanPropSafe $p.Value 'current'
+            $ticketCurrent[$p.Name] = $taskCurrent
+            $ticketSummaries[$p.Name] = [string](Get-JiraPlanPropSafe $taskCurrent 'summary')
+            $taskLastSummaryVal = Get-JiraPlanPropSafe $p.Value 'last_summary'
+            if ($null -ne $taskLastSummaryVal) { $ticketLastSummaries[$p.Name] = [string]$taskLastSummaryVal }
+            # ticket_origins also carries the task tier (018, T049).
+            $ticketOrigins[$p.Name] = [string](Get-JiraPlanPropSafe $p.Value 'origin')
         }
     }
 
@@ -500,6 +518,8 @@ function Get-JiraReconcilePlanContextFromBinding {
     if (@($fieldDefaultsJson.PSObject.Properties).Count -gt 0) { $result['field_defaults'] = $fieldDefaultsJson }
     if (-not [string]::IsNullOrEmpty($taskTypeId)) { $result['task_type_id'] = $taskTypeId }
     if ($ticketCurrent.Count -gt 0) { $result['ticket_current'] = $ticketCurrent }
+    if ($ticketSummaries.Count -gt 0) { $result['ticket_summaries'] = $ticketSummaries }
+    if ($ticketLastSummaries.Count -gt 0) { $result['ticket_last_summaries'] = $ticketLastSummaries }
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-Json -InputObject $result -Compress -Depth 20) }
 }
 
@@ -1162,6 +1182,13 @@ function Invoke-JiraReconcile {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the local Jira binding could not be read (zero writes)')
     }
     $planCtx = $planCtxResult.Json
+    # on_drift (018, T047; contracts/summary-record.md §4): the SAME
+    # --on-drift the lifecycle context already carries — Get-JiraPlanWriteSet's
+    # summary decision reads it from here rather than a second flag.
+    $planCtxWithDrift = [ordered]@{}
+    foreach ($p in ($planCtx | ConvertFrom-Json -Depth 100).PSObject.Properties) { $planCtxWithDrift[$p.Name] = $p.Value }
+    $planCtxWithDrift['on_drift'] = $onDrift
+    $planCtx = ConvertTo-JiraJsonValue $planCtxWithDrift
 
     # Merge the parent's recognition facts into the plan context (T077): a
     # bound parent carries its key, current content (for zero churn) and
@@ -1175,6 +1202,11 @@ function Invoke-JiraReconcile {
         $parentOriginKnown = [string]$recogParent.origin
         if ([string]::IsNullOrEmpty($parentOriginKnown)) { $parentOriginKnown = 'bridge' }
         $planCtxMap['parent_origin'] = $parentOriginKnown
+        # parent_last_summary (018, T047; contracts/summary-record.md §2/§5:
+        # every tier, including the parent) — omitted for a marker
+        # predating it.
+        $parentLastSummaryVal = Get-JiraPlanPropSafe $recogParent 'last_summary'
+        if ($null -ne $parentLastSummaryVal) { $planCtxMap['parent_last_summary'] = [string]$parentLastSummaryVal }
         $planCtx = ConvertTo-JiraJsonValue $planCtxMap
     }
 
@@ -1226,7 +1258,14 @@ function Invoke-JiraReconcile {
     # inactive, so $tasksActionsJson stays the '[]' it was initialised to
     # and every downstream read of it is a no-op (FR-011).
     if ($taskRoleActive) {
-        try { $tasksActionsJson = Get-JiraPlanTaskWriteSet -DocJson $docForWriteJson -ContextJson $planCtx -TaskLabel $taskLabel }
+        try {
+            $tasksPlan = Get-JiraPlanTaskWriteSet -DocJson $docForWriteJson -ContextJson $planCtx -TaskLabel $taskLabel | ConvertFrom-Json -Depth 100
+            $tasksActionsJson = ConvertTo-JiraJsonValue @($tasksPlan.actions)
+            # 018, T027: the boundary's own warnings (malformed / ambiguous
+            # migration) on the task tier, through the same channel every
+            # other task-tier warning already uses.
+            foreach ($w in @($tasksPlan.warnings)) { $taskWarns.Add([string]$w) }
+        }
         catch {
             $taskWarns.Add("reconcile: the task tier's write plan could not be assembled and was withheld this run")
             $tasksActionsJson = '[]'
@@ -1329,12 +1368,11 @@ function Invoke-JiraReconcile {
         $lcJson = ConvertTo-JiraJsonValue $lcMap
     }
     else {
-        # origin is omitted when "bridge": Get-JiraLifecyclePlan's own churn
-        # check branches on origin exactly as Get-JiraPlanWriteSet does, and
-        # a "bridge" value would wrongly route a bridge-created ticket
-        # through the human-origin managed-panel comparison, which always
-        # reads "unchanged" for a description that never carried the panel
-        # marker in the first place.
+        # origin (018, T025): included for EVERY recognised ticket now,
+        # mirroring the plan context's ticket_origins above — the
+        # managed-panel comparison is origin-independent (contract §3), so
+        # there is no longer a "bridge" value that would route a ticket
+        # incorrectly.
         # target/category (Phase 6, US4, research R9): target is the status
         # the CURRENT lifecycle event maps to, via the routed project's
         # phase_status_map — empty when this run has no hook event or the
@@ -1375,8 +1413,7 @@ function Invoke-JiraReconcile {
                     flagged  = Get-JiraPlanPropSafe $p.Value 'flagged'
                     blockers = Get-JiraPlanPropSafe $p.Value 'blockers'
                 }
-                $originVal2 = [string](Get-JiraPlanPropSafe $p.Value 'origin')
-                if ($originVal2 -ne 'bridge') { $entry['origin'] = $originVal2 }
+                $entry['origin'] = [string](Get-JiraPlanPropSafe $p.Value 'origin')
                 $lcTickets[$p.Name] = $entry
             }
         }
@@ -1756,19 +1793,22 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
     # The reported action list stays FLAT (T080a): the parent — when
     # present — is reported first, exactly like any other action,
     # host-relative and stripped of its internal local_id bookkeeping.
+    # identity_stamp (018, T049) is an apply-time-only instruction — never
+    # part of the displayed/dry-run summary, regardless of whether local_id
+    # itself is kept for task matching.
     $disp = [System.Collections.Generic.List[object]]::new()
     if ($null -ne $parentAction) {
         $u = [string]$parentAction.url
         if ($u.StartsWith($base)) { $parentAction.url = $u.Substring($base.Length) }
         $copy = [ordered]@{}
-        foreach ($p in $parentAction.PSObject.Properties) { if ($p.Name -ne 'local_id') { $copy[$p.Name] = $p.Value } }
+        foreach ($p in $parentAction.PSObject.Properties) { if ($p.Name -ne 'local_id' -and $p.Name -ne 'identity_stamp') { $copy[$p.Name] = $p.Value } }
         $disp.Add($copy)
     }
     foreach ($x in $actions) {
         $u = [string]$x.url
         if ($u.StartsWith($base)) { $x.url = $u.Substring($base.Length) }
         $copy = [ordered]@{}
-        foreach ($p in $x.PSObject.Properties) { if ($p.Name -ne 'local_id' -or $taskRoleActive) { $copy[$p.Name] = $p.Value } }
+        foreach ($p in $x.PSObject.Properties) { if (($p.Name -ne 'local_id' -or $taskRoleActive) -and $p.Name -ne 'identity_stamp') { $copy[$p.Name] = $p.Value } }
         $disp.Add($copy)
     }
     # Phase 3, US1 (Constitution XI): task actions join the SAME displayed
@@ -1781,7 +1821,7 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
             $u = [string]$x.url
             if ($u.StartsWith($base)) { $x.url = $u.Substring($base.Length) }
             $copy = [ordered]@{}
-            foreach ($p in $x.PSObject.Properties) { if ($p.Name -ne 'local_id') { $copy[$p.Name] = $p.Value } }
+            foreach ($p in $x.PSObject.Properties) { if ($p.Name -ne 'local_id' -and $p.Name -ne 'identity_stamp') { $copy[$p.Name] = $p.Value } }
             $disp.Add($copy)
         }
     }

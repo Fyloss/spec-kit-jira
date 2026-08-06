@@ -164,20 +164,50 @@ managed_section_splice() {
 #   the human-authored prefix, preserved verbatim; everything from that node onward
 #   is the previously-written managed section. When no node carries the marker the
 #   whole array is human prefix (the first managed write appends the panel below).
-#   Emits canonical {prefix, managed, had_marker}.
+#   Emits canonical {prefix, managed, had_marker, marker_count}. marker_count
+#   (018, T006, data-model.md §2) is the number of nodes carrying the marker —
+#   0 means no boundary yet, 1 is well-formed, >1 is malformed (contract §1);
+#   had_marker is retained unchanged (it is marker_count > 0) so no existing
+#   caller changes shape.
 managed_section_panel_split() {
   local marker="$1" nodes
   nodes="$(cat)"
   [[ -z "${nodes}" ]] && nodes="[]"
   jq -c --arg m "${marker}" '
     . as $nodes
-    | ( first(
-          range(0; ($nodes | length)) as $i
-          | select(([ $nodes[$i] | .. | strings ] | join("\n")) | contains($m))
-          | $i
-        ) // null ) as $k
+    | [ range(0; ($nodes | length)) as $i
+        | select(([ $nodes[$i] | .. | strings ] | join("\n")) | contains($m))
+        | $i ] as $idxs
+    | ($idxs | length) as $count
+    | ($idxs[0] // null) as $k
     | if $k == null
-      then { prefix: $nodes, managed: [], had_marker: false }
-      else { prefix: $nodes[0:$k], managed: $nodes[$k:], had_marker: true }
+      then { prefix: $nodes, managed: [], had_marker: false, marker_count: $count }
+      else { prefix: $nodes[0:$k], managed: $nodes[$k:], had_marker: true, marker_count: $count }
       end' <<< "${nodes}" | json_canonical
+}
+
+# managed_section_suffix_split <managed-nodes-json>   (stdin: the existing
+#   content-node array)
+#   The migration split (018, T010, research R3, contract §3, data-model.md
+#   §2): a description carrying no boundary yet must be told apart from a
+#   human's untouched prose. PURE structural array comparison — no marker, no
+#   tracker vocabulary — used only on the migration path (marker_count == 0).
+#   Emits canonical {prefix, matched}: matched is true when the existing array
+#   ends with <managed-nodes>, in which case prefix is everything before that
+#   matched suffix; false means the mirror's previous output could not be
+#   identified, and prefix is the WHOLE existing array — nothing is ever
+#   discarded (FR-020a/FR-020b).
+managed_section_suffix_split() {
+  local managed_json="$1" existing
+  existing="$(cat)"
+  [[ -z "${existing}" ]] && existing="[]"
+  jq -c --argjson m "${managed_json}" '
+    . as $existing
+    | ($m | length) as $mlen
+    | ($existing | length) as $elen
+    | if $mlen == 0 then { prefix: $existing, matched: true }
+      elif $elen < $mlen then { prefix: $existing, matched: false }
+      elif ($existing[($elen - $mlen):]) == $m then { prefix: $existing[0:($elen - $mlen)], matched: true }
+      else { prefix: $existing, matched: false }
+      end' <<< "${existing}" | json_canonical
 }

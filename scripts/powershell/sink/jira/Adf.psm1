@@ -162,41 +162,120 @@ function New-JiraAdfMarkerNode {
     return [ordered]@{ type = 'paragraph'; content = @($text) }
 }
 
+function Resolve-JiraManagedAdfContent {
+    <#
+    .SYNOPSIS
+      The shared contract §3 resolution engine (018, T014/T027,
+      data-model.md §3), independent of what produced the managed-node
+      array — the same decision serves the story/parent shape
+      (Get-JiraAdfContentNode) and the task tier's own shape
+      (ConvertTo-JiraAdfTaskDescription) identically. Mirror of
+      _adf_resolve_managed.
+    .DESCRIPTION
+      - ExistingJson omitted entirely: a CREATION. No prior content to preserve;
+        the result is marker ++ freshly-rendered managed nodes, with no human
+        prefix and no warning (contract §3 row 5).
+      - marker_count > 1 (Split-JiraManagedSectionPanel): malformed — nothing is
+        written for this description (row 1). Status 'malformed', no `doc` key.
+      - marker_count == 1: well-formed. The existing prefix is preserved
+        verbatim above a freshly-rendered managed panel (row 2).
+      - marker_count == 0: Split-JiraManagedSectionSuffix (the migration split)
+        decides whether the existing content ends with the freshly rendered
+        managed nodes: a match is a clean migration with nothing duplicated
+        (row 3); no match preserves the WHOLE existing content as human text
+        above a fresh panel and reports 'migrated-warned' (row 4) — nothing is
+        ever discarded (FR-020a/FR-020b).
+      Returns canonical {status:'ok'|'malformed'|'migrated-warned', doc:<adf-doc>}
+      — `doc` is present on every status except 'malformed'.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]] $Managed,
+        [Parameter()] [AllowEmptyString()] [string] $ExistingJson = ''
+    )
+    $managedJson = ConvertTo-JiraJsonValue $Managed
+    $marker = Get-JiraManagedMarker
+    $markerNode = New-JiraAdfMarkerNode
+
+    if ([string]::IsNullOrEmpty($ExistingJson)) {
+        $docContent = [System.Collections.Generic.List[object]]::new()
+        $docContent.Add($markerNode)
+        foreach ($n in $Managed) { $docContent.Add($n) }
+        $docObj = [ordered]@{ type = 'doc'; version = 1; content = $docContent }
+        return (ConvertTo-JiraJsonValue ([ordered]@{ status = 'ok'; doc = $docObj }))
+    }
+
+    $existingContentJson = '[]'
+    $existing = $ExistingJson | ConvertFrom-Json -Depth 100
+    # An EMPTY PSCustomObject's .PSObject.Properties.Name throws under
+    # StrictMode (the same gotcha Get-JiraPlanProp guards against) — index
+    # the member collection instead.
+    $contentMember = $existing.PSObject.Properties['content']
+    if ($null -ne $contentMember -and $null -ne $contentMember.Value) {
+        $existingContentJson = ConvertTo-JiraJsonValue @($contentMember.Value)
+    }
+    $split = Split-JiraManagedSectionPanel -Marker $marker -ContentJson $existingContentJson | ConvertFrom-Json -Depth 100
+    $markerCount = [int]$split.marker_count
+
+    if ($markerCount -gt 1) {
+        return (ConvertTo-JiraJsonValue ([ordered]@{ status = 'malformed' }))
+    }
+
+    $prefix = [System.Collections.Generic.List[object]]::new()
+    $status = 'ok'
+    if ($markerCount -eq 1) {
+        foreach ($n in @($split.prefix)) { $prefix.Add($n) }
+    }
+    else {
+        $suffix = Split-JiraManagedSectionSuffix -ManagedJson $managedJson -ContentJson $existingContentJson | ConvertFrom-Json -Depth 100
+        foreach ($n in @($suffix.prefix)) { $prefix.Add($n) }
+        if (-not $suffix.matched) { $status = 'migrated-warned' }
+    }
+
+    $docContent = [System.Collections.Generic.List[object]]::new()
+    foreach ($n in $prefix) { $docContent.Add($n) }
+    $docContent.Add($markerNode)
+    foreach ($n in $Managed) { $docContent.Add($n) }
+    $docObj = [ordered]@{ type = 'doc'; version = 1; content = $docContent }
+    return (ConvertTo-JiraJsonValue ([ordered]@{ status = $status; doc = $docObj }))
+}
+
 function ConvertTo-JiraManagedAdfDocument {
     <#
     .SYNOPSIS
-      Origin-discriminated description rendering (US7, T075). Mirror of
-      adf_render_managed_description. Bridge-created => whole managed section, no
-      delimiter (FR-040). Human => existing human prefix preserved verbatim above a
-      delimited managed panel (FR-038).
+      Origin-INDEPENDENT description resolution for the story/parent shape
+      (018, T015). See Resolve-JiraManagedAdfContent for the contract §3
+      decision. Mirror of adf_render_managed_description.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string] $ContentJson,
-        [Parameter(Mandatory)] [string] $Origin,
         [Parameter()] [AllowEmptyString()] [string] $ExistingJson = ''
     )
-    $managed = @(Get-JiraAdfContentNode -ContentJson $ContentJson)
+    $managed = [System.Collections.Generic.List[object]]::new()
+    foreach ($n in @(Get-JiraAdfContentNode -ContentJson $ContentJson)) { $managed.Add($n) }
+    return (Resolve-JiraManagedAdfContent -Managed $managed -ExistingJson $ExistingJson)
+}
 
-    if ($Origin -eq 'bridge-created') {
-        return (ConvertTo-JiraJsonValue ([ordered]@{ type = 'doc'; version = 1; content = $managed }))
-    }
-
-    $existingContentJson = '[]'
-    if (-not [string]::IsNullOrEmpty($ExistingJson)) {
-        $existing = $ExistingJson | ConvertFrom-Json -Depth 100
-        if ($existing.PSObject.Properties.Name -contains 'content' -and $null -ne $existing.content) {
-            $existingContentJson = ConvertTo-JiraJsonValue @($existing.content)
-        }
-    }
-    $split = Split-JiraManagedSectionPanel -Marker (Get-JiraManagedMarker) -ContentJson $existingContentJson | ConvertFrom-Json -Depth 100
-
-    $docContent = [System.Collections.Generic.List[object]]::new()
-    foreach ($n in @($split.prefix)) { $docContent.Add($n) }
-    $docContent.Add((New-JiraAdfMarkerNode))
-    foreach ($n in $managed) { $docContent.Add($n) }
-
-    return (ConvertTo-JiraJsonValue ([ordered]@{ type = 'doc'; version = 1; content = $docContent }))
+function ConvertTo-JiraManagedTaskAdfDocument {
+    <#
+    .SYNOPSIS
+      Origin-INDEPENDENT description resolution for the task tier's own
+      shape (018, T027, FR-006): the sub-task's description
+      (ConvertTo-JiraAdfTaskDescription — its own text, identifier, phase,
+      attribution, etc., never the story or the specification, FR-009) is
+      what the boundary now wraps, resolved through the SAME §3 decision as
+      every other tier. Mirror of adf_render_managed_task_description.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $TaskJson,
+        [Parameter()] [AllowEmptyString()] [string] $ExistingJson = ''
+    )
+    $taskDoc = ConvertTo-JiraAdfTaskDescription -TaskJson $TaskJson | ConvertFrom-Json -Depth 100
+    $managed = [System.Collections.Generic.List[object]]::new()
+    foreach ($n in @($taskDoc.content)) { $managed.Add($n) }
+    return (Resolve-JiraManagedAdfContent -Managed $managed -ExistingJson $ExistingJson)
 }
 
 # --- The task tier (Phase 3, US1, T037; contracts/task-tier.md §4) ----------
@@ -263,5 +342,5 @@ function ConvertTo-JiraAdfTaskDescription {
     return (ConvertTo-JiraJsonValue ([ordered]@{ type = 'doc'; version = 1; content = $docContent }))
 }
 
-Export-ModuleMember -Function ConvertTo-JiraAdfDocument, ConvertTo-JiraManagedAdfDocument, Get-JiraManagedMarker, `
-    Get-JiraAdfTaskSummary, ConvertTo-JiraAdfTaskDescription
+Export-ModuleMember -Function ConvertTo-JiraAdfDocument, ConvertTo-JiraManagedAdfDocument, ConvertTo-JiraManagedTaskAdfDocument, `
+    Get-JiraManagedMarker, Get-JiraAdfTaskSummary, ConvertTo-JiraAdfTaskDescription

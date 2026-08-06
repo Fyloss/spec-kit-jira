@@ -1,0 +1,51 @@
+# Machine-owned resolved identifiers for the boundary-preservation
+# conformance scenario (018, T028): a project whose binding carries the
+# specification and story roles.
+resolved_ids:
+  PRSV:
+    style: company_managed
+    issue_types:
+      - logical_name: "Epic"
+        id: "20701"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "20704"
+        hierarchy_level: "0"
+        subtask: false
+    roles:
+      specification:
+        logical_name: "Epic"
+        id: "20701"
+        hierarchy_level: "1"
+        subtask: false
+        source: declared
+      story:
+        logical_name: "Story"
+        id: "20704"
+        hierarchy_level: "0"
+        subtask: false
+        source: declared
+    child_type:
+      logical_name: "Story"
+      id: "20704"
+      source: declared
+    parent_type:
+      logical_name: "Epic"
+      id: "20701"
+      source: declared
+    required_fields:
+      "20701":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "20704":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "20704": true
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"

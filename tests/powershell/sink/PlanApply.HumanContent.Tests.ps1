@@ -34,11 +34,17 @@ Describe 'Get-JiraPlanWriteSet (US7 human origin)' {
         $out | Should -BeLike '*New managed body.*'
     }
 
-    It 'keeps the whole-description behaviour when no origin is given' {
-        $ctx = '{"base_url":"https://mock","parent_type_id":"10101","parent_local_id":"3f2a91c04b7e6d18","tickets":{"s1":"PROJ-1"}}'
+    It '018, T021 — a bridge-created update preserves the human prefix and renders a delimited managed region below it' {
+        # Reproduction of the reported defect: a bridge-created ticket (no
+        # ticket_origins entry at all) must not overwrite a human's prose.
+        $ctx = "{`"base_url`":`"https://mock`",`"parent_type_id`":`"10101`",`"parent_local_id`":`"3f2a91c04b7e6d18`",`"tickets`":{`"s1`":`"PROJ-1`"},`"ticket_descriptions`":{`"s1`":$($script:Existing)}}"
         $r = Get-JiraPlanWriteSet -NeutralDocJson $script:Doc -PlanContextJson $ctx | ConvertFrom-Json
-        $out = ConvertTo-Json -InputObject $r.stories[0].body.fields.description -Depth 100 -Compress
-        $out | Should -Not -BeLike '*do not edit below this line*'
+        $desc = $r.stories[0].body.fields.description
+        $desc.content[0].content[0].text | Should -Be 'PO handwritten note.'
+        $out = ConvertTo-Json -InputObject $desc -Depth 100 -Compress
+        $out | Should -BeLike '*do not edit below this line*'
+        $out | Should -Not -BeLike '*stale managed body*'
+        $out | Should -BeLike '*New managed body.*'
     }
 }
 

@@ -408,6 +408,18 @@ if [[ "${method}" == "POST" && "${path}" == "/rest/api/3/issue" ]]; then
 fi
 fault_json="$(_shim_get_fault "${fault_path}")"
 
+# `ifFieldPresent` (018, T068, FR-011): a fault that only fires while the
+# request body's `.fields` still carries the named key — lets a test
+# simulate a tracker rejecting an oversized description on the first PUT
+# and accepting the same request once the caller strips that field on retry.
+if [[ "${fault_json}" != "null" ]]; then
+  if_field="$(jq -r '.ifFieldPresent // empty' <<< "${fault_json}")"
+  if [[ -n "${if_field}" ]]; then
+    has_field="$(jq -r --arg f "${if_field}" '(.fields | has($f)) // false' 2> /dev/null <<< "${body}")"
+    [[ "${has_field}" == "true" ]] || fault_json="null"
+  fi
+fi
+
 if [[ "${fault_json}" != "null" ]]; then
   is_network="$(jq -r '.network // false' <<< "${fault_json}")"
   if [[ "${is_network}" == "true" ]]; then

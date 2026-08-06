@@ -153,3 +153,44 @@ SPEC_B='{"repo":"acme/app","spec_slug":"002-feature-b","folder":"specs/002-featu
   p="$(pwsh -NoProfile -Command "Import-Module '${PS_SINK}/Identity.psm1' -Force; [Console]::Out.Write((Get-JiraIdentityMarker -SpecRefJson '${SPEC_A}' -Origin 'bridge-created' -Role 'parent'))")"
   [ "${b}" = "${p}" ]
 }
+
+# --- T036 [Phase 5, US3]: the identity marker gains `summary` (the last-
+# written summary record, contract summary-record.md §1/§2) -----------------
+
+@test "T036: identity_marker omits summary when not supplied" {
+  run identity_marker "${SPEC_A}" bridge-created "" "parent"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("summary")' <<< "$output")" = "false" ]
+}
+
+@test "T036: identity_marker records summary as the exact string given, alongside role and story" {
+  run identity_marker "${SPEC_A}" bridge-created "7f3a9c1e40b2d85a" "story" "  The Epic, renamed  "
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.summary' <<< "$output")" = "  The Epic, renamed  " ]
+  [ "$(jq -r '.role' <<< "$output")" = "story" ]
+  [ "$(jq -r '.story' <<< "$output")" = "7f3a9c1e40b2d85a" ]
+}
+
+@test "T036: identity_claimed_by_other is unaffected by summary's presence" {
+  local marker
+  marker="$(identity_marker "${SPEC_A}" bridge-created "" "" "Some title")"
+  run identity_claimed_by_other "${marker}" "${SPEC_B}"
+  [ "$status" -eq 0 ]
+  run identity_claimed_by_other "${marker}" "${SPEC_A}"
+  [ "$status" -ne 0 ]
+}
+
+@test "T036: identity_write stamps a marker carrying summary when given one" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  run identity_write ABC-1 "${SPEC_A}" bridge-created "" "" "The Epic"
+  [ "$status" -eq 0 ]
+}
+
+@test "T036: the PowerShell port builds an identical marker with summary (NFR-1)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local b p
+  b="$(identity_marker "${SPEC_A}" bridge-created "" "story" "The Epic, renamed")"
+  p="$(pwsh -NoProfile -Command "Import-Module '${PS_SINK}/Identity.psm1' -Force; [Console]::Out.Write((Get-JiraIdentityMarker -SpecRefJson '${SPEC_A}' -Origin 'bridge-created' -Role 'story' -Summary 'The Epic, renamed'))")"
+  [ "${b}" = "${p}" ]
+}

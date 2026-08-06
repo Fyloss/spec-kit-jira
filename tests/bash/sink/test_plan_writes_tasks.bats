@@ -3,6 +3,11 @@
 # local_id, parent_local_id, role:"task" and the parent placeholder; never a
 # POST under the specification-level issue (FR-007); a story with no task
 # planning nothing extra (FR-010); contract §4.
+#
+# 018, T026: plan_writes_tasks now returns {actions, warnings} rather than a
+# bare array (the boundary's own malformed/migrated-warned warnings need a
+# channel) — every test below unwraps `.actions` right after `run` so the
+# assertions that follow keep reading the array shape they always have.
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
@@ -42,9 +47,19 @@ DOC_NO_TASKS='{
 
 CTX_CREATE='{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
 
+# 018, T026: the task tier now carries the boundary too (FR-006), so a fixture
+# meant to isolate a NON-migration churn (a pure content change, or a pure
+# label back-fill) must seed ticket_current's description already inside the
+# boundary — otherwise the first touch of a legacy (marker-less) description
+# also migrates, which is its own, separately-tested behaviour.
+_already_migrated_task_desc() {
+  jq -c '.doc' <<< "$(adf_render_managed_task_description "${TASK1}")"
+}
+
 @test "one POST per attributed task, carrying local_id, parent_local_id, role and the parent placeholder" {
   run plan_writes_tasks "${DOC_ONE_TASK}" "${CTX_CREATE}"
   [ "$status" -eq 0 ]
+  output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq '. | length' <<< "$output")" -eq 1 ]
   [ "$(jq -r '.[0].method' <<< "$output")" = "POST" ]
   [ "$(jq -r '.[0].url' <<< "$output")" = "https://mock/rest/api/3/issue" ]
@@ -58,16 +73,19 @@ CTX_CREATE='{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
 @test "a story with no task plans nothing extra (FR-010)" {
   run plan_writes_tasks "${DOC_NO_TASKS}" "${CTX_CREATE}"
   [ "$status" -eq 0 ]
+  output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq '. | length' <<< "$output")" -eq 0 ]
 }
 
 @test "never a POST under the specification-level issue — the URL is always the collection endpoint" {
   run plan_writes_tasks "${DOC_ONE_TASK}" "${CTX_CREATE}"
+  output="$(jq -c '.actions' <<< "$output")"
   [[ "$(jq -r '.[0].url' <<< "$output")" != *"/issue/e1"* ]]
 }
 
 @test "the summary is the task's title (untruncated when short)" {
   run plan_writes_tasks "${DOC_ONE_TASK}" "${CTX_CREATE}"
+  output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq -r '.[0].body.fields.summary' <<< "$output")" = "Implement the parser" ]
 }
 
@@ -77,6 +95,7 @@ CTX_CREATE='{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
   task="$(jq -c --arg t "${long}" '.title=$t' <<< "${TASK1}")"
   doc="$(jq -c --argjson t "${task}" '.stories[0].tasks=[$t]' <<< "${DOC_ONE_TASK}")"
   run plan_writes_tasks "${doc}" "${CTX_CREATE}"
+  output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq -r '.[0].body.fields.summary | length' <<< "$output")" -eq 255 ]
   [[ "$(jq -c '.[0].body.fields.description' <<< "$output")" == *"${long}"* ]]
 }
@@ -85,9 +104,10 @@ CTX_CREATE='{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
   local ctx
   ctx='{"base_url":"https://mock","task_type_id":"10099",
         "tickets":{"1111111111111111":"COMP-9"},
-        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(adf_render_task_description "${TASK1}")"'}}}'
+        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(_already_migrated_task_desc)"'}}}'
   run plan_writes_tasks "${DOC_ONE_TASK}" "${ctx}"
   [ "$status" -eq 0 ]
+  output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq '. | length' <<< "$output")" -eq 0 ]
 }
 
@@ -100,6 +120,7 @@ CTX_CREATE='{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
         "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(adf_render_task_description "${TASK1}")"'}}}'
   run plan_writes_tasks "${doc}" "${ctx}"
   [ "$status" -eq 0 ]
+  output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq '. | length' <<< "$output")" -eq 1 ]
   [ "$(jq -r '.[0].method' <<< "$output")" = "PUT" ]
   [ "$(jq -r '.[0].url' <<< "$output")" = "https://mock/rest/api/3/issue/COMP-9" ]
@@ -120,24 +141,33 @@ CTX_CREATE='{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
         "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(adf_render_task_description "${TASK1}")"'}}}'
   run plan_writes_tasks "${doc}" "${ctx}"
   [ "$status" -eq 0 ]
+  output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq '. | length' <<< "$output")" -eq 1 ]
   [ "$(jq -r '.[0].method' <<< "$output")" = "PUT" ]
   [ "$(jq -r '.[0].body.fields | has("description")' <<< "$output")" = "true" ]
   [ "$(jq -r '.[0].body.fields | has("summary")' <<< "$output")" = "false" ]
 }
 
-@test "an already-bound task whose content diverges on the Jira side carries a named warning identifying the ticket and the field (FR-020)" {
+@test "an already-bound task whose summary drifted on the Jira side carries a named warning identifying the ticket and the field (018, T048; contract summary-record.md §4)" {
+  # Predates 018: summary used to be named by the GENERIC per-field warning
+  # (FR-020) on any divergence, unconditionally. It is now carved out of
+  # that mechanism exactly like description and labels — an ordinary,
+  # un-drifted retitle (no recorded value yet) is silent (FR-018), and a
+  # genuine drift (a recorded value that disagrees with what Jira holds)
+  # is named through the summary record's OWN warning channel instead.
   local task doc ctx
   task="$(jq -c '.title="Implement the parser, reworded"' <<< "${TASK1}")"
   doc="$(jq -c --argjson t "${task}" '.stories[0].tasks=[$t]' <<< "${DOC_ONE_TASK}")"
   ctx='{"base_url":"https://mock","task_type_id":"10099",
         "tickets":{"1111111111111111":"COMP-9"},
-        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(adf_render_task_description "${TASK1}")"'}}}'
+        "ticket_current":{"1111111111111111":{"summary":"A human'"'"'s rename","description":'"$(adf_render_task_description "${TASK1}")"'}},
+        "ticket_last_summaries":{"1111111111111111":"Implement the parser"}}'
   run plan_writes_tasks "${doc}" "${ctx}"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.[0].warning' <<< "$output")" != "null" ]
-  [[ "$(jq -r '.[0].warning' <<< "$output")" == *"COMP-9"* ]]
-  [[ "$(jq -r '.[0].warning' <<< "$output")" == *"summary"* ]]
+  [ "$(jq -r '.actions[0] | has("warning")' <<< "$output")" = "false" ]
+  [ "$(jq -r '.actions[0].body.fields | has("summary")' <<< "$output")" = "false" ]
+  [[ "$(jq -r '.warnings[]' <<< "$output")" == *"COMP-9"* ]]
+  [[ "$(jq -r '.warnings[]' <<< "$output")" == *"summary"* ]]
 }
 
 @test "a creation with no project or issue type refuses (zero writes)" {
@@ -151,6 +181,7 @@ CTX_CREATE='{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
   task2="$(jq -c '.local_id="2222222222222222"' <<< "${TASK1}")"
   doc="$(jq -c --argjson t2 "${task2}" '.stories += [{"local_id":"s2","title":"B","description":{"blocks":[{"type":"paragraph","text":"n"}]},"priority_logical":"P2","tasks":[$t2]}]' <<< "${DOC_ONE_TASK}")"
   run plan_writes_tasks "${doc}" "${CTX_CREATE}"
+  output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq '. | length' <<< "$output")" -eq 2 ]
   [ "$(jq -r '.[0].parent_local_id' <<< "$output")" = "s1" ]
   [ "$(jq -r '.[1].parent_local_id' <<< "$output")" = "s2" ]
@@ -200,12 +231,14 @@ CTX_CREATE='{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
 @test "017 [US2] a created sub-task carries the provenance label passed by the caller" {
   run plan_writes_tasks "${DOC_ONE_TASK}" "${CTX_CREATE}" "speckit-001-x"
   [ "$status" -eq 0 ]
+  output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq -c '.[0].body.fields.labels' <<< "$output")" = '["speckit-001-x"]' ]
 }
 
 @test "017 [US2] no label argument leaves the created sub-task's payload without a labels key at all" {
   run plan_writes_tasks "${DOC_ONE_TASK}" "${CTX_CREATE}"
   [ "$status" -eq 0 ]
+  output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq -r '.[0].body.fields | has("labels")' <<< "$output")" = "false" ]
 }
 
@@ -213,9 +246,10 @@ CTX_CREATE='{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
   local ctx
   ctx='{"base_url":"https://mock","task_type_id":"10099",
         "tickets":{"1111111111111111":"COMP-9"},
-        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(adf_render_task_description "${TASK1}")"',"labels":[]}}}'
+        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(_already_migrated_task_desc)"',"labels":[]}}}'
   run plan_writes_tasks "${DOC_ONE_TASK}" "${ctx}" "speckit-001-x"
   [ "$status" -eq 0 ]
+  output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq '. | length' <<< "$output")" -eq 1 ]
   [ "$(jq -r '.[0].method' <<< "$output")" = "PUT" ]
   [ "$(jq -c '.[0].body.fields | keys' <<< "$output")" = '["labels"]' ]
@@ -230,6 +264,7 @@ CTX_CREATE='{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
         "tickets":{"1111111111111111":"COMP-9"},
         "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(adf_render_task_description "${TASK1}")"',"labels":["ops","zeta"]}}}'
   run plan_writes_tasks "${DOC_ONE_TASK}" "${ctx}" "speckit-001-x"
+  output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq -c '.[0].body.fields.labels' <<< "$output")" = '["ops","speckit-001-x","zeta"]' ]
 }
 
@@ -237,9 +272,10 @@ CTX_CREATE='{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
   local ctx
   ctx='{"base_url":"https://mock","task_type_id":"10099",
         "tickets":{"1111111111111111":"COMP-9"},
-        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(adf_render_task_description "${TASK1}")"',"labels":["speckit-001-x"]}}}'
+        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(_already_migrated_task_desc)"',"labels":["speckit-001-x"]}}}'
   run plan_writes_tasks "${DOC_ONE_TASK}" "${ctx}" "speckit-001-x"
   [ "$status" -eq 0 ]
+  output="$(jq -c '.actions' <<< "$output")"
   [ "$(jq '. | length' <<< "$output")" -eq 0 ]
 }
 
@@ -249,8 +285,18 @@ CTX_CREATE='{"base_url":"https://mock","task_type_id":"10099","tickets":{}}'
   doc="$(jq -c --argjson t "${task}" '.stories[0].tasks=[$t]' <<< "${DOC_ONE_TASK}")"
   ctx='{"base_url":"https://mock","task_type_id":"10099",
         "tickets":{"1111111111111111":"COMP-9"},
-        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(adf_render_task_description "${TASK1}")"',"labels":[]}}}'
+        "ticket_current":{"1111111111111111":{"summary":"Implement the parser","description":'"$(_already_migrated_task_desc)"',"labels":[]}}}'
   run plan_writes_tasks "${doc}" "${ctx}" "speckit-001-x"
-  [ "$(jq -r '.[0].warning' <<< "$output")" = 'COMP-9 diverges from the specification on "summary, description"; only the differing field(s) will be written' ]
-  [ "$(jq -c '.[0].body.fields.labels' <<< "$output")" = '["speckit-001-x"]' ]
+  local actions; actions="$(jq -c '.actions' <<< "$output")"
+  # 018, T026: description's OWN divergence is reported through the boundary's
+  # warnings, not this per-field one. 018, T048: summary's own divergence is
+  # reported through the summary record's own mechanism (here, silently — no
+  # record exists yet, FR-018) — neither is named by the generic per-field
+  # warning, and no OTHER field diverges (labels are never named either), so
+  # this action carries no generic warning at all.
+  [ "$(jq -r '.[0] | has("warning")' <<< "${actions}")" = "false" ]
+  [ "$(jq -r '.[0].body.fields.summary' <<< "${actions}")" = "Implement the parser, reworded" ]
+  [ "$(jq -r '.[0].body.fields | has("description")' <<< "${actions}")" = "true" ]
+  [ "$(jq -c '.[0].body.fields.labels' <<< "${actions}")" = '["speckit-001-x"]' ]
+  [ "$(jq '.warnings // [] | length' <<< "$output")" -eq 0 ]
 }

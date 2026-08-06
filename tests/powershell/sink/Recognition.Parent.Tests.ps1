@@ -80,6 +80,24 @@ Describe 'Invoke-JiraRecognitionParentRun — bound reads' {
         $j.origin | Should -Be 'bridge'
     }
 
+    It '018, T039 — a bound parent surfaces last_summary from the identity marker; a legacy marker omits it' {
+        $cfg = New-JiraMockConfig '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","role":"parent","summary":"The Epic, renamed"}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $minfo = '{"state":"bound","id":"3f2a91c04b7e6d18","ticket":"COMP-412","lines":[2]}'
+        $r = Invoke-JiraRecognitionParentRun -MarkerInfoJson $minfo -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath $script:SpecPath
+        $j = $r.Json | ConvertFrom-Json
+        $j.last_summary | Should -Be 'The Epic, renamed'
+        Stop-JiraMock -Mock $script:M
+
+        $cfg = New-JiraMockConfig '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","role":"parent"}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $r = Invoke-JiraRecognitionParentRun -MarkerInfoJson $minfo -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath $script:SpecPath
+        $j = $r.Json | ConvertFrom-Json
+        ($j.PSObject.Properties.Name -contains 'last_summary') | Should -BeFalse
+    }
+
     It 'ok + different spec_slug: state blocked, reason parent-claimed-by-other' {
         $cfg = New-JiraMockConfig '{"origin":"bridge","repo":"acme/app","spec_slug":"999-other","role":"parent"}'
         $script:M = Start-JiraMock -ConfigPath $cfg

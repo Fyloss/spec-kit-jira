@@ -205,6 +205,36 @@ plan_confirmation_fields() {
   # kcov-excl-stop
 }
 
+# _plan_apply_managed_field <render-json> [ticket-label]
+#   018, T026, contract §3 rows 1/4 (FR-012/FR-020a/FR-020b): given
+#   adf_render_managed_description's or adf_render_managed_task_description's
+#   {status, doc} and a label identifying the ticket for a warning (the
+#   ticket's key on an UPDATE; empty on a CREATE, which never warns since a
+#   creation has no existing content to be ambiguous about), decide the
+#   description FIELD to send and any warning to surface. Prints canonical
+#   {doc, warning}: doc is JSON `null` when the boundary is malformed — the
+#   caller MUST omit the description key entirely rather than send null, so
+#   every other field of that ticket still reconciles (FR-012); warning is ""
+#   when none applies.
+_plan_apply_managed_field() {
+  local render="$1" label="${2:-}" status doc warning=""
+  status="$(jq -r '.status' <<< "${render}")"
+  case "${status}" in
+    malformed)
+      doc="null"
+      warning="${label} carries more than one boundary marker in its description; nothing was written to it. A human must remove the duplicate."
+      ;;
+    migrated-warned)
+      doc="$(jq -c '.doc' <<< "${render}")"
+      warning="${label}'s previous mirrored content could not be identified and is preserved above the boundary; it may now appear twice."
+      ;;
+    *)
+      doc="$(jq -c '.doc' <<< "${render}")"
+      ;;
+  esac
+  jq -cn --argjson d "${doc}" --arg w "${warning}" '{doc:$d, warning:$w}'
+}
+
 # plan_writes <neutral-doc-json> <plan-context-json> — resolve the validated
 # neutral document into an ordered write plan (US3, T058; Phase 5, US2,
 # T072, R7). Each story becomes a create OR an update, with logical values
@@ -216,7 +246,9 @@ plan_confirmation_fields() {
 # plan-context carries the resolved facts the engine cannot know:
 #   { base_url, story_type_id, priority_ids:{P1,P2,P3}, estimation_field_id|null,
 #     tickets:{<local_id>: <existing-issue-key>},   (a local_id absent => create)
-#     ticket_origins:{<local_id>: "bridge-created"|"human"},  (optional, US7)
+#     ticket_origins:{<local_id>: "bridge"|"human"},  (018, T072: populated for
+#       every recognised ticket now — kept for other consumers, but no longer
+#       read here; see below)
 #     ticket_descriptions:{<local_id>: <existing-adf-doc>},   (optional, US7)
 #     ticket_parents:{<local_id>: <existing-parent-key>},   (optional, T109;
 #       only entries whose child ALREADY carries a parent — a flat mirror
@@ -224,11 +256,13 @@ plan_confirmation_fields() {
 #     parent_type_id, parent_key|absent (a recognised parent's key),
 #     parent_local_id (the parent marker's id, for a creation),
 #     parent_current|absent ({summary, description}, for the zero-churn
-#       comparison), parent_origin|absent ("bridge"|"human") }
-# When a ticket carries a human origin and its existing description, the
-# update's description is rendered through the managed-panel splice so the
-# human-authored prose above the panel is preserved verbatim (FR-038);
-# absent that context the whole description is bridge-owned.
+#       comparison) }
+# 018, T026/T072: the managed-panel splice is now UNCONDITIONAL and
+# origin-independent (contract §3) — every recognised ticket's update is
+# rendered through it, so human-authored prose above the boundary is
+# preserved verbatim (FR-007) regardless of origin. "bridge-created" is
+# retired; recognition.sh's own spelling, "bridge", is the one this file
+# and adf.sh now share (test_recognition.bats asserts it).
 #
 # Returns {parent, stories} (data-model.md §6): `parent` is `null` when a
 # recognised parent's bridge-owned content already matches (zero churn); a
@@ -291,7 +325,6 @@ plan_writes() {
     est="$(jq -c '.estimation // null' <<< "${story}")"
     ticket="$(jq -r --arg s "${sid}" '.tickets[$s] // ""' <<< "${ctx}")"
     priority_id="$(jq -r --arg p "${prio}" '.priority_ids[$p] // ""' <<< "${ctx}")"
-    adf="$(adf_render_description "${story}")"
 
     if [[ -z "${ticket}" ]]; then
       # FR-024 assembly guard: refuse an incomplete creation BEFORE it is ever
@@ -302,8 +335,10 @@ plan_writes() {
       fi
       # CREATE: the shared mandatory base (research R3, FR-025) + description +
       # priority + estimation (create-only) + the parent-key placeholder
-      # (T072/T073), resolved once the parent's create response is read. A
-      # bridge-created ticket owns its whole description (no delimiter, FR-040).
+      # (T072/T073), resolved once the parent's create response is read. Every
+      # ticket the mirror creates now carries the boundary from its first byte
+      # (018, T026, FR-006/FR-010) — a creation never warns (no prior content).
+      adf="$(jq -c '.doc' <<< "$(adf_render_managed_description "${story}")")"
       base_fields="$(jira_create_fields_base "${project}" "${title}" "${story_type}" "${field_defaults}" "${story_label}")"
       fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${adf}" \
         '$base + {description:$d, parent:{key:"<resolved at apply time>"}}')"
@@ -311,22 +346,51 @@ plan_writes() {
       if [[ -n "${estid}" && "${est}" != "null" ]]; then
         fields="$(jq -c --arg fid "${estid}" --argjson v "${est}" '. + {($fid): $v}' <<< "${fields}")"
       fi
-      action="$(jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" --arg sid "${sid}" \
-        '{method:"POST", url:$u, body:{fields:$f}, local_id:$sid, role:"story"}')"
+      # 018, T048, contracts/summary-record.md §2: a creation's payload
+      # always carries a summary, so it always establishes the record.
+      local identity_stamp
+      identity_stamp="$(jq -cn --arg st "${sid}" --arg sm "${title}" '{origin:"bridge", story:$st, role:"story", summary:$sm}')"
+      action="$(jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" --arg sid "${sid}" --argjson stamp "${identity_stamp}" \
+        '{method:"POST", url:$u, body:{fields:$f}, local_id:$sid, role:"story", identity_stamp:$stamp}')"
     else
       # UPDATE: content + priority; the estimation is NEVER re-sent (FR-018).
       # The parent link is corrected only when the child already names a
       # DIFFERENT parent (T109, below) — never when it names none at all
-      # (Out of Scope, "no migration"). On a human-origin ticket the
-      # description is spliced into the managed panel so the human prose
-      # above it survives (FR-038).
-      local origin existing
-      origin="$(jq -r --arg s "${sid}" '.ticket_origins[$s] // ""' <<< "${ctx}")"
-      if [[ -n "${origin}" && "${origin}" != "bridge-created" ]]; then
-        existing="$(jq -c --arg s "${sid}" '.ticket_descriptions[$s] // {}' <<< "${ctx}")"
-        adf="$(adf_render_managed_description "${story}" "${origin}" "${existing}")"
+      # (Out of Scope, "no migration"). The managed-panel path is now
+      # UNCONDITIONAL (018, T026): every recognised story's description is
+      # spliced through the origin-independent resolution, so any human prose
+      # above the boundary survives (FR-007) regardless of origin.
+      local existing render field warn
+      existing="$(jq -c --arg s "${sid}" '.ticket_descriptions[$s] // {}' <<< "${ctx}")"
+      render="$(adf_render_managed_description "${story}" "${existing}")"
+      field="$(_plan_apply_managed_field "${render}" "${ticket}")"
+      adf="$(jq -c '.doc' <<< "${field}")"
+      warn="$(jq -r '.warning' <<< "${field}")"
+      [[ -n "${warn}" ]] && plan_warnings="$(jq -c --arg w "${warn}" '. + [$w]' <<< "${plan_warnings}")"
+
+      # Summary drift (018, T048, contracts/summary-record.md §4): decided
+      # before `fields` is built, so an omission never reaches the payload.
+      local current_summary recorded_summary on_drift_mode summary_decision final_summary identity_stamp
+      current_summary="$(jq -r --arg s "${sid}" '.ticket_summaries[$s] // ""' <<< "${ctx}")"
+      recorded_summary="$(jq -r --arg s "${sid}" '.ticket_last_summaries[$s] // ""' <<< "${ctx}")"
+      on_drift_mode="$(jq -r '.on_drift // "abort"' <<< "${ctx}")"
+      summary_decision="$(plan_summary_drift_status "${current_summary}" "${recorded_summary}" "${title}" "${on_drift_mode}")"
+      final_summary="$(jq -r '.summary // empty' <<< "${summary_decision}")"
+      identity_stamp="null"
+      if [[ -z "${final_summary}" ]]; then
+        plan_warnings="$(jq -c --arg w "reconcile: ticket ${ticket} diverges from the specification on \"summary\" — a human appears to have renamed it since the last write; nothing was sent. Pass --on-drift=proceed to restore the specification's title." '. + [$w]' <<< "${plan_warnings}")"
       fi
-      fields="$(jq -cn --arg t "${title}" --argjson d "${adf}" '{summary:$t, description:$d}')"
+
+      if [[ "${adf}" == "null" ]]; then
+        fields="$(jq -cn '{}')"
+      else
+        fields="$(jq -cn --argjson d "${adf}" '{description:$d}')"
+      fi
+      if [[ -n "${final_summary}" ]]; then
+        fields="$(jq -c --arg t "${final_summary}" '. + {summary:$t}' <<< "${fields}")"
+        identity_stamp="$(jq -cn --arg o "$(jq -r --arg s "${sid}" '.ticket_origins[$s] // "bridge"' <<< "${ctx}")" \
+          --arg st "${sid}" --arg sm "${final_summary}" '{origin:$o, story:$st, role:"story", summary:$sm}')"
+      fi
       [[ -n "${priority_id}" ]] && fields="$(jq -c --arg pid "${priority_id}" '. + {priority:{id:$pid}}' <<< "${fields}")"
 
       # Provenance label union (017, contract §2/§3): the desired list is
@@ -360,8 +424,8 @@ plan_writes() {
         fi
       fi
 
-      action="$(jq -cn --arg u "${base}/rest/api/3/issue/${ticket}" --argjson f "${fields}" \
-        '{method:"PUT", url:$u, body:{fields:$f}, role:"story"}')"
+      action="$(jq -cn --arg u "${base}/rest/api/3/issue/${ticket}" --argjson f "${fields}" --argjson stamp "${identity_stamp}" \
+        '{method:"PUT", url:$u, body:{fields:$f}, role:"story"} + (if $stamp == null then {} else {identity_stamp:$stamp} end)')"
     fi
     stories="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${stories}")"
   done
@@ -398,7 +462,10 @@ plan_writes() {
     [[ -n "${task_label_warning}" ]] && plan_warnings="$(jq -c --arg w "${task_label_warning}" '. + [$w]' <<< "${plan_warnings}")"
   fi
 
-  local parent; parent="$(_plan_writes_parent "${doc}" "${ctx}" "${base}" "${parent_label}")"
+  local parent_result parent
+  parent_result="$(_plan_writes_parent "${doc}" "${ctx}" "${base}" "${parent_label}")"
+  parent="$(jq -c '.action' <<< "${parent_result}")"
+  plan_warnings="$(jq -c --argjson w "$(jq -c '.warnings' <<< "${parent_result}")" '. + $w' <<< "${plan_warnings}")"
   jq -cn --argjson p "${parent}" --argjson s "${stories}" --argjson w "${plan_warnings}" --arg tl "${task_label}" \
     '{parent:$p, stories:$s}
      + (if $tl == "" then {} else {task_label:$tl} end)
@@ -417,37 +484,70 @@ _plan_writes_parent() {
   epic_title="$(jq -r '.epic.title // ""' <<< "${doc}")"
   epic_local_id="$(jq -r '.epic.local_id // ""' <<< "${doc}")"
 
-  local epic_adf; epic_adf="$(adf_render_description "$(jq -c '.epic' <<< "${doc}")")"
-
   local parent_key; parent_key="$(jq -r '.parent_key // ""' <<< "${ctx}")"
+  local warnings="[]"
 
   if [[ -z "${parent_key}" ]]; then
     # CREATE: no parent recognised yet. 011, research R2: same field_defaults
     # map the story branch reads, scoped to the parent type by the shared
-    # builder itself.
-    local base_fields fields field_defaults
+    # builder itself. Every ticket the mirror creates now carries the
+    # boundary from its first byte (018, T026, FR-006/FR-010) — a creation
+    # never warns (no prior content).
+    local epic_adf base_fields fields field_defaults
+    epic_adf="$(jq -c '.doc' <<< "$(adf_render_managed_description "$(jq -c '.epic' <<< "${doc}")")")"
     field_defaults="$(jq -c '.field_defaults // {}' <<< "${ctx}")"
     base_fields="$(jira_create_fields_base "${project}" "${epic_title}" "${parent_type}" "${field_defaults}" "${parent_label}")"
     fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${epic_adf}" '$base + {description:$d}')"
-    jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" --arg lid "${epic_local_id}" \
-      '{method:"POST", url:$u, body:{fields:$f}, local_id:$lid, role:"parent"}'
+    # 018, T048, contracts/summary-record.md §2: a creation's payload always
+    # carries a summary, so it always establishes the record.
+    local action identity_stamp
+    identity_stamp="$(jq -cn --arg sm "${epic_title}" '{origin:"bridge", role:"parent", summary:$sm}')"
+    action="$(jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" --arg lid "${epic_local_id}" --argjson stamp "${identity_stamp}" \
+      '{method:"POST", url:$u, body:{fields:$f}, local_id:$lid, role:"parent", identity_stamp:$stamp}')"
+    jq -cn --argjson a "${action}" --argjson w "${warnings}" '{action:$a, warnings:$w}'
     return 0
   fi
 
-  # A recognised parent: compare its bridge-owned content before planning a
-  # write (T076) — a human-origin parent's description is rendered through
-  # the SAME managed-panel splice a human-origin story uses (FR-039's rule,
-  # extended to the parent), so its prose above the panel survives, and is
-  # then compared on its managed section alone.
-  local current origin status
+  # A recognised parent: the managed-panel path is now UNCONDITIONAL (018,
+  # T026) — every recognised parent's description is spliced through the
+  # origin-independent resolution (contract §3), so human prose above the
+  # boundary survives (FR-007) on the parent exactly as on a story.
+  local current
   current="$(jq -c '.parent_current // null' <<< "${ctx}")"
-  origin="$(jq -r '.parent_origin // ""' <<< "${ctx}")"
 
-  if [[ -n "${origin}" && "${origin}" != "bridge" ]]; then
-    local existing; existing="$(jq -c '.description // {}' <<< "${current}")"
-    epic_adf="$(adf_render_managed_description "$(jq -c '.epic' <<< "${doc}")" "${origin}" "${existing}")"
+  local existing render field epic_adf warn
+  existing="$(jq -c '.description // {}' <<< "${current}")"
+  render="$(adf_render_managed_description "$(jq -c '.epic' <<< "${doc}")" "${existing}")"
+  field="$(_plan_apply_managed_field "${render}" "${parent_key}")"
+  epic_adf="$(jq -c '.doc' <<< "${field}")"
+  warn="$(jq -r '.warning' <<< "${field}")"
+  [[ -n "${warn}" ]] && warnings="$(jq -c --arg w "${warn}" '. + [$w]' <<< "${warnings}")"
+
+  # Summary drift (018, T048, contracts/summary-record.md §4): decided
+  # before `desired_fields` is built, so an omission never reaches the
+  # payload (mirror of the story branch in plan_writes).
+  local current_summary recorded_summary on_drift_mode summary_decision final_summary identity_stamp
+  current_summary="$(jq -r '.summary // ""' <<< "${current}")"
+  recorded_summary="$(jq -r '.parent_last_summary // ""' <<< "${ctx}")"
+  on_drift_mode="$(jq -r '.on_drift // "abort"' <<< "${ctx}")"
+  summary_decision="$(plan_summary_drift_status "${current_summary}" "${recorded_summary}" "${epic_title}" "${on_drift_mode}")"
+  final_summary="$(jq -r '.summary // empty' <<< "${summary_decision}")"
+  identity_stamp="null"
+  if [[ -z "${final_summary}" ]]; then
+    warnings="$(jq -c --arg w "reconcile: ticket ${parent_key} diverges from the specification on \"summary\" — a human appears to have renamed it since the last write; nothing was sent. Pass --on-drift=proceed to restore the specification's title." '. + [$w]' <<< "${warnings}")"
   fi
-  local desired_fields; desired_fields="$(jq -cn --arg t "${epic_title}" --argjson d "${epic_adf}" '{summary:$t, description:$d}')"
+
+  local desired_fields
+  if [[ "${epic_adf}" == "null" ]]; then
+    desired_fields="$(jq -cn '{}')"
+  else
+    desired_fields="$(jq -cn --argjson d "${epic_adf}" '{description:$d}')"
+  fi
+  if [[ -n "${final_summary}" ]]; then
+    desired_fields="$(jq -c --arg t "${final_summary}" '. + {summary:$t}' <<< "${desired_fields}")"
+    identity_stamp="$(jq -cn --arg o "$(jq -r '.parent_origin // "bridge"' <<< "${ctx}")" --arg sm "${final_summary}" \
+      '{origin:$o, role:"parent", summary:$sm}')"
+  fi
 
   # Provenance label union (017, contract §2/§3), on the recognised-parent
   # branch — same union rule as the story branch, and folded into
@@ -461,27 +561,31 @@ _plan_writes_parent() {
       '. + {labels: (($cur + [$lbl]) | unique)}' <<< "${desired_fields}")"
   fi
 
+  local status
   if [[ "${current}" == "null" ]]; then
     status="changed"
-  elif [[ -n "${origin}" && "${origin}" != "bridge" ]]; then
-    local desc_st other_st cur_desc new_desc cur_rest des_rest
-    cur_desc="$(jq -c '.description // {}' <<< "${current}")"
-    new_desc="$(jq -c '.description // {}' <<< "${desired_fields}")"
-    desc_st="$(plan_managed_description_status "${cur_desc}" "${new_desc}")"
+  else
+    local desc_st="unchanged" other_st cur_rest des_rest
+    if jq -e 'has("description")' <<< "${desired_fields}" > /dev/null 2>&1; then
+      local cur_desc new_desc
+      cur_desc="$(jq -c '.description // {}' <<< "${current}")"
+      new_desc="$(jq -c '.description' <<< "${desired_fields}")"
+      desc_st="$(plan_managed_description_status "${cur_desc}" "${new_desc}")"
+    fi
     cur_rest="$(jq -c 'del(.description)' <<< "${current}")"
     des_rest="$(jq -c 'del(.description)' <<< "${desired_fields}")"
     other_st="$(idempotency_field_status "${cur_rest}" "${des_rest}")"
     if [[ "${desc_st}" == "unchanged" && "${other_st}" == "unchanged" ]]; then status="unchanged"; else status="changed"; fi
-  else
-    status="$(idempotency_field_status "${current}" "${desired_fields}")"
   fi
 
   if [[ "${status}" == "unchanged" ]]; then
-    printf 'null'
+    jq -cn --argjson w "${warnings}" '{action:null, warnings:$w}'
     return 0
   fi
-  jq -cn --arg u "${base}/rest/api/3/issue/${parent_key}" --argjson f "${desired_fields}" \
-    '{method:"PUT", url:$u, body:{fields:$f}, role:"parent"}'
+  local action
+  action="$(jq -cn --arg u "${base}/rest/api/3/issue/${parent_key}" --argjson f "${desired_fields}" --argjson stamp "${identity_stamp}" \
+    '{method:"PUT", url:$u, body:{fields:$f}, role:"parent"} + (if $stamp == null then {} else {identity_stamp:$stamp} end)')"
+  jq -cn --argjson a "${action}" --argjson w "${warnings}" '{action:$a, warnings:$w}'
 }
 
 # plan_managed_description_status <current-desc-json> <new-desc-json>
@@ -498,6 +602,61 @@ plan_managed_description_status() {
     printf 'unchanged'
   else
     printf 'changed'
+  fi
+}
+
+# _summary_normalise <string> — contract summary-record.md §3: strip leading
+# and trailing whitespace, then collapse every internal run of whitespace to
+# a single space. For COMPARISON only — never applied to a value recorded or
+# sent.
+_summary_normalise() {
+  printf '%s' "$1" | tr -s '[:space:]' ' ' | sed -e 's/^ *//' -e 's/ *$//'
+}
+
+# plan_summary_drift_status <current-summary> <recorded-summary-or-empty>
+# <desired-summary> [<on-drift>] — 018, T048, contracts/summary-record.md §4:
+# the whole decision table, collapsed into one function every tier calls
+# identically. Prints {summary: <string>|null}: the value to send (present),
+# or null when the field must be OMITTED from the payload — the caller's own
+# signal to skip this field and emit exactly one warning naming the ticket.
+#
+#   recorded-summary-or-empty absent (no record yet) -> send desired, never
+#     omit (FR-018: no record means no warning).
+#   recorded present, normalised(current) == normalised(recorded) -> no
+#     human intervened since the last write; send desired (FR-017, a silent
+#     retitle when the specification's title changed).
+#   recorded present, normalised(current) != normalised(recorded), but
+#     normalised(current) == normalised(desired) -> the human already
+#     renamed it to exactly the specification's title; nothing to protect
+#     the human FROM, so this is never treated as drift (§6 scenario table).
+#   recorded present, current differs from BOTH recorded and desired ->
+#     genuine drift: `--on-drift=proceed` sends desired (FR-016, restores
+#     and counts as an ordinary update); otherwise (the default) the field
+#     is omitted (FR-015) — the caller's job to warn, since only it knows
+#     the ticket key.
+plan_summary_drift_status() {
+  local current="$1" recorded="${2:-}" desired="$3" on_drift="${4:-abort}"
+  if [[ -z "${recorded}" ]]; then
+    jq -cn --arg d "${desired}" '{summary:$d}'
+    return 0
+  fi
+  local nc nr
+  nc="$(_summary_normalise "${current}")"
+  nr="$(_summary_normalise "${recorded}")"
+  if [[ "${nc}" == "${nr}" ]]; then
+    jq -cn --arg d "${desired}" '{summary:$d}'
+    return 0
+  fi
+  local nd
+  nd="$(_summary_normalise "${desired}")"
+  if [[ "${nc}" == "${nd}" ]]; then
+    jq -cn --arg d "${desired}" '{summary:$d}'
+    return 0
+  fi
+  if [[ "${on_drift}" == "proceed" ]]; then
+    jq -cn --arg d "${desired}" '{summary:$d}'
+  else
+    jq -cn '{summary:null}'
   fi
 }
 
@@ -527,7 +686,7 @@ plan_writes_tasks() {
   field_defaults="$(jq -c '.field_defaults // {}' <<< "${ctx}")"
   project="$(jq -r '.routing.project_key // ""' <<< "${doc}")"
 
-  local actions="[]" sn si
+  local actions="[]" warnings="[]" sn si
   sn="$(jq '.stories | length' <<< "${doc}")"
   for ((si = 0; si < sn; si++)); do
     local story story_local_id tn ti
@@ -541,23 +700,66 @@ plan_writes_tasks() {
       title="$(jq -r '.title' <<< "${task}")"
       ticket="$(jq -r --arg t "${tid}" '.tickets[$t] // ""' <<< "${ctx}")"
       summary="$(adf_task_summary "${title}")"
-      adf="$(adf_render_task_description "${task}")"
 
       if [[ -z "${ticket}" ]]; then
         if [[ -z "${project}" || -z "${task_type}" ]]; then
           printf 'plan_writes_tasks: refusing to assemble a creation for "%s" with no project or issue type (zero writes)\n' "${tid}" >&2
           return 1
         fi
+        # Every ticket the mirror creates now carries the boundary from its
+        # first byte (018, T026, FR-006/FR-010) — a creation never warns.
+        adf="$(jq -c '.doc' <<< "$(adf_render_managed_task_description "${task}")")"
         base_fields="$(jira_create_fields_base "${project}" "${summary}" "${task_type}" "${field_defaults}" "${task_label}")"
         fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${adf}" \
           '$base + {description:$d, parent:{key:"<resolved at apply time>"}}')"
+        # 018, T048, contracts/summary-record.md §2: a creation's payload
+        # always carries a summary, so it always establishes the record.
+        local identity_stamp
+        identity_stamp="$(jq -cn --arg st "${tid}" --arg sm "${summary}" '{origin:"bridge", story:$st, role:"task", summary:$sm}')"
         action="$(jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" \
-          --arg lid "${tid}" --arg pid "${story_local_id}" \
-          '{method:"POST", url:$u, body:{fields:$f}, local_id:$lid, parent_local_id:$pid, role:"task"}')"
+          --arg lid "${tid}" --arg pid "${story_local_id}" --argjson stamp "${identity_stamp}" \
+          '{method:"POST", url:$u, body:{fields:$f}, local_id:$lid, parent_local_id:$pid, role:"task", identity_stamp:$stamp}')"
       else
         local current desired st
         current="$(jq -c --arg t "${tid}" '.ticket_current[$t] // null' <<< "${ctx}")"
-        desired="$(jq -cn --arg s "${summary}" --argjson d "${adf}" '{summary:$s, description:$d}')"
+
+        # The managed-panel path is now UNCONDITIONAL (018, T026): every
+        # recognised sub-task's description is spliced through the
+        # origin-independent resolution (contract §3), so human prose above
+        # the boundary survives (FR-007) on the task tier exactly as on a
+        # story or the parent.
+        local existing render field warn
+        existing="$(jq -c '.description // {}' <<< "${current}")"
+        render="$(adf_render_managed_task_description "${task}" "${existing}")"
+        field="$(_plan_apply_managed_field "${render}" "${ticket}")"
+        adf="$(jq -c '.doc' <<< "${field}")"
+        warn="$(jq -r '.warning' <<< "${field}")"
+        [[ -n "${warn}" ]] && warnings="$(jq -c --arg w "${warn}" '. + [$w]' <<< "${warnings}")"
+
+        # Summary drift (018, T048, contracts/summary-record.md §4/§5):
+        # decided before `desired` is built. The desired value is the task
+        # tier's own (possibly shortened) summary — the exact string a
+        # payload carries is what the record keeps (contract §2).
+        local current_summary recorded_summary on_drift_mode summary_decision final_summary identity_stamp summary_changed
+        current_summary="$(jq -r '.summary // ""' <<< "${current}")"
+        recorded_summary="$(jq -r --arg t "${tid}" '.ticket_last_summaries[$t] // ""' <<< "${ctx}")"
+        on_drift_mode="$(jq -r '.on_drift // "abort"' <<< "${ctx}")"
+        summary_decision="$(plan_summary_drift_status "${current_summary}" "${recorded_summary}" "${summary}" "${on_drift_mode}")"
+        final_summary="$(jq -r '.summary // empty' <<< "${summary_decision}")"
+        identity_stamp="null"
+        summary_changed="false"
+        if [[ -z "${final_summary}" ]]; then
+          warnings="$(jq -c --arg w "reconcile: ticket ${ticket} diverges from the specification on \"summary\" — a human appears to have renamed it since the last write; nothing was sent. Pass --on-drift=proceed to restore the specification's title." '. + [$w]' <<< "${warnings}")"
+        elif [[ "${final_summary}" != "${current_summary}" ]]; then
+          summary_changed="true"
+        fi
+
+        if [[ "${adf}" == "null" ]]; then
+          desired="$(jq -cn '{}')"
+        else
+          desired="$(jq -cn --argjson d "${adf}" '{description:$d}')"
+        fi
+        [[ -n "${final_summary}" ]] && desired="$(jq -c --arg s "${final_summary}" '. + {summary:$s}' <<< "${desired}")"
         # Provenance label union (017 FR-009/FR-011/FR-012/FR-013 on the task
         # tier): the desired list is the sub-task's CURRENT labels plus the
         # provenance token, both `unique`-normalised — which is at once the
@@ -569,10 +771,28 @@ plan_writes_tasks() {
           desired="$(jq -c --argjson cur "${cur_labels}" --arg lbl "${task_label}" \
             '. + {labels: (($cur + [$lbl]) | unique)}' <<< "${desired}")"
         fi
+
+        # Churn (FR-009): the description key, when present, is decided on
+        # its managed section alone — an edit confined to the human prefix
+        # is not churn. `summary` is excluded from the generic field-diff
+        # below and merged back separately (summary_changed), exactly like
+        # description — its own divergence is reported through the summary-
+        # record's warning above, not the generic per-field one. Every other
+        # field compares as before this feature.
+        local desc_st="unchanged" other_st cur_rest des_rest
+        cur_rest="$(jq -c 'del(.description, .summary)' <<< "${current}")"
+        des_rest="$(jq -c 'del(.description, .summary)' <<< "${desired}")"
+        if [[ "${current}" != "null" ]] && jq -e 'has("description")' <<< "${desired}" > /dev/null 2>&1; then
+          local cur_desc new_desc
+          cur_desc="$(jq -c '.description // {}' <<< "${current}")"
+          new_desc="$(jq -c '.description' <<< "${desired}")"
+          desc_st="$(plan_managed_description_status "${cur_desc}" "${new_desc}")"
+        fi
         if [[ "${current}" == "null" ]]; then
           st="changed"
         else
-          st="$(idempotency_field_status "${current}" "${desired}")"
+          other_st="$(idempotency_field_status "${cur_rest}" "${des_rest}")"
+          if [[ "${desc_st}" == "unchanged" && "${other_st}" == "unchanged" && "${summary_changed}" == "false" ]]; then st="unchanged"; else st="changed"; fi
         fi
         [[ "${st}" == "unchanged" ]] && continue
 
@@ -580,34 +800,51 @@ plan_writes_tasks() {
         # comparison names the divergent field(s) in a warning before the
         # overwrite — current == null means no prior state was read at all,
         # so nothing narrower than the full desired set can be sent, and
-        # there is no known field to name.
+        # there is no known field to name. The description field's own
+        # divergence is reported through the boundary's warnings above, not
+        # this per-field one, so it is compared and merged separately.
         local filtered diverged warning=""
         if [[ "${current}" == "null" ]]; then
           filtered="${desired}"
         else
-          filtered="$(jq -cn --argjson cur "${current}" --argjson des "${desired}" \
+          filtered="$(jq -cn --argjson cur "${cur_rest}" --argjson des "${des_rest}" \
             '[ $des | to_entries[] | select(.value != ($cur[.key])) ] | from_entries')"
+          if [[ "${desc_st}" == "changed" ]]; then
+            filtered="$(jq -c --argjson d "$(jq -c '.description' <<< "${desired}")" '. + {description:$d}' <<< "${filtered}")"
+          fi
+          if [[ "${summary_changed}" == "true" ]]; then
+            filtered="$(jq -c --arg s "${final_summary}" '. + {summary:$s}' <<< "${filtered}")"
+          fi
           # `labels` is excluded from the divergence naming (017 FR-011): a
           # sub-task that merely lacks its provenance label has not diverged
           # from the specification, and back-filling it must stay as silent
           # on the task tier as it is on the story tier.
-          diverged="$(jq -rn --argjson cur "${current}" --argjson des "${desired}" \
+          diverged="$(jq -rn --argjson cur "${cur_rest}" --argjson des "${des_rest}" \
             '[ $des | to_entries[] | select(.key != "labels") | select(.value != ($cur[.key])) | .key ] | join(", ")')"
           [[ -n "${diverged}" ]] && warning="${ticket} diverges from the specification on \"${diverged}\"; only the differing field(s) will be written"
         fi
 
+        # identity_stamp (018, T048, contracts/summary-record.md §2): the
+        # record is written only after a payload that ACTUALLY carries
+        # `summary` — decided from `filtered`, the payload this action will
+        # really send, not from whether a value was merely computed above.
+        if jq -e 'has("summary")' > /dev/null 2>&1 <<< "${filtered}"; then
+          identity_stamp="$(jq -cn --arg o "$(jq -r --arg t "${tid}" '.ticket_origins[$t] // "bridge"' <<< "${ctx}")" \
+            --arg st "${tid}" --arg sm "${final_summary}" '{origin:$o, story:$st, role:"task", summary:$sm}')"
+        fi
+
         if [[ -n "${warning}" ]]; then
-          action="$(jq -cn --arg u "${base}/rest/api/3/issue/${ticket}" --argjson f "${filtered}" --arg w "${warning}" \
-            '{method:"PUT", url:$u, body:{fields:$f}, role:"task", warning:$w}')"
+          action="$(jq -cn --arg u "${base}/rest/api/3/issue/${ticket}" --argjson f "${filtered}" --arg w "${warning}" --argjson stamp "${identity_stamp}" \
+            '{method:"PUT", url:$u, body:{fields:$f}, role:"task", warning:$w} + (if $stamp == null then {} else {identity_stamp:$stamp} end)')"
         else
-          action="$(jq -cn --arg u "${base}/rest/api/3/issue/${ticket}" --argjson f "${filtered}" \
-            '{method:"PUT", url:$u, body:{fields:$f}, role:"task"}')"
+          action="$(jq -cn --arg u "${base}/rest/api/3/issue/${ticket}" --argjson f "${filtered}" --argjson stamp "${identity_stamp}" \
+            '{method:"PUT", url:$u, body:{fields:$f}, role:"task"} + (if $stamp == null then {} else {identity_stamp:$stamp} end)')"
         fi
       fi
       actions="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${actions}")"
     done
   done
-  json_canonical <<< "${actions}"
+  jq -cn --argjson a "${actions}" --argjson w "${warnings}" '{actions:$a, warnings:$w}' | json_canonical
 }
 
 # _plan_transition_action <base_url> <key> <transition_id> <blockers-json> <label>
@@ -673,28 +910,25 @@ plan_lifecycle() {
 
     local drop_content="false" do_transition="false"
     # --- Zero churn: drop an unchanged UPDATE ---------------------------------
+    # The managed-panel path is now UNCONDITIONAL (018, T026): every
+    # recognised ticket's description churn is decided on its managed
+    # section alone (FR-009), regardless of origin.
     if [[ "${method}" == "PUT" ]]; then
       local current
       current="$(jq -c '.current // null' <<< "${tk}")"
       if [[ "${current}" != "null" ]]; then
-        local desired origin st
+        local desired desc_st="unchanged" other_st cur_rest des_rest
         desired="$(jq -c '.body.fields' <<< "${action}")"
-        origin="$(jq -r '.origin // ""' <<< "${tk}")"
-        if [[ -n "${origin}" && "${origin}" != "bridge-created" ]]; then
-          # FR-039: on a human-origin ticket the description diff is computed on the
-          # managed section alone; the other fields compare normally.
-          local desc_st other_st cur_desc new_desc cur_rest des_rest
+        if jq -e 'has("description")' <<< "${desired}" > /dev/null 2>&1; then
+          local cur_desc new_desc
           cur_desc="$(jq -c '.description // {}' <<< "${current}")"
-          new_desc="$(jq -c '.description // {}' <<< "${desired}")"
+          new_desc="$(jq -c '.description' <<< "${desired}")"
           desc_st="$(plan_managed_description_status "${cur_desc}" "${new_desc}")"
-          cur_rest="$(jq -c 'del(.description)' <<< "${current}")"
-          des_rest="$(jq -c 'del(.description)' <<< "${desired}")"
-          other_st="$(idempotency_field_status "${cur_rest}" "${des_rest}")"
-          [[ "${desc_st}" == "unchanged" && "${other_st}" == "unchanged" ]] && drop_content="true"
-        else
-          st="$(idempotency_field_status "${current}" "${desired}")"
-          [[ "${st}" == "unchanged" ]] && drop_content="true"
         fi
+        cur_rest="$(jq -c 'del(.description)' <<< "${current}")"
+        des_rest="$(jq -c 'del(.description)' <<< "${desired}")"
+        other_st="$(idempotency_field_status "${cur_rest}" "${des_rest}")"
+        [[ "${desc_st}" == "unchanged" && "${other_st}" == "unchanged" ]] && drop_content="true"
       fi
     fi
 
@@ -856,6 +1090,88 @@ _plan_apply_report_rejection() {
   [[ -n "${msg}" ]] && printf '%s\n' "${msg}" >&2
 }
 
+# _plan_apply_write <method> <url> <body-json-or-empty> <resp-file> — the
+# single write primitive every write loop in this file goes through. 018,
+# T068, contract managed-description §2, FR-011: on a PUT whose body carries
+# a `description` field and Jira rejects it (400, `errors.description`
+# present), the write is retried ONCE with `description` stripped from the
+# payload and one warning is printed to stderr naming the ticket key —
+# EVERY OTHER field of that ticket still reconciles, and the caller sees the
+# retried result (success or otherwise), never the original rejection: the
+# host's exit code is unaffected by a description-only rejection. A
+# rejection that does not name `description`, or a non-PUT method, is left
+# to the existing generic failure path (the caller's own rc >= 2 handling)
+# untouched.
+# _plan_apply_stamp_identity <issue-key> <spec-ref-json> <action-json> —
+# 018, T048, contracts/summary-record.md §2: stamp the identity marker with
+# `action.identity_stamp` when the action carries one — a no-op when it
+# does not (the payload never carried `summary`, so nothing is recorded).
+# Called after EVERY successful write (create or update), on both tiers'
+# every role, so this is the single site that decides whether the record
+# advances this run.
+_plan_apply_stamp_identity() {
+  local key="$1" spec_ref="$2" action="$3"
+  local stamp; stamp="$(jq -c '.identity_stamp // null' <<< "${action}")"
+  [[ "${stamp}" == "null" || -z "${key}" ]] && return 0
+  local origin story role summary
+  origin="$(jq -r '.origin // "bridge"' <<< "${stamp}")"
+  story="$(jq -r '.story // ""' <<< "${stamp}")"
+  role="$(jq -r '.role // ""' <<< "${stamp}")"
+  summary="$(jq -r '.summary // ""' <<< "${stamp}")"
+  identity_write "${key}" "${spec_ref}" "${origin}" "${story}" "${role}" "${summary}" || true
+}
+
+_plan_apply_write() {
+  local method="$1" url="$2" body="$3" resp="$4"
+  if [[ -n "${body}" ]]; then
+    jira_request "${method}" "${url}" "${body}" > "${resp}"
+  else
+    jira_request "${method}" "${url}" > "${resp}"
+  fi
+  local rc=$?
+  if ((rc >= 2)) && [[ "${method}" == "PUT" && "${JIRA_LAST_STATUS:-}" == "400" && -n "${body}" ]]; then
+    local has_desc
+    has_desc="$(jq -r '(.fields | has("description")) // false' <<< "${body}" 2> /dev/null)"
+    if [[ "${has_desc}" == "true" ]]; then
+      local errbody="${JIRA_LAST_ERROR_BODY:-{\}}"
+      jq -e . > /dev/null 2>&1 <<< "${errbody}" || errbody='{}'
+      local desc_reason
+      desc_reason="$(jq -r '.errors.description // empty' <<< "${errbody}")"
+      if [[ -n "${desc_reason}" ]]; then
+        local key
+        key="$(sed -E 's#.*/issue/##' <<< "${url}")"
+        printf 'reconcile: Jira rejected the description for %s — %s. No description was written for %s; every other field still reconciled.\n' \
+          "${key}" "${desc_reason}" "${key}" >&2
+        local stripped
+        stripped="$(jq -c 'del(.fields.description)' <<< "${body}")"
+        jira_request "${method}" "${url}" "${stripped}" > "${resp}"
+        rc=$?
+      fi
+    fi
+  fi
+  return "${rc}"
+}
+
+# _plan_apply_privacy_projection <body-json> — 018, T018, contract §5, FR-024a:
+# the projection of a payload handed to the pre-write privacy scan, excluding
+# the description's preserved human prefix. The guard's own rules (privacy_guard.sh)
+# are untouched; only what reaches them changes. The preserved prefix is a
+# verbatim round-trip — read from this ticket and written back to it — so it
+# cannot carry anything into the tracker the tracker does not already hold.
+# Splits the description's content at the managed-panel marker (structural,
+# not configurable) and scans only the managed portion (the marker node
+# onward) plus every other field, exactly as before this feature. A payload
+# with no description field, a description that is not an ADF object, or a
+# description with no content array, is unchanged.
+_plan_apply_privacy_projection() {
+  local body="$1" content
+  content="$(jq -c '(.fields.description.content)? // null' <<< "${body}")"
+  [[ "${content}" == "null" || -z "${content}" ]] && { printf '%s' "${body}"; return 0; }
+  local managed
+  managed="$(printf '%s' "${content}" | managed_section_panel_split "$(adf_managed_marker)" | jq -c '.managed')"
+  jq -c --argjson m "${managed}" 'if (.fields.description | type) == "object" then (.fields.description.content = $m) else . end' <<< "${body}"
+}
+
 # apply_writes <actions-json> [extra-known-coords-json] — guard every payload,
 # then perform the writes in order. Returns EXIT_BLOCK (9) with zero writes if any
 # payload is blocked; otherwise returns the worst (highest) transport exit code.
@@ -874,7 +1190,7 @@ apply_writes() {
   local i body
   for ((i = 0; i < n; i++)); do
     body="$(jq -c ".[${i}].body // {}" <<< "${actions}")"
-    privacy_guard_scan "${body}" "${coords}" "${allow}" || return $?
+    privacy_guard_scan "$(_plan_apply_privacy_projection "${body}")" "${coords}" "${allow}" || return $?
   done
 
   # (2) Write pass — all payloads cleared; perform each write in order. A
@@ -886,11 +1202,7 @@ apply_writes() {
     method="$(jq -r ".[${i}].method" <<< "${actions}")"
     url="$(jq -r ".[${i}].url" <<< "${actions}")"
     body="$(jq -c ".[${i}].body // empty" <<< "${actions}")"
-    if [[ -n "${body}" ]]; then
-      jira_request "${method}" "${url}" "${body}" > /dev/null
-    else
-      jira_request "${method}" "${url}" > /dev/null
-    fi
+    _plan_apply_write "${method}" "${url}" "${body}" /dev/null
     rc=$?
     ((rc > worst)) && worst=${rc}
     ((rc >= 2)) && return "${worst}"
@@ -979,19 +1291,19 @@ apply_writes_with_recognition() {
   local body
   if [[ "${parent}" != "null" ]]; then
     body="$(jq -c '.body // {}' <<< "${parent}")"
-    privacy_guard_scan "${body}" "${coords}" "${allow}" || return $?
+    privacy_guard_scan "$(_plan_apply_privacy_projection "${body}")" "${coords}" "${allow}" || return $?
   fi
   local n i
   n="$(jq 'length' <<< "${stories}")"
   for ((i = 0; i < n; i++)); do
     body="$(jq -c ".[${i}].body // {}" <<< "${stories}")"
-    privacy_guard_scan "${body}" "${coords}" "${allow}" || return $?
+    privacy_guard_scan "$(_plan_apply_privacy_projection "${body}")" "${coords}" "${allow}" || return $?
   done
   local tn
   tn="$(jq 'length' <<< "${tasks_actions}")"
   for ((i = 0; i < tn; i++)); do
     body="$(jq -c ".[${i}].body // {}" <<< "${tasks_actions}")"
-    privacy_guard_scan "${body}" "${coords}" "${allow}" || return $?
+    privacy_guard_scan "$(_plan_apply_privacy_projection "${body}")" "${coords}" "${allow}" || return $?
   done
 
   # (2) R5 step 4 / contract step 9 -- mark the parent (when it is a
@@ -1038,7 +1350,7 @@ apply_writes_with_recognition() {
     url="$(jq -r '.url' <<< "${parent}")"
     body="$(jq -c '.body // empty' <<< "${parent}")"
     resp="$(mktemp)"
-    if [[ -n "${body}" ]]; then jira_request "${method}" "${url}" "${body}" > "${resp}"; else jira_request "${method}" "${url}" > "${resp}"; fi
+    _plan_apply_write "${method}" "${url}" "${body}" "${resp}"
     rc=$?
     ((rc > worst)) && worst=${rc}
     if ((rc >= 2)); then
@@ -1050,7 +1362,6 @@ apply_writes_with_recognition() {
     if [[ "${method}" == "POST" ]]; then
       parent_key="$(jq -r '.key // empty' < "${resp}")"
       if [[ -n "${parent_key}" && -n "${parent_local_id}" ]]; then
-        identity_write "${parent_key}" "${spec_ref}" "bridge" "" "parent" || true
         local cur new
         cur="$(cat "${spec_file}" 2> /dev/null; printf x)"; cur="${cur%x}"
         new="$(printf '%s' "${cur}" | spec_marker_record_ticket "${parent_local_id}" "${parent_key}"; printf x)"; new="${new%x}"
@@ -1059,6 +1370,7 @@ apply_writes_with_recognition() {
           '$c + [{key:$k, role:"parent", local_id:$lid}]')"
       fi
     fi
+    _plan_apply_stamp_identity "${parent_key}" "${spec_ref}" "${parent}"
     rm -f "${resp}"
   fi
 
@@ -1082,11 +1394,7 @@ apply_writes_with_recognition() {
     url="$(jq -r '.url' <<< "${action}")"
     body="$(jq -c '.body // empty' <<< "${action}")"
     resp="$(mktemp)"
-    if [[ -n "${body}" ]]; then
-      jira_request "${method}" "${url}" "${body}" > "${resp}"
-    else
-      jira_request "${method}" "${url}" > "${resp}"
-    fi
+    _plan_apply_write "${method}" "${url}" "${body}" "${resp}"
     rc=$?
     ((rc > worst)) && worst=${rc}
     if ((rc >= 2)); then
@@ -1101,7 +1409,6 @@ apply_writes_with_recognition() {
       key="$(jq -r '.key // empty' < "${resp}")"
       local_id="$(jq -r '.local_id // empty' <<< "${action}")"
       if [[ -n "${key}" && -n "${local_id}" ]]; then
-        identity_write "${key}" "${spec_ref}" "bridge" "${local_id}" "story" || true
         local cur new
         cur="$(cat "${spec_file}" 2> /dev/null; printf x)"; cur="${cur%x}"
         new="$(printf '%s' "${cur}" | story_marker_record_ticket "${local_id}" "${key}"; printf x)"; new="${new%x}"
@@ -1110,6 +1417,9 @@ apply_writes_with_recognition() {
         created_out="$(jq -cn --argjson c "${created_out}" --arg k "${key}" --arg lid "${local_id}" \
           '$c + [{key:$k, role:"story", local_id:$lid}]')"
       fi
+      _plan_apply_stamp_identity "${key}" "${spec_ref}" "${action}"
+    elif [[ "${method}" == "PUT" ]]; then
+      _plan_apply_stamp_identity "$(sed -E 's#.*/issue/##' <<< "${url}")" "${spec_ref}" "${action}"
     fi
     rm -f "${resp}"
   done
@@ -1140,11 +1450,7 @@ apply_writes_with_recognition() {
     url="$(jq -r '.url' <<< "${taction}")"
     body="$(jq -c '.body // empty' <<< "${taction}")"
     resp="$(mktemp)"
-    if [[ -n "${body}" ]]; then
-      jira_request "${method}" "${url}" "${body}" > "${resp}"
-    else
-      jira_request "${method}" "${url}" > "${resp}"
-    fi
+    _plan_apply_write "${method}" "${url}" "${body}" "${resp}"
     rc=$?
     ((rc > worst)) && worst=${rc}
     if ((rc >= 2)); then
@@ -1154,12 +1460,11 @@ apply_writes_with_recognition() {
       return "${worst}"
     fi
 
-    if [[ "${method}" == "POST" && "${url}" == */issue && -n "${tasks_file}" ]]; then
+    if [[ "${method}" == "POST" && "${url}" == */issue ]]; then
       local tkey tlocal_id
       tkey="$(jq -r '.key // empty' < "${resp}")"
       tlocal_id="$(jq -r '.local_id // empty' <<< "${taction}")"
-      if [[ -n "${tkey}" && -n "${tlocal_id}" ]]; then
-        identity_write "${tkey}" "${spec_ref}" "bridge" "${tlocal_id}" "task" || true
+      if [[ -n "${tkey}" && -n "${tlocal_id}" && -n "${tasks_file}" ]]; then
         local tcur tnew
         tcur="$(cat "${tasks_file}" 2> /dev/null; printf x)"; tcur="${tcur%x}"
         tnew="$(printf '%s' "${tcur}" | task_marker_record_ticket "${tlocal_id}" "${tkey}"; printf x)"; tnew="${tnew%x}"
@@ -1167,6 +1472,9 @@ apply_writes_with_recognition() {
         created_out="$(jq -cn --argjson c "${created_out}" --arg k "${tkey}" --arg lid "${tlocal_id}" \
           '$c + [{key:$k, role:"task", local_id:$lid}]')"
       fi
+      _plan_apply_stamp_identity "${tkey}" "${spec_ref}" "${taction}"
+    elif [[ "${method}" == "PUT" ]]; then
+      _plan_apply_stamp_identity "$(sed -E 's#.*/issue/##' <<< "${url}")" "${spec_ref}" "${taction}"
     fi
     rm -f "${resp}"
   done

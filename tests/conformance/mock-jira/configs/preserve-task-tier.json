@@ -1,0 +1,54 @@
+{
+  "projects": { "TASKP": "company" },
+  "issues": {
+    "TASKP-1": {
+      "summary": "Task Tier Demo",
+      "description": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          { "type": "paragraph", "content": [ { "type": "text", "text": "A human's note on the Epic, above the boundary." } ] },
+          { "type": "paragraph", "content": [ { "type": "text", "text": "Synced from spec-kit — do not edit below this line", "marks": [ { "type": "strong" } ] } ] },
+          { "type": "paragraph", "content": [ { "type": "text", "text": "stale managed body from a previous run" } ] }
+        ]
+      },
+      "issuetype": { "id": "20701" },
+      "properties": {
+        "spec-kit-jira": { "origin": "bridge", "repo": "acme/app", "spec_slug": "001-feature", "role": "parent" }
+      }
+    },
+    "TASKP-2": {
+      "summary": "First story",
+      "description": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          { "type": "paragraph", "content": [ { "type": "text", "text": "A human's note on the story, above the boundary." } ] },
+          { "type": "paragraph", "content": [ { "type": "text", "text": "Synced from spec-kit — do not edit below this line", "marks": [ { "type": "strong" } ] } ] },
+          { "type": "paragraph", "content": [ { "type": "text", "text": "stale managed body from a previous run" } ] }
+        ]
+      },
+      "issuetype": { "id": "20704" },
+      "properties": {
+        "spec-kit-jira": { "origin": "bridge", "repo": "acme/app", "spec_slug": "001-feature", "role": "story", "story": "5555555555555555" }
+      }
+    },
+    "TASKP-3": {
+      "summary": "Implement the first story's feature, renamed by hand",
+      "description": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          { "type": "paragraph", "content": [ { "type": "text", "text": "A human's note on the sub-task, above the boundary." } ] },
+          { "type": "paragraph", "content": [ { "type": "text", "text": "Synced from spec-kit — do not edit below this line", "marks": [ { "type": "strong" } ] } ] },
+          { "type": "paragraph", "content": [ { "type": "text", "text": "stale managed body from a previous run" } ] }
+        ]
+      },
+      "issuetype": { "id": "20705" },
+      "parent": { "key": "TASKP-2" },
+      "properties": {
+        "spec-kit-jira": { "origin": "bridge", "repo": "acme/app", "spec_slug": "001-feature", "role": "task", "story": "6666666666666666", "summary": "Implement the first story's feature" }
+      }
+    }
+  }
+}

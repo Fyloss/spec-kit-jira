@@ -74,3 +74,33 @@ Describe 'T053 [Phase 5, US2] — the identity marker gains role (data-model.md 
         Test-JiraIdentityClaimedByOther -MarkerJson $marker -SpecRefJson $script:SpecA | Should -BeFalse
     }
 }
+
+Describe 'T037 [Phase 5, US3] — the identity marker gains summary (summary-record.md §1/§2)' {
+    It 'omits summary when not supplied' {
+        $m = Get-JiraIdentityMarker -SpecRefJson $script:SpecA -Origin 'bridge-created' -Role 'parent' | ConvertFrom-Json
+        ($m.PSObject.Properties.Name -contains 'summary') | Should -BeFalse
+    }
+
+    It 'records summary as the exact string given, alongside role and story' {
+        $m = Get-JiraIdentityMarker -SpecRefJson $script:SpecA -Origin 'bridge-created' -Story '7f3a9c1e40b2d85a' -Role 'story' -Summary '  The Epic, renamed  ' | ConvertFrom-Json
+        $m.summary | Should -Be '  The Epic, renamed  '
+        $m.role | Should -Be 'story'
+        $m.story | Should -Be '7f3a9c1e40b2d85a'
+    }
+
+    It "Test-JiraIdentityClaimedByOther is unaffected by summary's presence" {
+        $marker = Get-JiraIdentityMarker -SpecRefJson $script:SpecA -Origin 'bridge-created' -Summary 'Some title'
+        Test-JiraIdentityClaimedByOther -MarkerJson $marker -SpecRefJson $script:SpecB | Should -BeTrue
+        Test-JiraIdentityClaimedByOther -MarkerJson $marker -SpecRefJson $script:SpecA | Should -BeFalse
+    }
+
+    It 'Set-JiraIdentity stamps a marker carrying summary when given one' {
+        $m = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $m.BaseUrl
+        try {
+            $rc = Set-JiraIdentity -IssueKey 'ABC-1' -SpecRefJson $script:SpecA -Origin 'bridge-created' -Summary 'The Epic'
+            $rc | Should -Be 0
+        }
+        finally { Stop-JiraMock -Mock $m }
+    }
+}
