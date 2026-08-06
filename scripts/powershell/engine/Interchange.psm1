@@ -66,10 +66,29 @@ function Get-JiraSpanErrorList {
     param($Span)
     $errors = [System.Collections.Generic.List[string]]::new()
     if ((Get-JiraInterchangeProp $Span 'text') -isnot [string]) { $errors.Add('span.text is required') }
-    if (-not (Test-JiraInterchangeProp $Span 'marks')) { $errors.Add('span.marks is required') }
-    foreach ($m in @(Get-JiraInterchangeProp $Span 'marks')) {
-        if ($null -eq $m) { continue }
-        foreach ($e in (Get-JiraMarkErrorList $m)) { $errors.Add($e) }
+    # Twin of the Bash rule `(.marks | type) != "array"` (interchange.sh): a
+    # present-but-wrong-type value is refused exactly like an absent one.
+    if (-not (Test-JiraInterchangeProp $Span 'marks')) {
+        $errors.Add('span.marks is required')
+    }
+    else {
+        # Direct property access, NOT Get-JiraInterchangeProp, and a PLAIN
+        # assignment statement — never the value of an if/else expression:
+        # either form routes the value through PowerShell's output stream,
+        # which unwraps a one-element array to a scalar AND collapses a
+        # zero-element array to $null, either way misreporting a genuine
+        # array as "not an array" (same hazard as story.tasks below —
+        # Copilot review).
+        $marksVal = $Span.marks
+        if ($null -eq $marksVal -or $marksVal -isnot [System.Array]) {
+            $errors.Add('span.marks is required')
+        }
+        else {
+            foreach ($m in $marksVal) {
+                if ($null -eq $m) { continue }
+                foreach ($e in (Get-JiraMarkErrorList $m)) { $errors.Add($e) }
+            }
+        }
     }
     return $errors
 }

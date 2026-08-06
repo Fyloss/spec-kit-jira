@@ -241,6 +241,12 @@ setup() {
   [[ "$output" == *"mark.href must be an absolute http(s) URL"* ]]
 }
 
+@test "a span whose marks is present but not an array is rejected (data-model.md §5 rule 3)" {
+  run bash -c "jq '.stories[0].description.blocks[0].spans[0].marks=\"oops\"' '${VALID}' | { source '${ENGINE_DIR}/interchange.sh'; interchange_validate; }"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"span.marks is required"* ]]
+}
+
 @test "interchange_build is byte-identical across ports (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local parse ctx b p
@@ -253,7 +259,8 @@ setup() {
 
 @test "both ports agree on validity for the same inputs" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
-  for mutation in '.' '.schema_version="2.0"' '.routing.project_key="bad-key"' '.stories=[]'; do
+  for mutation in '.' '.schema_version="2.0"' '.routing.project_key="bad-key"' '.stories=[]' \
+    '.stories[0].description.blocks[0].spans[0].marks="oops"'; do
     doc="$(jq -c "${mutation}" "${VALID}")"
     if printf '%s' "${doc}" | interchange_validate 2> /dev/null; then bash_ok=0; else bash_ok=1; fi
     if printf '%s' "${doc}" | pwsh -NoProfile -Command "Import-Module '${PS_ENGINE}/Interchange.psm1' -Force; if (Test-JiraInterchange ([Console]::In.ReadToEnd())) { exit 0 } else { exit 1 }" 2> /dev/null; then ps_ok=0; else ps_ok=1; fi

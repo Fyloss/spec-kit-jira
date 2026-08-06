@@ -166,7 +166,7 @@ tok() { markdown_tokenize_inline "$1" | jq -cS .; }
     b="$(markdown_tokenize_inline "${c}" | jq -cS .)"
     # printf without a trailing newline: a here-string (<<<) would append one,
     # which the tokenizer (rightly) treats as literal text and diverges on.
-    p="$(printf '%s' "${c}" | pwsh -NoProfile -Command "Import-Module '${PS_ENGINE}/Markdown.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraMarkdownInlineSpans -Text ([Console]::In.ReadToEnd())))" | jq -cS .)"
+    p="$(printf '%s' "${c}" | pwsh -NoProfile -Command "Import-Module '${PS_ENGINE}/Markdown.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraMarkdownInlineSpanList -Text ([Console]::In.ReadToEnd())))" | jq -cS .)"
     [ "${b}" = "${p}" ]
   done
 }

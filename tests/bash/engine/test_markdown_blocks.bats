@@ -111,7 +111,7 @@ blocks() { markdown_parse_blocks "$1" | jq -cS .; }
   local d b p
   for d in "${docs[@]}"; do
     b="$(markdown_parse_blocks "${d}" | jq -cS .)"
-    p="$(printf '%s' "${d}" | pwsh -NoProfile -Command "Import-Module '${PS_ENGINE}/Markdown.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraMarkdownBlocks -Text ([Console]::In.ReadToEnd())))" | jq -cS .)"
+    p="$(printf '%s' "${d}" | pwsh -NoProfile -Command "Import-Module '${PS_ENGINE}/Markdown.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraMarkdownBlockList -Text ([Console]::In.ReadToEnd())))" | jq -cS .)"
     [ "${b}" = "${p}" ]
   done
 }

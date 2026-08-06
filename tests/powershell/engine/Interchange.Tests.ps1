@@ -47,6 +47,18 @@ Describe 'Test-JiraInterchange' {
         Test-JiraInterchange ($bad | ConvertTo-Json -Depth 100) 2>$null | Should -BeFalse
     }
 
+    It 'rejects a span whose marks is present but not an array (data-model.md §5 rule 3)' {
+        $bad = ($script:Valid | ConvertFrom-Json)
+        $bad.stories[0].description.blocks[0].spans[0].marks = 'oops'
+        $sw = [System.IO.StringWriter]::new()
+        $prev = [Console]::Error
+        [Console]::SetError($sw)
+        try { $result = Test-JiraInterchange ($bad | ConvertTo-Json -Depth 100) }
+        finally { [Console]::SetError($prev) }
+        $result | Should -BeFalse
+        $sw.ToString() | Should -BeLike '*span.marks is required*'
+    }
+
     It 'a document still carrying epic.strategy is not an error — it is simply ignored (008 T024/T026, FR-030)' {
         $bad = ($script:Valid | ConvertFrom-Json)
         $bad.epic | Add-Member -NotePropertyName strategy -NotePropertyValue 'per_repo' -Force
