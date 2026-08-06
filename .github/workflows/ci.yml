@@ -171,9 +171,8 @@ jobs:
 
       - name: TEMP diagnostic (018 annotation mechanism check — revert before merge)
         run: |
-          printf '::notice title=diag-test::hello-notice\n'
-          printf '::warning title=diag-test::hello-warning\n'
-          printf '::error title=diag-test::hello-error\n'
+          sudo apt-get update && sudo apt-get install -y bats
+          GITHUB_ACTIONS=true tests/run-bash.sh tests/bash/ci/test_mtime_helper.bats
 
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
