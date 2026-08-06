@@ -679,7 +679,38 @@ open, low-priority puzzle, not blocking this feature. All temporary
 diagnostic steps were reverted; `ci.yml` diffed clean against the
 pre-detour commit before this A/B change was applied.
 
-Result: **pending** — waiting on the real run's `Unit suites (macos-latest)`
-duration.
+**Result: inconclusive — the run is contaminated by noise unrelated to the
+A/B pin.** Run `31083948515`, "Run the Bash suite" step alone (excluding
+Pester and the conformance corpus, which run in later steps of the same
+job):
+
+| Host | jobs default this run | step duration | prior job-total baseline |
+| --- | --- | --- | --- |
+| ubuntu-latest | 3x (unchanged) | **49m01s** | ~47-48m (whole job, all 3 steps) |
+| macos-latest | 1x (A/B-pinned) | **37m42s** | 42m25s pre-T031 / ~51-55m T031-regressed |
+
+ubuntu-latest's own "Run the Bash suite" step ALONE now exceeds its entire
+historical *job* total (all three steps combined) — a step that measured
+low double digits of minutes on every prior run. Since the A/B change
+never touches Linux, this can only be noise: most likely knock-on effects
+from the seven back-to-back pushes (each cancelling the previous run via
+`concurrency: cancel-in-progress`) made during the annotation-mechanism
+detour immediately before this run, possibly compounded by real suite
+growth this session (several new `tests/bash/ci/*.bats` files added for
+018 itself). Not read as evidence against the oversubscription hypothesis
+either: macOS-at-1x still finished faster than ubuntu-at-3x within this
+same noisy run, which is at least directionally consistent, but one noisy
+run with no same-run Linux control at 1x cannot confirm it.
+
+**Decision: stop here.** Per this project's own principle for Windows CI
+flakes (one retry, then hand the result back rather than chasing further),
+the same discipline applies to a third full-matrix run: each attempt costs
+a real macOS-runner slot and ~45-60 minutes, and this one didn't produce a
+clean signal. The macOS regression stays **documented, unconfirmed, not
+fixed** — a candidate follow-up (an OS-specific oversubscription default,
+lower on macOS) is recorded here for whoever picks this up next, but
+implementing it now, on this evidence, would be tuning blind exactly as
+this task set out not to do. `ci.yml`'s "Run the Bash suite" step was
+reverted to its pre-A/B form and diffed clean against commit `a896fbb`.
 
 ---
