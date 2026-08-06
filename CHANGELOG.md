@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-08-06
+
+### Fixed
+
+- A description update could overwrite a human's own text added directly in
+  Jira, and a Product Owner's rename of a mirrored ticket's title was silently
+  undone on the next run. Every managed description now carries a boundary
+  marker: content the mirror owns lives below it and is rewritten in full,
+  content above it — a human's prose, or a `plan.md` section added inside the
+  mirror's own region — is preserved verbatim. A rename that no longer
+  matches the mirror's own last-written title is left alone and warned about
+  by default (`--on-drift=proceed` to overwrite it deliberately, as before).
+  A ticket a previous release wrote gains the boundary on its next ordinary
+  write, without losing a word under any circumstance; an existing consumer
+  will see this one-time transition as ordinary `updated` counts, with a
+  named warning only where the mirror's own former output could not be
+  identified unambiguously — see INSTALL.md.
+
 ## [0.11.1] - 2026-08-05
 
 ### Fixed
@@ -28,19 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   label and refuses rather than risking a duplicate — a best-effort,
   read-only mitigation on top of the marker-line fix above, droppable
   independently of it.
-- A description update could overwrite a human's own text added directly in
-  Jira, and a Product Owner's rename of a mirrored ticket's title was silently
-  undone on the next run. Every managed description now carries a boundary
-  marker: content the mirror owns lives below it and is rewritten in full,
-  content above it — a human's prose, or a `plan.md` section added inside the
-  mirror's own region — is preserved verbatim. A rename that no longer
-  matches the mirror's own last-written title is left alone and warned about
-  by default (`--on-drift=proceed` to overwrite it deliberately, as before).
-  A ticket a previous release wrote gains the boundary on its next ordinary
-  write, without losing a word under any circumstance; an existing consumer
-  will see this one-time transition as ordinary `updated` counts, with a
-  named warning only where the mirror's own former output could not be
-  identified unambiguously — see INSTALL.md.
 
 ## [0.11.0] - 2026-08-04
 
@@ -727,7 +732,8 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.2...HEAD
+[0.11.2]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.1...v0.10.2
