@@ -542,6 +542,87 @@ committing a file back to the repo, which needs `contents: write`.
 — a deliberate minimum this feature should not widen without saying so.
 Raised to the user rather than changed silently, same posture as T015.
 
+## PR #26 (`018-optimize-ci-wall-clock` → `main`) — first two real CI runs
+
+Merged `main` in first (one real conflict: `.specify/feature.json`, a
+trivial active-feature pointer, resolved by keeping this feature's value;
+`tests/conformance/mock-jira/curl-shim.sh` and `mock-server.ps1` both
+changed on both sides — feature 017 added `_shim_label_search` — but
+merged cleanly, verified: `bash -n`, the full local suite, and the real
+corpus at 90/90 verdicts (84 + 6 scenarios 017 added) all green before
+pushing).
+
+**Run 1 (`31050522526`, commit `627b949`) — three failures, none of them
+what they first looked like:**
+
+- **`Static checks` / `Unit suites (ubuntu-latest)`** — a real bug in
+  MY OWN test. `test_conformance_worker_accounting.bats`'s R5/R6 test
+  asserted an exact "verdicts: 2/3" after killing one worker. Reproduced in
+  an `ubuntu:24.04` Docker container (started Docker Desktop locally for
+  this — raw job logs answer 403, non-admin token, so a real Linux host was
+  the only way to see the actual failure): **GNU `xargs` (Linux) aborts the
+  whole `-P` batch when a child dies by signal (0/3 survive); BSD `xargs`
+  (macOS) lets already-dispatched siblings finish (2/3 survive).** Both
+  satisfy R5/R6 — a shortfall is reported either way, which is the actual
+  guarantee — so the fix relaxed the assertion to the portable invariant
+  (fewer verdicts than the corpus), not a specific fraction. Verified green
+  in the container AND locally after the fix; **confirmed green for real**
+  on the second CI run (below).
+- **`Unit suites (windows-latest)`** — NOT this feature's bug. Failure:
+  `[-] refuses plan.md before any request, exit 1, plan.md untouched (§5
+  T1, T2)`, a Pester test from feature 017's target-guard work. Confirmed
+  by checking `main`'s own most recent CI run (`31006298347`, before this
+  PR): **identical failure, identical message.** Pre-existing on `main`,
+  inherited by the merge, not caused by this branch. Not fixed here — out
+  of scope, and not this feature's code.
+
+**Run 2 (`31055241513`/`31055241515`/`31055241528`, commit `0e1630b`) —
+after the worker-accounting fix:**
+
+| Check | Result |
+| --- | --- |
+| Lint, Static checks, Boundary, module-parity, version-string, Detect Bash-relevant changes, PowerShell coverage | **pass** |
+| Unit suites (ubuntu-latest) | **pass** (47m35s) |
+| Unit suites (macos-latest) | **pass** (55m14s) |
+| Unit suites (windows-latest) | **fail** — same pre-existing 017 bug, confirmed unrelated |
+| Bash coverage (kcov) | **fail** — the pre-existing, documented-since-2026-07-28 red gate (Phase 5 of this feature, not yet started) |
+
+**Both failures here are already-documented, pre-existing states this PR
+did not create.** No new regression from this feature's changes across
+either run.
+
+### An open question this run surfaced: macOS may have gotten SLOWER
+
+Two consecutive real measurements, both above the pre-change baseline:
+
+| Host | Pre-change baseline (run `30947466217`) | Run 1 (`627b949`) | Run 2 (`0e1630b`) |
+| --- | --- | --- | --- |
+| ubuntu-latest | 48m33s | ~47m24s (failed) | **47m35s** — essentially unchanged |
+| macos-latest | 42m25s | ~50m57s | **55m14s** — up ~25-30% |
+
+ubuntu-latest tracks its baseline closely. macos-latest is **consistently
+higher** across both runs, not a one-off — this looks like a real effect,
+not noise, though two data points from one PR is thin evidence for a
+mechanism.
+
+**Not yet diagnosed. Leading hypothesis, not confirmed**: T031's
+oversubscription (3x core count, uniform across every host) may backfire
+specifically on `macos-latest`, whose GH-hosted runners are historically
+the most resource-constrained of the three (fewest vCPUs) — 3x on an
+already-tight core budget could turn process-creation overhead into
+context-switch thrashing rather than better utilisation, unlike Windows/
+Linux where the same multiplier helped. The suite also grew (149→159
+files, 1427→1521 tests) from merging feature 017, which alone would add
+some time on every host but should not explain a Linux/macOS split this
+large.
+
+**Not acted on without more evidence.** Raised to the user rather than
+tuned blindly — the fix, if the hypothesis holds, is most likely an
+OS-specific oversubscription multiplier (e.g. lower on macOS) rather than
+a uniform one, but that needs at least one more data point (a run with
+`SPEC_KIT_JIRA_BATS_JOBS` pinned to the OLD default on macOS, for a clean
+A/B) before being justified as a real fix rather than a guess.
+
 ### T015 — the escalated decision (answered by the user, 2026-08-05)
 
 Put to the user with W1's measured number attached (W4's, per above, was not
