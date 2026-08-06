@@ -231,7 +231,7 @@ _adf_resolve_managed() {
   marker_count="$(jq -r '.marker_count' <<< "${split}")"
 
   if ((marker_count > 1)); then
-    jq -cn '{status:"malformed"}'
+    jq -cn '{status:"malformed"}' | json_canonical
     return 0
   elif ((marker_count == 1)); then
     prefix="$(jq -c '.prefix' <<< "${split}")"
