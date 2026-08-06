@@ -169,10 +169,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: TEMP setup-uv (stop-commands hypothesis check)
+        uses: astral-sh/setup-uv@v5
+
+      - name: TEMP cache (stop-commands hypothesis check)
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/uv/tools/specify-cli
+          key: specify-cli-diag-${{ runner.os }}-github-spec-kit-main
+
       - name: TEMP diagnostic (018 annotation mechanism check — revert before merge)
         run: |
           sudo apt-get update && sudo apt-get install -y bats jq
-          GITHUB_ACTIONS=true tests/run-bash.sh
+          GITHUB_ACTIONS=true tests/run-bash.sh tests/bash/ci/test_mtime_helper.bats
 
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
