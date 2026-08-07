@@ -104,3 +104,31 @@ Describe 'Invoke-JiraReconcile — reordering and retitling never swap tickets (
         $ticket.fields.summary | Should -Be 'Export a date range (renamed)'
     }
 }
+
+# --- 019, T044: contract §5.5, FR-018, SC-005 on all three tiers -----------
+Describe '019, T044 — origin bridge, no-boundary description: settles to zero writes' {
+    BeforeEach {
+        $script:Work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse (Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-pre-release-migration') $script:Work
+        $script:Spec = Join-Path $script:Work 'specs/001-feature/spec.md'
+        $env:JIRA_CONFIG_DIR = Join-Path $script:Work '.specify/jira'
+        $env:SPEC_KIT_JIRA_REPO = 'acme/app'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-feature'
+        Remove-Item Env:\SPEC_KIT_JIRA_ID_SOURCE -ErrorAction SilentlyContinue
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/preserve-pre-release.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+    }
+    AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
+
+    It 'the first run replaces the region, the second reports 0/0 and issues no PUT' {
+        $first = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
+        $pre1 = $first.actions | Where-Object { $_.url -like '*PRE-1' }
+        $pre1.body.fields.description.content[0].content[0].text | Should -Be 'Synced from spec-kit — do not edit below this line'
+
+        Clear-Content -LiteralPath $script:M.CallLog
+        $second = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
+        $second.counts.created | Should -Be 0
+        $second.counts.updated | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -like 'PUT *' }).Count | Should -Be 0
+    }
+}

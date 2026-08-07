@@ -136,6 +136,7 @@ mindmap
         zero-churn diff
       managed_section
         marker-delimited byte splice
+        ownership decision — self, other or unknown, opaque to the sink (019)
       naming
         slug and branch pattern and short name
     sink

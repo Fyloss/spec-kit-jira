@@ -131,6 +131,35 @@ boot_declared_hierarchy() {
   [ "$(jq -r '[.actions[] | select(.role=="story")] | length' <<< "${ps_out}")" -eq 2 ]
 }
 
+# --- 019, T043: FR-017 on the origin-bridge, no-boundary payload -----------
+@test "019, T043 — --dry-run predicts exactly the description payload and the (now empty) warning set an origin-bridge, no-boundary ticket produces, and issues zero writes (FR-017)" {
+  local work="${BATS_TEST_TMPDIR}/repo-pre-release-migration-dry"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-pre-release-migration" "${work}"
+  local spec="${work}/specs/001-feature/spec.md"
+  export JIRA_CONFIG_DIR="${work}/.specify/jira"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-feature"
+  unset SPEC_KIT_JIRA_PLAN_CONTEXT SPEC_KIT_JIRA_LIFECYCLE SPEC_KIT_JIRA_ID_SOURCE
+  mock_start "${MOCK}/configs/preserve-pre-release.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_reconcile reconcile "${spec}" --dry-run --json
+  local dry_status="$status" dry_output="$output"
+  [ "${dry_status}" -eq 0 ]
+  local pre1_dry; pre1_dry="$(jq -c '.actions[] | select(.url | endswith("PRE-1"))' <<< "${dry_output}")"
+  [ "$(jq -r '.body.fields.description.content[0].content[0].text' <<< "${pre1_dry}")" = "$(adf_managed_marker)" ]
+  [ "$(jq -r '[.warnings[]? // empty] | map(select(test("PRE-1"))) | length' <<< "${dry_output}")" -eq 0 ]
+
+  local real_work="${BATS_TEST_TMPDIR}/repo-pre-release-migration-dry-real"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-pre-release-migration" "${real_work}"
+  export JIRA_CONFIG_DIR="${real_work}/.specify/jira"
+  run cmd_reconcile reconcile "${real_work}/specs/001-feature/spec.md" --json
+  local real_status="$status" real_output="$output"
+  [ "${real_status}" -eq "${dry_status}" ]
+  local pre1_real; pre1_real="$(jq -c '.actions[] | select(.url | endswith("PRE-1"))' <<< "${real_output}")"
+  [ "$(jq -c '.body.fields.description' <<< "${pre1_dry}")" = "$(jq -c '.body.fields.description' <<< "${pre1_real}")" ]
+}
+
 # --- T060 [016, US3] — the rendered description in the dry-run preview -----
 @test "T060 [016, US3] — the rendered description appears in the dry-run preview with no write issued (FR-014)" {
   local work="${BATS_TEST_TMPDIR}/repo-markdown-prose-dry"

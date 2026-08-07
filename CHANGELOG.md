@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-08-07
+
+### Fixed
+
+- Re-running reconcile against an edited specification could leave a ticket
+  carrying two Acceptance Criteria sections — the previous run's scenarios,
+  then a boundary line, then the current specification's, with no way to
+  tell which the team was meant to build. The mirror now decides whose text
+  an unbounded description is by the ticket's recorded origin rather than by
+  guessing from content: a ticket the mirror created has its region replaced
+  in full on every update, and a ticket a human created and handed over still
+  has its prose preserved exactly as before. `plan.md` and `tasks.md` updates
+  are fixed identically on the parent and the sub-task tier. A ticket already
+  carrying a duplicate from before this fix is not repaired automatically —
+  it is cleaned up by hand or by recreating the ticket.
+
 ## [0.12.0] - 2026-08-06
 
 ### Added

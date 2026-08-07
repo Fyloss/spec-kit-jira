@@ -92,7 +92,10 @@ Describe 'ConvertTo-JiraManagedAdfDocument (018, T013, contract §3 — origin-i
     It 'row 3 — clean migration: existing ends with the freshly rendered managed nodes, no duplication (FR-020a)' {
         $managed = (ConvertTo-JiraAdfDocument -ContentJson $script:Content | ConvertFrom-Json).content
         $preRelease = (@{ type = 'doc'; version = 1; content = $managed } | ConvertTo-Json -Depth 100 -Compress)
-        $raw = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -ExistingJson $preRelease
+        # 019: origin 'human' keeps this on the suffix-split ('other') path
+        # it was written to test; omitting Origin now defaults to 'unknown'
+        # (contract §2), a different row of the decision table.
+        $raw = ConvertTo-JiraManagedAdfDocument -ContentJson $script:Content -ExistingJson $preRelease -Origin 'human'
         $r = $raw | ConvertFrom-Json
         $r.status | Should -Be 'ok'
         $needTexts = @($r.doc.content | Where-Object { $_.content -and $_.content[0].text -eq 'The need statement.' })

@@ -133,7 +133,11 @@ CONTENT='{
   local managed pre_release
   managed="$(adf_render_description "${CONTENT}" | jq -c '.content')"
   pre_release="$(jq -cn --argjson c "${managed}" '{type:"doc", version:1, content:$c}')"
-  run adf_render_managed_description "${CONTENT}" "${pre_release}"
+  # 019: an origin of "human" keeps this on the suffix-split (ownership
+  # "other") path it was written to test — the migration behaviour is
+  # unmodified (contract §5.3); omitting the origin now defaults to
+  # "unknown" (contract §2), a different row of the decision table.
+  run adf_render_managed_description "${CONTENT}" "${pre_release}" human
   [ "$status" -eq 0 ]
   [ "$(jq -r '.status' <<< "$output")" = "ok" ]
   local doc; doc="$(jq -c '.doc' <<< "$output")"

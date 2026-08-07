@@ -180,6 +180,29 @@ Describe 'FR-012 — a duplicated delimiter warns and writes no description' {
     }
 }
 
+Describe '019, T019 [US4] — text a human wrote is never mistaken for the mirror''s' {
+    It 'origin human, no boundary: the whole description is preserved above a newly established boundary, with one warning (FR-003)' {
+        $existing = '{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"A human wrote this ticket from scratch."}]}]}'
+        $ctx = "{`"base_url`":`"https://mock`",`"parent_type_id`":`"10101`",`"parent_local_id`":`"3f2a91c04b7e6d18`",`"tickets`":{`"s1`":`"PROJ-1`"},`"ticket_descriptions`":{`"s1`":$existing},`"ticket_origins`":{`"s1`":`"human`"},`"priority_ids`":{`"P2`":`"2`"}}"
+        $r = Get-JiraPlanWriteSet -NeutralDocJson $script:Doc -PlanContextJson $ctx | ConvertFrom-Json -Depth 100
+        $desc = $r.stories[0].body.fields.description
+        $desc.content[0].content[0].text | Should -Be 'A human wrote this ticket from scratch.'
+        (ConvertTo-Json -InputObject $desc -Depth 100 -Compress) | Should -BeLike '*do not edit below this line*'
+        ($r.warnings -join ' ') | Should -BeLike '*PROJ-1*'
+    }
+
+    It 'origin human, existing boundary: human prose above it is preserved verbatim, only the region below is replaced (FR-003)' {
+        $managed = @((ConvertTo-JiraAdfDocument -ContentJson '{"description":{"blocks":[{"type":"paragraph","spans":[{"text":"Story body.","marks":[]}]}]}}' | ConvertFrom-Json -Depth 100).content)
+        $existing = HumanDesc 'Context the product owner added.' $managed
+        $existingJson = ConvertTo-Json -InputObject $existing -Depth 100 -Compress
+        $ctx = "{`"base_url`":`"https://mock`",`"parent_type_id`":`"10101`",`"parent_local_id`":`"3f2a91c04b7e6d18`",`"tickets`":{`"s1`":`"PROJ-1`"},`"ticket_descriptions`":{`"s1`":$existingJson},`"ticket_origins`":{`"s1`":`"human`"}}"
+        $r = Get-JiraPlanWriteSet -NeutralDocJson $script:Doc -PlanContextJson $ctx | ConvertFrom-Json -Depth 100
+        $desc = $r.stories[0].body.fields.description
+        $desc.content[0].content[0].text | Should -Be 'Context the product owner added.'
+        @($r.warnings | Where-Object { $_ }).Count | Should -Be 0
+    }
+}
+
 Describe 'T069 (FR-011) — an oversized-description rejection retries without it' {
     AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
 

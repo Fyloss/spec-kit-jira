@@ -135,6 +135,71 @@ NO_PLAN='[]'
 # case is proven byte-for-byte cross-port at the plan_apply unit level
 # (test_plan_apply_parent.bats/PlanApply.Parent.Tests.ps1, T090)") — this test
 # follows that established precedent for the same reason.
+# --- 019, T024: origin bridge, no boundary, parent tier (US2 AC1/AC3) ------
+# A parent description written by a release predating the boundary — no
+# marker, the whole content the mirror's own — carries no human prefix, so
+# `_bridge_desc_no_boundary` skips `_human_desc`'s prefix and marker paragraph
+# entirely.
+
+_bridge_desc_no_boundary() {
+  local managed="$1"
+  jq -cn --argjson c "${managed}" '{type:"doc", version:1, content:$c}'
+}
+
+@test "019, T024 — origin bridge, no boundary, changed plan summary: exactly one section, no trace of the previous (FR-010)" {
+  local managed_a existing_a ctx
+  managed_a="$(adf_render_description "$(jq -c '.epic' <<< "$(_doc "${PLAN_A}")")" | jq -c '.content')"
+  existing_a="$(_bridge_desc_no_boundary "${managed_a}")"
+  ctx="$(jq -cn --argjson ex "${existing_a}" '{base_url:"https://mock", parent_type_id:"10101", parent_key:"PROJ-1", parent_origin:"bridge", parent_current:{summary:"The Epic", description:$ex}, tickets:{}}')"
+  run plan_writes "$(_doc "${PLAN_B}")" "${ctx}"
+  [ "$status" -eq 0 ]
+  local desc; desc="$(jq -c '.parent.body.fields.description' <<< "$output")"
+  [ "$(jq '[.content[] | select((.content[0].text? // "") == "Implementation Plan")] | length' <<< "${desc}")" -eq 1 ]
+  [[ "$(jq -c '.content' <<< "${desc}")" == *"Use a different approach."* ]]
+  [[ "$(jq -c '.content' <<< "${desc}")" != *"Use a shared library."* ]]
+  [ "$(jq -r '.warnings // [] | length' <<< "$output")" -eq 0 ]
+}
+
+@test "019, T024 — plan summary and specification both changed in one run settle in a single write (US2 AC3)" {
+  local managed_a existing_a ctx doc_b out1 desc
+  managed_a="$(adf_render_description "$(jq -c '.epic' <<< "$(_doc "${PLAN_A}")")" | jq -c '.content')"
+  existing_a="$(_bridge_desc_no_boundary "${managed_a}")"
+  ctx="$(jq -cn --argjson ex "${existing_a}" '{base_url:"https://mock", parent_type_id:"10101", parent_key:"PROJ-1", parent_origin:"bridge", parent_current:{summary:"The Epic", description:$ex}, tickets:{}}')"
+  doc_b="$(_doc "${PLAN_B}" | jq -c '.epic.description.blocks[0].spans[0].text = "Epic overview, revised."')"
+  out1="$(plan_writes "${doc_b}" "${ctx}")"
+  desc="$(jq -c '.parent.body.fields.description' <<< "${out1}")"
+  [[ "$(jq -c '.content' <<< "${desc}")" == *"Epic overview, revised."* ]]
+  [[ "$(jq -c '.content' <<< "${desc}")" == *"Use a different approach."* ]]
+  [[ "$(jq -c '.content' <<< "${desc}")" != *"Use a shared library."* ]]
+
+  # The run after it settles: same inputs against the just-written description, zero writes.
+  local existing_b ctx2 out2
+  existing_b="$(_bridge_desc_no_boundary "$(jq -c '.content' <<< "${desc}")")"
+  ctx2="$(jq -cn --argjson ex "${existing_b}" '{base_url:"https://mock", parent_type_id:"10101", parent_key:"PROJ-1", parent_origin:"bridge", parent_current:{summary:"The Epic", description:$ex}, tickets:{}}')"
+  out2="$(plan_writes "${doc_b}" "${ctx2}")"
+  [ "$(jq -c '.parent' <<< "${out2}")" = "null" ]
+}
+
+@test "019, T026 — origin bridge, no boundary, no plan.md: no plan content, no warning, on the run that establishes the boundary and every run after (US2 AC2)" {
+  local managed_a existing_a ctx desc
+  managed_a="$(adf_render_description "$(jq -c '.epic' <<< "$(_doc "${NO_PLAN}")")" | jq -c '.content')"
+  existing_a="$(_bridge_desc_no_boundary "${managed_a}")"
+  ctx="$(jq -cn --argjson ex "${existing_a}" '{base_url:"https://mock", parent_type_id:"10101", parent_key:"PROJ-1", parent_origin:"bridge", parent_current:{summary:"The Epic", description:$ex}, tickets:{}}')"
+  run plan_writes "$(_doc "${NO_PLAN}")" "${ctx}"
+  [ "$status" -eq 0 ]
+  # No marker existed yet, so the boundary is established here — that alone
+  # is a byte change (018 migration behaviour, unaffected by this feature).
+  desc="$(jq -c '.parent.body.fields.description' <<< "$output")"
+  [[ "$(jq -c '.content' <<< "${desc}")" != *"Implementation Plan"* ]]
+  [ "$(jq -r '.warnings // [] | length' <<< "$output")" -eq 0 ]
+
+  # The run after it, against the now-marked description, writes nothing.
+  local ctx2 out2
+  ctx2="$(jq -cn --argjson ex "${desc}" '{base_url:"https://mock", parent_type_id:"10101", parent_key:"PROJ-1", parent_origin:"bridge", parent_current:{summary:"The Epic", description:$ex}, tickets:{}}')"
+  out2="$(plan_writes "$(_doc "${NO_PLAN}")" "${ctx2}")"
+  [ "$(jq -c '.parent' <<< "${out2}")" = "null" ]
+}
+
 @test "T035 — the plan changed, then deleted: both transitions are byte-identical across ports (NFR-1, FR-002, FR-004)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local ps_abs; ps_abs="$(cd "${ROOT}/scripts/powershell/sink/jira" && pwd)"

@@ -421,7 +421,12 @@ function Get-JiraPlanWriteSet {
             $descs = Get-JiraPlanProp $ctx 'ticket_descriptions'
             $existing = Get-JiraPlanProp $descs $sid
             $existingJson = if ($null -eq $existing) { '{}' } else { ConvertTo-JiraJsonValue $existing }
-            $renderJson = ConvertTo-JiraManagedAdfDocument -ContentJson $storyJson -ExistingJson $existingJson
+            # 019: the origin lookup MUST be hoisted above the render call —
+            # this port reads $ticketOrigins only later, at the summary-drift
+            # branch (research R6, the ordering hazard that exists only here).
+            $ticketOriginsForRender = Get-JiraPlanProp $ctx 'ticket_origins'
+            $storyOriginForRender = [string](Get-JiraPlanProp $ticketOriginsForRender $sid)
+            $renderJson = ConvertTo-JiraManagedAdfDocument -ContentJson $storyJson -ExistingJson $existingJson -Origin $storyOriginForRender
             $fieldResult = Get-JiraApplyManagedField -RenderJson $renderJson -Label $ticket | ConvertFrom-Json -Depth 100
             if ([string]$fieldResult.warning -ne '') { $planWarnings.Add([string]$fieldResult.warning) }
 
@@ -583,7 +588,11 @@ function Get-JiraPlanWriteSetParent {
 
     $existing = Get-JiraPlanProp $current 'description'
     $existingJson = if ($null -eq $existing) { '{}' } else { ConvertTo-JiraJsonValue $existing }
-    $renderJson = ConvertTo-JiraManagedAdfDocument -ContentJson $epicJson -ExistingJson $existingJson
+    # 019: hoisted above the render call — this port reads $parentOrigin only
+    # later, at the summary-drift branch (research R6, the ordering hazard
+    # that exists only here).
+    $parentOriginForRender = [string](Get-JiraPlanProp $ctx 'parent_origin')
+    $renderJson = ConvertTo-JiraManagedAdfDocument -ContentJson $epicJson -ExistingJson $existingJson -Origin $parentOriginForRender
     $fieldResult = Get-JiraApplyManagedField -RenderJson $renderJson -Label $parentKey | ConvertFrom-Json -Depth 100
     if ([string]$fieldResult.warning -ne '') { $warnings.Add([string]$fieldResult.warning) }
     $epicAdf = $fieldResult.doc
@@ -727,7 +736,12 @@ function Get-JiraPlanTaskWriteSet {
                 # tier exactly as on a story or the parent.
                 $existing = Get-JiraPlanProp $current 'description'
                 $existingJson = if ($null -eq $existing) { '{}' } else { ConvertTo-JiraJsonValue $existing }
-                $renderJson = ConvertTo-JiraManagedTaskAdfDocument -TaskJson $taskJson -ExistingJson $existingJson
+                # 019: hoisted above the render call — this port reads
+                # $taskOrigins only later, at the identity-stamp branch
+                # (research R6, the ordering hazard that exists only here).
+                $taskOriginsForRender = Get-JiraPlanProp $ctx 'ticket_origins'
+                $taskOriginForRender = [string](Get-JiraPlanProp $taskOriginsForRender $tid)
+                $renderJson = ConvertTo-JiraManagedTaskAdfDocument -TaskJson $taskJson -ExistingJson $existingJson -Origin $taskOriginForRender
                 $fieldResult = Get-JiraApplyManagedField -RenderJson $renderJson -Label $ticket | ConvertFrom-Json -Depth 100
                 if ([string]$fieldResult.warning -ne '') { $warnings.Add([string]$fieldResult.warning) }
                 $adf = $fieldResult.doc
