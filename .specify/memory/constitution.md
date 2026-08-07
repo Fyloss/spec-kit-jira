@@ -1,6 +1,57 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 1.2.0 → 1.3.0 (MINOR — materially expanded guidance: the OS secret-manager
+rung is described by the property it must satisfy rather than by three product names, and
+one new rule is added to an existing principle. No principle added, removed, renumbered, or
+redefined; nothing existing weakened or restated.)
+Modified principles:
+  IV. Credential Security — Zero Tokens in the Tree, Ever — the second rung is now defined
+      by its requirement (a store encrypted at rest by the operating system, read at run
+      time) with the per-platform mechanisms listed as how that requirement is met today:
+      macOS Keychain (`security`), Linux libsecret (`secret-tool`), and — replacing
+      "Windows Credential Manager" — PowerShell SecretManagement (`Get-Secret`) against the
+      operator's registered default vault. A platform's mechanism may be replaced by another
+      satisfying the same requirement without a further amendment. A new rule states that
+      the rung is SOFT-OPTIONAL on every platform: an absent tool or module, an unregistered
+      or locked store, and a missing entry each fall through silently; the rung is never a
+      prerequisite check, never raises an error, and never prompts or blocks. The
+      enforcement test gains a per-platform fall-through clause. The rest of Principle IV
+      (nothing secret in a tracked file, the three-rung order itself, the CI note, never
+      logged / never in argv, the pre-write guard) is unchanged.
+Rationale: surfaced by feature 021's Constitution Check. The principle named Windows
+Credential Manager, but PowerShell 7 cannot read a value out of it without a compiled
+interop shim — `cmdkey` enumerates credentials and cannot return one — and Principle VI
+forbids a build or download step at runtime. The port therefore shipped
+`Get-JiraSecretManagerToken` as a deliberate no-op, and the documentation had to tell
+Windows operators that no OS secret-manager rung existed for them: the constitution named a
+door nobody could open, so Windows alone lost the encrypted-store rung the principle exists
+to require. PowerShell SecretManagement, with a SecretStore or CredMan-backed vault, is
+encrypted at rest by the OS, needs no build step, and restores the three-rung shape on all
+three platforms. Naming the requirement rather than the product is what stops the next host
+difference from needing another amendment. The soft-optional rule was already how the Bash
+port behaves (`|| true`, fall through) but was nowhere written down, and SecretStore adds a
+new way to get it wrong: a lockable vault can prompt, and a prompt inside a lifecycle hook
+is a hang.
+Added sections: none
+Removed sections: none
+Templates: re-verified — no template changes required
+  - ✅ .specify/templates/plan-template.md — no reference to Principle IV wording
+  - ✅ .specify/templates/spec-template.md — no reference to Principle IV wording
+  - ✅ .specify/templates/tasks-template.md — no reference to Principle IV wording
+  - ✅ .specify/templates/checklist-template.md — no changes required
+Runtime documentation: deliberately NOT updated in this amendment
+  - ⚠ README.md §Windows, docs/07-configuration-and-secrets.md ("there is no OS
+    secret-manager rung on Windows") — these describe SHIPPED behaviour, which is still
+    accurate. They are updated by the change that implements the rung
+    (specs/021-reconcile-performance FR-040), never ahead of it: documenting a rung the
+    code does not have would be worse than the asymmetry it describes.
+  - ⚠ specs/001-jira-reconcile-engine NFR-3 names Windows Credential Manager — a shipped
+    historical spec, not amended retroactively. Feature 021's spec supersedes it.
+Follow-up TODOs: none
+
+Prior report (1.2.0)
+--------------------
 Version change: 1.1.0 → 1.2.0 (MINOR — materially expanded guidance: one new rule added
 to an existing principle. No principle added, removed, renumbered, or redefined; nothing
 existing weakened or restated.)
@@ -245,9 +296,21 @@ No token, authentication email, real site URL, or accountId may ever enter a tra
 file, including test fixtures.
 
 - Credentials MUST be resolved in this order: environment variables → OS secret manager
-  (macOS Keychain, Linux libsecret, Windows Credential Manager) → gitignored `.env`.
-  In CI (GitHub Actions), secrets are injected as environment variables and therefore
-  resolve via the first rung; no separate mechanism exists or is needed.
+  → gitignored `.env`. The second rung requires a store that the operating system
+  encrypts at rest and that the bridge reads at run time; it is realized today by the
+  macOS Keychain (`security`), Linux libsecret (`secret-tool`), and, on Windows,
+  PowerShell SecretManagement (`Get-Secret`) against the operator's registered default
+  vault. A platform's mechanism MAY be replaced by another satisfying that same
+  requirement without amending this principle — the requirement is the rule, the
+  mechanisms are how it is met. In CI (GitHub Actions), secrets are injected as
+  environment variables and therefore resolve via the first rung; no separate mechanism
+  exists or is needed.
+- The OS secret manager rung is SOFT-OPTIONAL on every platform: an absent tool or
+  module, an unregistered or locked store, and a missing entry MUST each fall through
+  silently to the next rung. That rung MUST NEVER be tested by the prerequisite check,
+  MUST NEVER raise an error, and MUST NEVER prompt or block — the bridge runs inside
+  lifecycle hooks, where there is nobody to answer a prompt and a wait is
+  indistinguishable from a hang.
 - The token MUST NEVER be logged, never echoed in an error message, and never passed as
   a command-line argument (visible in `ps`).
 - A pre-write guard MUST scan the tracked tree and block — with a dedicated exit code
@@ -255,7 +318,10 @@ file, including test fixtures.
 
 **Enforcement test**: a repository scan for known coordinates runs in CI and locally
 before every write; a test asserts the token never appears in any log or error output,
-including at maximum verbosity.
+including at maximum verbosity; each platform's secret-manager rung has a test proving
+that every unavailability path — tool or module absent, store unregistered, store locked,
+entry missing — falls through silently and without prompting, and a rung that fails a run
+or waits on input is a review rejection.
 
 ### V. Separation of Team Config / Local Binding / Secrets
 
@@ -559,4 +625,4 @@ whose review requires verbal explanations to be understood fails this principle.
 - Every PR review verifies compliance with all sixteen principles; any deviation MUST
   be justified in the plan's "Complexity Tracking" section or the PR is rejected.
 
-**Version**: 1.2.0 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-08-02
+**Version**: 1.3.0 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-08-07
