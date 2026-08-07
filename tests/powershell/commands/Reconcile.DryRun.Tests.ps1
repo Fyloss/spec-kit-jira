@@ -176,3 +176,40 @@ Describe 'Invoke-JiraReconcile --dry-run — field defaults (011, contract §4.3
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
     }
 }
+
+# --- 019, T043: FR-017 on the origin-bridge, no-boundary payload -----------
+Describe 'Invoke-JiraReconcile --dry-run — origin bridge, no boundary (019, FR-017)' {
+    BeforeEach {
+        $script:Work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse (Join-Path $Root 'tests/conformance/fixtures/repo-with-pre-release-migration') $script:Work
+        $script:Spec = Join-Path $script:Work 'specs/001-feature/spec.md'
+        $env:JIRA_CONFIG_DIR = Join-Path $script:Work '.specify/jira'
+        $env:SPEC_KIT_JIRA_REPO = 'acme/app'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-feature'
+        Remove-Item Env:\SPEC_KIT_JIRA_ID_SOURCE -ErrorAction SilentlyContinue
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/preserve-pre-release.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+    }
+    AfterEach {
+        if ($script:M) { Stop-JiraMock -Mock $script:M }
+        Remove-Item -Recurse -Force $script:Work -ErrorAction SilentlyContinue
+    }
+
+    It '019, T043 — --dry-run predicts exactly the description payload and the (now empty) warning set an origin-bridge, no-boundary ticket produces, and issues zero writes' {
+        $dry = Invoke-CapturedWithCode @('reconcile', $script:Spec, '--dry-run', '--json')
+        $dry.ExitCode | Should -Be 0
+        $dryObj = $dry.Out | ConvertFrom-Json
+        $pre1Dry = $dryObj.actions | Where-Object { $_.url -like '*PRE-1' }
+        $pre1Dry.body.fields.description.content[0].content[0].text | Should -Be 'Synced from spec-kit — do not edit below this line'
+        @($dryObj.warnings | Where-Object { $_ -match 'PRE-1' }).Count | Should -Be 0
+
+        $realWork = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse (Join-Path $Root 'tests/conformance/fixtures/repo-with-pre-release-migration') $realWork
+        $env:JIRA_CONFIG_DIR = Join-Path $realWork '.specify/jira'
+        $real = Invoke-CapturedWithCode @('reconcile', (Join-Path $realWork 'specs/001-feature/spec.md'), '--json')
+        $real.ExitCode | Should -Be $dry.ExitCode
+        $realObj = $real.Out | ConvertFrom-Json
+        $pre1Real = $realObj.actions | Where-Object { $_.url -like '*PRE-1' }
+        (ConvertTo-Json -InputObject $pre1Dry.body.fields.description -Depth 100 -Compress) | Should -Be (ConvertTo-Json -InputObject $pre1Real.body.fields.description -Depth 100 -Compress)
+    }
+}

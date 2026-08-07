@@ -360,9 +360,10 @@ plan_writes() {
       # UNCONDITIONAL (018, T026): every recognised story's description is
       # spliced through the origin-independent resolution, so any human prose
       # above the boundary survives (FR-007) regardless of origin.
-      local existing render field warn
+      local existing story_origin render field warn
       existing="$(jq -c --arg s "${sid}" '.ticket_descriptions[$s] // {}' <<< "${ctx}")"
-      render="$(adf_render_managed_description "${story}" "${existing}")"
+      story_origin="$(jq -r --arg s "${sid}" '.ticket_origins[$s] // ""' <<< "${ctx}")"
+      render="$(adf_render_managed_description "${story}" "${existing}" "${story_origin}")"
       field="$(_plan_apply_managed_field "${render}" "${ticket}")"
       adf="$(jq -c '.doc' <<< "${field}")"
       warn="$(jq -r '.warning' <<< "${field}")"
@@ -515,9 +516,10 @@ _plan_writes_parent() {
   local current
   current="$(jq -c '.parent_current // null' <<< "${ctx}")"
 
-  local existing render field epic_adf warn
+  local existing parent_origin render field epic_adf warn
   existing="$(jq -c '.description // {}' <<< "${current}")"
-  render="$(adf_render_managed_description "$(jq -c '.epic' <<< "${doc}")" "${existing}")"
+  parent_origin="$(jq -r '.parent_origin // ""' <<< "${ctx}")"
+  render="$(adf_render_managed_description "$(jq -c '.epic' <<< "${doc}")" "${existing}" "${parent_origin}")"
   field="$(_plan_apply_managed_field "${render}" "${parent_key}")"
   epic_adf="$(jq -c '.doc' <<< "${field}")"
   warn="$(jq -r '.warning' <<< "${field}")"
@@ -728,9 +730,10 @@ plan_writes_tasks() {
         # origin-independent resolution (contract §3), so human prose above
         # the boundary survives (FR-007) on the task tier exactly as on a
         # story or the parent.
-        local existing render field warn
+        local existing task_origin render field warn
         existing="$(jq -c '.description // {}' <<< "${current}")"
-        render="$(adf_render_managed_task_description "${task}" "${existing}")"
+        task_origin="$(jq -r --arg t "${tid}" '.ticket_origins[$t] // ""' <<< "${ctx}")"
+        render="$(adf_render_managed_task_description "${task}" "${existing}" "${task_origin}")"
         field="$(_plan_apply_managed_field "${render}" "${ticket}")"
         adf="$(jq -c '.doc' <<< "${field}")"
         warn="$(jq -r '.warning' <<< "${field}")"

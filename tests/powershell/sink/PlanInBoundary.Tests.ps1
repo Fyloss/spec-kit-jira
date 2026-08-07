@@ -125,3 +125,69 @@ Describe 'T031 (FR-001-FR-005, FR-033) — the plan section inside the managed r
         $out1 | Should -Be $out2
     }
 }
+
+Describe '019, T025 — origin bridge, no boundary, parent tier (US2 AC1-AC3)' {
+    # A parent description written by a release predating the boundary — no
+    # marker, the whole content the mirror's own — carries no human prefix,
+    # so this skips HumanDesc's prefix and marker paragraph entirely.
+    function script:BridgeDescNoBoundary([object[]] $Managed) {
+        return [ordered]@{ type = 'doc'; version = 1; content = $Managed }
+    }
+
+    It '019, T024 — origin bridge, no boundary, changed plan summary: exactly one section, no trace of the previous (FR-010)' {
+        $managedA = ManagedFor $script:PlanA
+        $existing = BridgeDescNoBoundary $managedA
+        $existingJson = ConvertTo-Json -InputObject $existing -Depth 100 -Compress
+        $ctx = "{`"base_url`":`"https://mock`",`"parent_type_id`":`"10101`",`"parent_key`":`"PROJ-1`",`"parent_origin`":`"bridge`",`"parent_current`":{`"summary`":`"The Epic`",`"description`":$existingJson},`"tickets`":{}}"
+        $docJson = ConvertTo-Json -InputObject (PlanDoc $script:PlanB) -Depth 100 -Compress
+        $r = Get-JiraPlanWriteSet -NeutralDocJson $docJson -PlanContextJson $ctx | ConvertFrom-Json -Depth 100
+        $desc = $r.parent.body.fields.description
+        $headings = @($desc.content | Where-Object { $_.content -and $_.content[0].PSObject.Properties['text'] -and $_.content[0].text -eq 'Implementation Plan' })
+        $headings.Count | Should -Be 1
+        $descText = ConvertTo-Json -InputObject $desc.content -Depth 100 -Compress
+        $descText | Should -BeLike '*Use a different approach.*'
+        $descText | Should -Not -BeLike '*Use a shared library.*'
+        $warningsMember = $r.PSObject.Properties['warnings']
+        if ($null -ne $warningsMember) { @($warningsMember.Value).Count | Should -Be 0 }
+    }
+
+    It '019, T024 — plan summary and specification both changed in one run settle in a single write (US2 AC3)' {
+        $managedA = ManagedFor $script:PlanA
+        $existing = BridgeDescNoBoundary $managedA
+        $existingJson = ConvertTo-Json -InputObject $existing -Depth 100 -Compress
+        $ctx = "{`"base_url`":`"https://mock`",`"parent_type_id`":`"10101`",`"parent_key`":`"PROJ-1`",`"parent_origin`":`"bridge`",`"parent_current`":{`"summary`":`"The Epic`",`"description`":$existingJson},`"tickets`":{}}"
+        $docB = PlanDoc $script:PlanB
+        $docB.epic.description.blocks[0].spans[0].text = 'Epic overview, revised.'
+        $docBJson = ConvertTo-Json -InputObject $docB -Depth 100 -Compress
+        $r1 = Get-JiraPlanWriteSet -NeutralDocJson $docBJson -PlanContextJson $ctx | ConvertFrom-Json -Depth 100
+        $desc = $r1.parent.body.fields.description
+        $descText = ConvertTo-Json -InputObject $desc.content -Depth 100 -Compress
+        $descText | Should -BeLike '*Epic overview, revised.*'
+        $descText | Should -BeLike '*Use a different approach.*'
+        $descText | Should -Not -BeLike '*Use a shared library.*'
+
+        # The run after it, against the just-written description, writes nothing.
+        $existingJson2 = ConvertTo-Json -InputObject $desc -Depth 100 -Compress
+        $ctx2 = "{`"base_url`":`"https://mock`",`"parent_type_id`":`"10101`",`"parent_key`":`"PROJ-1`",`"parent_origin`":`"bridge`",`"parent_current`":{`"summary`":`"The Epic`",`"description`":$existingJson2},`"tickets`":{}}"
+        $r2 = Get-JiraPlanWriteSet -NeutralDocJson $docBJson -PlanContextJson $ctx2 | ConvertFrom-Json -Depth 100
+        $r2.parent | Should -Be $null
+    }
+
+    It '019, T026 — origin bridge, no boundary, no plan.md: no plan content, no warning, on the run that establishes the boundary and every run after (US2 AC2)' {
+        $managedA = ManagedFor $script:NoPlan
+        $existing = BridgeDescNoBoundary $managedA
+        $existingJson = ConvertTo-Json -InputObject $existing -Depth 100 -Compress
+        $ctx = "{`"base_url`":`"https://mock`",`"parent_type_id`":`"10101`",`"parent_key`":`"PROJ-1`",`"parent_origin`":`"bridge`",`"parent_current`":{`"summary`":`"The Epic`",`"description`":$existingJson},`"tickets`":{}}"
+        $docJson = ConvertTo-Json -InputObject (PlanDoc $script:NoPlan) -Depth 100 -Compress
+        $r1 = Get-JiraPlanWriteSet -NeutralDocJson $docJson -PlanContextJson $ctx | ConvertFrom-Json -Depth 100
+        $desc = $r1.parent.body.fields.description
+        (ConvertTo-Json -InputObject $desc.content -Depth 100 -Compress) | Should -Not -BeLike '*Implementation Plan*'
+        $warningsMember = $r1.PSObject.Properties['warnings']
+        if ($null -ne $warningsMember) { @($warningsMember.Value).Count | Should -Be 0 }
+
+        $existingJson2 = ConvertTo-Json -InputObject $desc -Depth 100 -Compress
+        $ctx2 = "{`"base_url`":`"https://mock`",`"parent_type_id`":`"10101`",`"parent_key`":`"PROJ-1`",`"parent_origin`":`"bridge`",`"parent_current`":{`"summary`":`"The Epic`",`"description`":$existingJson2},`"tickets`":{}}"
+        $r2 = Get-JiraPlanWriteSet -NeutralDocJson $docJson -PlanContextJson $ctx2 | ConvertFrom-Json -Depth 100
+        $r2.parent | Should -Be $null
+    }
+}

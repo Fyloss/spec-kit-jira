@@ -209,6 +209,32 @@ DOC_WITH_TASK='{"routing":{"project_key":"COMP"},
   [[ "$(jq -r '.warnings[]' <<< "$output")" == *"PROJ-9"* ]]
 }
 
+# --- 019, T018 [US4]: text a human wrote is never mistaken for the mirror's --
+
+@test "019, T018 — origin human, no boundary: the whole description is preserved above a newly established boundary, with one warning (FR-003)" {
+  local existing ctx
+  existing="$(jq -cn '{type:"doc", version:1, content:[{type:"paragraph", content:[{type:"text", text:"A human wrote this ticket from scratch."}]}]}')"
+  ctx="$(jq -cn --argjson ex "${existing}" '{base_url:"https://mock", parent_type_id:"10101", parent_local_id:"3f2a91c04b7e6d18", tickets:{s1:"PROJ-1"}, ticket_descriptions:{s1:$ex}, ticket_origins:{s1:"human"}, priority_ids:{P2:"2"}}')"
+  run plan_writes "${DOC}" "${ctx}"
+  [ "$status" -eq 0 ]
+  local desc; desc="$(jq -c '.stories[0].body.fields.description' <<< "$output")"
+  [ "$(jq -r '.content[0].content[0].text' <<< "${desc}")" = "A human wrote this ticket from scratch." ]
+  [[ "$(jq -c '.' <<< "${desc}")" == *"do not edit below this line"* ]]
+  [[ "$(jq -r '.warnings[]' <<< "$output")" == *"PROJ-1"* ]]
+}
+
+@test "019, T018 — origin human, existing boundary: human prose above it is preserved verbatim, only the region below is replaced (FR-003)" {
+  local managed existing ctx
+  managed="$(_adf_content_nodes '{"description":{"blocks":[{"type":"paragraph","spans":[{"text":"Story body.","marks":[]}]}]}}')"
+  existing="$(_human_desc "Context the product owner added." "${managed}")"
+  ctx="$(jq -cn --argjson ex "${existing}" '{base_url:"https://mock", parent_type_id:"10101", parent_local_id:"3f2a91c04b7e6d18", tickets:{s1:"PROJ-1"}, ticket_descriptions:{s1:$ex}, ticket_origins:{s1:"human"}}')"
+  run plan_writes "${DOC}" "${ctx}"
+  [ "$status" -eq 0 ]
+  local desc; desc="$(jq -c '.stories[0].body.fields.description' <<< "$output")"
+  [ "$(jq -r '.content[0].content[0].text' <<< "${desc}")" = "Context the product owner added." ]
+  [ "$(jq -r '.warnings // [] | length' <<< "$output")" -eq 0 ]
+}
+
 @test "T068 (FR-011) — a tracker rejection of an oversized description retries without it, warns once by key, and every other field still reconciles" {
   boot '{"issues":{"PRSV-2":{"summary":"Old summary"}},"faults":{"PRSV-2":{"status":400,"errors":{"description":"The description field exceeds the maximum length of 32767 characters."},"ifFieldPresent":"description"}}}'
   local desc plan spec_file

@@ -139,3 +139,29 @@ teardown() {
   run curl -s "${MOCK_BASE_URL}/rest/api/3/issue/COMP-3"
   [ "$(jq -r '.fields.summary' <<< "$output")" = "Export a date range (renamed)" ]
 }
+
+# --- 019, T044: contract §5.5, FR-018, SC-005 on all three tiers -----------
+@test "019, T044 — origin bridge, no-boundary description: the first run replaces the region, the second reports 0/0 and issues no PUT" {
+  local work="${BATS_TEST_TMPDIR}/repo-pre-release-migration-idempotent"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-pre-release-migration" "${work}"
+  local spec="${work}/specs/001-feature/spec.md"
+  export JIRA_CONFIG_DIR="${work}/.specify/jira"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-feature"
+  unset SPEC_KIT_JIRA_PLAN_CONTEXT SPEC_KIT_JIRA_LIFECYCLE SPEC_KIT_JIRA_ID_SOURCE
+  mock_start "${MOCK}/configs/preserve-pre-release.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_reconcile reconcile "${spec}" --json
+  local first_status="$status" first_output="$output"
+  [ "${first_status}" -eq 0 ]
+  local pre1; pre1="$(jq -c '.actions[] | select(.url | endswith("PRE-1"))' <<< "${first_output}")"
+  [ "$(jq -r '.body.fields.description.content[0].content[0].text' <<< "${pre1}")" = "Synced from spec-kit — do not edit below this line" ]
+
+  : > "${MOCK_CALLLOG}"
+  run cmd_reconcile reconcile "${spec}" --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.counts.created' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
+  [ "$(grep -cE '^PUT ' "${MOCK_CALLLOG}")" -eq 0 ]
+}

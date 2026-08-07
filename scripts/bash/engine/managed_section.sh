@@ -211,3 +211,55 @@ managed_section_suffix_split() {
       else { prefix: $existing, matched: false }
       end' <<< "${existing}" | json_canonical
 }
+
+# managed_section_ownership_split <marker> <managed-nodes-json> <ownership>
+#   (019, T006, contracts/ownership-decision.md §1): stdin the existing
+#   content-node array (may be empty or absent). <ownership> is one of
+#   self|other|unknown; anything else MUST be treated as unknown. Emits
+#   canonical {prefix, status}: status is "ok" | "malformed" | "migrated-warned".
+#   The marker count is decided BEFORE ownership (ordering is normative) —
+#   a description that already carries its boundary is never subject to the
+#   self branch below.
+#     1. marker occurs more than once -> malformed, no `prefix` key
+#     2. marker occurs exactly once   -> prefix is the nodes above it, ok
+#     3. marker absent, ownership self   -> prefix [] (the fix, FR-002)
+#     4. marker absent, ownership other  -> managed_section_suffix_split
+#        (today's behaviour, unmodified) -> ok | migrated-warned
+#     5. marker absent, ownership unknown (or anything else) -> whole
+#        content preserved as prefix, migrated-warned (FR-004)
+managed_section_ownership_split() {
+  local marker="$1" managed_json="$2" ownership="$3" existing_content
+  existing_content="$(cat)"
+  [[ -z "${existing_content}" ]] && existing_content="[]"
+
+  local split marker_count
+  split="$(printf '%s' "${existing_content}" | managed_section_panel_split "${marker}")"
+  marker_count="$(jq -r '.marker_count' <<< "${split}")"
+
+  if ((marker_count > 1)); then
+    jq -cn '{status:"malformed"}' | json_canonical
+    return 0
+  elif ((marker_count == 1)); then
+    jq -cn --argjson p "$(jq -c '.prefix' <<< "${split}")" '{prefix:$p, status:"ok"}' | json_canonical
+    return 0
+  fi
+
+  case "${ownership}" in
+    self)
+      jq -cn '{prefix:[], status:"ok"}' | json_canonical
+      ;;
+    other)
+      local suffix matched
+      suffix="$(printf '%s' "${existing_content}" | managed_section_suffix_split "${managed_json}")"
+      matched="$(jq -r '.matched' <<< "${suffix}")"
+      if [[ "${matched}" == "true" ]]; then
+        jq -cn --argjson p "$(jq -c '.prefix' <<< "${suffix}")" '{prefix:$p, status:"ok"}' | json_canonical
+      else
+        jq -cn --argjson p "$(jq -c '.prefix' <<< "${suffix}")" '{prefix:$p, status:"migrated-warned"}' | json_canonical
+      fi
+      ;;
+    *)
+      jq -cn --argjson p "${existing_content}" '{prefix:$p, status:"migrated-warned"}' | json_canonical
+      ;;
+  esac
+}

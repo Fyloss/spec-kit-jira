@@ -235,4 +235,66 @@ function Split-JiraManagedSectionSuffix {
     return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; matched = $true }))
 }
 
-Export-ModuleMember -Function Get-JiraManagedSectionLineEnding, Invoke-JiraManagedSectionSplice, Split-JiraManagedSectionPanel, Split-JiraManagedSectionSuffix
+function Split-JiraManagedSectionOwnership {
+    <#
+    .SYNOPSIS
+      The ownership decision (019, T007, contracts/ownership-decision.md §1).
+      Mirror of managed_section_ownership_split.
+    .DESCRIPTION
+      Given the existing content-node array and an ownership of self|other|
+      unknown (anything else MUST be treated as unknown), returns canonical
+      { prefix, status }: status is 'ok' | 'malformed' | 'migrated-warned'.
+      The marker count is decided BEFORE ownership (ordering is normative) —
+      a description that already carries its boundary is never subject to
+      the self branch.
+        1. marker occurs more than once -> malformed, no `prefix` key
+        2. marker occurs exactly once   -> prefix is the nodes above it, ok
+        3. marker absent, ownership self   -> prefix [] (the fix, FR-002)
+        4. marker absent, ownership other  -> Split-JiraManagedSectionSuffix
+           (today's behaviour, unmodified) -> ok | migrated-warned
+        5. marker absent, ownership unknown (or anything else) -> whole
+           content preserved as prefix, migrated-warned (FR-004)
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Marker,
+        [Parameter(Mandatory)] [string] $ManagedJson,
+        [Parameter(Mandatory)] [string] $Ownership,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $ExistingJson
+    )
+    $existingContentJson = if ([string]::IsNullOrEmpty($ExistingJson)) { '[]' } else { $ExistingJson }
+
+    $split = Split-JiraManagedSectionPanel -Marker $Marker -ContentJson $existingContentJson | ConvertFrom-Json -Depth 100
+    $markerCount = [int]$split.marker_count
+
+    if ($markerCount -gt 1) {
+        return (ConvertTo-JiraJsonValue ([ordered]@{ status = 'malformed' }))
+    }
+    if ($markerCount -eq 1) {
+        $prefix = [System.Collections.Generic.List[object]]::new()
+        foreach ($n in @($split.prefix)) { $prefix.Add($n) }
+        return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; status = 'ok' }))
+    }
+
+    switch ($Ownership) {
+        'self' {
+            return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = [System.Collections.Generic.List[object]]::new(); status = 'ok' }))
+        }
+        'other' {
+            $suffix = Split-JiraManagedSectionSuffix -ManagedJson $ManagedJson -ContentJson $existingContentJson | ConvertFrom-Json -Depth 100
+            $prefix = [System.Collections.Generic.List[object]]::new()
+            foreach ($n in @($suffix.prefix)) { $prefix.Add($n) }
+            $status = if ($suffix.matched) { 'ok' } else { 'migrated-warned' }
+            return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; status = $status }))
+        }
+        default {
+            $prefix = [System.Collections.Generic.List[object]]::new()
+            if (-not [string]::IsNullOrEmpty($existingContentJson)) {
+                foreach ($n in @($existingContentJson | ConvertFrom-Json -Depth 100)) { $prefix.Add($n) }
+            }
+            return (ConvertTo-JiraJsonValue ([ordered]@{ prefix = $prefix; status = 'migrated-warned' }))
+        }
+    }
+}
+
+Export-ModuleMember -Function Get-JiraManagedSectionLineEnding, Invoke-JiraManagedSectionSplice, Split-JiraManagedSectionPanel, Split-JiraManagedSectionSuffix, Split-JiraManagedSectionOwnership

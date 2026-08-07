@@ -308,3 +308,68 @@ _already_migrated_task_desc() {
   [ "$(jq -c '.[0].body.fields.labels' <<< "${actions}")" = '["speckit-001-x"]' ]
   [ "$(jq '.warnings // [] | length' <<< "$output")" -eq 0 ]
 }
+
+# --- 019, T028 [US3]: an edited task replaces that sub-task's content ------
+
+@test "019, T028 — origin bridge, no boundary, edited task text: one copy of the text and one metadata bullet list, no warning" {
+  local task doc ctx existing
+  existing="$(adf_render_task_description "${TASK1}" | jq -c '{type:"doc", version:1, content:.content}')"
+  task="$(jq -c '.title="Implement the parser, reworded" | .description.blocks[0].spans[0].text="Implement the parser, reworded"' <<< "${TASK1}")"
+  doc="$(jq -c --argjson t "${task}" '.stories[0].tasks=[$t]' <<< "${DOC_ONE_TASK}")"
+  ctx="$(jq -cn --argjson ex "${existing}" '{base_url:"https://mock", task_type_id:"10099",
+        tickets:{"1111111111111111":"COMP-9"},
+        ticket_current:{"1111111111111111":{summary:"Implement the parser", description:$ex}},
+        ticket_origins:{"1111111111111111":"bridge"}}')"
+  run plan_writes_tasks "${doc}" "${ctx}"
+  [ "$status" -eq 0 ]
+  local actions; actions="$(jq -c '.actions' <<< "$output")"
+  [ "$(jq '. | length' <<< "${actions}")" -eq 1 ]
+  local desc; desc="$(jq -c '.[0].body.fields.description' <<< "${actions}")"
+  local occurrences; occurrences="$(jq -r '[.content[].content[]?.text? // empty] | map(select(. == "Implement the parser, reworded")) | length' <<< "${desc}")"
+  [ "${occurrences}" -eq 1 ]
+  [[ "$(jq -c '.' <<< "${desc}")" != *"Implement the parser</span>"* ]]
+  [ "$(jq '[.content[] | select(.type=="bulletList")] | length' <<< "${desc}")" -eq 1 ]
+  [ "$(jq '.warnings // [] | length' <<< "$output")" -eq 0 ]
+}
+
+@test "019, T028 — origin bridge, once settled (boundary established), an unchanged task is not written to again" {
+  # First run: no boundary yet — establishing it is itself a legitimate write
+  # (the fix replaces the whole prior description, contract row 3). Second
+  # run against that SAME (now delimited) description, task text unchanged,
+  # must write nothing (FR-018).
+  local existing ctx first_actions settled_desc ctx2
+  existing="$(adf_render_task_description "${TASK1}" | jq -c '{type:"doc", version:1, content:.content}')"
+  ctx="$(jq -cn --argjson ex "${existing}" '{base_url:"https://mock", task_type_id:"10099",
+        tickets:{"1111111111111111":"COMP-9"},
+        ticket_current:{"1111111111111111":{summary:"Implement the parser", description:$ex}},
+        ticket_origins:{"1111111111111111":"bridge"}}')"
+  first_actions="$(plan_writes_tasks "${DOC_ONE_TASK}" "${ctx}" | jq -c '.actions')"
+  [ "$(jq '. | length' <<< "${first_actions}")" -eq 1 ]
+  settled_desc="$(jq -c '.[0].body.fields.description' <<< "${first_actions}")"
+  ctx2="$(jq -cn --argjson ex "${settled_desc}" '{base_url:"https://mock", task_type_id:"10099",
+        tickets:{"1111111111111111":"COMP-9"},
+        ticket_current:{"1111111111111111":{summary:"Implement the parser", description:$ex}},
+        ticket_origins:{"1111111111111111":"bridge"}}')"
+  run plan_writes_tasks "${DOC_ONE_TASK}" "${ctx2}"
+  [ "$status" -eq 0 ]
+  [ "$(jq '.actions | length' <<< "$output")" -eq 0 ]
+}
+
+@test "019, T028 — origin bridge, no boundary, a metadata-only change writes one updated copy" {
+  local task doc ctx existing
+  existing="$(adf_render_task_description "${TASK1}" | jq -c '{type:"doc", version:1, content:.content}')"
+  task="$(jq -c '.phase="Phase 4"' <<< "${TASK1}")"
+  doc="$(jq -c --argjson t "${task}" '.stories[0].tasks=[$t]' <<< "${DOC_ONE_TASK}")"
+  ctx="$(jq -cn --argjson ex "${existing}" '{base_url:"https://mock", task_type_id:"10099",
+        tickets:{"1111111111111111":"COMP-9"},
+        ticket_current:{"1111111111111111":{summary:"Implement the parser", description:$ex}},
+        ticket_origins:{"1111111111111111":"bridge"}}')"
+  run plan_writes_tasks "${doc}" "${ctx}"
+  [ "$status" -eq 0 ]
+  local actions; actions="$(jq -c '.actions' <<< "$output")"
+  [ "$(jq '. | length' <<< "${actions}")" -eq 1 ]
+  local desc; desc="$(jq -c '.[0].body.fields.description' <<< "${actions}")"
+  local occurrences; occurrences="$(jq -r '[.content[] | select(.type=="bulletList")] | length' <<< "${desc}")"
+  [ "${occurrences}" -eq 1 ]
+  [[ "$(jq -c '.' <<< "${desc}")" == *"Phase 4"* ]]
+}

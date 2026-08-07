@@ -306,4 +306,73 @@ Describe 'Get-JiraPlanTaskWriteSet' {
         if ($null -ne $warningsMember) { @($warningsMember.Value).Count | Should -Be 0 }
     }
 
+    # --- 019, T029 [US3]: an edited task replaces that sub-task's content --
+
+    It '019, T029 — origin bridge, no boundary, edited task text: one copy of the text and one metadata bullet list, no warning' {
+        $existing = (ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100)
+        $existingJson = (@{ type = 'doc'; version = 1; content = $existing.content } | ConvertTo-Json -Depth 100 -Compress)
+        $task = $script:Task1 | ConvertFrom-Json -Depth 100
+        $task.title = 'Implement the parser, reworded'
+        $task.description.blocks = @([ordered]@{ type = 'paragraph'; spans = @([ordered]@{ text = 'Implement the parser, reworded'; marks = @() }) })
+        $doc = $script:DocOneTask | ConvertFrom-Json -Depth 100
+        $doc.stories[0].tasks = @($task)
+        $docJson = $doc | ConvertTo-Json -Depth 100 -Compress
+        $ctx = [ordered]@{
+            base_url = 'https://mock'; task_type_id = '10099'
+            tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
+            ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = ($existingJson | ConvertFrom-Json) } }
+            ticket_origins = [ordered]@{ '1111111111111111' = 'bridge' }
+        } | ConvertTo-Json -Depth 100 -Compress
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $ctx | ConvertFrom-Json -Depth 100)
+        @($result.actions).Count | Should -Be 1
+        $desc = $result.actions[0].body.fields.description
+        $texts = @($desc.content | ForEach-Object { $_.content } | ForEach-Object { $_.text } | Where-Object { $_ })
+        @($texts | Where-Object { $_ -eq 'Implement the parser, reworded' }).Count | Should -Be 1
+        @($desc.content | Where-Object { $_.type -eq 'bulletList' }).Count | Should -Be 1
+        $warningsMember = $result.PSObject.Properties['warnings']
+        if ($null -ne $warningsMember) { @($warningsMember.Value).Count | Should -Be 0 }
+    }
+
+    It '019, T029 — origin bridge, once settled (boundary established), an unchanged task is not written to again' {
+        $existing = (ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100)
+        $existingJson = (@{ type = 'doc'; version = 1; content = $existing.content } | ConvertTo-Json -Depth 100 -Compress)
+        $ctx = [ordered]@{
+            base_url = 'https://mock'; task_type_id = '10099'
+            tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
+            ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = ($existingJson | ConvertFrom-Json) } }
+            ticket_origins = [ordered]@{ '1111111111111111' = 'bridge' }
+        } | ConvertTo-Json -Depth 100 -Compress
+        $first = (Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $ctx | ConvertFrom-Json -Depth 100)
+        @($first.actions).Count | Should -Be 1
+        $settledDesc = $first.actions[0].body.fields.description
+        $ctx2 = [ordered]@{
+            base_url = 'https://mock'; task_type_id = '10099'
+            tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
+            ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = $settledDesc } }
+            ticket_origins = [ordered]@{ '1111111111111111' = 'bridge' }
+        } | ConvertTo-Json -Depth 100 -Compress
+        $second = (Get-JiraPlanTaskWriteSet -DocJson $script:DocOneTask -ContextJson $ctx2 | ConvertFrom-Json -Depth 100)
+        @($second.actions).Count | Should -Be 0
+    }
+
+    It '019, T029 — origin bridge, no boundary, a metadata-only change writes one updated copy' {
+        $existing = (ConvertTo-JiraAdfTaskDescription -TaskJson $script:Task1 | ConvertFrom-Json -Depth 100)
+        $existingJson = (@{ type = 'doc'; version = 1; content = $existing.content } | ConvertTo-Json -Depth 100 -Compress)
+        $task = $script:Task1 | ConvertFrom-Json -Depth 100
+        $task.phase = 'Phase 4'
+        $doc = $script:DocOneTask | ConvertFrom-Json -Depth 100
+        $doc.stories[0].tasks = @($task)
+        $docJson = $doc | ConvertTo-Json -Depth 100 -Compress
+        $ctx = [ordered]@{
+            base_url = 'https://mock'; task_type_id = '10099'
+            tickets = [ordered]@{ '1111111111111111' = 'COMP-9' }
+            ticket_current = [ordered]@{ '1111111111111111' = [ordered]@{ summary = 'Implement the parser'; description = ($existingJson | ConvertFrom-Json) } }
+            ticket_origins = [ordered]@{ '1111111111111111' = 'bridge' }
+        } | ConvertTo-Json -Depth 100 -Compress
+        $result = (Get-JiraPlanTaskWriteSet -DocJson $docJson -ContextJson $ctx | ConvertFrom-Json -Depth 100)
+        @($result.actions).Count | Should -Be 1
+        $desc = $result.actions[0].body.fields.description
+        @($desc.content | Where-Object { $_.type -eq 'bulletList' }).Count | Should -Be 1
+        ($desc | ConvertTo-Json -Depth 100 -Compress) | Should -BeLike '*Phase 4*'
+    }
 }
