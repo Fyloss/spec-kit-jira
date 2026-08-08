@@ -24,6 +24,10 @@ BeforeAll {
 
 Describe 'Config degraded mode' {
     BeforeEach {
+        # Re-import -Force: resets Credentials.psm1's $script:-scoped credential
+        # cache (021, US3) via Config.psm1's own cascade — Pester runs every It
+        # in one process, so module scope has no per-test isolation otherwise.
+        Import-Module (Join-Path $PSScriptRoot '../../../scripts/powershell/commands/Config.psm1') -Force
         $script:Work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
         New-Item -ItemType Directory -Path (Join-Path $Work '.specify/jira') -Force | Out-Null
         $env:JIRA_CONFIG_DIR = Join-Path $Work '.specify/jira'
@@ -122,6 +126,10 @@ Describe 'Degraded causes are told apart (T047, 003 US5)' {
     # every degraded state the host command succeeds (SC-006): a ceremony that
     # cannot reach Jira is a report, not a failure.
     BeforeEach {
+        # Re-import -Force: resets Credentials.psm1's $script:-scoped credential
+        # cache (021, US3) via Config.psm1's own cascade — Pester runs every It
+        # in one process, so module scope has no per-test isolation otherwise.
+        Import-Module (Join-Path $PSScriptRoot '../../../scripts/powershell/commands/Config.psm1') -Force
         $script:Work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
         New-Item -ItemType Directory -Path (Join-Path $script:Work '.specify/jira') -Force | Out-Null
         $env:JIRA_CONFIG_DIR = Join-Path $script:Work '.specify/jira'
