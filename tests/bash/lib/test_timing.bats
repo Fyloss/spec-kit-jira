@@ -174,3 +174,18 @@ teardown() {
   _timing_now_ms
   [ "${_TIMING_NOW_MS}" = "42" ]
 }
+
+# A set-but-empty _TIMING_FAKE_CLOCK supplies zero readings, so the cursor
+# clamp computes index -1 over an empty array. §4 says an under-supplied
+# fixture shows 0 ms phases rather than crashing a run, and that has to hold
+# at zero readings too — the more so because bash's "bad array subscript"
+# goes to STDERR, which is the very channel the report writes on and the
+# corpus diffs byte-for-byte (invariant T5: nothing but `timing:` lines).
+@test "_TIMING_FAKE_CLOCK set to whitespace only reads 0 ms, silently" {
+  _TIMING_FAKE_CLOCK="   "
+  run _timing_now_ms
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  _timing_now_ms
+  [ "${_TIMING_NOW_MS}" = "0" ]
+}

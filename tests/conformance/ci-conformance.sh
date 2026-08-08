@@ -148,10 +148,16 @@ export -f _size _byte_at byte_diff
 # only this one is masked, on BOTH sides identically, immediately before the
 # written-files diff.
 _normalize_state_base_url() {
-  local dir="$1" f
+  local dir="$1" f masked
   [ -d "${dir}" ] || return 0
   while IFS= read -r -d '' f; do
-    printf '%s' "$(jq -cS '.base_url = "MOCK_BASE_URL"' "${f}" 2> /dev/null)" > "${f}"
+    # Only rewrite a document jq could actually parse. Emptying one it could
+    # not would corrupt BOTH captures identically, and a symmetric corruption
+    # diffs CLEAN — it would mask the very divergence this corpus exists to
+    # catch, and us021-state-corrupt.json produces such a document on purpose.
+    if masked="$(jq -cS '.base_url = "MOCK_BASE_URL"' "${f}" 2> /dev/null)" && [ -n "${masked}" ]; then
+      printf '%s' "${masked}" > "${f}"
+    fi
   done < <(find "${dir}" -path '*/jira/state/*.json' -print0 2> /dev/null)
 }
 export -f _normalize_state_base_url
