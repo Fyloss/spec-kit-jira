@@ -65,7 +65,15 @@ _setup_fresh() {
   export SPEC_KIT_JIRA_SPEC_SLUG="001-billing-invoices"
   export SPEC_KIT_JIRA_REPO="acme/app"
   export SPEC_KIT_JIRA_PROJECT_KEY="COMP"
-  export JIRA_CONFIG_DIR="${ROOT}/tests/conformance/fixtures/repo-with-reconcile-binding/.specify/jira"
+  # A COPY of the fixture's config, never the fixture itself: 021's
+  # run_state_record writes ${JIRA_CONFIG_DIR}/state/<feature>.json on every
+  # successful reconcile, and this test reaches one. Pointed at the source
+  # tree it deposits a machine-specific document (absolute paths, the live
+  # mock port, the real extension version) inside tests/conformance/fixtures,
+  # where the state/.gitignore's `*` then hides it from git status.
+  export JIRA_CONFIG_DIR="${BATS_TEST_TMPDIR}/jira-config"
+  mkdir -p "${JIRA_CONFIG_DIR}"
+  cp "${ROOT}/tests/conformance/fixtures/repo-with-reconcile-binding/.specify/jira/"*.yml "${JIRA_CONFIG_DIR}/"
   export JIRA_EMAIL="user@example.com"
   export JIRA_API_TOKEN="RAWSECRETXYZ"
   export JIRA_NO_SLEEP=1
