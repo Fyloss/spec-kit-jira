@@ -58,10 +58,10 @@ function Get-TimingFakeClockNext {
     return [int64]$readings[$idx]
 }
 
-# Get-TimingNowMs — the current reading, in milliseconds. $env:_TIMING_FAKE_CLOCK,
+# Get-TimingClockReading — the current reading, in milliseconds. $env:_TIMING_FAKE_CLOCK,
 # when set, always wins: no real clock is read, which is what keeps a timing
 # scenario's stderr byte-identical across runs and across ports.
-function Get-TimingNowMs {
+function Get-TimingClockReading {
     [CmdletBinding()]
     param()
     if ($env:_TIMING_FAKE_CLOCK) {
@@ -82,7 +82,7 @@ function Start-JiraTimingPhase {
         [int] $RequestCount = 0
     )
     if (-not (Test-JiraTimingEnabled)) { return }
-    $script:TimingStartMs[$Phase] = Get-TimingNowMs
+    $script:TimingStartMs[$Phase] = Get-TimingClockReading
     $script:TimingReqs[$Phase] = -$RequestCount
 }
 
@@ -102,7 +102,7 @@ function Stop-JiraTimingPhase {
     if (-not (Test-JiraTimingEnabled)) { return }
     if (-not $script:TimingStartMs.ContainsKey($Phase)) { return }
     $start = $script:TimingStartMs[$Phase]
-    $script:TimingElapsedMs[$Phase] = (Get-TimingNowMs) - $start
+    $script:TimingElapsedMs[$Phase] = (Get-TimingClockReading) - $start
     $script:TimingReqs[$Phase] = $script:TimingReqs[$Phase] + $RequestCount
 }
 
