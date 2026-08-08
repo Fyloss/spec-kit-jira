@@ -1,0 +1,1 @@
+{"base_url":"http://fixture.invalid","email":"user@example.com","extension_version":"0.0.0-fixture","field_values":"{}","inputs":{"config.local.yml":"0000000000000000000000000000000000000000","config.yml":"0000000000000000000000000000000000000000","spec.md":"0000000000000000000000000000000000000000"},"on_drift":"abort","schema":1}
