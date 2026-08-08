@@ -41,7 +41,8 @@ Describe 'Credential leak guard (SC-007)' {
         # scrub that variable) after lib/, and red on the ones that do not.
         foreach ($name in @(
                 'JIRA_EMAIL', 'JIRA_API_TOKEN', 'JIRA_NO_SLEEP', 'JIRA_MAX_ATTEMPTS',
-                'SPEC_KIT_JIRA_SPEC_SLUG', 'SPEC_KIT_JIRA_PROJECT_KEY', 'SPEC_KIT_JIRA_BASE_URL')) {
+                'SPEC_KIT_JIRA_SPEC_SLUG', 'SPEC_KIT_JIRA_PROJECT_KEY', 'SPEC_KIT_JIRA_BASE_URL',
+                'SPEC_KIT_JIRA_TIMING')) {
             Remove-Item -LiteralPath "Env:\$name" -ErrorAction SilentlyContinue
         }
     }
@@ -52,6 +53,28 @@ Describe 'Credential leak guard (SC-007)' {
         $pwshPath = (Get-Process -Id $PID).Path
         $out = & $pwshPath -NoProfile -File $Entry reconcile --verbose --json $Spec *>&1 | Out-String
         $out | Should -Not -Match 'RAWSECRETXYZ0123456789'
+    }
+
+    It 'T010 — neither the token nor its base64 Authorization value leaks with timing and tracing both on (contracts/timing-report.md T7)' {
+        $script:Mock = Start-JiraMock -ConfigPath (Join-Path $MockDir 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:Mock.BaseUrl
+        $env:SPEC_KIT_JIRA_TIMING = '1'
+        $basic = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes("$($env:JIRA_EMAIL):$($env:JIRA_API_TOKEN)"))
+        $pwshPath = (Get-Process -Id $PID).Path
+        $out = & $pwshPath -NoProfile -File $Entry reconcile --verbose --json $Spec *>&1 | Out-String
+        $out | Should -Not -Match 'RAWSECRETXYZ0123456789'
+        $out | Should -Not -Match ([regex]::Escape($basic))
+        $out | Should -Match 'timing: '
+    }
+
+    It 'T040 — neither the raw token nor its base64 Authorization value is written anywhere in the post-run tree, including the state document' {
+        $script:Mock = Start-JiraMock -ConfigPath (Join-Path $MockDir 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:Mock.BaseUrl
+        $basic = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes("$($env:JIRA_EMAIL):$($env:JIRA_API_TOKEN)"))
+        $pwshPath = (Get-Process -Id $PID).Path
+        & $pwshPath -NoProfile -File $Entry reconcile --json $Spec *>&1 | Out-Null
+        $hits = Get-ChildItem -Path $Work -Recurse -File | Select-String -Pattern 'RAWSECRETXYZ0123456789', ([regex]::Escape($basic))
+        $hits | Should -BeNullOrEmpty
     }
 }
 

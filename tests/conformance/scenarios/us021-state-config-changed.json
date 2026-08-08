@@ -1,0 +1,19 @@
+{
+  "name": "us021-state-config-changed",
+  "description": "T021 [US2]: reconcile a three-story specification to completion, edit config.yml (a comment line — no routing/style change), then reconcile again. contracts/run-state.md §3 row 'base_url, email, on_drift, or field_values differs' generalises to any hashed input: config.yml's inputs hash differs, so the second run must be a full reconcile that re-records state reflecting the edited file.",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec-clean",
+  "runs": [
+    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] },
+    {
+      "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"],
+      "before": { "append": { ".specify/jira/config.yml": "\n# T021 fail-open probe — content-only edit, no routing/style change\n" } }
+    }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222 3333333333333333"
+  }
+}

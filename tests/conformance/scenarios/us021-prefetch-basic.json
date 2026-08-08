@@ -1,0 +1,17 @@
+{
+  "name": "us021-prefetch-basic",
+  "description": "T049, contracts/recognition-prefetch.md §6: reconcile a three-story specification twice — the first run creates and binds all three tickets, the second run recognises them. Diffed against the SAME scenario run with _RECOGNITION_NO_PREFETCH=1: stdout, stderr, exit, and the post-run tree must be byte-identical; the prefetch run's calls.log carries exactly one bulkfetch request in place of the three individual GETs the unprefetched run still issues.",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec",
+  "runs": [
+    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] },
+    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222 3333333333333333"
+  },
+  "read_requests": 1
+}

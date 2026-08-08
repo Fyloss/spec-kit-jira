@@ -1,0 +1,63 @@
+# Machine-owned resolved identifiers for the T051 counting-case conformance
+# fixtures (021), matching the default "company" mock style.
+resolved_ids:
+  TASKS:
+    style: company_managed
+    issue_types:
+      - logical_name: "Deliverable"
+        id: "10101"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "10102"
+        hierarchy_level: "0"
+        subtask: false
+      - logical_name: "Sub-task"
+        id: "10104"
+        hierarchy_level: "-1"
+        subtask: true
+    roles:
+      specification:
+        logical_name: "Deliverable"
+        id: "10101"
+        hierarchy_level: "1"
+        subtask: false
+        source: declared
+      story:
+        logical_name: "Story"
+        id: "10102"
+        hierarchy_level: "0"
+        subtask: false
+        source: declared
+      task:
+        logical_name: "Sub-task"
+        id: "10104"
+        hierarchy_level: "-1"
+        subtask: true
+        source: declared
+    child_type:
+      logical_name: "Story"
+      id: "10102"
+      source: declared
+    parent_type:
+      logical_name: "Deliverable"
+      id: "10101"
+      source: declared
+    required_fields:
+      "10101":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "10102":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "10104":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "10102": true
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"

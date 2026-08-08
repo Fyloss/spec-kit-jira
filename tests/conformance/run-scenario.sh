@@ -192,9 +192,16 @@ fi
 # one mock process. Captured as stdout.N / stderr.N / exit.N, N = 1-based;
 # stdout/stderr/exit (unsuffixed) always mirror the LAST run, so a
 # single-run scenario's existing consumers see no difference.
+#
+# calls.log.N (021, US2, T020) is the SLICE of the shared, cumulative mock
+# log written during run N alone — never the log-so-far — because the mock
+# process and its call log are shared across every run in the array (see the
+# calls.log capture below), so a consumer proving "run 2 issued zero
+# requests" needs run 2's own contribution isolated from run 1's.
 RUN_COUNT="$(jq_lines '(.runs // []) | length' "${SCENARIO}")"
 if [ "${RUN_COUNT}" -eq 0 ]; then RUN_COUNT=1; fi
 
+CALLLOG_PREV_LINES=0
 set +e
 for ((i = 1; i <= RUN_COUNT; i++)); do
   ARGV=()
@@ -204,6 +211,55 @@ for ((i = 1; i <= RUN_COUNT; i++)); do
     while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq_lines -r --argjson i "$((i - 1))" '.runs[$i].argv[]? // empty' "${SCENARIO}")
   else
     while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq_lines -r '.argv[]? // empty' "${SCENARIO}")
+  fi
+
+  # `runs[i].before` (021, US2, T021) mutates WORKDIR immediately ahead of
+  # run i's own process — the only way to build a fail-open fixture, since
+  # base_url inside a recorded run-state document is the mock's OS-assigned
+  # port and can never be pre-baked to match a real run's own state file.
+  # `write`/`append` extract each key SEPARATELY with plain `jq -r` rather
+  # than folding the object through `@tsv`: `@tsv` escapes embedded
+  # newlines into literal backslash-n and `read` never un-escapes them,
+  # which would corrupt any multi-line file content.
+  if [ "${RUN_COUNT}" -gt 1 ]; then
+    while IFS= read -r rel_path; do
+      [ -z "${rel_path}" ] && continue
+      mkdir -p "$(dirname "${WORKDIR}/${rel_path}")"
+      jq_lines -r --argjson i "$((i - 1))" --arg k "${rel_path}" '.runs[$i].before.write[$k]' "${SCENARIO}" > "${WORKDIR}/${rel_path}"
+    done < <(jq_lines -r --argjson i "$((i - 1))" '.runs[$i].before.write // {} | keys[]' "${SCENARIO}")
+
+    while IFS= read -r rel_path; do
+      [ -z "${rel_path}" ] && continue
+      mkdir -p "$(dirname "${WORKDIR}/${rel_path}")"
+      jq_lines -r --argjson i "$((i - 1))" --arg k "${rel_path}" '.runs[$i].before.append[$k]' "${SCENARIO}" >> "${WORKDIR}/${rel_path}"
+    done < <(jq_lines -r --argjson i "$((i - 1))" '.runs[$i].before.append // {} | keys[]' "${SCENARIO}")
+
+    while IFS= read -r rel_path; do
+      [ -z "${rel_path}" ] && continue
+      rm -f "${WORKDIR}/${rel_path}"
+    done < <(jq_lines -r --argjson i "$((i - 1))" '.runs[$i].before.delete // [] | .[]' "${SCENARIO}")
+
+    # `jq` (021, US2, T021) patches a SINGLE field of a file a prior run in
+    # this same scenario already wrote — e.g. the run-state document's
+    # `extension_version` — where a static `write` cannot, because the rest
+    # of that file's content (its real base_url, its real input hashes) is
+    # only known once run i-1 has actually produced it. A target absent at
+    # this point (the state phase not yet wired, or the prior run recorded
+    # nothing) is silently skipped rather than treated as an error: the run
+    # that follows still sees "no state file", itself a fail-open row of
+    # contracts/run-state.md §3, so the scenario stays meaningful either way.
+    while IFS= read -r rel_path; do
+      [ -z "${rel_path}" ] && continue
+      target="${WORKDIR}/${rel_path}"
+      [ -f "${target}" ] || continue
+      filter="$(jq_lines -r --argjson i "$((i - 1))" --arg k "${rel_path}" '.runs[$i].before.jq[$k]' "${SCENARIO}")"
+      tmp="$(mktemp)"
+      if jq -c "${filter}" "${target}" 2> /dev/null | tr -d '\n' > "${tmp}"; then
+        mv "${tmp}" "${target}"
+      else
+        rm -f "${tmp}"
+      fi
+    done < <(jq_lines -r --argjson i "$((i - 1))" '.runs[$i].before.jq // {} | keys[]' "${SCENARIO}")
   fi
 
   if [ "${PORT}" = "bash" ]; then
@@ -245,6 +301,11 @@ for ((i = 1; i <= RUN_COUNT; i++)); do
     ) > "${OUTDIR}/stdout.${i}" 2> "${OUTDIR}/stderr.${i}"
   fi
   echo "$?" > "${OUTDIR}/exit.${i}"
+
+  calllog_total_lines="$(wc -l < "${MOCK_CALLLOG}" 2> /dev/null || echo 0)"
+  tail -n "+$((CALLLOG_PREV_LINES + 1))" "${MOCK_CALLLOG}" > "${OUTDIR}/calls.log.${i}" 2> /dev/null \
+    || : > "${OUTDIR}/calls.log.${i}"
+  CALLLOG_PREV_LINES="${calllog_total_lines}"
 done
 set -e
 cp "${OUTDIR}/stdout.${RUN_COUNT}" "${OUTDIR}/stdout"

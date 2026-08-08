@@ -13,7 +13,9 @@ flowchart TD
     Spec -->|"no"| Usage(["exit 1"])
     Spec -->|"yes"| TargetGuard{"basename == spec.md?<br/>(017, target guard)"}
     TargetGuard -->|"no"| RejectedTarget(["exit 1 — rejected target<br/>zero requests, zero writes"])
-    TargetGuard -->|"yes"| Bound{"Base URL set and config.yml present?"}
+    TargetGuard -->|"yes"| State{"State phase (021)<br/>local inputs unchanged since<br/>the last fully successful run?"}
+    State -->|"unchanged"| ShortCircuit(["exit 0 — zero requests, zero writes,<br/>zero secret-store consultations"])
+    State -->|"changed, --force, or --dry-run"| Bound{"Base URL set and config.yml present?"}
 
     Bound -->|"no"| Notice(["Not bound yet — 3-line notice, exit 0"])
     Bound -->|"yes"| Avail{"Bridge entry points intact?"}
@@ -44,6 +46,16 @@ flowchart TD
 Every failure between step 1 and step 9 exits with **zero Jira writes**. That
 is not incidental: the write path is the last thing that happens, after every
 decision has already been made.
+
+The **state phase (021)** trades one guarantee for the speed: while the recorded
+document matches the local inputs — `spec.md`, `tasks.md`, `config.yml`,
+`config.local.yml`, and the run's own flags — a reconcile that changed nothing
+locally exits in under a second having issued zero requests, but a change made
+only on the Jira side (a deleted ticket, an edited description, a stripped
+label) goes undetected and unhealed until a local edit, or `--force`, restores
+a full reconcile. See
+[`contracts/run-state.md`](../specs/021-reconcile-performance/contracts/run-state.md) for the full
+decision table.
 
 ## The consolidated field-defaults question (011)
 

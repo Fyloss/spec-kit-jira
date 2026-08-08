@@ -147,6 +147,12 @@ summary_render_prose() {
   exit_code="$(jq -r '.exit_code' <<< "${json}")"
   [[ "${dry}" == "true" ]] && suffix=" (dry-run)"
   printf 'Command: %s%s\n' "${command}" "${suffix}"
+  # The run-state short-circuit (021, T032, contracts/run-state.md §3): a
+  # short-circuited run must not look like a run that did nothing for unclear
+  # reasons — name both the fact and the file that made it possible.
+  if [[ "$(jq -r '.short_circuited // false' <<< "${json}")" == "true" ]]; then
+    printf 'Short-circuited: %s\n' "$(jq -r '.state_file' <<< "${json}")"
+  fi
   printf 'Created: %s, Updated: %s, Skipped: %s\n' "${created}" "${updated}" "${skipped}"
   # recognised/assigned (Phase 7, US1/US2) exist only on reconcile's summary
   # — a reader confirms an unchanged re-run recognised every story and

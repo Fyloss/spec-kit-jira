@@ -9,9 +9,9 @@ short-circuit may only ever skip work after a proven-complete prior run; it may 
 
 | Function | Behaviour |
 | --- | --- |
-| `run_state_compose <spec-path>` | Prints the canonical JSON document of `data-model.md` §1 for the current inputs. Returns 1, printing nothing, if any required input cannot be hashed. |
-| `run_state_matches <spec-path>` | Returns 0 only when a recorded document exists, is readable, is valid, and is byte-equal to a freshly composed one. Returns 1 in every other case, including every error. |
-| `run_state_record <spec-path>` | Composes and writes atomically. Creates the directory and its self-ignoring `.gitignore` if absent. Never fails the run: a write error is a warning, not an exit code. |
+| `run_state_compose <spec-path> <base-url> <email> <on-drift> <field-values>` | Prints the canonical JSON document of `data-model.md` §1 for the current inputs. Returns 1, printing nothing, if any required input cannot be hashed. Takes `base-url`/`email`/`on-drift`/`field-values` as explicit arguments rather than reading them from the environment or from `cli_parse`'s output itself — `lib/run_state.sh` stays a pure function of its arguments, like `lib/config.sh` and `lib/credentials.sh`'s `cred_curl_config`, not a `sink/`-level module reaching into `JIRA_EMAIL`/`SPEC_KIT_JIRA_BASE_URL` directly. |
+| `run_state_matches <spec-path> <base-url> <email> <on-drift> <field-values>` | Composes fresh from the same five arguments and returns 0 only when a recorded document exists, is readable, is valid, and is byte-equal to it. Returns 1 in every other case, including every error. |
+| `run_state_record <spec-path> <base-url> <email> <on-drift> <field-values>` | Composes and writes atomically. Creates the directory and its self-ignoring `.gitignore` if absent. Never fails the run: a write error is a warning, not an exit code. |
 
 Hashing primitive: `git hash-object --no-filters <path>` on both ports. `git` is already a declared
 prerequisite, and it is the only content hash guaranteed present and identical on all three hosts
@@ -53,7 +53,7 @@ routing's *inputs* instead; see `data-model.md` §1.
 | `schema` unknown | Full reconcile. |
 | `extension_version` differs | Full reconcile. |
 | Any input hash differs, or an input appeared/disappeared | Full reconcile. |
-| `base_url`, `email`, or `on_drift` differs | Full reconcile. |
+| `base_url`, `email`, `on_drift`, or `field_values` differs | Full reconcile. |
 | Byte-equal | **SHORT-CIRCUIT** |
 
 Short-circuit behaviour: exit `0`, **zero** Jira requests, **zero** writes, **zero** secret-store
@@ -140,3 +140,24 @@ the natural follow-up rather than silently dropped (research R8).
 | Two runs racing | Neither observes a partial document; no wrongful skip |
 | Short-circuit path, counting secret-store stub | Counter reads 0 |
 | Fresh clone, `git status` after a short-circuit | Clean; the state directory is ignored |
+
+## 10. Option sweep (T017a)
+
+Every option `cli_parse`/`ConvertFrom-JiraCliArgs` accepts, examined for whether it changes the set of
+actions a reconcile takes — spec A-2 calls a missing input here a defect, not a gap, because it produces a
+wrongful skip:
+
+| Option | `cmd_reconcile` reads it? | Verdict |
+| --- | --- | --- |
+| `--on-drift` | Yes | Already a field (§3, `data-model.md` §1). |
+| `--field-value` | Yes, into `field_values`, folded into every issue's written field values by `_reconcile_plan_context`/`Get-JiraReconcilePlanContextFromBinding` | **Gap found and closed by this task**: nothing else in the document changes when only this argument does, so it is now the `field_values` field of §3/`data-model.md` §1. |
+| `--accept-defaults` | Yes, into `accept_defaults`, gating whether the mandatory-field gate blocks for confirmation | No document field needed: §4 records state only for a run with **no pending confirmation outstanding**, so a state was only ever recorded when the gate was not askable under the mode active on that run. A later run with unchanged local inputs recomputes the same "not askable", regardless of this run's own flag value — it cannot turn an already-resolved gate into a blocking one. |
+| `--force` | Yes | Already a decision-table row (§3) — bypasses the read entirely rather than needing to be a field. |
+| `--dry-run` | Yes | Already a decision-table row (§3) — bypasses the read and the write entirely. |
+| `--style` | No — `cmd_reconcile`/`Invoke-JiraReconcileRun` do not read the `styles` key `cli_parse` emits | Consumed only by the `config` command (`scripts/bash/commands/config.sh` / `Config.psm1`), which persists the answer into `config.yml`'s managed block. That file is already a hashed `inputs` member, so a change reaching reconcile at all is already covered; the raw flag reaching reconcile itself has no effect to miss. |
+| `--child-type` | No — same as `--style` | Same reasoning as `--style`: `config`-only, persisted to the already-hashed `config.yml`. |
+| `--issue-type` | No — same as `--style` | Same reasoning as `--style`. |
+| `--field-default` | No — `cmd_reconcile`/`Invoke-JiraReconcileRun` read `field_values` but never `field_defaults` | Consumed only by `config`, which splices the answer into `config.yml`'s `field_defaults` managed region (already hashed). Distinct from `--field-value` above precisely because this one is persisted and that one is not. |
+| `--accept-defaults` (config context) / `--use-team` | No | `--use-team` is consumed only by the `feature`/`Feature.psm1` command, never parsed out by `cmd_reconcile`. Irrelevant to reconcile's action set. |
+| `--verbose` | Yes, but only by `lib/output.sh` (`json_canonical`) and trace framing | Never changes what is planned or applied, only what is printed — matches the Constitution's tracing/output layer, not the action set. |
+| `--json` | Yes, but only by the output formatter | Same reasoning as `--verbose`. |

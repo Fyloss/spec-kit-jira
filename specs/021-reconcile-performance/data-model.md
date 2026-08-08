@@ -32,6 +32,7 @@ raw UTF-8, no trailing newline. The two ports produce identical bytes for identi
 | `base_url` | string | The resolved Jira base URL. Re-pointing the bridge at another instance invalidates. |
 | `email` | string | The resolved Basic-auth email. A different operator invalidates. Not a secret; already present in the config layer. |
 | `on_drift` | string | The drift-handling mode this run was invoked with. It changes which drifted tickets are written, so a run under one mode must never reuse a state recorded under the other. |
+| `field_values` | string | The raw, unit-separator-joined `--field-value` argument this run was invoked with (empty string when none given). A per-run answer to a field's value, read directly by `cmd_reconcile`/`Invoke-JiraReconcileRun` and folded into what is written to each issue — never persisted to a config file, so nothing else in this document would otherwise change when it does (T017a). Present verbatim, the same way `on_drift` is, rather than through `git hash-object`, because it is a CLI argument, not a file. |
 | `inputs` | object | Map of relative path → `git hash-object` blob hash. See below. |
 
 There is deliberately **no** `project_key` field. See the note below the `inputs` table.

@@ -108,7 +108,7 @@ MD
   # the parent's creation. Read-only — zero writes either way.
   run mock_calls
   [ "$(grep -c 'search/jql' <<< "$output")" -eq 1 ]
-  [ "$(grep -cE '^(POST|PUT) ' <<< "$output")" -eq 0 ]
+  [ "$(grep -vE 'issue/bulkfetch' <<< "$output" | grep -cE '^(POST|PUT) ')" -eq 0 ]
 }
 
 @test "T095: --dry-run predicts a recognised, unchanged parent's reuse — no parent action, matching the real zero-churn run" {

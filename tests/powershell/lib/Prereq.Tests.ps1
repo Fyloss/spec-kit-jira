@@ -29,4 +29,12 @@ Describe 'Test-JiraPrereq' {
         Test-JiraPrereq -ForceMissing @('git') -WarningVariable warn -WarningAction SilentlyContinue | Out-Null
         ($warn -join "`n") | Should -Match 'git'
     }
+
+    It 'passes on a host without the SecretManagement module — the vault rung is never a prerequisite (T071, Constitution IV v1.3.0)' {
+        # This host has no SecretManagement module installed, and Prereq.psm1
+        # has no dependency on Credentials.psm1 or Get-Secret — the vault rung
+        # cannot block prereq_check because nothing here ever checks for it.
+        Get-Command Get-Secret -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+        Test-JiraPrereq | Should -Be 0
+    }
 }

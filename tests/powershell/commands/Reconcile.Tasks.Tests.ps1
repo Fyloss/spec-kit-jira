@@ -72,11 +72,15 @@ Describe 'Invoke-JiraReconcile — the task tier' {
     It 'a re-run issues zero writes for the task tier (zero churn)' {
         $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
         Clear-Content -LiteralPath $script:M.CallLog
-        $r = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
+        # -Force: this re-run's local inputs are unchanged since the baseline run,
+        # so without -Force the state short-circuit (021) would skip Jira entirely
+        # — this test's point is that a genuine reconcile issues zero writes, not
+        # that the short-circuit fires.
+        $r = Invoke-Captured @('reconcile', $script:Spec, '--json', '--force') | ConvertFrom-Json
         $r.counts.tasks.created | Should -Be 0
         $r.counts.tasks.updated | Should -Be 0
         $r.counts.tasks.unchanged | Should -Be 1
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' -and $_ -notmatch '/issue/bulkfetch' }).Count | Should -Be 0
     }
 
     It 'tasks.md is byte-preserved apart from the inserted marker lines' {

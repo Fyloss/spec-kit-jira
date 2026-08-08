@@ -43,6 +43,21 @@ teardown() {
   [ "$output" = "0" ]
 }
 
+@test "T010 — neither the token nor its base64 Authorization value leaks with timing and tracing both on (contracts/timing-report.md T7)" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  export SPEC_KIT_JIRA_TIMING=1
+  local basic
+  basic="$(printf '%s:%s' "${JIRA_EMAIL}" "${JIRA_API_TOKEN}" | base64 | tr -d '\n')"
+  local out
+  out="$(bash -x "${ENTRY_BASH}" reconcile --verbose --json "${SPEC}" 2>&1 || true)"
+  run grep -c "RAWSECRETXYZ0123456789" <<< "${out}"
+  [ "$output" = "0" ]
+  run grep -c -- "${basic}" <<< "${out}"
+  [ "$output" = "0" ]
+  [[ "${out}" == *"timing: "* ]]
+}
+
 @test "the token never appears on the PowerShell port at max verbosity (SC-007, NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   mock_start "${MOCK}/configs/default.json"

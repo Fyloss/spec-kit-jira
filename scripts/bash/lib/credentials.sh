@@ -20,6 +20,14 @@ _JIRA_LIB_CREDENTIALS=1
 # `set -x` never traces a secret. The guard stays down through the printf and the
 # final emptiness test; xtrace is only restored once no token value remains live.
 
+# Per-process credential cache (021, US3, contracts/credential-cache.md). Filled
+# at most once — by `cred_prime_cache` called from the main shell, or on first
+# miss inside `cred_resolve_token` — so the secret store is asked at most once
+# no matter how many requests (and retries) the run issues. Both non-exported:
+# a child process spawned mid-run must never inherit a copy of the token.
+_CRED_CACHE_STATE="unset"
+_CRED_CACHE_TOKEN=""
+
 # kcov-excl-start — every token-handling function below runs with xtrace
 # suspended (NFR-3 / SC-007), so kcov's tracer cannot observe these lines;
 # the credential suites exercise all three resolution sources.
@@ -74,20 +82,48 @@ _cred_from_env_file() {
 }
 
 # cred_resolve_token — print the resolved token to stdout; return 1 if none.
+# Reads the cache when filled (by cred_prime_cache or a prior call); otherwise
+# resolves through the three rungs and fills it (cache-on-miss, so correctness
+# never depends on cred_prime_cache having run first — only the "at most once"
+# guarantee does).
 cred_resolve_token() {
   local _xt=0
   case "$-" in *x*) _xt=1; set +x ;; esac
   local token="" rc=0
-  if [[ -n "${JIRA_API_TOKEN:-}" ]]; then
-    token="${JIRA_API_TOKEN}"
-  else
-    token="$(_cred_from_secret_manager)"
-    [[ -z "${token}" ]] && token="$(_cred_from_env_file)"
-  fi
+  case "${_CRED_CACHE_STATE}" in
+    resolved) token="${_CRED_CACHE_TOKEN}" ;;
+    unresolved) rc=1 ;;
+    *)
+      if [[ -n "${JIRA_API_TOKEN:-}" ]]; then
+        token="${JIRA_API_TOKEN}"
+      else
+        token="$(_cred_from_secret_manager)"
+        [[ -z "${token}" ]] && token="$(_cred_from_env_file)"
+      fi
+      if [[ -z "${token}" ]]; then
+        _CRED_CACHE_STATE="unresolved"
+        rc=1
+      else
+        _CRED_CACHE_STATE="resolved"
+        _CRED_CACHE_TOKEN="${token}"
+      fi
+      ;;
+  esac
   # Emit and test emptiness while still suspended — the token is live here.
-  if [[ -z "${token}" ]]; then rc=1; else printf '%s' "${token}"; fi
+  [[ "${rc}" == 0 ]] && printf '%s' "${token}"
   [[ "${_xt}" == 1 ]] && set -x
   return "${rc}"
+}
+
+# cred_prime_cache — fill the cache once, from the MAIN shell (research R3: a
+# cache filled inside a `$(jira_request …)` subshell dies with it). Returns 0
+# whether or not a token was found — priming is not a gate. Prints nothing.
+cred_prime_cache() {
+  local _xt=0
+  case "$-" in *x*) _xt=1; set +x ;; esac
+  cred_resolve_token > /dev/null 2>&1 || true
+  [[ "${_xt}" == 1 ]] && set -x
+  return 0
 }
 
 # cred_curl_config <email> — emit a curl `--config` document carrying the
