@@ -85,7 +85,11 @@ Describe 'Invoke-JiraReconcile — the task tier completion pass' {
             -Body '{"fields":{"status":{"name":"Terminé","statusCategory":{"key":"done"}}}}' | Out-Null
 
         $before = (Get-JiraMockCallLog -Mock $script:M).Count
-        $r = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
+        # -Force: this run's local inputs are unchanged since the prior run, so
+        # without -Force the state short-circuit (021) would skip Jira entirely —
+        # this test's point is that a genuine reconcile reads Jira and still finds
+        # zero work, not that the short-circuit fires.
+        $r = Invoke-Captured @('reconcile', $script:Spec, '--json', '--force') | ConvertFrom-Json
         $r.counts.tasks.transitioned | Should -Be 0
         @(Get-JiraMockCallLog -Mock $script:M | Select-Object -Skip $before | Where-Object { $_ -like '*/transitions' }).Count | Should -Be 0
     }
@@ -98,7 +102,9 @@ Describe 'Invoke-JiraReconcile — the task tier completion pass' {
             -Body '{"fields":{"status":{"name":"Terminé","statusCategory":{"key":"done"}}}}' | Out-Null
 
         $before = (Get-JiraMockCallLog -Mock $script:M).Count
-        $r = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
+        # -Force: same rationale as FR-031's re-run above — this test exercises
+        # the divergence-reporting logic itself, not the state short-circuit.
+        $r = Invoke-Captured @('reconcile', $script:Spec, '--json', '--force') | ConvertFrom-Json
         $r.counts.tasks.transitioned | Should -Be 0
         ($r.warnings -join ' ') | Should -BeLike '*TASKP-3*'
         @(Get-JiraMockCallLog -Mock $script:M | Select-Object -Skip $before | Where-Object { $_ -like '*/transitions' }).Count | Should -Be 0
@@ -113,7 +119,11 @@ Describe 'Invoke-JiraReconcile — the task tier completion pass' {
             -ContentType 'application/json' `
             -Body '{"fields":{"status":{"name":"Terminé","statusCategory":{"key":"done"}}}}' | Out-Null
 
-        $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
+        # -Force: without it this run's unchanged local inputs would trigger the
+        # state short-circuit (021), which trivially never writes tasks.md for a
+        # reason unrelated to FR-033 — force a genuine reconcile so the assertion
+        # below actually exercises the "never checks off" logic.
+        $null = Invoke-Captured @('reconcile', $script:Spec, '--json', '--force')
         (Get-Content -Raw -LiteralPath $script:Tasks) | Should -Be $before
     }
 

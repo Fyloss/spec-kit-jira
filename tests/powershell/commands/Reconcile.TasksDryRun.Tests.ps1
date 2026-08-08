@@ -81,7 +81,7 @@ Describe 'Invoke-JiraReconcile --dry-run — the task tier (012)' {
         # a --dry-run over a specification with no parent marker legitimately
         # reaches the double. The dry-run invariant is zero WRITES, not zero
         # requests.
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' -and $_ -notlike '*issue/bulkfetch*' }).Count | Should -Be 0
     }
 
     It 'shows the summary and description of a created sub-task' {
@@ -109,7 +109,7 @@ Describe 'Invoke-JiraReconcile --dry-run — the task tier (012)' {
         ($action.body.fields.description | ConvertTo-Json -Depth 100 -Compress) | Should -Match 'strict validation'
 
         (Get-Content -Raw -LiteralPath $script:Tasks) | Should -Be $before
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' -and $_ -notlike '*issue/bulkfetch*' }).Count | Should -Be 0
     }
 
     It "the dry-run action set for the task tier is identical to the real run's, over the same starting state (Constitution XI)" {

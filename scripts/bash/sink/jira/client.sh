@@ -83,6 +83,15 @@ export JIRA_LAST_STATUS
 JIRA_LAST_ERROR_BODY=''
 export JIRA_LAST_ERROR_BODY
 
+# Total curl attempts issued so far, including retries (contracts/timing-report.md
+# §5). NOT exported: lib/timing.sh reads it directly, since bash sourcing shares
+# one flat process namespace and no export is needed for that. A caller that
+# invokes jira_request via `$( … )` (discovery.sh, ticket.sh, duplicate_probe.sh)
+# loses its increment to the subshell — an accepted undercount, not a bug
+# (contracts/timing-report.md §6, research R5): `calls.log` is the authoritative
+# request count for any test, never this variable.
+: "${JIRA_REQUEST_COUNT:=0}"
+
 # kcov-excl-start — jira_request suspends xtrace for its whole duration
 # (NFR-3 / SC-007: the credential must never be traced), so kcov's tracer
 # cannot observe this machinery; the transport suites exercise it end-to-end.
@@ -141,6 +150,7 @@ jira_request() {
     cfg="${cfg}"$'\n'"header = \"Accept: application/json\""
     [[ -n "${bodyfile}" ]] && cfg="${cfg}"$'\n'"data = \"@$(_jira_curl_path "${bodyfile}")\""
 
+    JIRA_REQUEST_COUNT=$((JIRA_REQUEST_COUNT + 1))
     local http_code curl_rc
     http_code="$(
       printf '%s\n' "${cfg}" | curl --silent --config - \

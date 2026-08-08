@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Windows now shares the same three-rung credential order as macOS and Linux:
+  the environment, then a PowerShell SecretManagement vault
+  (`Get-Secret -Name spec-kit-jira`), then the gitignored `.specify/jira/.env`.
+  Every unavailability path — the module absent, no vault registered, no
+  entry named `spec-kit-jira`, a locked vault — falls through silently.
+- `SPEC_KIT_JIRA_TIMING=1` prints a per-phase timing report on stderr.
+
+### Changed
+
+- **An unchanged reconcile now performs no tracker read.** A run whose
+  `spec.md`, `tasks.md`, `config.yml`, `config.local.yml`, and flags are
+  byte-identical to the last fully successful run exits immediately with zero
+  Jira requests and zero secret-store consultations. The trade: a change made
+  only on the Jira side (a deleted ticket, an edited description, a stripped
+  label) is not detected or healed until a local edit, or `--force`, forces a
+  full reconcile.
+- A changed reconcile now issues one bulk-fetch request ahead of recognition's
+  per-key reads instead of one request per recorded ticket, and resolves the
+  credential once per run instead of once per request.
+
 ## [0.12.1] - 2026-08-07
 
 ### Fixed

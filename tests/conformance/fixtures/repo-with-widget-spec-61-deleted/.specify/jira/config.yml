@@ -1,0 +1,14 @@
+# Team config for the T051 counting-case conformance fixtures (021) — reuses
+# the T050 classification fixture's project shape (story-tier only).
+projects:
+  - key: TASKS
+    style: company_managed
+    hierarchy:
+      specification: Deliverable
+      story: Story
+      task: "Sub-task"
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing_default: TASKS

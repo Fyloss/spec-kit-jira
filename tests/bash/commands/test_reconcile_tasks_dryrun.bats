@@ -72,7 +72,7 @@ _mock_configs() {
   # --dry-run over a specification with no parent marker legitimately reaches
   # the double. The dry-run invariant is zero WRITES, not zero requests.
   run mock_calls
-  [ "$(grep -cE '^(POST|PUT|DELETE) ' <<< "$output")" -eq 0 ]
+  [ "$(grep -vE 'issue/bulkfetch' <<< "$output" | grep -cE '^(POST|PUT|DELETE) ')" -eq 0 ]
 }
 
 @test "a --dry-run preview shows the summary and description of a created sub-task" {
@@ -113,9 +113,13 @@ _mock_configs() {
   [ "${before}" = "${after}" ]
   # Dry-run's own recognition pass GETs each already-created ticket to detect
   # drift (that is how it knows T003 changed) — only a POST/PUT is a write.
+  # The 021 US4 prefetch's own bulkfetch is a POST, but it is a read (one
+  # bulk GET standing in for many), so it is exempted from the "every call
+  # is a GET" check the same way a write would not be.
   run mock_calls
   while IFS= read -r line; do
     [ -z "${line}" ] && continue
+    [[ "${line}" == *"issue/bulkfetch"* ]] && continue
     [[ "${line}" == GET\ * ]]
   done <<< "$output"
 }

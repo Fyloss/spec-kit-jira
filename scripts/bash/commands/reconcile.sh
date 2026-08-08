@@ -50,6 +50,10 @@ source "${_cmd_reconcile_dir}/../hooks/register_hooks.sh" # hook health — READ
 source "${_cmd_reconcile_dir}/../lib/config.sh"          # the operator disable record
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../lib/prereq.sh"          # the bridge-unavailable cause
+# shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../lib/timing.sh"          # per-phase report (contracts/timing-report.md)
+# shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../lib/run_state.sh"       # the run-state short-circuit (Phase 4, US2)
 
 : "${EXIT_CONFIG:=4}"
 
@@ -428,15 +432,25 @@ _reconcile_plan_context() {
 }
 
 # cmd_reconcile <argv...> — reconcile one specification into its Jira project.
-# Echoes the run summary to stdout; returns the exit code.
+# Echoes the run summary to stdout; returns the exit code. Thin wrapper around
+# _reconcile_run so contracts/timing-report.md's report fires on every one of
+# that function's many return paths, not only the final one.
 cmd_reconcile() {
-  local parsed json="false" dry_run="false" on_drift="abort" exit_code="0" error=""
+  local _reconcile_rc=0
+  _reconcile_run "$@" || _reconcile_rc=$?
+  timing_report
+  return "${_reconcile_rc}"
+}
+
+_reconcile_run() {
+  local parsed json="false" dry_run="false" force="false" on_drift="abort" exit_code="0" error=""
   local field_values="" accept_defaults="false"
   parsed="$(cli_parse "$@")"
   while IFS='=' read -r key value; do
     case "${key}" in
       json) json="${value}" ;;
       dry_run) dry_run="${value}" ;;
+      force) force="${value}" ;;
       on_drift) on_drift="${value}" ;;
       field_values) field_values="${value}" ;;
       accept_defaults) accept_defaults="${value}" ;;
@@ -448,6 +462,8 @@ cmd_reconcile() {
     [[ -n "${error}" ]] && printf 'reconcile: %s\n' "${error}" >&2
     return "${exit_code}"
   fi
+
+  timing_phase_begin "prereq"
 
   # (0) DISPATCH GUARD — the operator's disable decision, honoured before any
   # prerequisite check, any config read and any network call (FR-020). The exit
@@ -526,6 +542,41 @@ cmd_reconcile() {
       "Jira mirror skipped: the bridge entry point ${bridge_missing} was not found or is not executable; the extension install is incomplete. This spec-kit command completed normally and nothing was mirrored to Jira. Restore it with: specify extension add --dev <path-to-spec-kit-jira> --force"
     return 0
   fi
+
+  timing_phase_end "prereq"
+
+  # `state` — the run-state short-circuit (Phase 4, US2, contracts/run-state.md
+  # §2–§3). Runs after the dispatch and target guards and before the config
+  # phase, composing from hashed inputs only — there is no resolved project
+  # key here. `--force` and `--dry-run` both skip the read entirely (full
+  # reconcile in both cases, §3); every other run compares against the
+  # recorded document and, on a byte match, short-circuits with zero Jira
+  # requests and zero writes.
+  timing_phase_begin "state"
+  local short_circuited="false"
+  local email="${JIRA_EMAIL:-}"
+  if [[ "${force}" != "true" && "${dry_run}" != "true" ]]; then
+    if run_state_matches "${spec_file}" "${base}" "${email}" "${on_drift}" "${field_values}"; then
+      short_circuited="true"
+    fi
+  fi
+  timing_phase_end "state"
+
+  if [[ "${short_circuited}" == "true" ]]; then
+    local sc_summary
+    sc_summary="$(jq -cn --argjson x 0 --arg f "$(run_state_path "${spec_file}")" \
+      '{schema_version:"1.0", command:"reconcile", dry_run:false, short_circuited:true, state_file:$f,
+        counts:{created:0, updated:0, skipped:0, warnings:0, errors:0}, actions:[], exit_code:$x}' \
+      | json_canonical)"
+    if [[ "${json}" == "true" ]]; then
+      printf '%s\n' "${sc_summary}"
+    else
+      printf '%s' "${sc_summary}" | summary_render_prose
+    fi
+    return 0
+  fi
+
+  timing_phase_begin "config"
 
   # Spec ref: folder from the path, slug from the folder name; repo from the
   # environment. Routing + creation-context resolution (US1/US2, FR-001–FR-013):
@@ -608,6 +659,9 @@ cmd_reconcile() {
   phase_status_map="$(_reconcile_phase_status_map "${project_key}" "${cfg}")"
   halted_statuses="$(_reconcile_halted_statuses "${project_key}" "${cfg}")"
 
+  timing_phase_end "config"
+  timing_phase_begin "gate"
+
   # Mandatory-field gate (Phase 6, US3, T086/T087/T088; contracts/
   # hierarchy-resolution.md §4/§5), moved ahead of spec-marker assignment by
   # Phase 4 (US2, T065): a run that turns out to stop for the consolidated
@@ -688,6 +742,9 @@ cmd_reconcile() {
     fi
   fi
 
+  timing_phase_end "gate"
+  timing_phase_begin "parse"
+
   # R5 step 1 — ASSIGN (Phase 2/3, contracts/story-marker.md, research R5):
   # every story section with no marker at all gets a durable identifier,
   # spliced into spec.md. A dry run computes the SAME assignment but never
@@ -753,6 +810,44 @@ cmd_reconcile() {
   if [[ "$(jq 'length' <<< "${plan_blocks}")" -gt 0 ]]; then
     doc="$(jq -c --argjson pb "${plan_blocks}" '.epic.description.blocks += $pb' <<< "${doc}")"
   fi
+
+  timing_phase_end "parse"
+
+  # 021 US3, contracts/credential-cache.md §2: prime the credential cache
+  # exactly once, HERE, in the main shell — never inside a `$(jira_request …)`
+  # subshell, which would die with it (research R3). Placed after config has
+  # established a base URL (so a run with none never pays a Keychain unlock)
+  # and right before the first phase that issues a real Jira request.
+  cred_prime_cache
+
+  # 021 US4, contracts/recognition-prefetch.md: gather every recorded key
+  # this run is about to read — parent, stories, tasks — and prime the
+  # prefetch cache with ONE bulk read before the per-key phase begins. Tasks
+  # are read from the UNMODIFIED tasks.md text: a side-effect-free
+  # look-ahead, never the authoritative parse (that happens further below,
+  # after marker assignment/splice) — a key it misses simply falls through
+  # to today's GET unchanged (contract §3).
+  local -a prefetch_keys=()
+  if [[ "$(jq -r '.epic.marker.state' <<< "${doc}")" == "bound" ]]; then
+    prefetch_keys+=("$(jq -r '.epic.marker.ticket' <<< "${doc}")")
+  fi
+  while IFS= read -r _pf_key; do
+    [[ -n "${_pf_key}" ]] && prefetch_keys+=("${_pf_key}")
+  done < <(jq -r '.stories[] | select(.marker.state == "bound") | .marker.ticket' <<< "${doc}")
+  if [[ -n "${task_type_id_candidate}" ]]; then
+    local _pf_tasks_file
+    _pf_tasks_file="$(dirname "${spec_file}")/tasks.md"
+    if [[ -f "${_pf_tasks_file}" ]]; then
+      local _pf_tasks_raw
+      _pf_tasks_raw="$(cat "${_pf_tasks_file}" 2> /dev/null; printf x)"; _pf_tasks_raw="${_pf_tasks_raw%x}"
+      while IFS= read -r _pf_key; do
+        [[ -n "${_pf_key}" ]] && prefetch_keys+=("${_pf_key}")
+      done < <(printf '%s' "${_pf_tasks_raw}" | tasks_parse_document | jq -r '.tasks[] | select(.marker.state == "bound") | .marker.ticket')
+    fi
+  fi
+  prefetch_load "${prefetch_keys[@]}"
+
+  timing_phase_begin "recognition"
 
   # R5 step 2a — RECOGNISE THE PARENT (Phase 5, US2, T070/T077;
   # contracts/parent-marker.md "Ordering within one run" step 5). One read
@@ -983,6 +1078,9 @@ cmd_reconcile() {
     task_notes="$(jq -c --argjson b "${reattribution_notes}" '. + $b' <<< "${orphan_notes}")"
   fi
   task_notes="$(jq -c --argjson s "${task_skip_notes}" '. + $s' <<< "${task_notes}")"
+
+  timing_phase_end "recognition"
+  timing_phase_begin "plan"
 
   # SINK: the plan context (US2, FR-007–FR-011; Phase 3, US1: tickets/
   # ticket_origins/ticket_descriptions now come from recognition's `bound`
@@ -1326,6 +1424,9 @@ cmd_reconcile() {
     fi
   fi
 
+  timing_phase_end "plan"
+  timing_phase_begin "apply"
+
   if [[ "${dry_run}" != "true" ]]; then
     # `|| rc=$?` keeps a fail-closed apply (exit >= 2) from aborting the command
     # under the dispatcher's `set -e`, so the run summary always prints (FR-032).
@@ -1470,6 +1571,12 @@ cmd_reconcile() {
   hooks_health="$(register_hooks_health "${ext_path}" "$(config_hooks_disabled_read 2> /dev/null)")" || true
   [[ -z "${hooks_health}" ]] && hooks_health='{"disabled":[],"duplicated":[],"held_disabled":[],"missing":[],"present":[],"unreadable":false}'
 
+  # run_state_record (021, T031) below must see whether this run actually
+  # applied every planned action — the hook-context downgrade just below
+  # resets `rc` to 0 even on a real failure, so the pre-downgrade value is
+  # captured here rather than trusting `rc` at the point of recording.
+  local rc_before_hook_downgrade="${rc}"
+
   # FR-046 / 003 FR-015: in hook context a bridge failure NEVER fails the host
   # command — after surfacing a single actionable WARNING the exit is downgraded
   # to 0, so the mirror can fail without ever affecting the spec-kit command that
@@ -1610,6 +1717,18 @@ cmd_reconcile() {
      actions:$actions}
     + (if $hl then {warnings:$w, notes:$no} else {} end)
     + {hook_health:$hooks, exit_code:$x}' | json_canonical)"
+
+  timing_phase_end "apply"
+
+  # run_state_record (021, T031, contracts/run-state.md §4): only a real run
+  # (never --dry-run) that applied every planned action (the pre-downgrade
+  # rc is 0 — a hook-context failure masked to exit 0 must not be recorded as
+  # a success), emitted no warning, and has no pending confirmation
+  # outstanding (a pending-confirmation run already returned above, long
+  # before this point, so reaching here already proves that condition).
+  if [[ "${dry_run}" != "true" && "${rc_before_hook_downgrade}" == "0" && "${warn_count}" -eq 0 ]]; then
+    run_state_record "${spec_file}" "${base}" "${email}" "${on_drift}" "${field_values}"
+  fi
 
   if [[ "${json}" == "true" ]]; then
     printf '%s\n' "${summary}"

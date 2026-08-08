@@ -116,6 +116,7 @@ function Invoke-JiraCliParse {
 
     $command = ''
     $dryRun = 'false'
+    $force = 'false'
     $json = 'false'
     $onDrift = 'abort'
     $verbose = 'false'
@@ -139,6 +140,7 @@ function Invoke-JiraCliParse {
                 break
             }
             '^--dry-run$' { $dryRun = 'true'; break }
+            '^--force$' { $force = 'true'; break }
             '^--json$' { $json = 'true'; break }
             '^--verbose$' { $verbose = 'true'; break }
             '^(--help|-h)$' { $help = 'true'; break }
@@ -279,6 +281,7 @@ function Invoke-JiraCliParse {
     else {
         $lines.Add("command=$command")
         $lines.Add("dry_run=$dryRun")
+        $lines.Add("force=$force")
         $lines.Add("json=$json")
         $lines.Add("on_drift=$onDrift")
         $lines.Add("verbose=$verbose")

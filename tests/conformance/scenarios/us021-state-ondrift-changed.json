@@ -1,0 +1,16 @@
+{
+  "name": "us021-state-ondrift-changed",
+  "description": "T021a [US2]: contracts/run-state.md §9 'Reconcile with --on-drift=abort, then with --on-drift=proceed' — the two modes do not share a state; the second run must be a full reconcile, and the freshly recorded state's on_drift field must reflect the mode of the run that recorded it.",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec-clean",
+  "runs": [
+    { "argv": ["reconcile", "--json", "--on-drift=abort", "specs/001-billing-invoices/spec.md"] },
+    { "argv": ["reconcile", "--json", "--on-drift=proceed", "specs/001-billing-invoices/spec.md"] }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222 3333333333333333"
+  }
+}

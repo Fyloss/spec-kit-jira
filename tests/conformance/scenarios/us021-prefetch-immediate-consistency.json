@@ -1,0 +1,41 @@
+{
+  "name": "us021-prefetch-immediate-consistency",
+  "description": "T052, spec.md Acceptance Scenario 2 / contracts/recognition-prefetch.md §6 \"A ticket created seconds earlier\": run 1 creates a fresh epic and story on an unbound spec; run 2, against the SAME mock state, recognises both through the bulkfetch-based prefetch with no fallback GET and no duplicate create — the immediate-consistency property that makes R2's bulkfetch substitution for feature 005's rejected search-based recognition legitimate. Diffed against the SAME two-run sequence with _RECOGNITION_NO_PREFETCH=1: stdout, stderr, exit, and the post-run tree must be byte-identical for both runs.",
+  "mock": {
+    "projects": {
+      "TASKS": "company"
+    },
+    "issues": {}
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-widget-spec-zero",
+  "runs": [
+    {
+      "argv": [
+        "reconcile",
+        "specs/001-widget/spec.md",
+        "--json"
+      ]
+    },
+    {
+      "before": {
+        "delete": [
+          ".specify/jira/state/001-widget.json"
+        ]
+      },
+      "argv": [
+        "reconcile",
+        "specs/001-widget/spec.md",
+        "--json"
+      ]
+    }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-widget",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222"
+  },
+  "read_requests": 1
+}

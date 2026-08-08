@@ -1,0 +1,13 @@
+{
+  "name": "us022-dry-run-no-write",
+  "description": "T022 [US2, S6]: --dry-run on a spec with no prior recorded state must neither read nor write the state document, so a re-run afterwards would still see a full first run. Forward-looking regression guard: no code path writes state for any run yet, so this is trivially green today by omission, not by a proven bypass — the assertion is written now so it fails the moment a future implementation writes state unconditionally on a dry run.",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec-clean",
+  "argv": ["reconcile", "--json", "--dry-run", "specs/001-billing-invoices/spec.md"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222 3333333333333333"
+  }
+}

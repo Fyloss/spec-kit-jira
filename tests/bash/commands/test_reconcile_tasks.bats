@@ -68,12 +68,16 @@ _mock_configs() {
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
   : > "${MOCK_CALLLOG}"
-  run cmd_reconcile reconcile "${SPEC}" --json
+  # --force: this re-run's local inputs are unchanged since the baseline run,
+  # so without --force the state short-circuit (021) would skip Jira entirely
+  # — this test's point is that a genuine reconcile issues zero writes, not
+  # that the short-circuit fires.
+  run cmd_reconcile reconcile "${SPEC}" --json --force
   [ "$status" -eq 0 ]
   [ "$(jq -r '.counts.tasks.created' <<< "$output")" -eq 0 ]
   [ "$(jq -r '.counts.tasks.updated' <<< "$output")" -eq 0 ]
   [ "$(jq -r '.counts.tasks.unchanged' <<< "$output")" -eq 1 ]
-  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 0 ]
+  [ "$(grep -vE 'issue/bulkfetch' "${MOCK_CALLLOG}" | grep -cE '^(POST|PUT) ')" -eq 0 ]
 }
 
 @test "T045/T046 [US2] — renumbering T0nn while preserving the durable marker updates the SAME ticket, never creates a second one (FR-016)" {
@@ -130,7 +134,7 @@ _mock_configs() {
   # --dry-run over a specification with no parent marker legitimately reaches
   # the double. The dry-run invariant is zero WRITES, not zero requests.
   run mock_calls
-  [ "$(grep -cE '^(POST|PUT|DELETE) ' <<< "$output")" -eq 0 ]
+  [ "$(grep -vE 'issue/bulkfetch' <<< "$output" | grep -cE '^(POST|PUT|DELETE) ')" -eq 0 ]
 }
 
 @test "no tasks.md is a silent no-op — no counts.tasks key at all" {

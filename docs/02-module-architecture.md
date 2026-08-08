@@ -42,6 +42,7 @@ flowchart TB
         S7["privacy_guard"]
         S8["plan_apply"]
         S9["duplicate_probe (017, US4, droppable)"]
+        S10["prefetch (021) — one bulkfetch ahead of recognition's per-key reads"]
     end
 
     subgraph LibLayer["lib/ — port infrastructure, no Jira knowledge"]
@@ -51,6 +52,8 @@ flowchart TB
         L3["credentials"]
         L4["output — canonical JSON"]
         L5["prereq"]
+        L6["timing (021) — phase marks, request counter"]
+        L7["run_state (021) — the state-phase short-circuit"]
     end
 
     subgraph HooksLayer["hooks/ — host-integration vocabulary"]
@@ -150,6 +153,10 @@ mindmap
         entity-property identity marker
       recognition
         reads recorded tickets back by key
+        consults the prefetch map first (021), falls back to its own GET unchanged
+      prefetch (021)
+        one POST bulkfetch, up to 100 keys, key -> issue map
+        can only remove individual reads, never change an outcome
       ticket
         validate and guarded create
       adf
@@ -164,6 +171,10 @@ mindmap
       credentials
       output canonical JSON
       prereq
+      timing (021)
+        phase marks, request counter, clock strategy
+      run_state (021)
+        compose, compare, record the run-state document
     hooks
       register_hooks reader
       readme_block writer
