@@ -57,6 +57,28 @@ a full reconcile. See
 [`contracts/run-state.md`](../specs/021-reconcile-performance/contracts/run-state.md) for the full
 decision table.
 
+## Timing instrumentation (021)
+
+`SPEC_KIT_JIRA_TIMING=1` makes a run report, on **stderr only**, how long each
+of the pipeline's eight phases took and how many tracker requests it issued —
+`prereq`, `state`, `config`, `parse`, `gate`, `recognition`, `plan`, `apply` —
+followed by a total line. It is an environment variable rather than a flag
+because the lifecycle hooks are invoked by the host, not by the operator, so a
+flag could never reach them. With the switch off, a run emits zero additional
+bytes on any channel; with it on, stdout, the exit code, and every written
+file stay byte-identical to the same run without it — only stderr gains the
+report. A short-circuited run (the state phase above) reaches only `prereq`
+and `state` before its total.
+
+One boundary is worth knowing before reading a number: `jira_request` is
+called through command substitution at a few call sites outside the
+`recognition` and `apply` phases, and a request counted inside a subshell
+never reaches the parent's counter, so those phases can undercount. Both
+phases every success criterion is written about count exactly, because they
+redirect to a file and run in the parent. See
+[`contracts/timing-report.md`](../specs/021-reconcile-performance/contracts/timing-report.md) §6 for
+the full boundary, and §2 for the report's exact shape.
+
 ## The consolidated field-defaults question (011)
 
 A recorded default makes an otherwise-unsatisfiable required field

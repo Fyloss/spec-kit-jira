@@ -29,11 +29,26 @@ flowchart TB
         D[".specify/jira/.env — JIRA_API_TOKEN only"]
     end
 
+    subgraph L4["4 · Run-state cache (021) — GITIGNORED, machine-owned"]
+        E[".specify/jira/state/&lt;feature&gt;.json"]
+        E1["hashes of the local inputs a run<br/>saw last time it fully succeeded"]
+    end
+
     A -->|"logical names"| Resolve["Reconcile"]
     B -->|"resolved ids"| Resolve
     C -->|"team selection"| Feature["Feature naming"]
     D -->|"3rd credential rung"| Sink["sink/jira/client"]
+    Resolve -->|"records on success"| E
 ```
+
+The run-state cache is not a fourth configuration layer — it holds no setting
+an operator sets, only hashes `run_state_record` computes from the other
+three's own inputs plus `spec.md`/`tasks.md`. It is machine-owned and never
+committed, self-ignoring through the `*` `.gitignore` `run_state_record`
+writes beside it the first time it creates the directory, and it never holds
+a credential (FR-019, Constitution V). See
+[`contracts/run-state.md`](../specs/021-reconcile-performance/contracts/run-state.md) for what it
+records and why staleness there is an accepted trade, not a bug.
 
 Rules that hold across all three:
 
