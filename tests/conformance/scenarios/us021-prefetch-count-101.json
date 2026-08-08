@@ -1,0 +1,3354 @@
+{
+  "name": "us021-prefetch-count-101",
+  "description": "T051, contracts/recognition-prefetch.md: 101 recorded keys (1 epic + 100 stories) chunk into two POST /issue/bulkfetch calls — 2 read requests total, no per-key fallback GET. Diffed against the SAME scenario run with _RECOGNITION_NO_PREFETCH=1: stdout, stderr, exit, and the post-run tree must be byte-identical.",
+  "mock": {
+    "projects": {
+      "TASKS": "company"
+    },
+    "issues": {
+      "TASKS-1": {
+        "summary": "Widget Management",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "We need to let users manage widgets end to end.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10101"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "parent"
+          }
+        }
+      },
+      "TASKS-2": {
+        "summary": "Story number TASKS-2",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 1.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000001"
+          }
+        }
+      },
+      "TASKS-3": {
+        "summary": "Story number TASKS-3",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 2.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000002"
+          }
+        }
+      },
+      "TASKS-4": {
+        "summary": "Story number TASKS-4",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 3.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000003"
+          }
+        }
+      },
+      "TASKS-5": {
+        "summary": "Story number TASKS-5",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 4.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000004"
+          }
+        }
+      },
+      "TASKS-6": {
+        "summary": "Story number TASKS-6",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 5.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000005"
+          }
+        }
+      },
+      "TASKS-7": {
+        "summary": "Story number TASKS-7",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 6.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000006"
+          }
+        }
+      },
+      "TASKS-8": {
+        "summary": "Story number TASKS-8",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 7.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000007"
+          }
+        }
+      },
+      "TASKS-9": {
+        "summary": "Story number TASKS-9",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 8.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000008"
+          }
+        }
+      },
+      "TASKS-10": {
+        "summary": "Story number TASKS-10",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 9.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000009"
+          }
+        }
+      },
+      "TASKS-11": {
+        "summary": "Story number TASKS-11",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 10.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000000a"
+          }
+        }
+      },
+      "TASKS-12": {
+        "summary": "Story number TASKS-12",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 11.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000000b"
+          }
+        }
+      },
+      "TASKS-13": {
+        "summary": "Story number TASKS-13",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 12.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000000c"
+          }
+        }
+      },
+      "TASKS-14": {
+        "summary": "Story number TASKS-14",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 13.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000000d"
+          }
+        }
+      },
+      "TASKS-15": {
+        "summary": "Story number TASKS-15",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 14.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000000e"
+          }
+        }
+      },
+      "TASKS-16": {
+        "summary": "Story number TASKS-16",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 15.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000000f"
+          }
+        }
+      },
+      "TASKS-17": {
+        "summary": "Story number TASKS-17",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 16.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000010"
+          }
+        }
+      },
+      "TASKS-18": {
+        "summary": "Story number TASKS-18",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 17.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000011"
+          }
+        }
+      },
+      "TASKS-19": {
+        "summary": "Story number TASKS-19",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 18.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000012"
+          }
+        }
+      },
+      "TASKS-20": {
+        "summary": "Story number TASKS-20",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 19.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000013"
+          }
+        }
+      },
+      "TASKS-21": {
+        "summary": "Story number TASKS-21",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 20.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000014"
+          }
+        }
+      },
+      "TASKS-22": {
+        "summary": "Story number TASKS-22",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 21.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000015"
+          }
+        }
+      },
+      "TASKS-23": {
+        "summary": "Story number TASKS-23",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 22.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000016"
+          }
+        }
+      },
+      "TASKS-24": {
+        "summary": "Story number TASKS-24",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 23.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000017"
+          }
+        }
+      },
+      "TASKS-25": {
+        "summary": "Story number TASKS-25",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 24.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000018"
+          }
+        }
+      },
+      "TASKS-26": {
+        "summary": "Story number TASKS-26",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 25.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000019"
+          }
+        }
+      },
+      "TASKS-27": {
+        "summary": "Story number TASKS-27",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 26.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000001a"
+          }
+        }
+      },
+      "TASKS-28": {
+        "summary": "Story number TASKS-28",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 27.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000001b"
+          }
+        }
+      },
+      "TASKS-29": {
+        "summary": "Story number TASKS-29",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 28.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000001c"
+          }
+        }
+      },
+      "TASKS-30": {
+        "summary": "Story number TASKS-30",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 29.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000001d"
+          }
+        }
+      },
+      "TASKS-31": {
+        "summary": "Story number TASKS-31",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 30.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000001e"
+          }
+        }
+      },
+      "TASKS-32": {
+        "summary": "Story number TASKS-32",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 31.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000001f"
+          }
+        }
+      },
+      "TASKS-33": {
+        "summary": "Story number TASKS-33",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 32.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000020"
+          }
+        }
+      },
+      "TASKS-34": {
+        "summary": "Story number TASKS-34",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 33.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000021"
+          }
+        }
+      },
+      "TASKS-35": {
+        "summary": "Story number TASKS-35",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 34.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000022"
+          }
+        }
+      },
+      "TASKS-36": {
+        "summary": "Story number TASKS-36",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 35.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000023"
+          }
+        }
+      },
+      "TASKS-37": {
+        "summary": "Story number TASKS-37",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 36.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000024"
+          }
+        }
+      },
+      "TASKS-38": {
+        "summary": "Story number TASKS-38",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 37.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000025"
+          }
+        }
+      },
+      "TASKS-39": {
+        "summary": "Story number TASKS-39",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 38.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000026"
+          }
+        }
+      },
+      "TASKS-40": {
+        "summary": "Story number TASKS-40",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 39.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000027"
+          }
+        }
+      },
+      "TASKS-41": {
+        "summary": "Story number TASKS-41",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 40.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000028"
+          }
+        }
+      },
+      "TASKS-42": {
+        "summary": "Story number TASKS-42",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 41.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000029"
+          }
+        }
+      },
+      "TASKS-43": {
+        "summary": "Story number TASKS-43",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 42.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000002a"
+          }
+        }
+      },
+      "TASKS-44": {
+        "summary": "Story number TASKS-44",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 43.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000002b"
+          }
+        }
+      },
+      "TASKS-45": {
+        "summary": "Story number TASKS-45",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 44.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000002c"
+          }
+        }
+      },
+      "TASKS-46": {
+        "summary": "Story number TASKS-46",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 45.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000002d"
+          }
+        }
+      },
+      "TASKS-47": {
+        "summary": "Story number TASKS-47",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 46.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000002e"
+          }
+        }
+      },
+      "TASKS-48": {
+        "summary": "Story number TASKS-48",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 47.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000002f"
+          }
+        }
+      },
+      "TASKS-49": {
+        "summary": "Story number TASKS-49",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 48.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000030"
+          }
+        }
+      },
+      "TASKS-50": {
+        "summary": "Story number TASKS-50",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 49.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000031"
+          }
+        }
+      },
+      "TASKS-51": {
+        "summary": "Story number TASKS-51",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 50.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000032"
+          }
+        }
+      },
+      "TASKS-52": {
+        "summary": "Story number TASKS-52",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 51.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000033"
+          }
+        }
+      },
+      "TASKS-53": {
+        "summary": "Story number TASKS-53",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 52.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000034"
+          }
+        }
+      },
+      "TASKS-54": {
+        "summary": "Story number TASKS-54",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 53.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000035"
+          }
+        }
+      },
+      "TASKS-55": {
+        "summary": "Story number TASKS-55",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 54.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000036"
+          }
+        }
+      },
+      "TASKS-56": {
+        "summary": "Story number TASKS-56",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 55.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000037"
+          }
+        }
+      },
+      "TASKS-57": {
+        "summary": "Story number TASKS-57",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 56.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000038"
+          }
+        }
+      },
+      "TASKS-58": {
+        "summary": "Story number TASKS-58",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 57.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000039"
+          }
+        }
+      },
+      "TASKS-59": {
+        "summary": "Story number TASKS-59",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 58.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000003a"
+          }
+        }
+      },
+      "TASKS-60": {
+        "summary": "Story number TASKS-60",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 59.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000003b"
+          }
+        }
+      },
+      "TASKS-61": {
+        "summary": "Story number TASKS-61",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 60.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000003c"
+          }
+        }
+      },
+      "TASKS-62": {
+        "summary": "Story number TASKS-62",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 61.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000003d"
+          }
+        }
+      },
+      "TASKS-63": {
+        "summary": "Story number TASKS-63",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 62.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000003e"
+          }
+        }
+      },
+      "TASKS-64": {
+        "summary": "Story number TASKS-64",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 63.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000003f"
+          }
+        }
+      },
+      "TASKS-65": {
+        "summary": "Story number TASKS-65",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 64.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000040"
+          }
+        }
+      },
+      "TASKS-66": {
+        "summary": "Story number TASKS-66",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 65.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000041"
+          }
+        }
+      },
+      "TASKS-67": {
+        "summary": "Story number TASKS-67",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 66.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000042"
+          }
+        }
+      },
+      "TASKS-68": {
+        "summary": "Story number TASKS-68",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 67.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000043"
+          }
+        }
+      },
+      "TASKS-69": {
+        "summary": "Story number TASKS-69",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 68.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000044"
+          }
+        }
+      },
+      "TASKS-70": {
+        "summary": "Story number TASKS-70",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 69.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000045"
+          }
+        }
+      },
+      "TASKS-71": {
+        "summary": "Story number TASKS-71",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 70.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000046"
+          }
+        }
+      },
+      "TASKS-72": {
+        "summary": "Story number TASKS-72",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 71.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000047"
+          }
+        }
+      },
+      "TASKS-73": {
+        "summary": "Story number TASKS-73",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 72.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000048"
+          }
+        }
+      },
+      "TASKS-74": {
+        "summary": "Story number TASKS-74",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 73.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000049"
+          }
+        }
+      },
+      "TASKS-75": {
+        "summary": "Story number TASKS-75",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 74.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000004a"
+          }
+        }
+      },
+      "TASKS-76": {
+        "summary": "Story number TASKS-76",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 75.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000004b"
+          }
+        }
+      },
+      "TASKS-77": {
+        "summary": "Story number TASKS-77",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 76.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000004c"
+          }
+        }
+      },
+      "TASKS-78": {
+        "summary": "Story number TASKS-78",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 77.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000004d"
+          }
+        }
+      },
+      "TASKS-79": {
+        "summary": "Story number TASKS-79",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 78.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000004e"
+          }
+        }
+      },
+      "TASKS-80": {
+        "summary": "Story number TASKS-80",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 79.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000004f"
+          }
+        }
+      },
+      "TASKS-81": {
+        "summary": "Story number TASKS-81",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 80.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000050"
+          }
+        }
+      },
+      "TASKS-82": {
+        "summary": "Story number TASKS-82",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 81.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000051"
+          }
+        }
+      },
+      "TASKS-83": {
+        "summary": "Story number TASKS-83",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 82.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000052"
+          }
+        }
+      },
+      "TASKS-84": {
+        "summary": "Story number TASKS-84",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 83.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000053"
+          }
+        }
+      },
+      "TASKS-85": {
+        "summary": "Story number TASKS-85",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 84.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000054"
+          }
+        }
+      },
+      "TASKS-86": {
+        "summary": "Story number TASKS-86",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 85.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000055"
+          }
+        }
+      },
+      "TASKS-87": {
+        "summary": "Story number TASKS-87",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 86.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000056"
+          }
+        }
+      },
+      "TASKS-88": {
+        "summary": "Story number TASKS-88",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 87.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000057"
+          }
+        }
+      },
+      "TASKS-89": {
+        "summary": "Story number TASKS-89",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 88.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000058"
+          }
+        }
+      },
+      "TASKS-90": {
+        "summary": "Story number TASKS-90",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 89.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000059"
+          }
+        }
+      },
+      "TASKS-91": {
+        "summary": "Story number TASKS-91",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 90.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000005a"
+          }
+        }
+      },
+      "TASKS-92": {
+        "summary": "Story number TASKS-92",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 91.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000005b"
+          }
+        }
+      },
+      "TASKS-93": {
+        "summary": "Story number TASKS-93",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 92.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000005c"
+          }
+        }
+      },
+      "TASKS-94": {
+        "summary": "Story number TASKS-94",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 93.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000005d"
+          }
+        }
+      },
+      "TASKS-95": {
+        "summary": "Story number TASKS-95",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 94.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000005e"
+          }
+        }
+      },
+      "TASKS-96": {
+        "summary": "Story number TASKS-96",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 95.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "000000000000005f"
+          }
+        }
+      },
+      "TASKS-97": {
+        "summary": "Story number TASKS-97",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 96.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000060"
+          }
+        }
+      },
+      "TASKS-98": {
+        "summary": "Story number TASKS-98",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 97.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000061"
+          }
+        }
+      },
+      "TASKS-99": {
+        "summary": "Story number TASKS-99",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 98.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000062"
+          }
+        }
+      },
+      "TASKS-100": {
+        "summary": "Story number TASKS-100",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 99.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000063"
+          }
+        }
+      },
+      "TASKS-101": {
+        "summary": "Story number TASKS-101",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want outcome 100.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "0000000000000064"
+          }
+        }
+      }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-widget-spec-101",
+  "argv": [
+    "reconcile",
+    "specs/001-widget/spec.md",
+    "--json"
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-widget"
+  },
+  "read_requests": 2
+}

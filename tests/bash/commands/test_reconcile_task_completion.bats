@@ -79,7 +79,11 @@ _mock_configs() {
     -d '{"fields":{"status":{"name":"Terminé","statusCategory":{"key":"done"}}}}' > /dev/null
 
   : > "${MOCK_CALLLOG}"
-  run cmd_reconcile reconcile "${SPEC}" --json
+  # --force: this run's local inputs are unchanged since the prior run, so
+  # without --force the state short-circuit (021) would skip Jira entirely —
+  # this test's point is that a genuine reconcile reads Jira and still finds
+  # zero work, not that the short-circuit fires.
+  run cmd_reconcile reconcile "${SPEC}" --json --force
   [ "$status" -eq 0 ]
   [ "$(jq -r '.counts.tasks.transitioned' <<< "$output")" -eq 0 ]
   [ "$(grep -c '/transitions$' "${MOCK_CALLLOG}")" -eq 0 ]
@@ -96,7 +100,9 @@ _mock_configs() {
     -d '{"fields":{"status":{"name":"Terminé","statusCategory":{"key":"done"}}}}' > /dev/null
 
   : > "${MOCK_CALLLOG}"
-  run cmd_reconcile reconcile "${SPEC}" --json
+  # --force: same rationale as FR-031's re-run above — this test exercises
+  # the divergence-reporting logic itself, not the state short-circuit.
+  run cmd_reconcile reconcile "${SPEC}" --json --force
   [ "$status" -eq 0 ]
   [ "$(jq -r '.counts.tasks.transitioned' <<< "$output")" -eq 0 ]
   [[ "$(jq -r '.warnings | join(" ")' <<< "$output")" == *"TASKP-3"* ]]
@@ -115,7 +121,11 @@ _mock_configs() {
     -H 'Content-Type: application/json' \
     -d '{"fields":{"status":{"name":"Terminé","statusCategory":{"key":"done"}}}}' > /dev/null
 
-  run cmd_reconcile reconcile "${SPEC}" --json
+  # --force: without it this run's unchanged local inputs would trigger the
+  # state short-circuit (021), which trivially never writes tasks.md for a
+  # reason unrelated to FR-033 — force a genuine reconcile so the assertion
+  # below actually exercises the "never checks off" logic.
+  run cmd_reconcile reconcile "${SPEC}" --json --force
   [ "$status" -eq 0 ]
   [ "$(cat "${TASKS}")" = "${before}" ]
 }

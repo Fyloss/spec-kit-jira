@@ -1,0 +1,22 @@
+{
+  "name": "us021-state-tasks-deleted",
+  "description": "T021a [US2]: mirror of us021-state-tasks-appeared — tasks.md is present for the first reconcile and removed before the second. data-model.md §1 'inputs members': tasks.md's key is omitted entirely once the file is gone, so its disappearance changes the inputs map just as its appearance does; the second run must be a full reconcile, and the freshly recorded state's inputs must carry no tasks.md key.",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec-clean",
+  "runs": [
+    {
+      "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"],
+      "before": { "write": { "specs/001-billing-invoices/tasks.md": "# Tasks\n\n- [ ] T001 A setup task\n" } }
+    },
+    {
+      "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"],
+      "before": { "delete": ["specs/001-billing-invoices/tasks.md"] }
+    }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222 3333333333333333"
+  }
+}

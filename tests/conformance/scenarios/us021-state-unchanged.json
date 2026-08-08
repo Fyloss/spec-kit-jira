@@ -1,0 +1,18 @@
+{
+  "name": "us021-state-unchanged",
+  "description": "T020 [US2]: reconcile a three-story specification to completion, then reconcile it again with nothing changed. The second run's calls.log must be empty (not merely free of writes, as us2-zero-churn-unchanged.json already proves — no recognition read either), its exit 0, and its stdout must name the short-circuit. With SPEC_KIT_JIRA_TIMING on, the second run's stderr must carry only the prereq, state, and total phases (invariant T8, contracts/timing-report.md §3).",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec-clean",
+  "runs": [
+    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] },
+    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222 3333333333333333",
+    "SPEC_KIT_JIRA_TIMING": "1",
+    "_TIMING_FAKE_CLOCK": "0 11 22 33 44 55 66 77 88 99 110 121 132 143 154 165 176 187 198 209 220 231 242 253 264 275 286 297 308 319 330 341 352 363 374 385 396 407 418 429"
+  }
+}

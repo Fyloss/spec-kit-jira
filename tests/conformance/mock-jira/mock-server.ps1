@@ -245,6 +245,74 @@ function Get-Fault {
     return $GlobalFault
 }
 
+function Get-IssueBulkfetch {
+    # 021 US4, contracts/recognition-prefetch.md T046: composes its response
+    # from the SAME per-key store `/rest/api/3/issue/{key}` already serves,
+    # honouring `fields`/`properties`, and returning issues in the store's own
+    # (insertion) order — never request order (P4: matched by key, never
+    # position). A key is omitted when it is absent from the store (deleted)
+    # or faulted on its own per-key path (not visible) — deleted and
+    # forbidden are equally "not returned", reusing the SAME fault config a
+    # direct per-key GET already uses, never a second source of truth.
+    param([string]$Body)
+    $reqIds = @()
+    $fieldsCsv = ''
+    $propsCsv = ''
+    try {
+        $bodyObj = $Body | ConvertFrom-Json -AsHashtable
+        if ($bodyObj) {
+            if ($bodyObj.ContainsKey('issueIdsOrKeys')) { $reqIds = @($bodyObj.issueIdsOrKeys) }
+            if ($bodyObj.ContainsKey('fields')) { $fieldsCsv = ($bodyObj.fields -join ',') }
+            if ($bodyObj.ContainsKey('properties')) { $propsCsv = ($bodyObj.properties -join ',') }
+        }
+    }
+    catch { }
+    $wantSubtasks = ",$fieldsCsv," -like '*,subtasks,*'
+    $wantFields = @()
+    if ($fieldsCsv) { $wantFields = $fieldsCsv -split ',' }
+    $propNames = @()
+    if ($propsCsv) { $propNames = $propsCsv -split ',' }
+
+    $issues = New-Object System.Collections.Generic.List[object]
+    foreach ($reqKey in $reqIds) {
+        $matchKey = $null
+        foreach ($k in $script:Issues.Keys) {
+            if ($k.ToLowerInvariant() -eq $reqKey.ToLowerInvariant()) { $matchKey = $k; break }
+        }
+        if (-not $matchKey) { continue }
+        $fault = Get-Fault -Path "/rest/api/3/issue/$matchKey"
+        if ($fault) { continue }
+
+        $issue = $script:Issues[$matchKey]
+        $flds = $issue.fields.Clone()
+        if ($wantSubtasks) {
+            $subtasks = @()
+            foreach ($ck in $script:Issues.Keys) {
+                $cf = $script:Issues[$ck].fields
+                if ($cf.ContainsKey('parent') -and $cf.parent -and $cf.parent.key -eq $matchKey) {
+                    $it = if ($cf.ContainsKey('issuetype') -and $cf.issuetype) { $cf.issuetype } else { @{ id = $null } }
+                    $subtasks += @{ key = $ck; fields = @{ issuetype = $it } }
+                }
+            }
+            $flds['subtasks'] = $subtasks
+        }
+        if ($wantFields.Count -gt 0) {
+            $projected = @{}
+            foreach ($fk in $wantFields) { if ($flds.ContainsKey($fk)) { $projected[$fk] = $flds[$fk] } }
+            $flds = $projected
+        }
+        $entry = @{ key = $matchKey; fields = $flds }
+        if ($propNames.Count -gt 0) {
+            $propsOut = @{}
+            foreach ($pn in $propNames) { if ($issue.properties.ContainsKey($pn)) { $propsOut[$pn] = $issue.properties[$pn] } }
+            $entry['properties'] = $propsOut
+        }
+        $issues.Add($entry)
+    }
+    $resp = @{ issues = $issues.ToArray(); issueErrors = @() }
+    return @{ status = 200; body = ($resp | ConvertTo-Json -Depth 20 -Compress) }
+}
+
 function Get-LabelSearchResult {
     # 017, contracts/duplicate-probe.md §3/§4: decode the jql query's
     # `labels = "<label>"` clause and look it up in $LabelSearch. Mirror of
@@ -335,6 +403,9 @@ function Resolve-Route {
                 $script:Issues[$key] = @{ fields = $fields; properties = @{} }
                 return @{ status = 201; body = "{`"id`":`"99001`",`"key`":`"$key`",`"self`":`"/rest/api/3/issue/99001`"}" }
             }
+        }
+        '^/rest/api/3/issue/bulkfetch$' {
+            if ($Method -eq 'POST') { return (Get-IssueBulkfetch -Body $Body) }
         }
         '^/rest/api/3/issue/[^/]+/transitions$' {
             if ($Method -eq 'POST') { return @{ status = 204; body = '' } }

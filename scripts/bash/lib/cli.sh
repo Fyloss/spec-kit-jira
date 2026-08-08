@@ -79,7 +79,7 @@ cli_field_answers_for() {
 
 # cli_parse <args...> — parse the command line; print key=value state lines.
 cli_parse() {
-  local command="" dry_run=false json=false on_drift=abort
+  local command="" dry_run=false force=false json=false on_drift=abort
   local verbose=false help=false error="" use_team="" accept_defaults=false
   local -a positional=() styles=() enable_hooks=() child_types=() issue_types=()
   local -a field_defaults=() field_values=()
@@ -90,6 +90,7 @@ cli_parse() {
         if [[ -z "${command}" ]]; then command="$1"; else positional+=("$1"); fi
         ;;
       --dry-run) dry_run=true ;;
+      --force) force=true ;;
       --json) json=true ;;
       --verbose) verbose=true ;;
       --help | -h) help=true ;;
@@ -262,6 +263,7 @@ cli_parse() {
 
   printf 'command=%s\n' "${command}"
   printf 'dry_run=%s\n' "${dry_run}"
+  printf 'force=%s\n' "${force}"
   printf 'json=%s\n' "${json}"
   printf 'on_drift=%s\n' "${on_drift}"
   printf 'verbose=%s\n' "${verbose}"

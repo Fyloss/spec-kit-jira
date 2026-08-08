@@ -223,10 +223,10 @@ connection setting. From then on every lifecycle step mirrors on its own.
 The PowerShell port needs fewer tools — it uses `Invoke-RestMethod` and native
 JSON, so neither `curl` nor `jq` is required.
 
-**There is no OS secret-manager rung on Windows.** `Get-JiraSecretManagerToken`
-is a deliberate no-op, so the token must come from the environment or the
-gitignored `.specify/jira/.env`. Do not put it in the Credential Manager
-expecting the bridge to find it — nothing reads from there.
+Same three-rung resolution as macOS and Linux: environment, then the OS secret
+manager, then the gitignored `.specify/jira/.env`. On Windows the second rung
+is a PowerShell SecretManagement vault, queried as
+`Get-Secret -Name spec-kit-jira` — the steps below use it.
 
 ### 1. Install the runtime prerequisites
 
@@ -243,10 +243,35 @@ the prerequisite check exits with code `5` on 5.1 and names the version.
 At <https://id.atlassian.com/manage-profile/security/api-tokens>, choose
 *Create API token*, name it, and copy the value — Jira shows it once.
 
-### 3. Store the token
+### 3. Store the token in a SecretManagement vault
 
-Read it in masked so it stays out of your console history, and persist it for
-your user account:
+```powershell
+Install-Module Microsoft.PowerShell.SecretManagement, Microsoft.PowerShell.SecretStore -Scope CurrentUser
+Register-SecretVault -Name SecretStore -ModuleName Microsoft.PowerShell.SecretStore -DefaultVault
+Set-Secret -Name spec-kit-jira
+```
+
+`Set-Secret` prompts for the token masked, keeping it out of your console
+history. `spec-kit-jira` is the secret name the credential resolver looks up,
+so use it verbatim.
+
+SecretStore defaults to a master-password prompt on every access, which blocks
+a lifecycle hook that runs non-interactively. If you intend to mirror from
+hooks, trade that prompt away once:
+
+```powershell
+Set-SecretStoreConfiguration -Authentication None
+```
+
+That leaves the vault protected by OS user-account access only — the same
+trade the macOS Keychain and the Linux keyring already make once unlocked for
+your login session. Every unavailability path (module absent, no vault
+registered, no entry named `spec-kit-jira`, a still-locked vault) falls
+through silently to the next rung; it never blocks or waits.
+
+If you would rather not install a vault, the same three-rung order still
+resolves the token from an environment variable or the gitignored
+`.specify/jira/.env`:
 
 ```powershell
 $token = Read-Host 'Jira API token' -AsSecureString
@@ -256,9 +281,8 @@ $token = Read-Host 'Jira API token' -AsSecureString
     'User')
 ```
 
-A user environment variable is stored in the registry in clear text. If that is
-unacceptable on your machine, use the gitignored file instead — same resolution
-order, third rung:
+A user environment variable is stored in the registry in clear text. The
+gitignored-file alternative, same resolution order, third rung:
 
 ```powershell
 New-Item -ItemType Directory -Force .specify/jira | Out-Null

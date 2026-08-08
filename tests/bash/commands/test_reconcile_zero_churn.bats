@@ -45,7 +45,7 @@ teardown() {
   [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
   [ "$(jq -r '.counts.skipped' <<< "$output")" -eq 3 ]
   [ "$(jq -r '.counts.recognised' <<< "$output")" -eq 3 ]
-  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 0 ]
+  [ "$(grep -vE 'issue/bulkfetch' "${MOCK_CALLLOG}" | grep -cE '^(POST|PUT) ')" -eq 0 ]
 }
 
 @test "a change to one story out of several produces exactly one PUT, naming that story's ticket" {
@@ -65,7 +65,7 @@ teardown() {
   # 018, US3: the story's whole-object update always carries `summary`, so the
   # write is followed by exactly one identity-property PUT recording it.
   [ "$(grep -c '^PUT /rest/api/3/issue/COMP-3/properties/spec-kit-jira$' "${MOCK_CALLLOG}")" -eq 1 ]
-  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 2 ]
+  [ "$(grep -vE 'issue/bulkfetch' "${MOCK_CALLLOG}" | grep -cE '^(POST|PUT) ')" -eq 2 ]
 }
 
 @test "spec.md is byte-identical after an unchanged re-run" {
@@ -94,7 +94,7 @@ teardown() {
   # the parent's creation. Read-only — zero writes either way.
   run mock_calls
   [ "$(grep -c 'search/jql' <<< "$output")" -eq 1 ]
-  [ "$(grep -cE '^(POST|PUT) ' <<< "$output")" -eq 0 ]
+  [ "$(grep -vE 'issue/bulkfetch' <<< "$output" | grep -cE '^(POST|PUT) ')" -eq 0 ]
 }
 
 @test "a human-origin ticket's churn is computed on the managed section alone: its prose above the panel is never rewritten (T072)" {
@@ -148,12 +148,16 @@ teardown() {
   cmd_reconcile reconcile "${spec}" --json > /dev/null # back-fills the provenance label once
 
   : > "${MOCK_CALLLOG}"
-  run cmd_reconcile reconcile "${spec}" --json
+  # --force: this re-run's local inputs are unchanged since the prior run, so
+  # without --force the state short-circuit (021) would skip Jira entirely —
+  # this test's point is that a genuine reconcile issues zero writes, not
+  # that the short-circuit fires.
+  run cmd_reconcile reconcile "${spec}" --json --force
   [ "$status" -eq 0 ]
   [ "$(jq -r '.counts.created' <<< "$output")" -eq 0 ]
   [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
   [ "$(jq -r '.counts.skipped' <<< "$output")" -eq 2 ]
-  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 0 ]
+  [ "$(grep -vE 'issue/bulkfetch' "${MOCK_CALLLOG}" | grep -cE '^(POST|PUT) ')" -eq 0 ]
 }
 
 @test "T056 [016, US3] — a ticket carrying a pre-feature description heals once, then stays quiet (FR-011, FR-012, SC-004)" {
@@ -185,13 +189,13 @@ teardown() {
   # 018, US3: the story's whole-object update always carries `summary`, so the
   # write is followed by exactly one identity-property PUT recording it.
   [ "$(grep -c '^PUT /rest/api/3/issue/COMP-2/properties/spec-kit-jira$' "${MOCK_CALLLOG}")" -eq 1 ]
-  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 2 ]
+  [ "$(grep -vE 'issue/bulkfetch' "${MOCK_CALLLOG}" | grep -cE '^(POST|PUT) ')" -eq 2 ]
 
   : > "${MOCK_CALLLOG}"
   run cmd_reconcile reconcile "${SPEC}" --json
   [ "$status" -eq 0 ]
   [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
-  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 0 ]
+  [ "$(grep -vE 'issue/bulkfetch' "${MOCK_CALLLOG}" | grep -cE '^(POST|PUT) ')" -eq 0 ]
 }
 
 @test "the PowerShell port shows the identical zero-churn signature (NFR-1)" {

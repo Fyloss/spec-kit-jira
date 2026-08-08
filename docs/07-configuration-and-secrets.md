@@ -29,11 +29,26 @@ flowchart TB
         D[".specify/jira/.env — JIRA_API_TOKEN only"]
     end
 
+    subgraph L4["4 · Run-state cache (021) — GITIGNORED, machine-owned"]
+        E[".specify/jira/state/&lt;feature&gt;.json"]
+        E1["hashes of the local inputs a run<br/>saw last time it fully succeeded"]
+    end
+
     A -->|"logical names"| Resolve["Reconcile"]
     B -->|"resolved ids"| Resolve
     C -->|"team selection"| Feature["Feature naming"]
     D -->|"3rd credential rung"| Sink["sink/jira/client"]
+    Resolve -->|"records on success"| E
 ```
+
+The run-state cache is not a fourth configuration layer — it holds no setting
+an operator sets, only hashes `run_state_record` computes from the other
+three's own inputs plus `spec.md`/`tasks.md`. It is machine-owned and never
+committed, self-ignoring through the `*` `.gitignore` `run_state_record`
+writes beside it the first time it creates the directory, and it never holds
+a credential (FR-019, Constitution V). See
+[`contracts/run-state.md`](../specs/021-reconcile-performance/contracts/run-state.md) for what it
+records and why staleness there is an accepted trade, not a bug.
 
 Rules that hold across all three:
 
@@ -52,17 +67,20 @@ Rules that hold across all three:
 flowchart LR
     Start(["Need the API token"]) --> R1{"Environment<br/>JIRA_API_TOKEN"}
     R1 -->|"found"| Use(["Use it"])
-    R1 -->|"absent"| R2{"OS secret manager<br/>Keychain / libsecret"}
+    R1 -->|"absent"| R2{"OS secret manager<br/>Keychain / libsecret / SecretManagement"}
     R2 -->|"found"| Use
     R2 -->|"absent or unavailable"| R3{"Gitignored .specify/jira/.env"}
     R3 -->|"found"| Use
     R3 -->|"absent"| Fail(["Degraded run — name the missing setting<br/>no Jira call is attempted"])
 ```
 
-Platform note: **there is no OS secret-manager rung on Windows.** The
-PowerShell port's `Get-JiraSecretManagerToken` is a deliberate no-op, so the
-token must come from the environment or the gitignored `.env`. Putting it in
-the Windows Credential Manager does nothing — nothing reads from there.
+All three platforms share the same three-rung shape. On Windows, the second rung
+reads `Get-Secret -Name spec-kit-jira -AsPlainText` from the registered
+PowerShell SecretManagement default vault — see `INSTALL.md` for
+`Install-Module`/`Register-SecretVault`/`Set-Secret` setup. The rung is
+soft-optional everywhere (constitution v1.3.0): the module absent, no vault
+registered, no entry named `spec-kit-jira`, or a locked vault all fall through
+silently to the gitignored `.env`, without an error and without waiting.
 
 ## How the token is protected in flight
 

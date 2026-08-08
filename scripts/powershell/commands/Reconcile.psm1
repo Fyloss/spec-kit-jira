@@ -20,6 +20,10 @@ Import-Module (Join-Path $PSScriptRoot '../engine/TaskMarker.psm1') -Force -Glob
 Import-Module (Join-Path $PSScriptRoot '../engine/TasksParse.psm1') -Force # Phase 3, US1 — reading tasks.md
 Import-Module (Join-Path $PSScriptRoot '../engine/StoryMarker.psm1') -Force -Global # R5 step 1 — assign identifiers
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Recognition.psm1') -Force # R5 step 2 — recognise recorded tickets
+# No -Force: Recognition.psm1 (imported above) already loads this module
+# internally; a second -Force reimport here would tear its exports out of
+# Recognition.psm1's scope and reattach them to this one instead.
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/Prefetch.psm1')        # 021 US4 — the recognition prefetch
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/PlanApply.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force # Phase 8, US5 — the completion pass's transitions read
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/DuplicateProbe.psm1') -Force # US4, droppable — the second, best-effort guard
@@ -27,6 +31,9 @@ Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force # h
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force          # the operator disable record
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Hierarchy.psm1') -Force -Global # the mandatory-field gate — a nested import inside lib/Config.psm1 is not enough
 Import-Module (Join-Path $PSScriptRoot '../lib/Prereq.psm1') -Force          # the bridge-unavailable cause
+Import-Module (Join-Path $PSScriptRoot '../lib/Timing.psm1') -Force          # phase timing (021, T015)
+Import-Module (Join-Path $PSScriptRoot '../lib/RunState.psm1') -Force        # the run-state short-circuit (021, T030)
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/Client.psm1') -Force    # Get-JiraRequestCount — a nested import inside Recognition.psm1/PlanApply.psm1 is not enough (module-scope, not session)
 
 $script:ReconcileExitConfig = 4
 
@@ -532,6 +539,22 @@ function Invoke-JiraReconcile {
     [CmdletBinding()]
     param([Parameter(ValueFromRemainingArguments = $true)] [string[]] $Arguments = @())
 
+    try {
+        return (Invoke-JiraReconcileRun -Arguments $Arguments)
+    }
+    finally {
+        Write-JiraTimingReport
+    }
+}
+
+# Invoke-JiraReconcileRun — thin-wrapped by Invoke-JiraReconcile so the timing
+# report (contracts/timing-report.md) fires on every one of this function's
+# many return paths, not only the final one (021, T015). Mirror of the Bash
+# port's _reconcile_run.
+function Invoke-JiraReconcileRun {
+    [CmdletBinding()]
+    param([Parameter(ValueFromRemainingArguments = $true)] [string[]] $Arguments = @())
+
     $parsed = Invoke-JiraCliParse -Arguments $Arguments
     $state = @{}
     foreach ($line in ($parsed -split "`n")) {
@@ -543,9 +566,12 @@ function Invoke-JiraReconcile {
     }
     $json = $state['json'] -eq 'true'
     $dryRun = $state['dry_run'] -eq 'true'
+    $force = $state['force'] -eq 'true'
     $onDrift = if ($state.ContainsKey('on_drift') -and $state['on_drift']) { $state['on_drift'] } else { 'abort' }
     $fieldValues = if ($state.ContainsKey('field_values')) { $state['field_values'] } else { '' }
     $acceptDefaults = $state['accept_defaults'] -eq 'true'
+
+    Start-JiraTimingPhase -Phase 'prereq' -RequestCount (Get-JiraRequestCount)
 
     # (0) DISPATCH GUARD — the operator's disable decision, honoured before any
     # prerequisite check, any config read and any network call (FR-020). The exit
@@ -632,6 +658,48 @@ function Invoke-JiraReconcile {
             "Jira mirror skipped: the bridge entry point $bridgeMissing was not found or is not executable; the extension install is incomplete. This spec-kit command completed normally and nothing was mirrored to Jira. Restore it with: specify extension add --dev <path-to-spec-kit-jira> --force")
         return 0
     }
+
+    Stop-JiraTimingPhase -Phase 'prereq' -RequestCount (Get-JiraRequestCount)
+
+    # `state` — the run-state short-circuit (Phase 4, US2, contracts/run-state.md
+    # §2–§3). Runs after the dispatch and target guards and before the config
+    # phase, composing from hashed inputs only — there is no resolved project
+    # key here. `-Force` and `-DryRun` both skip the read entirely (full
+    # reconcile in both cases, §3); every other run compares against the
+    # recorded document and, on a byte match, short-circuits with zero Jira
+    # requests and zero writes.
+    Start-JiraTimingPhase -Phase 'state' -RequestCount (Get-JiraRequestCount)
+    $shortCircuited = $false
+    $email = if ($env:JIRA_EMAIL) { $env:JIRA_EMAIL } else { '' }
+    if (-not $force -and -not $dryRun) {
+        if (Test-JiraRunStateMatch -SpecPath $specFile -BaseUrl $base -Email $email -OnDrift $onDrift -FieldValues $fieldValues) {
+            $shortCircuited = $true
+        }
+    }
+    Stop-JiraTimingPhase -Phase 'state' -RequestCount (Get-JiraRequestCount)
+
+    if ($shortCircuited) {
+        $scSummaryObj = [ordered]@{
+            schema_version  = '1.0'
+            command         = 'reconcile'
+            dry_run         = $false
+            short_circuited = $true
+            state_file      = (Get-JiraRunStatePath -SpecPath $specFile)
+            counts          = [ordered]@{ created = 0; updated = 0; skipped = 0; warnings = 0; errors = 0 }
+            actions         = @()
+            exit_code       = 0
+        }
+        $scSummary = ConvertTo-JiraJsonValue $scSummaryObj
+        if ($json) {
+            [Console]::Out.Write($scSummary + "`n")
+        }
+        else {
+            [Console]::Out.Write((ConvertTo-JiraSummaryProse -Json $scSummary))
+        }
+        return 0
+    }
+
+    Start-JiraTimingPhase -Phase 'config' -RequestCount (Get-JiraRequestCount)
 
     # Split-Path -Parent yields '' for a bare filename and for a root-level path,
     # where the Bash port's dirname yields '.' and '/' — map those the same way
@@ -726,6 +794,9 @@ function Invoke-JiraReconcile {
     $phaseStatusMap = Get-JiraReconcilePhaseStatusMap -ProjectKey $projectKey -ConfigJson $cfg
     $haltedStatuses = Get-JiraReconcileHaltedStatuses -ProjectKey $projectKey -ConfigJson $cfg
 
+    Stop-JiraTimingPhase -Phase 'config' -RequestCount (Get-JiraRequestCount)
+    Start-JiraTimingPhase -Phase 'gate' -RequestCount (Get-JiraRequestCount)
+
     # Mandatory-field gate (Phase 6, US3, T086/T087/T088; contracts/
     # hierarchy-resolution.md §4/§5), moved ahead of spec-marker assignment
     # by Phase 4 (US2, T066): a run that turns out to stop for the
@@ -812,6 +883,9 @@ function Invoke-JiraReconcile {
         }
     }
 
+    Stop-JiraTimingPhase -Phase 'gate' -RequestCount (Get-JiraRequestCount)
+    Start-JiraTimingPhase -Phase 'parse' -RequestCount (Get-JiraRequestCount)
+
     # R5 step 1 — ASSIGN (Phase 2/3, contracts/story-marker.md, research R5):
     # every story section with no marker at all gets a durable identifier,
     # spliced into spec.md. A dry run computes the SAME assignment but never
@@ -888,6 +962,49 @@ function Invoke-JiraReconcile {
     if ($planBlocks.Count -gt 0) {
         $docObj.epic.description.blocks = @($docObj.epic.description.blocks) + $planBlocks
     }
+
+    Stop-JiraTimingPhase -Phase 'parse' -RequestCount (Get-JiraRequestCount)
+
+    # 021 US4, contracts/recognition-prefetch.md: gather every recorded key
+    # this run is about to read — parent, stories, tasks — and prime the
+    # prefetch cache with ONE bulk read before the per-key phase begins.
+    # Tasks are read from the UNMODIFIED tasks.md text: a side-effect-free
+    # look-ahead, never the authoritative parse (that happens further below,
+    # after marker assignment/splice) — a key it misses simply falls through
+    # to today's GET unchanged (contract §3).
+    $prefetchKeys = [System.Collections.Generic.List[string]]::new()
+    $prefetchEpicObj = Get-JiraPlanPropSafe $docObj 'epic'
+    $prefetchEpicMarker = Get-JiraPlanPropSafe $prefetchEpicObj 'marker'
+    if ([string](Get-JiraPlanPropSafe $prefetchEpicMarker 'state') -eq 'bound') {
+        $prefetchKeys.Add([string](Get-JiraPlanPropSafe $prefetchEpicMarker 'ticket'))
+    }
+    foreach ($s in @($docObj.stories)) {
+        $prefetchStoryMarker = Get-JiraPlanPropSafe $s 'marker'
+        if ([string](Get-JiraPlanPropSafe $prefetchStoryMarker 'state') -eq 'bound') {
+            $prefetchKeys.Add([string](Get-JiraPlanPropSafe $prefetchStoryMarker 'ticket'))
+        }
+    }
+    if (-not [string]::IsNullOrEmpty($taskTypeIdCandidate)) {
+        $prefetchTasksParent = (Split-Path -Parent $specFile) -replace '\\', '/'
+        if ([string]::IsNullOrEmpty($prefetchTasksParent)) {
+            $prefetchTasksParent = if ($specFile.StartsWith('/')) { '/' } else { '.' }
+        }
+        $prefetchTasksFile = "$prefetchTasksParent/tasks.md"
+        if (Test-Path -LiteralPath $prefetchTasksFile) {
+            $prefetchTasksRaw = Get-Content -Raw -LiteralPath $prefetchTasksFile
+            if ($null -eq $prefetchTasksRaw) { $prefetchTasksRaw = '' }
+            $prefetchTasksParsed = ConvertTo-JiraTasksParseDocument -Text $prefetchTasksRaw | ConvertFrom-Json -Depth 100
+            foreach ($t in @($prefetchTasksParsed.tasks)) {
+                $prefetchTaskMarker = Get-JiraPlanPropSafe $t 'marker'
+                if ([string](Get-JiraPlanPropSafe $prefetchTaskMarker 'state') -eq 'bound') {
+                    $prefetchKeys.Add([string](Get-JiraPlanPropSafe $prefetchTaskMarker 'ticket'))
+                }
+            }
+        }
+    }
+    Invoke-JiraPrefetchLoad -Keys $prefetchKeys.ToArray()
+
+    Start-JiraTimingPhase -Phase 'recognition' -RequestCount (Get-JiraRequestCount)
 
     # R5 step 2a — RECOGNISE THE PARENT (Phase 5, US2, T070/T077;
     # contracts/parent-marker.md "Ordering within one run" step 5). One read
@@ -1155,6 +1272,9 @@ function Invoke-JiraReconcile {
         }
     }
     foreach ($n in $taskSkipNotes) { $taskNotes.Add($n) }
+
+    Stop-JiraTimingPhase -Phase 'recognition' -RequestCount (Get-JiraRequestCount)
+    Start-JiraTimingPhase -Phase 'plan' -RequestCount (Get-JiraRequestCount)
 
     # SINK: the plan context (US2, FR-007–FR-011; Phase 3, US1: tickets/
     # ticket_origins/ticket_descriptions now come from recognition's `bound`
@@ -1561,6 +1681,9 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
         }
     }
 
+    Stop-JiraTimingPhase -Phase 'plan' -RequestCount (Get-JiraRequestCount)
+    Start-JiraTimingPhase -Phase 'apply' -RequestCount (Get-JiraRequestCount)
+
     $rc = 0
     if (-not $dryRun) {
         # R5 steps 4/6, contract steps 8-11: Invoke-JiraApplyWriteSetWithRecognition
@@ -1721,6 +1844,12 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
     $extPath = if ($env:SPEC_KIT_JIRA_EXTENSIONS_YML) { $env:SPEC_KIT_JIRA_EXTENSIONS_YML } else { '.specify/extensions.yml' }
     $hooksHealth = Get-JiraHookHealth -Path $extPath -DisabledJson (Get-JiraHooksDisabled) | ConvertFrom-Json -Depth 100
 
+    # Save-JiraRunState (021, T031) below must see whether this run actually
+    # applied every planned action — the hook-context downgrade just below
+    # resets $rc to 0 even on a real failure, so the pre-downgrade value is
+    # captured here rather than trusting $rc at the point of recording.
+    $rcBeforeHookDowngrade = $rc
+
     # FR-046 / 003 FR-015: in hook context a bridge failure NEVER fails the host
     # command — after surfacing a single actionable WARNING the exit is downgraded
     # to 0, so the mirror can fail without ever affecting the spec-kit command
@@ -1868,6 +1997,19 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
     $summaryObj['hook_health'] = $hooksHealth
     $summaryObj['exit_code'] = $rc
     $summary = ConvertTo-JiraJsonValue $summaryObj
+
+    Stop-JiraTimingPhase -Phase 'apply' -RequestCount (Get-JiraRequestCount)
+
+    # Save-JiraRunState (021, T031, contracts/run-state.md §4): only a real
+    # run (never -DryRun) that applied every planned action (the
+    # pre-downgrade rc is 0 — a hook-context failure masked to exit 0 must
+    # not be recorded as a success), emitted no warning, and has no pending
+    # confirmation outstanding (a pending-confirmation run already returned
+    # above, long before this point, so reaching here already proves that
+    # condition).
+    if (-not $dryRun -and $rcBeforeHookDowngrade -eq 0 -and $warnCount -eq 0) {
+        Save-JiraRunState -SpecPath $specFile -BaseUrl $base -Email $email -OnDrift $onDrift -FieldValues $fieldValues
+    }
 
     if ($json) {
         [Console]::Out.Write($summary + "`n")

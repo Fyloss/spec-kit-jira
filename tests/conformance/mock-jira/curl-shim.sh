@@ -301,6 +301,70 @@ _shim_create_issue() {
   RESP_BODY="{\"id\":\"99001\",\"key\":\"${CREATED_KEY}\",\"self\":\"/rest/api/3/issue/99001\"}"
 }
 
+# _shim_issue_bulkfetch <body-json> — 021 US4, contracts/recognition-prefetch.md
+# T046: composes its response from the SAME per-key store `/rest/api/3/issue/
+# {key}` already serves, honouring the requested `fields`/`properties`, and
+# returning issues in the state store's own (insertion) order — never request
+# order, so a test can prove P4 (matched by key, not position). A key is
+# omitted, exactly as the real endpoint's own documentation states, when it is
+# either absent from the store (deleted) or faulted on its own per-key path
+# (not visible) — deleted and forbidden are equally just "not returned",
+# reusing the SAME fault config a direct per-key GET test already uses, never
+# a second source of truth.
+_shim_issue_bulkfetch() {
+  local body_json="$1"
+  [[ -z "${body_json}" ]] && body_json='{}'
+  jq -e . > /dev/null 2>&1 <<< "${body_json}" || body_json='{}'
+
+  local fields_csv props_csv want_subtasks="false"
+  fields_csv="$(jq -r '(.fields // []) | join(",")' <<< "${body_json}")"
+  props_csv="$(jq -r '(.properties // []) | join(",")' <<< "${body_json}")"
+  [[ ",${fields_csv}," == *",subtasks,"* ]] && want_subtasks="true"
+
+  local ids_json n i issues="[]"
+  ids_json="$(jq -c '.issueIdsOrKeys // []' <<< "${body_json}")"
+  n="$(jq 'length' <<< "${ids_json}")"
+  for ((i = 0; i < n; i++)); do
+    local reqkey matchkey fault
+    reqkey="$(jq -r ".[${i}]" <<< "${ids_json}")"
+    matchkey="$(jq -r --arg rk "${reqkey}" \
+      '.issues | keys[] | select(ascii_downcase == ($rk | ascii_downcase))' \
+      "${MOCK_STATE_PATH}" | head -n1)"
+    [[ -z "${matchkey}" ]] && continue
+    fault="$(_shim_get_fault "/rest/api/3/issue/${matchkey}")"
+    [[ "${fault}" != "null" ]] && continue
+
+    local entry
+    entry="$(jq -c --arg k "${matchkey}" --arg props "${props_csv}" --argjson want_sub "${want_subtasks}" '
+      .issues[$k] as $i
+      | ($i.fields
+          + (if $want_sub then
+              {subtasks: [ .issues | to_entries[] | select(.value.fields.parent.key == $k)
+                | {key: .key, fields: {issuetype: (.value.fields.issuetype // {id: null})}} ]}
+            else {} end)
+        ) as $flds
+      | {key: $k, fields: $flds}
+      + (if $props != "" then
+          {properties: ( ($props | split(",")) as $names
+            | reduce $names[] as $n ({}; . + (if ($i.properties | has($n)) then {($n): $i.properties[$n]} else {} end)) )}
+        else {} end)
+    ' "${MOCK_STATE_PATH}")"
+    issues="$(jq -c --argjson e "${entry}" '. + [$e]' <<< "${issues}")"
+  done
+
+  # Project fields down to the caller's requested list — the mock stores every
+  # field the per-key GET already knows, so this mirrors Jira's own selection.
+  if [[ -n "${fields_csv}" ]]; then
+    issues="$(jq -c --arg fields "${fields_csv}" '
+      ($fields | split(",")) as $want
+      | map(.fields |= (to_entries | map(select(.key as $k | $want | index($k) != null)) | from_entries))
+    ' <<< "${issues}")"
+  fi
+
+  RESP_STATUS=200
+  RESP_BODY="$(jq -cn --argjson issues "${issues}" '{issues:$issues, issueErrors:[]}')"
+}
+
 _shim_issue_put() {
   local key="$1" body_json="$2" tmp
   [[ -z "${body_json}" ]] && body_json='{}'
@@ -469,6 +533,8 @@ else
     _read_fixture 'field'
   elif [[ "${path}" == "/rest/api/3/issue" && "${method}" == "POST" ]]; then
     _shim_create_issue "${body}"
+  elif [[ "${path}" == "/rest/api/3/issue/bulkfetch" && "${method}" == "POST" ]]; then
+    _shim_issue_bulkfetch "${body}"
   elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)/transitions$ ]]; then
     ikey="${BASH_REMATCH[1]}"
     if [[ "${method}" == "POST" ]]; then

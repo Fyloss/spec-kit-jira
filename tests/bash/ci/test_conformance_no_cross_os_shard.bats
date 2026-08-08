@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # T017d [009, US2] — Mechanical guard for SC-011/FR-018/FR-019: every OS leg of
-# the `unit` job must run Pester in full AND the complete 107-scenario
+# the `unit` job must run Pester in full AND the complete 132-scenario
 # conformance corpus — never a shard of it. Decision 7 permits sharding the
 # corpus WITHIN one OS (multiple runners of the SAME os value); it explicitly
 # FORBIDS spreading scenarios ACROSS the three OSes, which would leave no host
@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (107)" {
+@test "the conformance corpus has exactly the recorded scenario count (132)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -32,8 +32,37 @@ setup() {
   # 019 adds one: us4-migration-ambiguous-human — the FR-003 coverage the
   # origin-"bridge" rewrite of us4-migration-ambiguous.json would otherwise
   # remove (106 -> 107).
+  # 021 adds two: us021-timing-off, us021-timing-on — invariants T1-T6 of
+  # contracts/timing-report.md (107 -> 109).
+  # 021 adds one: us021-state-unchanged — the run-state short-circuit,
+  # invariant T8 of contracts/timing-report.md §3 (109 -> 110).
+  # 021 adds three: us021-state-corrupt, us021-state-version-changed,
+  # us021-state-config-changed — the fail-open rows of
+  # contracts/run-state.md §3 (110 -> 113).
+  # 021 adds four: us021-state-tasks-appeared, us021-state-tasks-deleted,
+  # us021-state-first-run, us021-state-ondrift-changed — the remaining
+  # contracts/run-state.md §9 rows T020/T021 do not cover (113 -> 117).
+  # 021 adds two: us021b-disabled-event, us021b-rejected-target — the FR-027
+  # placement rows proving the dispatch/target guards fire before the state
+  # phase (117 -> 119).
+  # 021 adds three: us022-dry-run-full-preview, us022-dry-run-no-write,
+  # us022-force-bypasses-and-records — contracts/run-state.md §3/S6 rows for
+  # --dry-run and --force (119 -> 122).
+  # 021 adds one: us021-prefetch-basic — contracts/recognition-prefetch.md §6,
+  # the base two-run create-then-recognise case (122 -> 123).
+  # 021 adds four: us021-prefetch-bulkfetch-400, us021-prefetch-bulkfetch-401,
+  # us021-prefetch-deleted-key, us021-prefetch-forbidden-key — the fail-open
+  # and per-key-fallback classification rows of
+  # contracts/recognition-prefetch.md §6 (123 -> 127).
+  # 021 adds four: us021-prefetch-count-61, us021-prefetch-count-101,
+  # us021-prefetch-count-61-deleted, us021-prefetch-count-zero — the
+  # bulkfetch-chunking counting rows of contracts/recognition-prefetch.md
+  # (127 -> 131).
+  # 021 adds one: us021-prefetch-immediate-consistency —
+  # contracts/recognition-prefetch.md §6, the "ticket created seconds
+  # earlier" immediate-consistency acceptance scenario (131 -> 132).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 107 ]
+  [ "${count}" -eq 132 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

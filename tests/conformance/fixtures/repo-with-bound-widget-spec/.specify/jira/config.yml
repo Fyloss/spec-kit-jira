@@ -1,0 +1,15 @@
+# Team config for the T050 classification-case conformance fixture (021) — a
+# story-tier-only bound spec, reusing the task-tier fixture's project shape
+# without its sub-task role (021 US4 scenarios are story-tier only).
+projects:
+  - key: TASKS
+    style: company_managed
+    hierarchy:
+      specification: Deliverable
+      story: Story
+      task: "Sub-task"
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing_default: TASKS

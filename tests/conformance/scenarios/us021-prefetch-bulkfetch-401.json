@@ -1,0 +1,334 @@
+{
+  "name": "us021-prefetch-bulkfetch-401",
+  "description": "T050, contracts/recognition-prefetch.md \u00a76: the bulkfetch request itself is rejected with 401. prefetch_load resets its cache and returns success (P2/P6: a bulkfetch failure is never fail-closed), so every read falls through to its own per-key GET and the run recognises all four tickets normally. Diffed against the SAME scenario run with _RECOGNITION_NO_PREFETCH=1: stdout, stderr, exit, and the post-run tree must be byte-identical.",
+  "mock": {
+    "projects": {
+      "TASKS": "company"
+    },
+    "issues": {
+      "TASKS-1": {
+        "summary": "Widget Management",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "We need to let users manage widgets end to end.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "text": "As a user, I want to create a widget.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10101"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "parent"
+          }
+        }
+      },
+      "TASKS-2": {
+        "summary": "Create a widget",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want to create a widget.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "text": "**Given** no widget exists **When** I create one **Then** it appears in my list",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "attrs": {
+                "level": 3
+              },
+              "content": [
+                {
+                  "text": "Acceptance Criteria",
+                  "type": "text"
+                }
+              ],
+              "type": "heading"
+            },
+            {
+              "attrs": {
+                "panelType": "info"
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Given no widget exists",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "When I create one",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "Then it appears in my list",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "panel"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "1"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "aaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "TASKS-3": {
+        "summary": "Rename a widget",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want to rename a widget.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "text": "**Given** a widget exists **When** I rename it **Then** the new name is shown",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "attrs": {
+                "level": 3
+              },
+              "content": [
+                {
+                  "text": "Acceptance Criteria",
+                  "type": "text"
+                }
+              ],
+              "type": "heading"
+            },
+            {
+              "attrs": {
+                "panelType": "info"
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Given a widget exists",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "When I rename it",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "Then the new name is shown",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "panel"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "3"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "1111111111111111"
+          }
+        }
+      },
+      "TASKS-4": {
+        "summary": "Delete a widget",
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "As a user, I want to delete a widget.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "text": "**Given** a widget exists **When** I delete it **Then** it no longer appears in my list",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "attrs": {
+                "level": 3
+              },
+              "content": [
+                {
+                  "text": "Acceptance Criteria",
+                  "type": "text"
+                }
+              ],
+              "type": "heading"
+            },
+            {
+              "attrs": {
+                "panelType": "info"
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Given a widget exists",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "When I delete it",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                },
+                {
+                  "content": [
+                    {
+                      "text": "Then it no longer appears in my list",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "panel"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10102"
+        },
+        "priority": {
+          "id": "4"
+        },
+        "properties": {
+          "spec-kit-jira": {
+            "origin": "bridge",
+            "repo": "acme/app",
+            "spec_slug": "001-widget",
+            "role": "story",
+            "story": "2222222222222222"
+          }
+        }
+      }
+    },
+    "faults": {
+      "issue/bulkfetch": {
+        "status": 401
+      }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-bound-widget-spec",
+  "argv": [
+    "reconcile",
+    "specs/001-widget/spec.md",
+    "--json"
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-widget"
+  }
+}

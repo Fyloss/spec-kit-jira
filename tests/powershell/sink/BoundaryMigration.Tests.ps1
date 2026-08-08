@@ -82,7 +82,8 @@ Describe 'Invoke-JiraReconcile — pre-release boundary migration' {
         # reconcile emits JSON `null`, not `[]`, for an empty warnings list —
         # ConvertFrom-Json turns that into $null, and @($null) has Count 1.
         @($out.warnings | Where-Object { $_ }).Count | Should -Be 0
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 0
+        # 021 US4's prefetch fires its own bulkfetch POST as a read, not a write.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' -and $_ -notmatch 'issue/bulkfetch' }).Count | Should -Be 0
     }
 }
 

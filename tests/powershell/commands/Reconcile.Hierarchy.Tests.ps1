@@ -110,7 +110,7 @@ Describe 'Invoke-JiraReconcile — the parent hierarchy regression' {
         # The one read this run makes: the duplicate probe (017, US4)
         # predicting the parent's creation. Read-only — zero writes either way.
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match 'search/jql' }).Count | Should -Be 1
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' -and $_ -notmatch '/issue/bulkfetch' }).Count | Should -Be 0
     }
 
     It 'T095: --dry-run predicts a recognised, unchanged parent''s reuse — no parent action, matching the real zero-churn run' {
