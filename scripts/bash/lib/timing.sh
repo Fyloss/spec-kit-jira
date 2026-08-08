@@ -72,6 +72,14 @@ _timing_fake_clock_next() {
   # shellcheck disable=SC2206  # word-splitting on whitespace is the intended parse
   readings=(${_TIMING_FAKE_CLOCK})
   local n="${#readings[@]}"
+  # A set-but-empty fixture supplies zero readings, which would clamp the
+  # cursor to -1 and index an empty array — "bad array subscript" on STDERR,
+  # the very channel the report writes on and the corpus diffs byte-for-byte
+  # (invariant T5). §4's "degrade, never crash" has to hold at zero too.
+  if ((n == 0)); then
+    _TIMING_NOW_MS=0
+    return 0
+  fi
   local idx="${_TIMING_FAKE_CLOCK_IDX}"
   (( idx >= n )) && idx=$((n - 1))
   _TIMING_NOW_MS="${readings[idx]}"

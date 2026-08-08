@@ -154,6 +154,20 @@ Describe 'The _TIMING_FAKE_CLOCK seam' {
         $lines[0] | Should -Be 'timing: prereq          10 ms    0 requests'
         $lines[1] | Should -Be 'timing: state            0 ms    0 requests'
     }
+
+    # A set-but-empty _TIMING_FAKE_CLOCK supplies zero readings, so the cursor
+    # clamp computes index -1 over an empty array — which throws under
+    # Set-StrictMode -Version Latest rather than degrading. §4 says an
+    # under-supplied fixture shows 0 ms phases rather than crashing a run, and
+    # that has to hold at zero readings too. Mirror of the bats twin.
+    It 'set to whitespace only reads 0 ms rather than throwing' {
+        $env:_TIMING_FAKE_CLOCK = '   '
+        { Start-JiraTimingPhase -Phase prereq } | Should -Not -Throw
+        { Stop-JiraTimingPhase -Phase prereq } | Should -Not -Throw
+
+        $lines = (Invoke-TimingReportCaptured) -split "`r?`n" | Where-Object { $_ -ne '' }
+        $lines[0] | Should -Be 'timing: prereq           0 ms    0 requests'
+    }
 }
 
 }

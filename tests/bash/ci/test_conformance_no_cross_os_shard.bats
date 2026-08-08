@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # T017d [009, US2] — Mechanical guard for SC-011/FR-018/FR-019: every OS leg of
-# the `unit` job must run Pester in full AND the complete 109-scenario
+# the `unit` job must run Pester in full AND the complete 132-scenario
 # conformance corpus — never a shard of it. Decision 7 permits sharding the
 # corpus WITHIN one OS (multiple runners of the SAME os value); it explicitly
 # FORBIDS spreading scenarios ACROSS the three OSes, which would leave no host

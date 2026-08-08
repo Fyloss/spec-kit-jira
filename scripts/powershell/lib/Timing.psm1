@@ -52,6 +52,12 @@ function Get-TimingFakeClockNext {
     param()
     $readings = @($env:_TIMING_FAKE_CLOCK -split '\s+' | Where-Object { $_ -ne '' })
     $n = $readings.Count
+    # A set-but-empty fixture supplies zero readings, which would clamp the
+    # cursor to -1 and index an empty array — an IndexOutOfRangeException under
+    # Set-StrictMode -Version Latest, crashing the run rather than degrading.
+    # §4's "degrade, never crash" has to hold at zero too. Mirror of the bash
+    # port's own zero-readings guard.
+    if ($n -eq 0) { return [int64]0 }
     $idx = $script:TimingFakeClockIdx
     if ($idx -ge $n) { $idx = $n - 1 }
     if ($idx -lt $n - 1) { $script:TimingFakeClockIdx = $idx + 1 }
