@@ -45,7 +45,11 @@ Describe 'Run-state short-circuit (conformance)' {
         & bash $script:Harness $script:Scenario 'powershell' $out | Out-Null
         $diag = Get-HarnessDiagnostics -OutDir $out
         $stdout = Get-Content -LiteralPath (Join-Path $out 'stdout.2') -Raw | ConvertFrom-Json -Depth 100
-        $stdout.state_file | Should -BeLike '*/state/*.json' -Because "harness artefacts:`n$diag"
+        # Either separator: the port names the file the way its own host spells
+        # a path, and on windows-latest that is C:\…\state\<feature>.json. A
+        # '*/state/*.json' glob asserts a POSIX spelling the PowerShell port has
+        # no reason to produce, and failed there while passing everywhere else.
+        $stdout.state_file | Should -Match '[\\/]state[\\/][^\\/]+\.json$' -Because "harness artefacts:`n$diag"
     }
 
     It "T020/T8 — with the timing mode on, the second run's stderr carries only prereq, state, and total" {
