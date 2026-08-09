@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-07
+
 ### Added
 
 - Windows now shares the same three-rung credential order as macOS and Linux:
