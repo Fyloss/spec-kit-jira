@@ -78,6 +78,51 @@ json_canonical() {
   printf '%s' "$(jq -cS .)"
 }
 
+# json_build <filter> <name> <value> [<name> <value> …] — evaluate <filter>
+# with each $<name> bound to <value> as JSON, passing no value through argv.
+#
+# `--argjson x "${big}"` puts the whole value in the argument vector, and
+# Linux caps a SINGLE argument at MAX_ARG_STRLEN — 32 pages, 128 KiB —
+# independently of the far larger total ARG_MAX. macOS has no per-argument
+# cap, so a plan of ~100 stories (~140 KB) execs fine there and fails on
+# Linux with "jq: Argument list too long", losing the whole run at exit 4.
+# --slurpfile reads from a file instead, which has no such limit.
+#
+# Temporary files, NOT process substitution. A `<(…)` collected into an array
+# and used by a LATER command is not reliable: its writer can exit and the
+# pipe be closed before jq opens the path, which on Linux surfaces as
+# "Bad JSON in --slurpfile …: Could not open /dev/fd/63". Inline in the jq
+# command itself a `<(…)` is fine, and two call sites use it that way; here,
+# where the arguments are accumulated first, only a real file will do.
+#
+# jq's exit status is captured before the files are removed, so the caller
+# still sees it — this is the write path, and a failure must not be swallowed.
+#
+# --slurpfile binds an ARRAY of the file's values, so each name is slurped
+# as <name>_f and re-bound to $<name> in a generated prelude — every caller's
+# filter text is then usable unchanged, which is the point: this is the write
+# path, and its behaviour is frozen (FR-030).
+json_build() {
+  local filter="$1"
+  shift
+  local -a args=() tmps=()
+  local prelude="" name value tmp
+  while (($# >= 2)); do
+    name="$1"
+    value="$2"
+    shift 2
+    tmp="$(mktemp)"
+    printf '%s' "${value}" > "${tmp}"
+    tmps+=("${tmp}")
+    args+=(--slurpfile "${name}_f" "${tmp}")
+    prelude="${prelude}(\$${name}_f[0]) as \$${name} | "
+  done
+  local rc=0
+  jq -cn "${args[@]}" "${prelude}${filter}" || rc=$?
+  ((${#tmps[@]})) && rm -f "${tmps[@]}"
+  return "${rc}"
+}
+
 # uri_encode <string> — percent-encode for a query component, applying the
 # @uri rule and the %20->+ normalisation (research §11).
 uri_encode() {
