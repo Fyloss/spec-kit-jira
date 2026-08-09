@@ -467,10 +467,20 @@ plan_writes() {
   parent_result="$(_plan_writes_parent "${doc}" "${ctx}" "${base}" "${parent_label}")"
   parent="$(jq -c '.action' <<< "${parent_result}")"
   plan_warnings="$(jq -c --argjson w "$(jq -c '.warnings' <<< "${parent_result}")" '. + $w' <<< "${plan_warnings}")"
-  jq -cn --argjson p "${parent}" --argjson s "${stories}" --argjson w "${plan_warnings}" --arg tl "${task_label}" \
+  # $s carries the whole story plan — ~140 KB at a hundred stories, past
+  # Linux's 128 KiB per-argument cap. json_build keeps it out of argv.
+  local _plan
+  # Captured, not piped straight into json_canonical: on an empty input jq
+  # writes nothing and exits 0, so a json_build failure would be swallowed
+  # and an EMPTY plan returned as a success. This is the write path.
+  # shellcheck disable=SC2016  # a jq filter: $p/$s/$w/$tl are jq variables
+  _plan="$(json_build \
     '{parent:$p, stories:$s}
      + (if $tl == "" then {} else {task_label:$tl} end)
-     + (if ($w|length) == 0 then {} else {warnings:$w} end)' | json_canonical
+     + (if ($w|length) == 0 then {} else {warnings:$w} end)' \
+    p "${parent}" s "${stories}" w "${plan_warnings}" \
+    tl "$(jq -cn --arg t "${task_label}" '$t')")" || return $?
+  printf '%s' "${_plan}" | json_canonical
 }
 
 # _plan_writes_parent <neutral-doc-json> <plan-context-json> <base-url> —
@@ -847,7 +857,10 @@ plan_writes_tasks() {
       actions="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${actions}")"
     done
   done
-  jq -cn --argjson a "${actions}" --argjson w "${warnings}" '{actions:$a, warnings:$w}' | json_canonical
+  local _out
+  # shellcheck disable=SC2016  # a jq filter: $a/$w are jq variables
+  _out="$(json_build '{actions:$a, warnings:$w}' a "${actions}" w "${warnings}")" || return $?
+  printf '%s' "${_out}" | json_canonical
 }
 
 # _plan_transition_action <base_url> <key> <transition_id> <blockers-json> <label>
@@ -973,8 +986,12 @@ plan_lifecycle() {
     fi
   done
 
-  jq -cn --argjson a "${kept}" --argjson w "${warns}" --argjson no "${notes}" \
-    '{actions:$a, warnings:$w, notes:$no}' | json_canonical
+  # shellcheck disable=SC2016  # a jq filter: $a/$w/$no are jq variables
+  local _out
+  # shellcheck disable=SC2016  # a jq filter: $a/$w/$no are jq variables
+  _out="$(json_build '{actions:$a, warnings:$w, notes:$no}' \
+    a "${kept}" w "${warns}" no "${notes}")" || return $?
+  printf '%s' "${_out}" | json_canonical
 }
 
 # plan_lifecycle_tasks <content-actions-json> <completion-ctx-json>
@@ -1065,8 +1082,12 @@ plan_lifecycle_tasks() {
     fi
   done <<< "${ids}"
 
-  jq -cn --argjson a "${kept}" --argjson w "${warns}" --argjson no "${notes}" \
-    '{actions:$a, warnings:$w, notes:$no}' | json_canonical
+  # shellcheck disable=SC2016  # a jq filter: $a/$w/$no are jq variables
+  local _out
+  # shellcheck disable=SC2016  # a jq filter: $a/$w/$no are jq variables
+  _out="$(json_build '{actions:$a, warnings:$w, notes:$no}' \
+    a "${kept}" w "${warns}" no "${notes}")" || return $?
+  printf '%s' "${_out}" | json_canonical
 }
 
 # _apply_known_coords <extra-json> — the known-coordinate set the guard checks:

@@ -201,12 +201,16 @@ _reconcile_field_default_notes() {
   [[ -z "${actions}" ]] && actions='[]'
   [[ -z "${parent}" ]] && parent='null'
   # kcov-excl-start — jq literal (string lines are not statements)
+  # $actions is the whole planned action set — past Linux's 128 KiB
+  # per-argument cap on a large specification (see lib/output.sh json_build).
+  # Only it moves to a file; the rest are scalars and stay in argv.
   jq -rn --arg pkey "${pkey}" --argjson itypes "${itypes}" --argjson df "${df}" \
-    --argjson resolved "${resolved}" --argjson actions "${actions}" --argjson parent "${parent}" \
+    --argjson resolved "${resolved}" --slurpfile actions_f <(printf '%s' "${actions}") --argjson parent "${parent}" \
     --arg ask "${ask}" --arg accept "${accept}" --arg dry "${dry_run}" '
     def typeName($tid): (first($itypes[] | select(.id == $tid)) // null) | .logical_name // $tid;
     def labelFor($tid; $fid): (first((($df[$tid]) // [])[] | select(.field_id == $fid)) // null) | .logical_name // $fid;
-    ( ([$parent] + $actions) | map(select(. != null and .method == "POST" and (.url | endswith("/issue"))))) as $creates
+    ($actions_f[0]) as $actions
+    | ( ([$parent] + $actions) | map(select(. != null and .method == "POST" and (.url | endswith("/issue"))))) as $creates
     | ( [ $creates[] | (.body.fields.issuetype.id) as $tid
           | ((($resolved.field_defaults[$tid]) // {}) | keys[]) as $fid
           | { tid: $tid, fid: $fid,
@@ -1330,7 +1334,8 @@ cmd_reconcile() {
     # first create, and stamps + records each created ticket's key
     # IMMEDIATELY, per ticket — never batched.
     local apply_plan known_parent_key="" apply_outcome=""
-    apply_plan="$(jq -cn --argjson p "${parent_action}" --argjson s "${actions}" '{parent:$p, stories:$s}')"
+    # shellcheck disable=SC2016  # a jq filter: $p/$s are jq variables
+    apply_plan="$(json_build '{parent:$p, stories:$s}' p "${parent_action}" s "${actions}")"
     [[ "${parent_state}" == "bound" ]] && known_parent_key="$(jq -r '.key' <<< "${recog_parent}")"
     # Phase 3, US1: the task tier's own writes join the SAME apply call —
     # the pre-write privacy sweep must cover every payload of the run
@@ -1587,13 +1592,17 @@ cmd_reconcile() {
   # a story was blocked, so the content-only reconcile (US3) summary with
   # neither is byte-for-byte unchanged.
   local summary
+  # $actions carries every planned action — past Linux's 128 KiB
+  # per-argument cap on a large specification (see lib/output.sh json_build).
+  # A silent failure here would empty the run summary, so it moves to a file.
   summary="$(jq -cn \
     --argjson dry "${dry_run}" --argjson c "${created}" --argjson u "${updated}" \
-    --argjson x "${rc}" --argjson actions "${disp_actions}" \
+    --argjson x "${rc}" --slurpfile actions_f <(printf '%s' "${disp_actions}") \
     --argjson wc "${warn_count}" --argjson w "${warns}" --argjson no "${notes}" \
     --argjson hl "${has_lifecycle}" --argjson hooks "${hooks_health}" \
     --argjson rec "${recognised_count}" --argjson asg "${assigned_count}" --argjson sk "${skipped_count}" \
     --argjson tc "${task_counts}" '
+    ($actions_f[0]) as $actions |
     {schema_version:"1.0", command:"reconcile", dry_run:$dry,
      counts:({created:$c, updated:$u, skipped:$sk, warnings:$wc, errors:0,
               recognised:$rec, assigned:$asg}
