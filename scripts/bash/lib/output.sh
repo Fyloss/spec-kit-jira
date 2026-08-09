@@ -78,6 +78,17 @@ json_canonical() {
   printf '%s' "$(jq -cS .)"
 }
 
+# JIRA_PATH_STYLE — how a native (non-MSYS) tool on PATH spells a filesystem
+# path: `native` on git-bash, `posix` everywhere else. Declared with := so it
+# agrees with sink/jira/client.sh, which owns the measured rationale for the
+# curl side; whichever file loads first sets it, and the logic is identical.
+: "${JIRA_PATH_STYLE:=$(
+  case "$(uname -s 2> /dev/null || true)" in
+    MINGW* | MSYS* | CYGWIN*) printf 'native' ;;
+    *) printf 'posix' ;;
+  esac
+)}"
+
 # json_build <filter> <name> <value> [<name> <value> …] — evaluate <filter>
 # with each $<name> bound to <value> as JSON, passing no value through argv.
 #
@@ -88,12 +99,21 @@ json_canonical() {
 # Linux with "jq: Argument list too long", losing the whole run at exit 4.
 # --slurpfile reads from a file instead, which has no such limit.
 #
-# Temporary files, NOT process substitution. A `<(…)` collected into an array
-# and used by a LATER command is not reliable: its writer can exit and the
-# pipe be closed before jq opens the path, which on Linux surfaces as
-# "Bad JSON in --slurpfile …: Could not open /dev/fd/63". Inline in the jq
-# command itself a `<(…)` is fine, and two call sites use it that way; here,
-# where the arguments are accumulated first, only a real file will do.
+# One file per value, each named separately. Streaming every value on stdin
+# and reading them back with `inputs` was tried and rejected: an EMPTY value
+# contributes nothing to the stream, so every later value silently shifts one
+# position and binds to the wrong name — a wrong answer at exit 0, on the
+# write path, which is the failure this whole change exists to remove.
+#
+# A `<(…)` process substitution collected into an array for a LATER command
+# is also unsafe: its writer can exit and the pipe close before jq opens the
+# path, surfacing on Linux as "Could not open /dev/fd/63".
+#
+# The path is spelled for the jq that will open it. The wrapper above runs
+# with MSYS_NO_PATHCONV=1, so MSYS does NOT translate arguments — and this is
+# the one place in the port that hands jq a real path to read, which is the
+# assumption that comment records. Untranslated, native jq.exe cannot open
+# /tmp/… on git-bash; `-m` matches client.sh's measured choice for curl.
 #
 # jq's exit status is captured before the files are removed, so the caller
 # still sees it — this is the write path, and a failure must not be swallowed.
@@ -106,7 +126,7 @@ json_build() {
   local filter="$1"
   shift
   local -a args=() tmps=()
-  local prelude="" name value tmp
+  local prelude="" name value tmp tmp_arg
   while (($# >= 2)); do
     name="$1"
     value="$2"
@@ -114,7 +134,11 @@ json_build() {
     tmp="$(mktemp)"
     printf '%s' "${value}" > "${tmp}"
     tmps+=("${tmp}")
-    args+=(--slurpfile "${name}_f" "${tmp}")
+    tmp_arg="${tmp}"
+    if [[ "${JIRA_PATH_STYLE}" == "native" ]] && command -v cygpath > /dev/null 2>&1; then
+      tmp_arg="$(cygpath -m "${tmp}")"
+    fi
+    args+=(--slurpfile "${name}_f" "${tmp_arg}")
     prelude="${prelude}(\$${name}_f[0]) as \$${name} | "
   done
   local rc=0
