@@ -58,7 +58,7 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
         $r.counts.updated | Should -Be 0
         $r.counts.skipped | Should -Be 3
         $r.counts.recognised | Should -Be 3
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' -and $_ -notmatch '/issue/bulkfetch' }).Count | Should -Be 0
     }
 
     It "a change to one story out of several produces exactly one PUT, naming that story's ticket" {
@@ -77,7 +77,7 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
         # 018, US3: the story's whole-object update always carries `summary`, so the
         # write is followed by exactly one identity-property PUT recording it.
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-3/properties/spec-kit-jira' }).Count | Should -Be 1
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 2
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' -and $_ -notmatch '/issue/bulkfetch' }).Count | Should -Be 2
     }
 
     It 'spec.md is byte-identical after an unchanged re-run' {
@@ -96,7 +96,7 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
         # The one read this run makes: the duplicate probe (017, US4)
         # predicting the parent's creation. Read-only — zero writes either way.
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match 'search/jql' }).Count | Should -Be 1
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' -and $_ -notmatch '/issue/bulkfetch' }).Count | Should -Be 0
     }
 
     It "a human-origin ticket's churn is computed on the managed section alone: its prose above the panel is never rewritten (T072)" {
@@ -153,12 +153,12 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
         # 018, US3: the story's whole-object update always carries `summary`,
         # so the write is followed by exactly one identity-property PUT.
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'PUT /rest/api/3/issue/COMP-2/properties/spec-kit-jira' }).Count | Should -Be 1
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 2
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' -and $_ -notmatch '/issue/bulkfetch' }).Count | Should -Be 2
 
         Clear-Content -LiteralPath $script:M.CallLog
         $r2 = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
         $r2.counts.updated | Should -Be 0
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' -and $_ -notmatch '/issue/bulkfetch' }).Count | Should -Be 0
     }
 
     It 'T080 [Phase 9] — a second reconcile over the declared-hierarchy fixture issues ZERO writes of every kind' {
@@ -175,13 +175,17 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
             $null = Invoke-JiraReconcile -Arguments @('reconcile', $spec, '--json') # back-fills the provenance label once
             Clear-Content -LiteralPath $m.CallLog
 
+            # -Force: this re-run's local inputs are unchanged since the prior run,
+            # so without -Force the state short-circuit (021) would skip Jira
+            # entirely — this test's point is that a genuine reconcile issues zero
+            # writes, not that the short-circuit fires.
             $sw = [System.IO.StringWriter]::new(); $orig = [Console]::Out; [Console]::SetOut($sw)
-            try { $null = Invoke-JiraReconcile -Arguments @('reconcile', $spec, '--json') } finally { [Console]::SetOut($orig) }
+            try { $null = Invoke-JiraReconcile -Arguments @('reconcile', $spec, '--json', '--force') } finally { [Console]::SetOut($orig) }
             $r = $sw.ToString() | ConvertFrom-Json
             $r.counts.created | Should -Be 0
             $r.counts.updated | Should -Be 0
             $r.counts.skipped | Should -Be 2
-            @(Get-JiraMockCallLog -Mock $m | Where-Object { $_ -match '^(POST|PUT) ' }).Count | Should -Be 0
+            @(Get-JiraMockCallLog -Mock $m | Where-Object { $_ -match '^(POST|PUT) ' -and $_ -notmatch '/issue/bulkfetch' }).Count | Should -Be 0
         }
         finally {
             Stop-JiraMock -Mock $m

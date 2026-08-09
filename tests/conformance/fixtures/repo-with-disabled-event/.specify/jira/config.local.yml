@@ -1,0 +1,7 @@
+# T021b [021, US2] fixture: the operator has disabled the after_specify
+# lifecycle event (data-model.md § Operator disable record). No resolved_ids
+# are needed here — the dispatch guard (FR-020) must return before config is
+# ever read for real, so this fixture never exercises that path.
+hooks:
+  disabled:
+    - after_specify

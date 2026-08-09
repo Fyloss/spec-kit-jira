@@ -80,7 +80,17 @@ Describe 'Invoke-JiraReconcile -- the duplicate probe, full pipeline' {
         $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-billing-invoices'
         $env:SPEC_KIT_JIRA_REPO = 'acme/app'
         $env:SPEC_KIT_JIRA_PROJECT_KEY = 'COMP'
-        $env:JIRA_CONFIG_DIR = Join-Path $Root 'tests/conformance/fixtures/repo-with-reconcile-binding/.specify/jira'
+        # A COPY of the fixture's config, never the fixture itself: 021's
+        # Save-JiraRunState writes $JIRA_CONFIG_DIR/state/<feature>.json on
+        # every successful reconcile, and this test reaches one. Pointed at the
+        # source tree it deposits a machine-specific document (absolute paths,
+        # the live mock port, the real extension version) inside
+        # tests/conformance/fixtures, where the state/.gitignore's `*` then
+        # hides it from git status. Mirror of the bats twin.
+        $cfgDir = Join-Path $TestDrive 'jira-config'
+        New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
+        Copy-Item -Path (Join-Path $Root 'tests/conformance/fixtures/repo-with-reconcile-binding/.specify/jira/*.yml') -Destination $cfgDir -Force
+        $env:JIRA_CONFIG_DIR = $cfgDir
         $env:JIRA_EMAIL = 'user@example.com'
         $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
         $env:JIRA_NO_SLEEP = '1'

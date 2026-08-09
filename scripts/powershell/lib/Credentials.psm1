@@ -10,16 +10,35 @@
 
 Set-StrictMode -Version Latest
 
+# Per-process credential cache (021, US3, contracts/credential-cache.md).
+# Filled at most once, on first miss inside Resolve-JiraToken — no priming
+# function is needed here: PowerShell has no subshell to lose the cache to,
+# so module scope persists for the whole process. Confirmed no module in the
+# dependency chain re-imports this one with -Force after Invoke-JiraReconcile
+# begins running (every such re-import is part of the static module-load
+# cascade, which completes before any credential is ever resolved).
+$script:CredCacheState = 'unset' # unset | resolved | unresolved
+$script:CredCacheToken = $null
+
 function Get-JiraConfigDir {
     if ($env:JIRA_CONFIG_DIR) { return $env:JIRA_CONFIG_DIR }
     return '.specify/jira'
 }
 
 function Get-JiraSecretManagerToken {
-    # Test-overridable via $env:_CRED_SECRET_TOKEN. On Windows, the Credential
-    # Manager / SecretManagement vault would be queried here; absence is non-fatal.
+    # Test-overridable via $env:_CRED_SECRET_TOKEN, which keeps precedence over
+    # a real vault so no test needs one (contracts/credential-cache.md §5). On
+    # Windows this reads the registered SecretManagement default vault; every
+    # failure — module absent, no vault registered, no entry named
+    # spec-kit-jira, or a locked vault unable to prompt — is swallowed into
+    # $null, silently and without waiting (Constitution IV, v1.3.0).
     if ($env:_CRED_SECRET_TOKEN) { return $env:_CRED_SECRET_TOKEN }
-    return $null
+    if (-not (Get-Command Get-Secret -ErrorAction SilentlyContinue)) { return $null }
+    try {
+        Get-Secret -Name 'spec-kit-jira' -AsPlainText -ErrorAction Stop
+    } catch {
+        $null
+    }
 }
 
 function Get-JiraEnvFileToken {
@@ -49,15 +68,28 @@ function Resolve-JiraToken {
     .SYNOPSIS
       Resolve the API token: env -> secret manager -> gitignored .env. Returns
       $null when no source provides one. Never writes the token to any stream.
+      Reads the cache when filled; otherwise resolves and fills it — a failed
+      resolution caches as 'unresolved', a state distinct from an empty token,
+      so a token-less run still consults its sources only once.
     #>
     [CmdletBinding()]
     param()
-    if ($env:JIRA_API_TOKEN) { return $env:JIRA_API_TOKEN }
-    $secret = Get-JiraSecretManagerToken
-    if ($secret) { return $secret }
-    $fromFile = Get-JiraEnvFileToken
-    if ($fromFile) { return $fromFile }
-    return $null
+    if ($script:CredCacheState -eq 'resolved') { return $script:CredCacheToken }
+    if ($script:CredCacheState -eq 'unresolved') { return $null }
+    $token = $null
+    if ($env:JIRA_API_TOKEN) {
+        $token = $env:JIRA_API_TOKEN
+    } else {
+        $secret = Get-JiraSecretManagerToken
+        if ($secret) { $token = $secret } else { $token = Get-JiraEnvFileToken }
+    }
+    if ($token) {
+        $script:CredCacheState = 'resolved'
+        $script:CredCacheToken = $token
+    } else {
+        $script:CredCacheState = 'unresolved'
+    }
+    return $token
 }
 
 function Get-JiraAuthHeader {

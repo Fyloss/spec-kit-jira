@@ -205,6 +205,12 @@ function ConvertTo-JiraSummaryProse {
     $suffix = if ($s.dry_run) { ' (dry-run)' } else { '' }
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("Command: $($s.command)$suffix")
+    # The run-state short-circuit (021, T032, contracts/run-state.md §3): a
+    # short-circuited run must not look like a run that did nothing for
+    # unclear reasons — name both the fact and the file that made it possible.
+    if ($s.PSObject.Properties.Name -contains 'short_circuited' -and $s.short_circuited) {
+        $lines.Add("Short-circuited: $($s.state_file)")
+    }
     $lines.Add("Created: $($s.counts.created), Updated: $($s.counts.updated), Skipped: $($s.counts.skipped)")
     # recognised/assigned (Phase 7, US1/US2) exist only on reconcile's
     # summary — a reader confirms an unchanged re-run recognised every

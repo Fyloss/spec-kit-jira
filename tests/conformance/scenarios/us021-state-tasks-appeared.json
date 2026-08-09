@@ -1,0 +1,19 @@
+{
+  "name": "us021-state-tasks-appeared",
+  "description": "T021a [US2]: reconcile a three-story specification to completion (no tasks.md present), then let tasks.md appear before the second reconcile. data-model.md §1 'inputs members': tasks.md's key is omitted entirely while absent, so its appearance changes the inputs map and contracts/run-state.md §3's 'an input appeared/disappeared' row applies — the second run must be a full reconcile, and the freshly recorded state's inputs must carry a tasks.md key.",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec-clean",
+  "runs": [
+    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] },
+    {
+      "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"],
+      "before": { "write": { "specs/001-billing-invoices/tasks.md": "# Tasks\n\n- [ ] T001 A setup task\n" } }
+    }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222 3333333333333333"
+  }
+}

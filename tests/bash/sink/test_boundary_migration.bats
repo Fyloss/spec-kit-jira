@@ -79,7 +79,8 @@ teardown() {
   [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
   [ "$(jq -r '.counts.created' <<< "$output")" -eq 0 ]
   [ "$(jq -r '.warnings | length' <<< "$output")" -eq 0 ]
-  [ "$(grep -cE '^(POST|PUT) ' "${MOCK_CALLLOG}")" -eq 0 ]
+  # 021 US4's prefetch fires its own bulkfetch POST as a read, not a write.
+  [ "$(grep -vE 'issue/bulkfetch' "${MOCK_CALLLOG}" | grep -cE '^(POST|PUT) ')" -eq 0 ]
 }
 
 # --- 019, T009: the reported defect — origin bridge, no boundary, an edited

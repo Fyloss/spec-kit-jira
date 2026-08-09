@@ -8,8 +8,17 @@ setup() {
   LIB_DIR="${ROOT}/scripts/bash/lib"
   # shellcheck source=/dev/null
   source "${LIB_DIR}/credentials.sh"
+  # shellcheck source=/dev/null
+  source "${ROOT}/tests/bash/helpers/secret_store_stub.bash"
   TMPDIR_T="$(mktemp -d)"
   export JIRA_CONFIG_DIR="${TMPDIR_T}"
+  # A minimal PATH entry carrying only `bash`, for tests that must prove a
+  # tool genuinely ABSENT (so PATH cannot include the directory holding the
+  # real macOS /usr/bin/security) while still letting a `#!/usr/bin/env bash`
+  # stub script resolve its own interpreter.
+  SAFEBIN="${TMPDIR_T}/safebin"
+  mkdir -p "${SAFEBIN}"
+  ln -s "$(command -v bash)" "${SAFEBIN}/bash"
 }
 
 teardown() {
@@ -106,4 +115,86 @@ teardown() {
   b64="$(printf '%s' "$out" | sed -n 's/.*Basic \([A-Za-z0-9+/=]*\).*/\1/p')"
   decoded="$(printf '%s' "$b64" | base64 -d)"
   [ "$decoded" = "user@example.com:RAWSECRETXYZ" ]
+}
+
+# --- T036/T037/T038 [US3] — the per-run credential cache -------------------
+# contracts/credential-cache.md. cred_prime_cache/the _CRED_CACHE_* pair are
+# process-lifetime state: every scenario below either runs in a fresh `bash
+# -c` child (rotation needs two independent, unprimed processes) or relies on
+# the fact that each bats @test is itself a fresh forked process, so no test
+# here depends on cache state left behind by another.
+
+@test "the credential cache variable is never exported; a child process born mid-run inherits no copy of the token (T036)" {
+  _CRED_SECRET_TOKEN="MID-RUN-SECRET-TOKEN" cred_prime_cache
+  run declare -p _CRED_CACHE_TOKEN
+  [[ "${output}" == "declare -- _CRED_CACHE_TOKEN="* ]]
+  run env
+  [[ "${output}" != *"MID-RUN-SECRET-TOKEN"* ]]
+}
+
+@test "credential rotation: two runs pick up two different stub tokens (T037)" {
+  local out1 out2
+  out1="$(_CRED_SECRET_TOKEN="token-one" bash -c '
+    source "'"${LIB_DIR}"'/credentials.sh"
+    cred_prime_cache
+    cred_resolve_token
+  ')"
+  out2="$(_CRED_SECRET_TOKEN="token-two" bash -c '
+    source "'"${LIB_DIR}"'/credentials.sh"
+    cred_prime_cache
+    cred_resolve_token
+  ')"
+  [ "${out1}" = "token-one" ]
+  [ "${out2}" = "token-two" ]
+}
+
+@test "an unresolved outcome caches as 'unresolved', a state distinct from an empty resolved token (T037)" {
+  cred_prime_cache
+  run declare -p _CRED_CACHE_STATE
+  [[ "${output}" == *"unresolved"* ]]
+  run cred_resolve_token
+  [ "${status}" -ne 0 ]
+  [ -z "${output}" ]
+}
+
+@test "an unresolved cache is not re-consulted on a second resolve (T037)" {
+  local bindir counter
+  bindir="${TMPDIR_T}/bin" counter="${TMPDIR_T}/count"
+  helper_secret_store_install "${bindir}" "${counter}"
+  PATH="${bindir}:${PATH}" cred_prime_cache
+  PATH="${bindir}:${PATH}" run cred_resolve_token
+  [ "${status}" -ne 0 ]
+  [ "$(helper_secret_store_count "${counter}")" = "1" ]
+}
+
+@test "security and secret-tool both absent from PATH: silent fall-through to .env (T038)" {
+  printf 'JIRA_API_TOKEN=file-token\n' > "${TMPDIR_T}/.env"
+  local emptybin="${TMPDIR_T}/emptybin"
+  mkdir -p "${emptybin}"
+  PATH="${emptybin}" run cred_resolve_token
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "file-token" ]
+}
+
+@test "security present but exits non-zero: silent fall-through to .env, and the attempt still counts (T038)" {
+  printf 'JIRA_API_TOKEN=file-token\n' > "${TMPDIR_T}/.env"
+  local bindir counter
+  bindir="${TMPDIR_T}/bin" counter="${TMPDIR_T}/count"
+  helper_secret_store_install "${bindir}" "${counter}" "" 1
+  PATH="${bindir}:${SAFEBIN}" run cred_resolve_token
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "file-token" ]
+  [ "$(helper_secret_store_count "${counter}")" = "1" ]
+}
+
+@test "secret-tool present but exits non-zero, security absent: silent fall-through to .env (T038)" {
+  printf 'JIRA_API_TOKEN=file-token\n' > "${TMPDIR_T}/.env"
+  local bindir counter
+  bindir="${TMPDIR_T}/bin" counter="${TMPDIR_T}/count"
+  helper_secret_store_install "${bindir}" "${counter}" "" 1
+  rm -f "${bindir}/security"
+  PATH="${bindir}:${SAFEBIN}" run cred_resolve_token
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "file-token" ]
+  [ "$(helper_secret_store_count "${counter}")" = "1" ]
 }

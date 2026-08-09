@@ -10,6 +10,16 @@
 # downgraded to "no ticket exists" (FR-004) — an inconclusive read fails the
 # WHOLE specification closed; a marker mismatch/duplicate/malformed marker
 # blocks only the story it names (FR-011, FR-016, FR-021).
+#
+# 021, US4: a bulk PREFETCH (prefetch.sh) may satisfy this read instead of a
+# per-key GET, but it is never a search — it is addressed by the SAME keys
+# research R2 already committed to, is optional (a miss falls through to
+# today's GET unchanged, contracts/recognition-prefetch.md §3), and never
+# changes a classification, only how many requests reach it. The eventual-
+# consistency risk R2 exists to avoid is a QUERY finding a stale index, not a
+# key-addressed read finding a stale one — bulkfetch is documented to resolve
+# a key exactly as its single-issue counterpart does, so batching it costs
+# nothing here that batching a search would have.
 
 [[ -n ${_JIRA_SINK_RECOGNITION:-} ]] && return 0
 _JIRA_SINK_RECOGNITION=1
@@ -21,20 +31,37 @@ source "${_recognition_dir}/../../lib/cli.sh"
 source "${_recognition_dir}/../../lib/output.sh"
 # shellcheck source=/dev/null
 source "${_recognition_dir}/client.sh"
+# shellcheck source=/dev/null
+source "${_recognition_dir}/prefetch.sh"
 
 : "${SPEC_KIT_JIRA_IDENTITY_KEY:=spec-kit-jira}"
 
-# _recognition_read <key> [extra-fields-csv] — one GET folding the identity
-# property into the issue fetch (research R3). Prints canonical JSON on
-# success: {"gone":false,"marker":<marker-or-null>,"fields":{...}}, or
-# {"gone":true} on a 404 (the ticket no longer exists — not a failure). Any
-# other transport failure returns the mapped exit code, zero stdout
-# (fail-closed, Constitution III).
+# _recognition_read <key> [extra-fields-csv] — consults the prefetch (021,
+# US4; contracts/recognition-prefetch.md §3) first; on a hit its own
+# projected result is printed and no request is made. On a miss (never
+# populated, chunk failure, or _RECOGNITION_NO_PREFETCH set — test seam,
+# underscore-prefixed and absent from the CLI contract) falls through to
+# today's GET UNCHANGED, folding the identity property into the issue fetch
+# (research R3). Prints canonical JSON on success: {"gone":false,
+# "marker":<marker-or-null>,"fields":{...}}, or {"gone":true} on a 404 (the
+# ticket no longer exists — not a failure; a prefetch hit can never express
+# this, so a deleted/forbidden key ALWAYS falls through here). Any other
+# transport failure returns the mapped exit code, zero stdout (fail-closed,
+# Constitution III).
 _recognition_read() {
-  local key="$1" extra="${2:-}" base url fields_param resp rc tmp
-  base="${SPEC_KIT_JIRA_BASE_URL:-}"
-  fields_param="summary,description,priority,status,issuelinks,parent,labels"
+  local key="$1" extra="${2:-}" base url fields_param resp rc tmp hit
+  # Flagged (FR-036): requested by its literal display name, matching the
+  # ["Flagged"] lookup below — every story/task read needs it, so it belongs
+  # in the fixed set rather than a per-caller extra.
+  fields_param="summary,description,priority,status,issuelinks,parent,labels,Flagged"
   [[ -n "${extra}" ]] && fields_param="${fields_param},${extra}"
+  if [[ -z "${_RECOGNITION_NO_PREFETCH:-}" ]]; then
+    if hit="$(prefetch_get "${key}" "${fields_param}")"; then
+      printf '%s' "${hit}"
+      return 0
+    fi
+  fi
+  base="${SPEC_KIT_JIRA_BASE_URL:-}"
   url="${base}/rest/api/3/issue/${key}?properties=${SPEC_KIT_JIRA_IDENTITY_KEY}&fields=${fields_param}"
   tmp="$(mktemp)"
   jira_request GET "${url}" > "${tmp}"
@@ -66,7 +93,13 @@ _recognition_project_of() {
 # on a 404. Any other transport failure returns the mapped exit code, zero
 # stdout (fail-closed, Constitution III).
 _recognition_read_parent() {
-  local key="$1" base url resp rc tmp
+  local key="$1" base url resp rc tmp hit
+  if [[ -z "${_RECOGNITION_NO_PREFETCH:-}" ]]; then
+    if hit="$(prefetch_get "${key}" "summary,description,labels")"; then
+      printf '%s' "${hit}"
+      return 0
+    fi
+  fi
   base="${SPEC_KIT_JIRA_BASE_URL:-}"
   url="${base}/rest/api/3/issue/${key}?properties=${SPEC_KIT_JIRA_IDENTITY_KEY}&fields=summary,description,labels"
   tmp="$(mktemp)"

@@ -137,6 +137,31 @@ byte_diff() {
 }
 export -f _size _byte_at byte_diff
 
+# _normalize_state_base_url <workdir> — masks the one field a recorded
+# run-state document (021, contracts/run-state.md) can never agree on across
+# ports: `base_url` is the mock's OS-assigned port for the PowerShell port's
+# real socket server, and the curl shim's fixed sentinel for the Bash port
+# (Decision 2, contracts/mock-driver.md) — run-scenario.sh's own comment on
+# `runs[i].before.jq` already documents this as "can never be pre-baked to
+# match". Every other field (the input hashes, email, on_drift, schema,
+# extension_version) is a genuine cross-port claim and stays fully compared;
+# only this one is masked, on BOTH sides identically, immediately before the
+# written-files diff.
+_normalize_state_base_url() {
+  local dir="$1" f masked
+  [ -d "${dir}" ] || return 0
+  while IFS= read -r -d '' f; do
+    # Only rewrite a document jq could actually parse. Emptying one it could
+    # not would corrupt BOTH captures identically, and a symmetric corruption
+    # diffs CLEAN — it would mask the very divergence this corpus exists to
+    # catch, and us021-state-corrupt.json produces such a document on purpose.
+    if masked="$(jq -cS '.base_url = "MOCK_BASE_URL"' "${f}" 2> /dev/null)" && [ -n "${masked}" ]; then
+      printf '%s' "${masked}" > "${f}"
+    fi
+  done < <(find "${dir}" -path '*/jira/state/*.json' -print0 2> /dev/null)
+}
+export -f _normalize_state_base_url
+
 # Scenarios are independent (each gets its own mktemp workdir and an
 # OS-assigned ephemeral mock port, per run-scenario.sh), so they run
 # concurrently across cores instead of one after another. xargs -P exits 123
@@ -144,6 +169,7 @@ export -f _size _byte_at byte_diff
 # own failure below — no manual result-collection needed.
 run_scenario() {
   local scenario="$1" name out_bash out_ps failed=0 detail="" line f rel
+  local off_bash off_ps expect got_bf port on_dir off_dir on_lines off_lines
   name="$(basename "${scenario}" .json)"
   out_bash="$(mktemp -d)"
   out_ps="$(mktemp -d)"
@@ -158,6 +184,8 @@ run_scenario() {
       failed=1
     fi
   done
+  _normalize_state_base_url "${out_bash}/workdir"
+  _normalize_state_base_url "${out_ps}/workdir"
   if ! diff -ru "${out_bash}/workdir" "${out_ps}/workdir"; then
     echo "conformance divergence in ${name} (written files)"
     while IFS= read -r line; do
@@ -173,6 +201,77 @@ run_scenario() {
     done < <(diff -rq "${out_bash}/workdir" "${out_ps}/workdir" 2>&1 || true)
     failed=1
   fi
+
+  # 021 US4, contracts/recognition-prefetch.md §6 (T049-T051): the SECOND,
+  # orthogonal axis this corpus proves for a `us021-prefetch-*` scenario —
+  # not bash-vs-powershell (above), but the SAME port run twice, prefetch on
+  # (the `out_*` captures already taken above) and prefetch off
+  # (`_RECOGNITION_NO_PREFETCH=1`, threaded through the one caller-side
+  # channel run-scenario.sh recognises, SPEC_KIT_JIRA_HARNESS_ENV). The
+  # governing rule is byte-identical stdout/stderr/exit/tree; only calls.log
+  # may differ, and only by shrinking — every line the prefetch run kept
+  # beyond its own bulkfetch request(s) must also appear in the unprefetched
+  # run's own calls.log (a fall-through read the prefetch left unresolved).
+  if [[ "${name}" == us021-prefetch-* ]]; then
+    off_bash="$(mktemp -d)"
+    off_ps="$(mktemp -d)"
+    SPEC_KIT_JIRA_HARNESS_ENV="_RECOGNITION_NO_PREFETCH=1" "${harness}" "${scenario}" bash "${off_bash}"
+    SPEC_KIT_JIRA_HARNESS_ENV="_RECOGNITION_NO_PREFETCH=1" "${harness}" "${scenario}" powershell "${off_ps}"
+    for port in bash powershell; do
+      if [ "${port}" = bash ]; then on_dir="${out_bash}"; off_dir="${off_bash}"; else on_dir="${out_ps}"; off_dir="${off_ps}"; fi
+      for artifact in stdout stderr exit; do
+        if ! diff -u "${on_dir}/${artifact}" "${off_dir}/${artifact}"; then
+          echo "prefetch differential divergence in ${name} (${port}, ${artifact}, prefetch on vs off)"
+          detail="${detail}  ${port}: ${artifact} differs between prefetch on and off"$'\n'
+          failed=1
+        fi
+      done
+      _normalize_state_base_url "${on_dir}/workdir"
+      _normalize_state_base_url "${off_dir}/workdir"
+      if ! diff -rq "${on_dir}/workdir" "${off_dir}/workdir" > /dev/null 2>&1; then
+        echo "prefetch differential divergence in ${name} (${port}, written files differ prefetch on vs off)"
+        detail="${detail}  ${port}: written files differ between prefetch on and off"$'\n'
+        failed=1
+      fi
+      on_lines="$(wc -l < "${on_dir}/calls.log" | tr -d '[:space:]')"
+      off_lines="$(wc -l < "${off_dir}/calls.log" | tr -d '[:space:]')"
+      if [ "${on_lines}" -gt "${off_lines}" ]; then
+        echo "prefetch differential divergence in ${name} (${port}, calls.log grew: ${on_lines} lines with the prefetch, ${off_lines} without)"
+        detail="${detail}  ${port}: calls.log has ${on_lines} lines with the prefetch vs ${off_lines} without — must never be more"$'\n'
+        failed=1
+      fi
+      while IFS= read -r line; do
+        [ -z "${line}" ] && continue
+        case "${line}" in
+          "POST "*"/issue/bulkfetch") continue ;;
+        esac
+        if ! grep -qxF "${line}" "${off_dir}/calls.log"; then
+          echo "prefetch differential divergence in ${name} (${port}, calls.log line is neither the prefetch nor a fall-through read: ${line})"
+          detail="${detail}  ${port}: unexplained calls.log line: ${line}"$'\n'
+          failed=1
+        fi
+      done < "${on_dir}/calls.log"
+    done
+    # Optional scenario field `read_requests` (T051): the exact count of
+    # read-phase requests — bulkfetch chunks PLUS the individual per-key GET
+    # fallbacks a deleted/forbidden key still costs — the prefetch-on bash
+    # capture's calls.log must carry. The counting cases (chunking at 100,
+    # a fall-through, zero keys).
+    expect="$(jq -r '.read_requests // empty' "${scenario}")"
+    if [ -n "${expect}" ]; then
+      local bf_count get_count
+      bf_count="$(grep -c '^POST .*/issue/bulkfetch$' "${out_bash}/calls.log" || true)"
+      get_count="$(grep -cE '^GET [^ ]+/issue/[^/?]+\?' "${out_bash}/calls.log" || true)"
+      got_bf="$((bf_count + get_count))"
+      if [ "${got_bf}" != "${expect}" ]; then
+        echo "prefetch differential divergence in ${name} (expected ${expect} read request(s), saw ${got_bf})"
+        detail="${detail}  read request count ${got_bf} != expected ${expect}"$'\n'
+        failed=1
+      fi
+    fi
+    rm -rf "${off_bash}" "${off_ps}"
+  fi
+
   if [ "${failed}" -ne 0 ]; then
     { printf '%s\n' "${name}"; printf '%s' "${detail}"; } > "${REPORT_DIR}/${name}"
   fi

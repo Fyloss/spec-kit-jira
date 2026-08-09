@@ -1,0 +1,19 @@
+{
+  "name": "us021-state-corrupt",
+  "description": "T021 [US2]: reconcile a three-story specification to completion, corrupt the recorded run-state document to invalid JSON, then reconcile again. contracts/run-state.md §3 row 'State file unreadable, not valid JSON, or missing a required field': the second run must still be a full reconcile — it re-records a fresh, valid state document rather than trusting or repairing the corrupt one (§8 invariant S8).",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec-clean",
+  "runs": [
+    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] },
+    {
+      "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"],
+      "before": { "write": { ".specify/jira/state/001-billing-invoices.json": "{ not valid json" } }
+    }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222 3333333333333333"
+  }
+}

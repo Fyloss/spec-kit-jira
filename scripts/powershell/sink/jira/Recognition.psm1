@@ -16,6 +16,7 @@ Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../../lib/Output.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Client.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Prefetch.psm1') -Force
 
 function Get-JiraRecognitionIdentityKey {
     if ($env:SPEC_KIT_JIRA_IDENTITY_KEY) { return $env:SPEC_KIT_JIRA_IDENTITY_KEY }
@@ -25,16 +26,32 @@ function Get-JiraRecognitionIdentityKey {
 function Get-JiraRecognitionRead {
     <#
     .SYNOPSIS
-      One GET folding the identity property into the issue fetch (research
-      R3). Returns a pscustomobject { ExitCode; Gone; Marker; Fields }.
-      ExitCode 0 with Gone=$true on a 404 (not a failure). Any other
-      transport failure returns its mapped exit code (fail-closed).
+      Consults the prefetch (021, US4; contracts/recognition-prefetch.md §3)
+      first; on a hit its own projected result is returned and no request is
+      made. On a miss (never populated, chunk failure, or
+      $env:_RECOGNITION_NO_PREFETCH set — test seam, underscore-prefixed and
+      absent from the CLI contract) falls through to today's GET UNCHANGED,
+      folding the identity property into the issue fetch (research R3).
+      Returns a pscustomobject { ExitCode; Gone; Marker; Fields }. ExitCode 0
+      with Gone=$true on a 404 (not a failure; a prefetch hit can never
+      express this, so a deleted/forbidden key ALWAYS falls through here).
+      Any other transport failure returns its mapped exit code (fail-closed).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Key, [string] $Extra = '')
-    $base = if ($env:SPEC_KIT_JIRA_BASE_URL) { $env:SPEC_KIT_JIRA_BASE_URL } else { '' }
-    $fieldsParam = 'summary,description,priority,status,issuelinks,parent,labels'
+    # Flagged (FR-036): requested by its literal display name, matching the
+    # 'Flagged' lookup below — every story/task read needs it, so it belongs
+    # in the fixed set rather than a per-caller extra.
+    $fieldsParam = 'summary,description,priority,status,issuelinks,parent,labels,Flagged'
     if (-not [string]::IsNullOrEmpty($Extra)) { $fieldsParam = "$fieldsParam,$Extra" }
+    if (-not $env:_RECOGNITION_NO_PREFETCH) {
+        $hit = Get-JiraPrefetch -Key $Key -FieldsCsv $fieldsParam
+        if ($null -ne $hit) {
+            $h = $hit | ConvertFrom-Json -Depth 100
+            return [pscustomobject]@{ ExitCode = 0; Gone = $false; Marker = $h.marker; Fields = $h.fields }
+        }
+    }
+    $base = if ($env:SPEC_KIT_JIRA_BASE_URL) { $env:SPEC_KIT_JIRA_BASE_URL } else { '' }
     $idKey = Get-JiraRecognitionIdentityKey
     $url = "$base/rest/api/3/issue/$Key`?properties=$idKey&fields=$fieldsParam"
     $r = Invoke-JiraRequest -Method GET -Url $url
@@ -94,13 +111,24 @@ function Get-JiraRecognitionNormalizedLabel {
 function Get-JiraRecognitionReadParent {
     <#
     .SYNOPSIS
-      One GET folding the identity property into the issue fetch, fields
-      limited to summary,description (contract hierarchy-resolution.md §7).
-      Mirror of _recognition_read_parent. Returns a pscustomobject
-      { ExitCode; Gone; Marker; Fields }.
+      Consults the prefetch (021, US4; contracts/recognition-prefetch.md §3)
+      first; on a hit its own projected result is returned and no request is
+      made. On a miss (never populated, chunk failure, or
+      $env:_RECOGNITION_NO_PREFETCH set — test seam, underscore-prefixed and
+      absent from the CLI contract) falls through to today's GET UNCHANGED,
+      fields limited to summary,description (contract
+      hierarchy-resolution.md §7). Mirror of _recognition_read_parent.
+      Returns a pscustomobject { ExitCode; Gone; Marker; Fields }.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Key)
+    if (-not $env:_RECOGNITION_NO_PREFETCH) {
+        $hit = Get-JiraPrefetch -Key $Key -FieldsCsv 'summary,description,labels'
+        if ($null -ne $hit) {
+            $h = $hit | ConvertFrom-Json -Depth 100
+            return [pscustomobject]@{ ExitCode = 0; Gone = $false; Marker = $h.marker; Fields = $h.fields }
+        }
+    }
     $base = if ($env:SPEC_KIT_JIRA_BASE_URL) { $env:SPEC_KIT_JIRA_BASE_URL } else { '' }
     $idKey = Get-JiraRecognitionIdentityKey
     $url = "$base/rest/api/3/issue/$Key`?properties=$idKey&fields=summary,description,labels"

@@ -1,0 +1,13 @@
+{
+  "name": "us021b-disabled-event",
+  "description": "T021b [US2, FR-027]: the dispatch guard (FR-020) is evaluated before the state phase, so a disabled lifecycle event behaves exactly as it does today — exit 0 silently, zero requests, no config read — even with a plausible run-state document already recorded for this feature directory. Fixture ships a state file that the run must never open.",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-disabled-event",
+  "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_HOOK_EVENT": "after_specify"
+  }
+}

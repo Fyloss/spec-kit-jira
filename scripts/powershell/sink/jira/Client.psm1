@@ -19,6 +19,22 @@ Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../../lib/Credentials.psm1') -Force
 
+# Total curl-equivalent attempts issued so far, including retries
+# (contracts/timing-report.md §5). $script:-scoped rather than a bash-style
+# global: a PowerShell module has no shared flat namespace for Timing.psm1 to
+# reach into, so Get-JiraRequestCount is the accessor Reconcile.psm1 reads at
+# each phase boundary and hands to Stop-JiraTimingPhase -RequestCount (T015).
+# There is no subshell-undercount boundary to document here the way
+# client.sh's comment does (contracts/timing-report.md §6, research R5) —
+# PowerShell has no command-substitution equivalent that discards this state.
+$script:JiraRequestCount = 0
+
+function Get-JiraRequestCount {
+    [CmdletBinding()]
+    param()
+    return $script:JiraRequestCount
+}
+
 function Get-JiraTransportBackoff {
     # Seconds to wait before the next retry: the response's Retry-After when it is
     # a plain integer, else exponential backoff. Suppress the real wait in tests.
@@ -61,6 +77,7 @@ function Invoke-JiraRequest {
         $retryAfter = $null
         $networkFailed = $false
 
+        $script:JiraRequestCount++
         try {
             $params = @{
                 Uri                = $Url
@@ -104,4 +121,4 @@ function Invoke-JiraRequest {
     }
 }
 
-Export-ModuleMember -Function Invoke-JiraRequest
+Export-ModuleMember -Function Invoke-JiraRequest, Get-JiraRequestCount

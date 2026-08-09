@@ -1,0 +1,13 @@
+{
+  "name": "us021-state-first-run",
+  "description": "T021a [US2]: contracts/run-state.md §9 'First run of all' — no state file present, every phase runs, and the run must record fresh state on success.",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec-clean",
+  "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222 3333333333333333"
+  }
+}

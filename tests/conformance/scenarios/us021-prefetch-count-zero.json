@@ -1,0 +1,25 @@
+{
+  "name": "us021-prefetch-count-zero",
+  "description": "T051, contracts/recognition-prefetch.md: a spec with no bound markers records zero keys — prefetch_load is never invoked with any key, so it issues no bulkfetch call, and recognition of the brand-new epic and story never falls through to a per-key GET either (there is nothing existing to read). 0 read requests total. Diffed against the SAME scenario run with _RECOGNITION_NO_PREFETCH=1: stdout, stderr, exit, and the post-run tree must be byte-identical.",
+  "mock": {
+    "projects": {
+      "TASKS": "company"
+    },
+    "issues": {}
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-widget-spec-zero",
+  "argv": [
+    "reconcile",
+    "specs/001-widget/spec.md",
+    "--json"
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-widget",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222"
+  },
+  "read_requests": 0
+}
