@@ -162,3 +162,31 @@ _record_checklist_mode() {
   task_issue_calls="$(mock_calls | grep -c '^POST /rest/api/3/issue$')"
   [ "${task_issue_calls}" -eq 2 ]
 }
+
+@test "022, T123 — checklist mode: a tasks.md with CRLF line endings plans a description byte-identical to LF (spec Edge Cases, Constitution VI)" {
+  _record_checklist_mode
+  local cfg; cfg="$(_mock_configs)"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_reconcile reconcile "${SPEC}" --json --dry-run
+  [ "$status" -eq 0 ]
+  local lf_desc
+  lf_desc="$(jq -c '[.actions[] | select(.role=="story")][0].body.fields.description.content' <<< "$output")"
+
+  local crlf_work="${BATS_TEST_TMPDIR}/repo-crlf"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-task-tier" "${crlf_work}"
+  local crlf_spec="${crlf_work}/specs/001-feature/spec.md"
+  local crlf_tasks="${crlf_work}/specs/001-feature/tasks.md"
+  sed 's/$/\r/' "${crlf_tasks}" > "${crlf_tasks}.tmp"
+  mv "${crlf_tasks}.tmp" "${crlf_tasks}"
+
+  export JIRA_CONFIG_DIR="${crlf_work}/.specify/jira"
+  _record_checklist_mode
+  run cmd_reconcile reconcile "${crlf_spec}" --json --dry-run
+  [ "$status" -eq 0 ]
+  local crlf_desc
+  crlf_desc="$(jq -c '[.actions[] | select(.role=="story")][0].body.fields.description.content' <<< "$output")"
+
+  [ "${lf_desc}" = "${crlf_desc}" ]
+}

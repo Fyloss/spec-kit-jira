@@ -122,4 +122,28 @@ Describe 'Invoke-JiraReconcile — the task-tier gate split' {
         $calls = @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'POST /rest/api/3/issue' })
         $calls.Count | Should -Be 2
     }
+
+    It '022, T124 — checklist mode: a tasks.md with CRLF line endings plans a description byte-identical to LF (spec Edge Cases, Constitution VI)' {
+        Add-TaskMirrorChecklist
+        $lfOut = Invoke-Captured @('reconcile', $script:Spec, '--json', '--dry-run')
+        $lfR = $lfOut | ConvertFrom-Json -Depth 100
+        $lfStory = @($lfR.actions | Where-Object { $_.role -eq 'story' })[0]
+        $lfDesc = ConvertTo-Json $lfStory.body.fields.description.content -Depth 20 -Compress
+
+        $crlfWork = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse (Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-task-tier') $crlfWork
+        $crlfSpec = Join-Path $crlfWork 'specs/001-feature/spec.md'
+        $crlfTasks = Join-Path $crlfWork 'specs/001-feature/tasks.md'
+        $crlfContent = (Get-Content -Raw -LiteralPath $crlfTasks) -replace "`r?`n", "`r`n"
+        Set-Content -NoNewline -LiteralPath $crlfTasks -Value $crlfContent
+
+        $env:JIRA_CONFIG_DIR = Join-Path $crlfWork '.specify/jira'
+        Add-TaskMirrorChecklist
+        $crlfOut = Invoke-Captured @('reconcile', $crlfSpec, '--json', '--dry-run')
+        $crlfR = $crlfOut | ConvertFrom-Json -Depth 100
+        $crlfStory = @($crlfR.actions | Where-Object { $_.role -eq 'story' })[0]
+        $crlfDesc = ConvertTo-Json $crlfStory.body.fields.description.content -Depth 20 -Compress
+
+        $crlfDesc | Should -Be $lfDesc
+    }
 }

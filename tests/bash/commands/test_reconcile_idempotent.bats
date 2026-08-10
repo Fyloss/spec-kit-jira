@@ -165,3 +165,37 @@ teardown() {
   [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
   [ "$(grep -cE '^PUT ' "${MOCK_CALLLOG}")" -eq 0 ]
 }
+
+# --- 022, T121: checklist-mode renumber produces zero writes (FR-017) ------
+@test "022, T121 — checklist mode: renumbering T0xx with text, order and checked state unchanged issues zero writes on the second reconcile" {
+  local work="${BATS_TEST_TMPDIR}/repo-checklist-renumber"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-task-tier" "${work}"
+  local spec="${work}/specs/001-feature/spec.md"
+  local tasks="${work}/specs/001-feature/tasks.md"
+  export JIRA_CONFIG_DIR="${work}/.specify/jira"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-feature"
+  unset SPEC_KIT_JIRA_PLAN_CONTEXT SPEC_KIT_JIRA_LIFECYCLE
+  printf 'task_mirror:\n  TASKP: checklist\n' >> "${JIRA_CONFIG_DIR}/config.yml"
+
+  local cfg; cfg="$(mock_write_config '{"projects":{"TASKP":"t"}}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_reconcile reconcile "${spec}" --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.counts.checklists.created' <<< "$output")" -eq 1 ]
+
+  # Regenerate tasks.md the way /speckit-tasks would: every T0nn shifts up by
+  # one, text/order/checked state unchanged.
+  sed -i.bak 's/^- \[ \] T001 /- [ ] T101 /; s/^- \[ \] T002 /- [ ] T102 /' "${tasks}"
+  rm -f "${tasks}.bak"
+
+  : > "${MOCK_CALLLOG}"
+  run cmd_reconcile reconcile "${spec}" --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.counts.checklists.unchanged' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.counts.checklists.created' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.counts.checklists.updated' <<< "$output")" -eq 0 ]
+  [ "$(grep -vE 'issue/bulkfetch' "${MOCK_CALLLOG}" | grep -cE '^(POST|PUT) ')" -eq 0 ]
+}

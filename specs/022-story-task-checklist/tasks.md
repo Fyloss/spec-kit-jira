@@ -427,3 +427,16 @@ half-day verification for whoever finishes first.
   story `description` channel the checklist rides on, and the hook non-blocking rule is untouched —
   T110a/T110b pin both). FR-020 is the same shape: the two-marker splice is upstream and untouched, and
   T035a/T035b pin that it stays so once a checklist is appended below the boundary.
+
+---
+
+## Phase 9: Convergence
+
+**Note**: T001–T005 and T119 are still open in their own phases and are deliberately not restated here —
+they are already traceable and already unchecked. This phase carries only the gaps that no existing task
+covers.
+
+- [X] T121 Add to `tests/bash/commands/test_reconcile_idempotent.bats` the checklist-mode renumber case: reconcile, regenerate `tasks.md` with every `T0xx` identifier renumbered and the task text, order and checked state unchanged, reconcile again, and assert zero writes of every kind and `checklists.unchanged` equal to the story count — T054 named this file and landed nothing in it, so the outcome FR-017 exists to guarantee is pinned only at the node level by `tests/bash/sink/test_adf_checklist.bats` per FR-017 (missing)
+- [X] T122 Add the same renumber-produces-zero-writes assertion to `tests/powershell/commands/Reconcile.Idempotent.Tests.ps1`, which T055 named and which carries no checklist assertion today, per FR-017 (missing)
+- [X] T123 Add to `tests/bash/commands/test_reconcile_task_mirror_gate.bats` the CRLF-versus-LF equality the conformance corpus cannot express: reconcile in checklist mode over a `tasks.md` with CRLF line endings, reconcile the same content with LF endings, and assert the planned story description is byte-identical — `us022-checklist-crlf.json` proves only that both ports agree on the CRLF input, not that CRLF and LF converge, per spec Edge Cases and Constitution VI (partial)
+- [X] T124 Add the same CRLF-versus-LF equality assertion to `tests/powershell/commands/Reconcile.TaskMirrorGate.Tests.ps1` per spec Edge Cases and Constitution VI (partial)

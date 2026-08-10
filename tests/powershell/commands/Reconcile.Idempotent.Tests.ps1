@@ -132,3 +132,40 @@ Describe '019, T044 — origin bridge, no-boundary description: settles to zero 
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -like 'PUT *' }).Count | Should -Be 0
     }
 }
+
+# --- 022, T122: checklist-mode renumber produces zero writes (FR-017) ------
+Describe '022, T122 — checklist-mode renumber issues zero writes' {
+    BeforeEach {
+        $script:Work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse (Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-task-tier') $script:Work
+        $script:Spec = Join-Path $script:Work 'specs/001-feature/spec.md'
+        $script:Tasks = Join-Path $script:Work 'specs/001-feature/tasks.md'
+        $env:JIRA_CONFIG_DIR = Join-Path $script:Work '.specify/jira'
+        $env:SPEC_KIT_JIRA_REPO = 'acme/app'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-feature'
+        Remove-Item Env:\SPEC_KIT_JIRA_PLAN_CONTEXT -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_LIFECYCLE -ErrorAction SilentlyContinue
+        Add-Content -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -Value "task_mirror:`n  TASKP: checklist`n"
+        $cfgPath = Write-JiraMockConfig -Json '{"projects":{"TASKP":"t"}}'
+        $script:M = Start-JiraMock -ConfigPath $cfgPath
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+    }
+    AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
+
+    It 'renumbering T0xx with text, order and checked state unchanged issues zero writes on the second reconcile' {
+        $first = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
+        $first.counts.checklists.created | Should -Be 1
+
+        $content = Get-Content -Raw -LiteralPath $script:Tasks
+        $content = $content -replace '(?m)^- \[ \] T001 ', '- [ ] T101 '
+        $content = $content -replace '(?m)^- \[ \] T002 ', '- [ ] T102 '
+        Set-Content -NoNewline -LiteralPath $script:Tasks -Value $content
+
+        Clear-Content -LiteralPath $script:M.CallLog
+        $second = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
+        $second.counts.checklists.unchanged | Should -Be 1
+        $second.counts.checklists.created | Should -Be 0
+        $second.counts.checklists.updated | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^(POST|PUT) ' -and $_ -notmatch 'issue/bulkfetch' }).Count | Should -Be 0
+    }
+}
