@@ -127,16 +127,21 @@ _adf_content_nodes() {
   [[ "${mode}" == "checklist" ]] && checklist="$(_adf_checklist_nodes "${content}")"
 
   # kcov-excl-start — jq literal (string lines are not statements)
-  jq -cn \
-    --argjson body "${body}" \
-    --argjson panel "${panel:-null}" \
-    --argjson design "$(jq -cs '.' <<< "${design_nodes}")" \
-    --argjson checklist "${checklist}" '
+  # 022: a story's checklist is unbounded — one entry per task — so $checklist
+  # (and with it $body) can pass Linux's 128 KiB per-argument cap, which macOS
+  # does not have. json_build keeps every value out of argv (lib/output.sh).
+  # The filter text is unchanged: the success path stays byte-for-byte frozen.
+  # shellcheck disable=SC2016  # a jq filter: $body/$panel/$design/$checklist are jq variables
+  json_build '
     $body
     + (if $panel == null then []
        else [ {type:"heading", attrs:{level:3}, content:[{type:"text", text:"Acceptance Criteria"}]}, $panel ] end)
     + $design
-    + $checklist'
+    + $checklist' \
+    body "${body}" \
+    panel "${panel:-null}" \
+    design "$(jq -cs '.' <<< "${design_nodes}")" \
+    checklist "${checklist}"
   # kcov-excl-stop
 }
 
@@ -191,7 +196,16 @@ _adf_checklist_nodes() {
 # single canonical ADF document. content-json carries `description` (content
 # blocks) and the optional `acceptance_criteria` and `design` arrays.
 adf_render_description() {
-  jq -cn --argjson c "$(_adf_content_nodes "$1")" '{type:"doc", version:1, content:$c}' | json_canonical
+  local nodes doc rc=0
+  nodes="$(_adf_content_nodes "$1")" || return $?
+  # The nodes carry the checklist, so they too can pass the 128 KiB cap. The
+  # result is captured rather than piped straight into json_canonical, which
+  # writes nothing and exits 0 on empty input — piping would turn a failed
+  # render into a silent empty description on the write path.
+  # shellcheck disable=SC2016  # a jq filter: $c is a jq variable
+  doc="$(json_build '{type:"doc", version:1, content:$c}' c "${nodes}")" || rc=$?
+  ((rc == 0)) || return "${rc}"
+  printf '%s' "${doc}" | json_canonical
 }
 
 # adf_managed_marker — the human-facing text that delimits the bridge-owned
@@ -327,8 +341,15 @@ _adf_resolve_managed() {
   marker_nodes="$(_adf_marker_nodes)"
 
   if [[ -z "${existing}" ]]; then
-    jq -cn --argjson m "${marker_nodes}" --argjson c "${managed}" \
-      '{status:"ok", doc:{type:"doc", version:1, content: ($m + $c)}}' | json_canonical
+    # $managed carries the checklist — past the 128 KiB per-argument cap on a
+    # large story. Captured, not piped, so a failure is not swallowed by
+    # json_canonical's exit 0 on empty input.
+    local fresh rc=0
+    # shellcheck disable=SC2016  # a jq filter: $m/$c are jq variables
+    fresh="$(json_build '{status:"ok", doc:{type:"doc", version:1, content: ($m + $c)}}' \
+      m "${marker_nodes}" c "${managed}")" || rc=$?
+    ((rc == 0)) || return "${rc}"
+    printf '%s' "${fresh}" | json_canonical
     return 0
   fi
 
@@ -344,8 +365,20 @@ _adf_resolve_managed() {
   fi
 
   prefix="$(jq -c '.prefix' <<< "${split}")"
-  jq -cn --argjson p "${prefix}" --argjson m "${marker_nodes}" --argjson c "${managed}" --arg st "${status}" \
-    '{status:$st, doc:{type:"doc", version:1, content: ($p + $m + $c)}}' | json_canonical
+  # $managed carries the checklist and $prefix the retained human text, so both
+  # can pass the 128 KiB per-argument cap. $st is a short string and stays in
+  # argv: this keeps the jq call and moves only the large values, which is the
+  # shape #31 chose for a mixed call. Captured, not piped — see above.
+  local spliced rc=0
+  spliced="$(jq -cn \
+    --slurpfile p_f <(printf '%s' "${prefix}") \
+    --argjson m "${marker_nodes}" \
+    --slurpfile c_f <(printf '%s' "${managed}") \
+    --arg st "${status}" \
+    '($p_f[0]) as $p | ($c_f[0]) as $c |
+     {status:$st, doc:{type:"doc", version:1, content: ($p + $m + $c)}}')" || rc=$?
+  ((rc == 0)) || return "${rc}"
+  printf '%s' "${spliced}" | json_canonical
 }
 
 # adf_render_managed_description <content-json> [existing-desc-json] [origin]

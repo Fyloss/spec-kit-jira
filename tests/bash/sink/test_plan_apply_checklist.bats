@@ -50,8 +50,12 @@ DOC_WITH_TASKS='{
 }
 
 @test "FR-041: a checklist pushing the description past the ceiling withholds that one field, names the story, and every other field still writes" {
-  local many_tasks; many_tasks="$(jq -cn '[range(0;2000) | {title: ("A task with a fairly long title to pad the payload out " + (.|tostring)), done: false, phase: "Phase 1"}]')"
-  local big_doc; big_doc="$(jq -c --argjson t "${many_tasks}" '.stories[0].tasks = $t' <<< "${DOC_WITH_TASKS}")"
+  # The 2000-task list is ~200 KB, so it must never cross argv: Linux caps a
+  # SINGLE argument at MAX_ARG_STRLEN (128 KiB) and macOS has no per-argument
+  # cap at all, so `--argjson t "${many_tasks}"` execs fine here and dies with
+  # E2BIG on the runner. Generate it inside the same jq program instead — see
+  # tests/bash/commands/test_reconcile_large_spec.bats for the same hazard.
+  local big_doc; big_doc="$(jq -c '.stories[0].tasks = [range(0;2000) | {title: ("A task with a fairly long title to pad the payload out " + (.|tostring)), done: false, phase: "Phase 1"}]' <<< "${DOC_WITH_TASKS}")"
   local ctx='{
     "base_url":"https://mock", "story_type_id":"10002", "parent_type_id":"10101",
     "parent_local_id":"3f2a91c04b7e6d18", "priority_ids":{"P1":"1"}, "task_mirror":"checklist"
