@@ -356,7 +356,25 @@ mkdir -p "${SCRATCH}"
 export SPEC_KIT_JIRA_COVERAGE_SCRATCH="${SCRATCH}"
 PROGRESS="${SCRATCH}/progress.log"
 TRACED="${SCRATCH}/traced.lines"
+DIAGNOSTICS="${SCRATCH}/diagnostics.log"
 : > "${TRACED}"
+: > "${DIAGNOSTICS}"
+
+# Every drive-side explanation of a failure goes to stderr AND to a file.
+# stderr is the job log, and a reader without repository admin rights on this
+# repository gets 403 on both the log and the artifact — so a run that says why
+# it could not measure says it only to people who already have the answer. The
+# file is small, it is uploaded with the report, and the workflow echoes it
+# back as an annotation, which is readable by anyone.
+#
+# Drive side only: fd 2 inside the exercise section belongs to kcov's tracer,
+# and tests/bash/ci/test_coverage_runner_bounds.bats pins that.
+diag() {
+  local fmt="$1"
+  shift
+  # shellcheck disable=SC2059 # the format string is this function's argument
+  printf "${fmt}" "$@" | tee -a "${DIAGNOSTICS}" >&2
+}
 
 KCOV_TIMEOUT="${SPEC_KIT_JIRA_COVERAGE_TIMEOUT:-600}"
 BATS_TIMEOUT="${SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT:-1200}"
@@ -410,8 +428,8 @@ trace_bats() {
   wait "${filter_pid}"
 
   if [ "${bats_rc}" -eq 124 ]; then
-    printf 'bash-coverage.sh: the traced bats run did not finish within %ss.\n' "${BATS_TIMEOUT}" >&2
-    printf '  Raise SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT if the suite is genuinely this long.\n' >&2
+    diag 'bash-coverage.sh: the traced bats run did not finish within %ss.\n' "${BATS_TIMEOUT}"
+    diag '  Raise SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT if the suite is genuinely this long.\n'
     return 2
   fi
   # A red suite is the unit job's business, not this one's: a failed test still
@@ -422,8 +440,8 @@ trace_bats() {
       "${bats_rc}"
   fi
   if [ ! -s "${TRACED}" ]; then
-    printf 'bash-coverage.sh: the traced bats run produced no port frames at all.\n' >&2
-    printf '  Either bats is not installed, or the trace never reached fd %s.\n' "${TRACE_FD}" >&2
+    diag 'bash-coverage.sh: the traced bats run produced no port frames at all.\n'
+    diag '  Either bats is not installed, or the trace never reached fd %s.\n' "${TRACE_FD}"
     return 2
   fi
   printf 'Traced %s distinct statements from the bats suite.\n\n' "$(wc -l < "${TRACED}" | tr -d ' ')"
@@ -486,13 +504,14 @@ run_kcov() {
 
   # 124 is `timeout`'s expiry code.
   if [ "${kcov_rc}" -eq 124 ]; then
-    printf 'bash-coverage.sh: the kcov run did not finish within %ss.\n' "${KCOV_TIMEOUT}" >&2
-    printf '  The progress above shows how far the exercise got. A run that stops\n' >&2
-    printf '  making progress is a child outliving its phase: kcov waits for every\n' >&2
-    printf '  inherited descriptor to close before it writes a report.\n' >&2
-    printf '  Raise the bound with SPEC_KIT_JIRA_COVERAGE_TIMEOUT if the work is\n' >&2
-    printf '  genuinely this long. Last lines of %s/kcov.log:\n' "${REPORT_DIR}" >&2
-    tail -20 "${REPORT_DIR}/kcov.log" 2> /dev/null | sed 's/^/    /' >&2
+    diag 'bash-coverage.sh: the kcov run did not finish within %ss.\n' "${KCOV_TIMEOUT}"
+    diag '  The progress above shows how far the exercise got. A run that stops\n'
+    diag '  making progress is a child outliving its phase: kcov waits for every\n'
+    diag '  inherited descriptor to close before it writes a report.\n'
+    diag '  Raise the bound with SPEC_KIT_JIRA_COVERAGE_TIMEOUT if the work is\n'
+    diag '  genuinely this long. Last progress line: %s\n' "$(tail -1 "${PROGRESS}" 2> /dev/null)"
+    diag '  Last lines of %s/kcov.log:\n' "${REPORT_DIR}"
+    diag '%s\n' "$(tail -20 "${REPORT_DIR}/kcov.log" 2> /dev/null | sed 's/^/    /')"
     return 2
   fi
 
@@ -500,8 +519,10 @@ run_kcov() {
   # only appears for multi-target runs, so resolve whichever exists.
   COBERTURA="$(find "${REPORT_DIR}" -maxdepth 3 -name cobertura.xml 2> /dev/null | head -1)"
   if [ -z "${COBERTURA}" ] || [ ! -f "${COBERTURA}" ]; then
-    printf 'bash-coverage.sh: kcov produced no cobertura.xml (rc=%s); see %s/kcov.log\n' \
-      "${kcov_rc}" "${REPORT_DIR}" >&2
+    diag 'bash-coverage.sh: kcov produced no cobertura.xml (rc=%s); see %s/kcov.log\n' \
+      "${kcov_rc}" "${REPORT_DIR}"
+    diag '  Last lines of %s/kcov.log:\n' "${REPORT_DIR}"
+    diag '%s\n' "$(tail -20 "${REPORT_DIR}/kcov.log" 2> /dev/null | sed 's/^/    /')"
     return 2
   fi
   return 0
