@@ -60,6 +60,21 @@ Describe 'Target guard (US1)' {
         (Get-Content -Raw -LiteralPath $script:PlanPath) | Should -Be $before
     }
 
+    It 'names the sibling in the caller''s own separator, never renormalised (§3, FR-027)' {
+        # The provider's path primitives rewrite every separator to the host's
+        # native one, so a target spelled with the other separator came back
+        # with a mixed <sibling> — on Windows that is the very forward-slash
+        # spelling every scenario and every caller above uses, which is why the
+        # §5 T1 case above was red there and green everywhere else.
+        Push-Location $script:Work
+        try {
+            $r = Invoke-Captured @('reconcile', '--json', 'specs\001-test-page\plan.md')
+            $r.ExitCode | Should -Be 1
+            ($r.Out + $r.Err) | Should -Match ([regex]::Escape('the target for this folder is "specs\001-test-page\spec.md"'))
+        }
+        finally { Pop-Location }
+    }
+
     It 'refuses every non-spec.md sibling artifact (§5 T3)' {
         foreach ($name in @('tasks.md', 'research.md', 'data-model.md', 'quickstart.md', 'spec.md.bak', 'my-spec.md')) {
             $p = Join-Path $script:Work "specs/001-test-page/$name"
