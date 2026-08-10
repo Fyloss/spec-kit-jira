@@ -186,7 +186,7 @@ _shim_get_style() {
 
 _shim_get_meta_style() {
   case "$1" in
-    company | team | french | safe | nonlatin | flat | hier-ambiguous | consumer | linebreak | taskm) printf '%s' "$1" ;;
+    company | team | french | safe | nonlatin | flat | hier-ambiguous | consumer | linebreak | taskm | notask) printf '%s' "$1" ;;
     *) printf 'company' ;;
   esac
 }

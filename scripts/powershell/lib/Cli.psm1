@@ -131,6 +131,7 @@ function Invoke-JiraCliParse {
     $enableHooks = [System.Collections.Generic.List[string]]::new()
     $fieldDefaults = [System.Collections.Generic.List[string]]::new()
     $fieldValues = [System.Collections.Generic.List[string]]::new()
+    $taskMirrors = [System.Collections.Generic.List[string]]::new()
 
     for ($idx = 0; $idx -lt $Arguments.Count; $idx++) {
         $arg = $Arguments[$idx]
@@ -225,6 +226,21 @@ function Invoke-JiraCliParse {
                 }
                 break
             }
+            '^--task-mirror$' {
+                # The recording flag of contract §4 (022): repeatable
+                # <PROJECT_KEY>=<subtask|checklist>, accepted by the config
+                # command only.
+                if ($idx + 1 -ge $Arguments.Count) {
+                    $parseError = '--task-mirror requires a value (--task-mirror KEY=<subtask|checklist>)'
+                }
+                else {
+                    $idx++
+                    $v = $Arguments[$idx]
+                    if ($v -cmatch '^[A-Z][A-Z0-9_]+=(subtask|checklist)$') { $taskMirrors.Add($v) }
+                    else { $parseError = "invalid --task-mirror value: $v (expected <PROJECT_KEY>=<subtask|checklist>)" }
+                }
+                break
+            }
             '^--accept-defaults$' {
                 # Contract §3.3/§3.10 — proceed with the recorded defaults,
                 # asking no consolidated question this run.
@@ -297,6 +313,7 @@ function Invoke-JiraCliParse {
         $usJoin = [char]0x1F
         $lines.Add("field_defaults=$($fieldDefaults -join $usJoin)")
         $lines.Add("field_values=$($fieldValues -join $usJoin)")
+        $lines.Add("task_mirrors=$($taskMirrors -join ' ')")
         $lines.Add("accept_defaults=$acceptDefaults")
         $lines.Add("args=$($positional -join ' ')")
         $lines.Add("exit=$($script:ExitCodes.ok)")

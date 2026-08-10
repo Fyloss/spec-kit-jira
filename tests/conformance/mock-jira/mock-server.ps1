@@ -175,7 +175,7 @@ function Get-MetaStyle {
     # feature's parent-level-ambiguous hierarchy fixture. Reusing it would
     # silently reroute every style-ambiguity test onto a hierarchy fixture
     # that has nothing to do with what they exercise.
-    if ($Style -in @('company', 'team', 'french', 'safe', 'nonlatin', 'flat', 'hier-ambiguous', 'consumer', 'linebreak', 'taskm')) { return $Style }
+    if ($Style -in @('company', 'team', 'french', 'safe', 'nonlatin', 'flat', 'hier-ambiguous', 'consumer', 'linebreak', 'taskm', 'notask')) { return $Style }
     return 'company'
 }
 

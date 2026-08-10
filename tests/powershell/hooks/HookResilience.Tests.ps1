@@ -135,3 +135,86 @@ Describe 'Hook resilience' {
         Test-Path -LiteralPath $ext | Should -BeFalse
     }
 }
+
+Describe 'T110b [Phase 8, 022] — a checklist-caused fault downgrades identically' {
+    BeforeAll {
+        $Root = Join-Path $PSScriptRoot '../../..'
+        $ConfigCmdDir = Join-Path $Root 'scripts/powershell/commands'
+        $Mock = Join-Path $Root 'tests/conformance/mock-jira'
+        $Fixture = Join-Path $Root 'tests/conformance/fixtures/repo-with-config'
+        Import-Module (Join-Path $Mock 'Mock.psm1') -Force
+        Import-Module (Join-Path $ConfigCmdDir 'Config.psm1') -Force
+        # Config.psm1 -Force-imports lib/Config.psm1 internally, rebinding it into
+        # its own scope — reimport here so this Describe's own use of it (and
+        # Reconcile.psm1's) keeps working too (memory:
+        # powershell-import-force-clobbers-caller-scope).
+        Import-Module (Join-Path $Root 'scripts/powershell/lib/Config.psm1') -Force
+        # Same clobber: Config.psm1 -Force-imports sink/jira/Hierarchy.psm1
+        # nested (non-Global), re-scoping Get-JiraHierarchyMandatoryGate out of
+        # Reconcile.psm1's own -Global registration. Restore it -Global too.
+        Import-Module (Join-Path $Root 'scripts/powershell/sink/jira/Hierarchy.psm1') -Force -Global
+
+        function Invoke-CapturedConfig {
+            param([string[]] $ArgList)
+            $sw = [System.IO.StringWriter]::new()
+            $orig = [Console]::Out
+            [Console]::SetOut($sw)
+            try { $null = Invoke-JiraConfig -Arguments $ArgList } finally { [Console]::SetOut($orig) }
+        }
+    }
+
+    It "a checklist entry's privacy BLOCK never fails the host in hook context, and is reported as a warning" {
+        $hookWork = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+        New-Item -ItemType Directory -Path $hookWork -Force | Out-Null
+        Copy-Item -Recurse (Join-Path $Fixture '.specify') (Join-Path $hookWork '.specify')
+        $env:JIRA_CONFIG_DIR = Join-Path $hookWork '.specify/jira'
+        $cfgPath = Write-JiraMockConfig -Json '{"projects":{"COMP":"company"}}'
+        $m = Start-JiraMock -ConfigPath $cfgPath
+        $env:SPEC_KIT_JIRA_BASE_URL = $m.BaseUrl
+        try {
+            Invoke-CapturedConfig -ArgList @('config', '--child-type', 'COMP=Story', '--json')
+            Add-Content -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -Value "task_mirror:`n  COMP: checklist"
+
+            $specDir = Join-Path $hookWork 'specs/001-feature'
+            New-Item -ItemType Directory -Path $specDir -Force | Out-Null
+            $hspec = Join-Path $specDir 'spec.md'
+            $htasks = Join-Path $specDir 'tasks.md'
+            Set-Content -LiteralPath $hspec -Value @(
+                '# Feature Specification: Hook Resilience Demo', '',
+                'We need a working task tier.', '',
+                '### User Story 1 - The first story (Priority: P1)', '',
+                'As a user, I want the first story.', '',
+                '- **Given** a thing', '- **When** it happens', '- **Then** it works'
+            )
+            Set-Content -LiteralPath $htasks -Value @(
+                '# Tasks', '', '## Phase 3: User Story 1', '',
+                '- [ ] T001 [US1] leak acme-corp.atlassian.net'
+            )
+
+            $env:SPEC_KIT_JIRA_ID_SOURCE = '1111111111111111 2222222222222222 3333333333333333'
+            $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-feature'
+            $env:SPEC_KIT_JIRA_REPO = 'acme/app'
+            Remove-Item Env:\SPEC_KIT_JIRA_PLAN_CONTEXT -ErrorAction SilentlyContinue
+            Remove-Item Env:\SPEC_KIT_JIRA_LIFECYCLE -ErrorAction SilentlyContinue
+            Remove-Item Env:\SPEC_KIT_JIRA_PROJECT_KEY -ErrorAction SilentlyContinue
+            $env:SPEC_KIT_JIRA_HOOK_CONTEXT = '1'
+
+            $sw = [System.IO.StringWriter]::new(); $se = [System.IO.StringWriter]::new()
+            $oo = [Console]::Out; $oe = [Console]::Error
+            [Console]::SetOut($sw); [Console]::SetError($se)
+            try { $code = Invoke-JiraReconcile -Arguments @('reconcile', $hspec, '--json') }
+            finally { [Console]::SetOut($oo); [Console]::SetError($oe) }
+            $text = $sw.ToString() + $se.ToString()
+
+            [int]$code | Should -Be 0
+            $text | Should -Match 'WARNING:'
+            $text | Should -Match ([regex]::Escape('the privacy guard blocked the write'))
+            (@(Get-JiraMockCallLog -Mock $m) | Where-Object { $_ -match '^POST /rest/api/3/issue$' }).Count | Should -Be 0
+        }
+        finally {
+            Stop-JiraMock -Mock $m
+            Remove-Item -Recurse -Force $hookWork -ErrorAction SilentlyContinue
+            Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue
+        }
+    }
+}

@@ -395,6 +395,131 @@ function Set-JiraFieldDefaultsBlock {
     return [pscustomobject]@{ ExitCode = 0; Status = $status }
 }
 
+function Get-JiraTaskMirrorFlagFor {
+    <#
+    .SYNOPSIS
+      The operator's --task-mirror answer for one project (last occurrence
+      wins), or '' when none was given this run (022, contract §4). Mirror
+      of _config_task_mirror_flag_for.
+    #>
+    param([string] $ProjectKey, [string] $TaskMirrors)
+    $out = ''
+    foreach ($tok in ($TaskMirrors -split ' ')) {
+        if ($tok -clike "$ProjectKey=*") { $out = $tok.Substring($tok.IndexOf('=') + 1) }
+    }
+    return $out
+}
+
+function Get-JiraTaskMirrorQuestion {
+    <#
+    .SYNOPSIS
+      The closed question line (022, contract §5 "Asked"), reported per
+      project when nothing is recorded for it, whether or not a task role is
+      declared (FR-005/FR-008).
+    #>
+    param([string] $ProjectKey)
+    return "config: project ${ProjectKey}: how should tasks be mirrored — choose one of: subtask, checklist (answer with --task-mirror '${ProjectKey}=checklist'). Recording nothing keeps today's behaviour: one sub-task per task when a task role is declared, and no task tier otherwise."
+}
+
+function Get-JiraTaskMirrorFr012Note {
+    <#
+    .SYNOPSIS
+      Reported at config time (022, contract §5 "FR-012 check") when the
+      recorded value is 'subtask' and no sub-task issue type can be resolved
+      for the project.
+    #>
+    param([string] $ProjectKey)
+    return "config: project ${ProjectKey}: task_mirror is 'subtask' but no sub-task issue type is resolved for this project — declare hierarchy.task, or switch with --task-mirror '${ProjectKey}=checklist'"
+}
+
+function Get-JiraTaskMirrorEffectLine {
+    <#
+    .SYNOPSIS
+      The ceremony's per-project effect line (022, contract §6), reported
+      alongside the effects the run already reports separately (FR-013).
+    #>
+    param([string] $ProjectKey, [string] $Effective, [string] $Status)
+    if ([string]::IsNullOrEmpty($Effective)) {
+        return "Task mirror: ${ProjectKey} — not recorded; today's behaviour applies"
+    }
+    return "Task mirror: ${ProjectKey} — $Effective ($Status)"
+}
+
+# Marker tokens for the task_mirror managed region (022, contract §3).
+$script:TaskMirrorBeginToken = '# --- spec-kit-jira:task_mirror:begin ---'
+$script:TaskMirrorEndToken = '# --- spec-kit-jira:task_mirror:end ---'
+
+function Get-JiraTaskMirrorBlock {
+    <#
+    .SYNOPSIS
+      The task_mirror region's full text (markers included), no trailing
+      newline. Mirror of _config_task_mirror_block.
+    #>
+    [CmdletBinding()]
+    param([string] $MapJson = '{}')
+    if ([string]::IsNullOrEmpty($MapJson)) { $MapJson = '{}' }
+    $yaml = Get-JiraTaskMirrorYaml -MapJson $MapJson
+    $lines = @(
+        $script:TaskMirrorBeginToken,
+        '# How each project''s task list reaches Jira (022), written by',
+        '# `/speckit.jira.config`. `subtask` creates one sub-task per task;',
+        '# `checklist` writes one checklist into each story instead. Edit a value',
+        '# here by hand if you like — keep it between these markers; an entry outside',
+        '# them is a duplicate top-level key and the next read refuses it (exit 4).',
+        $yaml,
+        $script:TaskMirrorEndToken
+    )
+    return ($lines -join "`n")
+}
+
+function Set-JiraTaskMirrorBlock {
+    <#
+    .SYNOPSIS
+      Splice the resolved task_mirror map into the team config through the
+      existing managed-section engine. Returns { ExitCode; Status } where
+      Status is created|written|unchanged|refused|inert. Mirror of
+      _config_task_mirror_write.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [string] $MapJson = '{}',
+        [bool] $DryRun = $false
+    )
+    if ([string]::IsNullOrEmpty($MapJson)) { $MapJson = '{}' }
+
+    $existed = Test-Path -LiteralPath $Path
+    $current = if ($existed) { [System.IO.File]::ReadAllText($Path) } else { '' }
+
+    $mapObj = $MapJson | ConvertFrom-Json -Depth 100
+    $isEmpty = (@($mapObj.PSObject.Properties)).Count -eq 0
+    if ($isEmpty -and -not $current.Contains($script:TaskMirrorBeginToken)) {
+        return [pscustomobject]@{ ExitCode = 0; Status = 'inert' }
+    }
+
+    $block = Get-JiraTaskMirrorBlock -MapJson $MapJson
+
+    $r = Invoke-JiraManagedSectionSplice -Text $current -BeginToken $script:TaskMirrorBeginToken `
+        -EndToken $script:TaskMirrorEndToken -NewBlock $block
+    if ($r.ExitCode -ne 0) {
+        return [pscustomobject]@{ ExitCode = $script:ExitConfig; Status = 'refused' }
+    }
+    $new = $r.Content
+
+    $status = if ($existed -and [System.String]::Equals($current, $new, [System.StringComparison]::Ordinal)) {
+        'unchanged'
+    }
+    elseif (-not $existed) { 'created' }
+    else { 'written' }
+
+    if (-not $DryRun -and $status -ne 'unchanged') {
+        if ($PSCmdlet.ShouldProcess($Path, 'write managed task_mirror block')) {
+            [System.IO.File]::WriteAllText($Path, $new, (New-Object System.Text.UTF8Encoding($false)))
+        }
+    }
+    return [pscustomobject]@{ ExitCode = 0; Status = $status }
+}
+
 function Get-JiraFieldDefaultAnswerProblem {
     <#
     .SYNOPSIS
@@ -891,6 +1016,7 @@ function Invoke-JiraConfig {
     $issueTypes = if ($state.ContainsKey('issue_types')) { $state['issue_types'] } else { '' }
     $enableHooks = if ($state.ContainsKey('enable_hooks')) { $state['enable_hooks'] } else { '' }
     $fieldDefaults = if ($state.ContainsKey('field_defaults')) { $state['field_defaults'] } else { '' }
+    $taskMirrors = if ($state.ContainsKey('task_mirrors')) { $state['task_mirrors'] } else { '' }
 
     $configdir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
 
@@ -983,6 +1109,8 @@ function Invoke-JiraConfig {
     $roleNotes = [System.Collections.Generic.List[string]]::new()
     $projFieldDefaults = [ordered]@{}
     $fdNotes = [System.Collections.Generic.List[string]]::new()
+    $projTaskMirror = [ordered]@{}
+    $tmNotes = [System.Collections.Generic.List[string]]::new()
     foreach ($pkey in $keys) {
         $p = $null
         foreach ($cand in $projects) {
@@ -1026,6 +1154,31 @@ function Invoke-JiraConfig {
             [Console]::Error.WriteLine($orderingMessage)
             return $script:ExitConfig
         }
+
+        # Task-mirror ceremony (022, contract §5/§6): resolve this
+        # project's effective value (this run's --task-mirror answer, else
+        # whatever is already recorded), report the closed question when
+        # nothing ends up recorded, the FR-012 remedy when 'subtask' has no
+        # resolvable sub-task type, and the per-project effect line —
+        # always, in every case.
+        $tmRecorded = Get-JiraTaskMirrorFor -ProjectKey $pkey -ConfigJson $cfg.Json
+        $tmFlag = Get-JiraTaskMirrorFlagFor -ProjectKey $pkey -TaskMirrors $taskMirrors
+        $tmEffective = if ($tmFlag) { $tmFlag } else { $tmRecorded }
+        if ([string]::IsNullOrEmpty($tmEffective)) {
+            $tmNotes.Add((Get-JiraTaskMirrorQuestion -ProjectKey $pkey))
+        }
+        if ($tmEffective -eq 'subtask') {
+            $tmTaskRoleId = if ($result.Roles.Contains('task')) { [string]$result.Roles['task'].id } else { '' }
+            if ([string]::IsNullOrEmpty($tmTaskRoleId)) {
+                $tmNotes.Add((Get-JiraTaskMirrorFr012Note -ProjectKey $pkey))
+            }
+        }
+        $tmStatus = ''
+        if (-not [string]::IsNullOrEmpty($tmEffective)) {
+            $tmStatus = if ($tmEffective -ne $tmRecorded) { 'recorded' } else { 'unchanged' }
+            $projTaskMirror[$pkey] = $tmEffective
+        }
+        $tmNotes.Add((Get-JiraTaskMirrorEffectLine -ProjectKey $pkey -Effective $tmEffective -Status $tmStatus))
 
         # Fetch required_fields / parent_link_available for every role id the
         # resolver selected that the initial discovery did not already cover
@@ -1224,6 +1377,27 @@ function Invoke-JiraConfig {
     if ($fdWriteResult.ExitCode -ne 0) { return [int] $fdWriteResult.ExitCode }
     $fdWriteStatus = $fdWriteResult.Status
 
+    # The task-mirror ceremony's per-project notes (022, contract §5/§6):
+    # never a warning, never a refusal — printed alongside the
+    # field-defaults and role notes.
+    if ($tmNotes.Count -gt 0) { [Console]::Error.WriteLine(($tmNotes -join "`n")) }
+
+    # Task-mirror write (022, contract §3): the union of every processed
+    # project's resolved value, overlaid onto whatever the committed config
+    # already held for OTHER projects this run did not touch. Absence is
+    # the off switch (FR-002, FR-011): Set-JiraTaskMirrorBlock never
+    # introduces the key when there is nothing to record and the region has
+    # never existed.
+    $tmBase = [ordered]@{}
+    $cfgTaskMirror = Get-CmdProp $cfgObj 'task_mirror'
+    if ($null -ne $cfgTaskMirror) {
+        foreach ($p in $cfgTaskMirror.PSObject.Properties) { $tmBase[$p.Name] = $p.Value }
+    }
+    foreach ($k in $projTaskMirror.Keys) { $tmBase[$k] = $projTaskMirror[$k] }
+    $tmWriteResult = Set-JiraTaskMirrorBlock -Path $teamConfigPath -MapJson (ConvertTo-JiraJsonValue $tmBase) -DryRun ([bool]$dryRun)
+    if ($tmWriteResult.ExitCode -ne 0) { return [int] $tmWriteResult.ExitCode }
+    $tmWriteStatus = $tmWriteResult.Status
+
     # Merge the resolved-id table into the machine-owned local layer, preserving
     # the operator's site_alias / overrides, and emit deterministic canonical YAML.
     $existingMap = [ordered]@{}
@@ -1326,6 +1500,7 @@ function Invoke-JiraConfig {
         readme         = [ordered]@{ status = $readmeStatus; detail = $readmeDetail }
         gitignore      = [ordered]@{ status = $gitignoreStatus; detail = 'personal.yml gitignore coverage' }
         field_defaults = [ordered]@{ status = $fdWriteStatus; detail = 'recorded field defaults in config.yml' }
+        task_mirror    = [ordered]@{ status = $tmWriteStatus; detail = 'recorded task mirror mode in config.yml' }
     }
 
     # §7.2/§7.3 notes (supersession, promotion): never a warning, never a
@@ -1357,4 +1532,6 @@ Export-ModuleMember -Function Test-JiraMappingValidity, New-JiraProjectMapping, 
     Write-JiraRoleProblemsReport, Invoke-JiraConfig, `
     Get-JiraFieldAnswersFor, Get-JiraFieldDefaultsBlock, Set-JiraFieldDefaultsBlock, `
     Get-JiraFieldDefaultAnswerProblem, Merge-JiraFieldDefault, Get-JiraFieldDefaultsReport, `
-    Write-JiraFieldDefaultProblemsReport, Get-JiraFieldDefaultNote
+    Write-JiraFieldDefaultProblemsReport, Get-JiraFieldDefaultNote, `
+    Get-JiraTaskMirrorFlagFor, Get-JiraTaskMirrorQuestion, Get-JiraTaskMirrorFr012Note, `
+    Get-JiraTaskMirrorEffectLine, Get-JiraTaskMirrorBlock, Set-JiraTaskMirrorBlock

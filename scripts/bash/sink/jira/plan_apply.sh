@@ -216,6 +216,12 @@ plan_confirmation_fields() {
 #   caller MUST omit the description key entirely rather than send null, so
 #   every other field of that ticket still reconciles (FR-012); warning is ""
 #   when none applies.
+# 022, FR-041, contract §7: the sink's practical ceiling for a rendered
+# description, in bytes of the canonical ADF JSON — Jira Cloud's documented
+# text-field limit. A story whose checklist pushes it past this withholds
+# ONE field rather than failing the run.
+: "${_PLAN_APPLY_DESCRIPTION_SIZE_CEILING:=32767}"
+
 _plan_apply_managed_field() {
   local render="$1" label="${2:-}" status doc warning=""
   status="$(jq -r '.status' <<< "${render}")"
@@ -232,6 +238,15 @@ _plan_apply_managed_field() {
       doc="$(jq -c '.doc' <<< "${render}")"
       ;;
   esac
+  # 022, FR-041, contract §7: a rendered description (the checklist
+  # included) that exceeds the sink's ceiling withholds THAT ONE field —
+  # every other field of the story, and every other story, still
+  # reconciles. Reuses the SAME whole-field drop as the malformed row
+  # above, rather than a second way to fail a field.
+  if [[ "${doc}" != "null" ]] && (($(printf '%s' "${doc}" | wc -c) > _PLAN_APPLY_DESCRIPTION_SIZE_CEILING)); then
+    doc="null"
+    warning="${label}'s rendered description exceeds what Jira accepts and was not written — nothing changed in Jira. Reduce the number of tasks in this story, or switch this project to subtask mode."
+  fi
   jq -cn --argjson d "${doc}" --arg w "${warning}" '{doc:$d, warning:$w}'
 }
 
@@ -290,6 +305,11 @@ plan_writes() {
   # routing.project_key — never from the plan context — so it cannot disagree
   # with the run summary's resolved project (research R2, FR-023).
   project="$(jq -r '.routing.project_key // ""' <<< "${doc}")"
+  # 022, contract §1/§7: the resolved task_mirror mode, threaded into the
+  # renderer as "checklist" or "off" — constant for the whole run, so
+  # resolved once rather than per story.
+  local checklist_mode="off"
+  [[ "$(jq -r '.task_mirror // ""' <<< "${ctx}")" == "checklist" ]] && checklist_mode="checklist"
 
   # Provenance label (017, contracts/provenance-label.md §1/§4): derived once
   # per run, from the document's own validated spec_ref — the "speckit-"
@@ -306,6 +326,11 @@ plan_writes() {
   story_type_name="$(jq -r --arg t "${story_type}" '(first(.[] | select(.id==$t)) // null) | .logical_name // $t' <<< "${issue_types_list}")"
   local story_label="" story_label_warning=""
   local plan_warnings="[]"
+  # 022, data-model.md §4: the checklist tallies, accumulated per story
+  # below and returned distinct from the specification/story/sub-task
+  # counts. Zero cost when checklist mode is off — the accumulators simply
+  # never increment.
+  local cl_created=0 cl_updated=0 cl_unchanged=0 cl_entries_completed=0
   if [[ -n "${provenance_label}" ]]; then
     local story_decision
     story_decision="$(_plan_apply_label_decision "${defaultable_by_type}" "${story_type}" "${story_type_name}" "${project}" "${provenance_label}" "${slug}")"
@@ -338,18 +363,30 @@ plan_writes() {
       # (T072/T073), resolved once the parent's create response is read. Every
       # ticket the mirror creates now carries the boundary from its first byte
       # (018, T026, FR-006/FR-010) — a creation never warns (no prior content).
-      adf="$(jq -c '.doc' <<< "$(adf_render_managed_description "${story}")")"
+      local create_render create_field
+      create_render="$(adf_render_managed_description "${story}" "" "" "${checklist_mode}")"
+      create_field="$(_plan_apply_managed_field "${create_render}" "${title}")"
+      adf="$(jq -c '.doc' <<< "${create_field}")"
+      local create_warn; create_warn="$(jq -r '.warning' <<< "${create_field}")"
+      [[ -n "${create_warn}" ]] && plan_warnings="$(jq -c --arg w "${create_warn}" '. + [$w]' <<< "${plan_warnings}")"
       base_fields="$(jira_create_fields_base "${project}" "${title}" "${story_type}" "${field_defaults}" "${story_label}")"
       fields="$(jq -cn --argjson base "${base_fields}" --argjson d "${adf}" \
-        '$base + {description:$d, parent:{key:"<resolved at apply time>"}}')"
+        '$base + (if $d == null then {} else {description:$d} end) + {parent:{key:"<resolved at apply time>"}}')"
       [[ -n "${priority_id}" ]] && fields="$(jq -c --arg pid "${priority_id}" '. + {priority:{id:$pid}}' <<< "${fields}")"
       if [[ -n "${estid}" && "${est}" != "null" ]]; then
         fields="$(jq -c --arg fid "${estid}" --argjson v "${est}" '. + {($fid): $v}' <<< "${fields}")"
       fi
       # 018, T048, contracts/summary-record.md §2: a creation's payload
       # always carries a summary, so it always establishes the record.
-      local identity_stamp
-      identity_stamp="$(jq -cn --arg st "${sid}" --arg sm "${title}" '{origin:"bridge", story:$st, role:"story", summary:$sm}')"
+      # 022, data-model.md §3: the checklist digest joins it, computed from
+      # the SAME story content, present only in checklist mode.
+      local identity_stamp create_checklist_digest=""
+      if [[ "${checklist_mode}" == "checklist" ]]; then
+        create_checklist_digest="$(adf_checklist_digest "${story}")"
+        [[ -n "${create_checklist_digest}" ]] && cl_created=$((cl_created + 1))
+      fi
+      identity_stamp="$(jq -cn --arg st "${sid}" --arg sm "${title}" --arg cd "${create_checklist_digest}" \
+        '{origin:"bridge", story:$st, role:"story", summary:$sm} + (if $cd == "" then {} else {checklist:$cd} end)')"
       action="$(jq -cn --arg u "${base}/rest/api/3/issue" --argjson f "${fields}" --arg sid "${sid}" --argjson stamp "${identity_stamp}" \
         '{method:"POST", url:$u, body:{fields:$f}, local_id:$sid, role:"story", identity_stamp:$stamp}')"
     else
@@ -363,11 +400,56 @@ plan_writes() {
       local existing story_origin render field warn
       existing="$(jq -c --arg s "${sid}" '.ticket_descriptions[$s] // {}' <<< "${ctx}")"
       story_origin="$(jq -r --arg s "${sid}" '.ticket_origins[$s] // ""' <<< "${ctx}")"
-      render="$(adf_render_managed_description "${story}" "${existing}" "${story_origin}")"
+      render="$(adf_render_managed_description "${story}" "${existing}" "${story_origin}" "${checklist_mode}")"
       field="$(_plan_apply_managed_field "${render}" "${ticket}")"
       adf="$(jq -c '.doc' <<< "${field}")"
       warn="$(jq -r '.warning' <<< "${field}")"
       [[ -n "${warn}" ]] && plan_warnings="$(jq -c --arg w "${warn}" '. + [$w]' <<< "${plan_warnings}")"
+
+      # 022, contract §6: the four-row checklist drift decision — did a
+      # PERSON edit the checklist on the ticket since the mirror last wrote
+      # it? A three-way digest comparison (current on the ticket, recorded
+      # in the identity property, desired now), mirroring
+      # plan_summary_drift_status's shape but the OPPOSITE outcome: warn
+      # then WRITE regardless (FR-026) — tasks.md stays the source of truth
+      # in both directions, never withheld.
+      if [[ "${checklist_mode}" == "checklist" ]]; then
+        local cl_marker cl_existing_managed cl_current_nodes cl_current_digest cl_recorded_digest cl_desired_digest
+        cl_marker="$(adf_managed_marker)"
+        cl_existing_managed="$(jq -c '.content // []' <<< "${existing}" | managed_section_panel_split "${cl_marker}" | jq -c '.managed')"
+        cl_current_nodes="$(_adf_checklist_slice "${cl_existing_managed}")"
+        cl_current_digest="$(_adf_checklist_nodes_digest "${cl_current_nodes}")"
+        cl_recorded_digest="$(jq -r --arg s "${sid}" '.ticket_last_checklists[$s] // ""' <<< "${ctx}")"
+        cl_desired_digest="$(adf_checklist_digest "${story}")"
+
+        # 022, data-model.md §4: created/updated/unchanged classified from
+        # CURRENT vs DESIRED (zero churn is current==desired) — independent
+        # of the drift record above, which answers a different question.
+        local cl_desired_nodes cl_entries_delta
+        cl_desired_nodes="$(_adf_checklist_nodes "${story}")"
+        if [[ "${cl_current_nodes}" == "[]" ]]; then
+          [[ "${cl_desired_nodes}" != "[]" ]] && cl_created=$((cl_created + 1))
+        elif [[ "${cl_current_digest}" == "${cl_desired_digest}" ]]; then
+          cl_unchanged=$((cl_unchanged + 1))
+        else
+          cl_updated=$((cl_updated + 1))
+        fi
+        # entries.completed: positional zip of the two flattened glyph
+        # sequences (entries carry no identity, contract §3) — a length
+        # change (a task added/removed) degrades to undercounting rather
+        # than a false match, which is the safe direction for a tally.
+        cl_entries_delta="$(jq -n --argjson cur "${cl_current_nodes}" --argjson des "${cl_desired_nodes}" '
+          def glyphs: [ .[] | select(.type=="bulletList") | .content[] | (.content[0].content[0].text // "" | startswith("☑")) ];
+          ($cur|glyphs) as $c | ($des|glyphs) as $d
+          | [range(0; ([$c,$d]|map(length)|min)) | select($c[.]==false and $d[.]==true)] | length
+        ')"
+        cl_entries_completed=$((cl_entries_completed + cl_entries_delta))
+
+        if [[ -n "${cl_recorded_digest}" && "${cl_current_digest}" != "${cl_recorded_digest}" && "${cl_desired_digest}" != "${cl_current_digest}" ]]; then
+          local cl_warn; cl_warn="reconcile: ticket ${ticket}'s checklist differs from the one the mirror last wrote — a human appears to have edited it since. tasks.md is the source of truth and the checklist has been rewritten from it; no box in tasks.md was changed."
+          plan_warnings="$(jq -c --arg w "${cl_warn}" '. + [$w]' <<< "${plan_warnings}")"
+        fi
+      fi
 
       # Summary drift (018, T048, contracts/summary-record.md §4): decided
       # before `fields` is built, so an omission never reaches the payload.
@@ -389,8 +471,16 @@ plan_writes() {
       fi
       if [[ -n "${final_summary}" ]]; then
         fields="$(jq -c --arg t "${final_summary}" '. + {summary:$t}' <<< "${fields}")"
+        # 022, data-model.md §3: the checklist digest joins the SAME stamp,
+        # computed from the SAME story content, present only in checklist
+        # mode. Recorded whenever the story writes at all — not only when
+        # the checklist itself changed — so the record never lags behind
+        # what the ticket currently carries.
+        local update_checklist_digest=""
+        [[ "${checklist_mode}" == "checklist" ]] && update_checklist_digest="$(adf_checklist_digest "${story}")"
         identity_stamp="$(jq -cn --arg o "$(jq -r --arg s "${sid}" '.ticket_origins[$s] // "bridge"' <<< "${ctx}")" \
-          --arg st "${sid}" --arg sm "${final_summary}" '{origin:$o, story:$st, role:"story", summary:$sm}')"
+          --arg st "${sid}" --arg sm "${final_summary}" --arg cd "${update_checklist_digest}" \
+          '{origin:$o, story:$st, role:"story", summary:$sm} + (if $cd == "" then {} else {checklist:$cd} end)')"
       fi
       [[ -n "${priority_id}" ]] && fields="$(jq -c --arg pid "${priority_id}" '. + {priority:{id:$pid}}' <<< "${fields}")"
 
@@ -473,13 +563,25 @@ plan_writes() {
   # Captured, not piped straight into json_canonical: on an empty input jq
   # writes nothing and exits 0, so a json_build failure would be swallowed
   # and an EMPTY plan returned as a success. This is the write path.
-  # shellcheck disable=SC2016  # a jq filter: $p/$s/$w/$tl are jq variables
+  # 022, data-model.md §4: the checklist tallies, present only when
+  # checklist mode was active this run — distinct from the specification/
+  # story/sub-task counts (FR-036), and absent entirely otherwise so a
+  # subtask-mode or unrecorded run stays byte-for-byte unchanged (FR-002).
+  local checklist_counts="null"
+  if [[ "${checklist_mode}" == "checklist" ]]; then
+    checklist_counts="$(jq -cn --argjson cr "${cl_created}" --argjson up "${cl_updated}" \
+      --argjson un "${cl_unchanged}" --argjson ec "${cl_entries_completed}" \
+      '{created:$cr, updated:$up, unchanged:$un, entries_completed:$ec}')"
+  fi
+  # shellcheck disable=SC2016  # a jq filter: $p/$s/$w/$tl/$cc are jq variables
   _plan="$(json_build \
     '{parent:$p, stories:$s}
      + (if $tl == "" then {} else {task_label:$tl} end)
-     + (if ($w|length) == 0 then {} else {warnings:$w} end)' \
+     + (if ($w|length) == 0 then {} else {warnings:$w} end)
+     + (if $cc == null then {} else {checklist_counts:$cc} end)' \
     p "${parent}" s "${stories}" w "${plan_warnings}" \
-    tl "$(jq -cn --arg t "${task_label}" '$t')")" || return $?
+    tl "$(jq -cn --arg t "${task_label}" '$t')" \
+    cc "${checklist_counts}")" || return $?
   printf '%s' "${_plan}" | json_canonical
 }
 

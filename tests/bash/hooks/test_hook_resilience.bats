@@ -176,3 +176,58 @@ teardown() {
       [Console]::Out.Write(\$code)")"
   [ "${status_ps}" = "0" ]
 }
+
+# =============================================================================
+# T110b [Phase 8, 022] — a checklist-caused fault (privacy BLOCK on an entry's
+# text) downgrades under hook context exactly like any other bridge fault
+# (FR-039, Constitution III). No new wiring — the dispatcher-level downgrade
+# is content-agnostic by construction; this pins that the checklist path
+# never bypasses it.
+# =============================================================================
+
+@test "T110b: a checklist entry's privacy BLOCK never fails the host in hook context, and is reported as a warning" {
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/bash/commands/config.sh"
+  # shellcheck source=/dev/null
+  source "${ROOT}/tests/conformance/mock-jira/lib.sh"
+  local hookwork; hookwork="$(mktemp -d)"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-config/.specify" "${hookwork}/.specify"
+  export JIRA_CONFIG_DIR="${hookwork}/.specify/jira"
+  local cfg; cfg="$(mock_write_config '{"projects":{"COMP":"company"}}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_config config --child-type COMP=Story --json > /dev/null
+  printf 'task_mirror:\n  COMP: checklist\n' >> "${JIRA_CONFIG_DIR}/config.yml"
+
+  mkdir -p "${hookwork}/specs/001-feature"
+  local hspec="${hookwork}/specs/001-feature/spec.md"
+  local htasks="${hookwork}/specs/001-feature/tasks.md"
+  {
+    printf '%s\n' '# Feature Specification: Hook Resilience Demo' ''
+    printf '%s\n' 'We need a working task tier.' ''
+    printf '%s\n' '### User Story 1 - The first story (Priority: P1)' ''
+    printf '%s\n' 'As a user, I want the first story.' ''
+    printf -- '%s\n' '- **Given** a thing' '- **When** it happens' '- **Then** it works'
+  } > "${hspec}"
+  {
+    printf '%s\n' '# Tasks' '' '## Phase 3: User Story 1' ''
+    printf -- '%s\n' '- [ ] T001 [US1] leak acme-corp.atlassian.net'
+  } > "${htasks}"
+
+  export SPEC_KIT_JIRA_ID_SOURCE="1111111111111111 2222222222222222 3333333333333333"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-feature"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  unset SPEC_KIT_JIRA_PLAN_CONTEXT SPEC_KIT_JIRA_LIFECYCLE SPEC_KIT_JIRA_PROJECT_KEY
+  export SPEC_KIT_JIRA_HOOK_CONTEXT=1
+
+  run cmd_reconcile reconcile "${hspec}" --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARNING:"* ]]
+  [[ "$output" == *"the privacy guard blocked the write"* ]]
+  # Zero writes: the block prevented every write, including the checklist's.
+  run mock_calls
+  ! [[ "$output" == *"POST /rest/api/3/issue"* ]]
+
+  mock_stop
+  rm -rf "${hookwork}"
+}

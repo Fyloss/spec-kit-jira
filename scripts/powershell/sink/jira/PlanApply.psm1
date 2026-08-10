@@ -78,6 +78,11 @@ function Get-JiraPlanApplyLabelDecision {
     return [ordered]@{ Label = $Provenance; Warning = '' }
 }
 
+# 022, FR-041, contract §7: the sink's practical ceiling for a rendered
+# description, in bytes of the canonical ADF JSON — Jira Cloud's documented
+# text-field limit. Mirror of _PLAN_APPLY_DESCRIPTION_SIZE_CEILING.
+$script:PlanApplyDescriptionSizeCeiling = 32767
+
 function Get-JiraApplyManagedField {
     <#
     .SYNOPSIS
@@ -112,6 +117,19 @@ function Get-JiraApplyManagedField {
         }
         default {
             $doc = $render.doc
+        }
+    }
+    # 022, FR-041, contract §7: a rendered description (the checklist
+    # included) that exceeds the sink's ceiling withholds THAT ONE field —
+    # every other field of the story, and every other story, still
+    # reconciles. Reuses the SAME whole-field drop as the malformed row
+    # above, rather than a second way to fail a field.
+    if ($null -ne $doc) {
+        $docJson = ConvertTo-JiraJsonValue $doc
+        $byteCount = [System.Text.Encoding]::UTF8.GetByteCount($docJson)
+        if ($byteCount -gt $script:PlanApplyDescriptionSizeCeiling) {
+            $doc = $null
+            $warning = "$Label's rendered description exceeds what Jira accepts and was not written — nothing changed in Jira. Reduce the number of tasks in this story, or switch this project to subtask mode."
         }
     }
     return (ConvertTo-JiraJsonValue ([ordered]@{ doc = $doc; warning = $warning }))
@@ -340,6 +358,14 @@ function Get-JiraPlanWriteSet {
     # routing.project_key — never from the plan context — so it cannot
     # disagree with the run summary's resolved project (research R2, FR-023).
     $project = [string](Get-JiraPlanProp (Get-JiraPlanProp $doc 'routing') 'project_key')
+    # 022, contract §1/§7: the resolved task_mirror mode, threaded into the
+    # renderer as 'checklist' or 'off' — constant for the whole run.
+    $checklistMode = 'off'
+    if ([string](Get-JiraPlanProp $ctx 'task_mirror') -eq 'checklist') { $checklistMode = 'checklist' }
+    # 022, data-model.md §4: the checklist tallies, accumulated per story
+    # below and returned distinct from the specification/story/sub-task
+    # counts.
+    $clCreated = 0; $clUpdated = 0; $clUnchanged = 0; $clEntriesCompleted = 0
 
     # Provenance label (017, contracts/provenance-label.md §1/§4): derived
     # once per run, from the document's own validated spec_ref — the
@@ -397,18 +423,27 @@ function Get-JiraPlanWriteSet {
             # resolved once the parent's create response is read. Every
             # ticket the mirror creates now carries the boundary from its
             # first byte (018, T027, FR-006/FR-010) — a creation never warns.
-            $adf = (ConvertTo-JiraManagedAdfDocument -ContentJson $storyJson | ConvertFrom-Json -Depth 100).doc
+            $createRenderJson = ConvertTo-JiraManagedAdfDocument -ContentJson $storyJson -Mode $checklistMode
+            $createFieldResult = Get-JiraApplyManagedField -RenderJson $createRenderJson -Label $title | ConvertFrom-Json -Depth 100
+            $adf = $createFieldResult.doc
+            if ([string]$createFieldResult.warning -ne '') { $planWarnings.Add([string]$createFieldResult.warning) }
             $baseFields = Get-JiraCreateFieldsBase -ProjectKey $project -Summary $title -IssueTypeId $storyType -FieldDefaultsByTypeJson $fieldDefaultsJson -Provenance $storyLabel | ConvertFrom-Json
             $fields = [ordered]@{}
             foreach ($p in $baseFields.PSObject.Properties) { $fields[$p.Name] = $p.Value }
-            $fields['description'] = $adf
+            if ($null -ne $adf) { $fields['description'] = $adf }
             $fields['parent'] = [ordered]@{ key = '<resolved at apply time>' }
             if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
             $estValue = Get-JiraPlanProp $story 'estimation'
             if ($estId -ne '' -and $null -ne $estValue) { $fields[$estId] = $estValue }
             # 018, T049, contracts/summary-record.md §2: a creation's payload
             # always carries a summary, so it always establishes the record.
+            $createChecklistDigest = ''
+            if ($checklistMode -eq 'checklist') {
+                $createChecklistDigest = Get-JiraAdfChecklistDigest -ContentJson $storyJson
+                if ($createChecklistDigest -ne '') { $clCreated++ }
+            }
             $identityStamp = [ordered]@{ origin = 'bridge'; story = $sid; role = 'story'; summary = $title }
+            if ($createChecklistDigest -ne '') { $identityStamp['checklist'] = $createChecklistDigest }
             $actions.Add([ordered]@{ method = 'POST'; url = "$base/rest/api/3/issue"; body = [ordered]@{ fields = $fields }; local_id = $sid; role = 'story'; identity_stamp = $identityStamp })
         }
         else {
@@ -426,9 +461,60 @@ function Get-JiraPlanWriteSet {
             # branch (research R6, the ordering hazard that exists only here).
             $ticketOriginsForRender = Get-JiraPlanProp $ctx 'ticket_origins'
             $storyOriginForRender = [string](Get-JiraPlanProp $ticketOriginsForRender $sid)
-            $renderJson = ConvertTo-JiraManagedAdfDocument -ContentJson $storyJson -ExistingJson $existingJson -Origin $storyOriginForRender
+            $renderJson = ConvertTo-JiraManagedAdfDocument -ContentJson $storyJson -ExistingJson $existingJson -Origin $storyOriginForRender -Mode $checklistMode
             $fieldResult = Get-JiraApplyManagedField -RenderJson $renderJson -Label $ticket | ConvertFrom-Json -Depth 100
             if ([string]$fieldResult.warning -ne '') { $planWarnings.Add([string]$fieldResult.warning) }
+
+            # 022, contract §6: the four-row checklist drift decision — did a
+            # PERSON edit the checklist on the ticket since the mirror last wrote
+            # it? A three-way digest comparison, mirroring
+            # Get-JiraPlanSummaryDriftStatus's shape but the OPPOSITE outcome: warn
+            # then WRITE regardless (FR-026).
+            if ($checklistMode -eq 'checklist') {
+                $clMarker = Get-JiraManagedMarker
+                $clExisting = $existingJson | ConvertFrom-Json -Depth 100
+                $clExistingContent = if ($clExisting.PSObject.Properties.Name -contains 'content') { ConvertTo-JiraJsonValue @($clExisting.content) } else { '[]' }
+                $clExistingManaged = (Split-JiraManagedSectionPanel -Marker $clMarker -ContentJson $clExistingContent | ConvertFrom-Json -Depth 100).managed
+                $clCurrentNodes = Get-JiraAdfChecklistSlice -ManagedJson (ConvertTo-JiraJsonValue @($clExistingManaged))
+                $clCurrentDigest = Get-JiraAdfChecklistNodesDigest -NodesJson $clCurrentNodes
+                $ticketLastChecklists = Get-JiraPlanProp $ctx 'ticket_last_checklists'
+                $clRecordedDigest = [string](Get-JiraPlanProp $ticketLastChecklists $sid)
+                $clDesiredDigest = Get-JiraAdfChecklistDigest -ContentJson $storyJson
+
+                # 022, data-model.md §4: created/updated/unchanged classified
+                # from CURRENT vs DESIRED (zero churn is current==desired) —
+                # independent of the drift record above.
+                $clDesiredNodesJson = ConvertTo-JiraJsonValue (Get-JiraAdfChecklistNode -ContentJson $storyJson)
+                if ($clCurrentNodes -eq '[]') {
+                    if ($clDesiredNodesJson -ne '[]') { $clCreated++ }
+                } elseif ($clCurrentDigest -eq $clDesiredDigest) {
+                    $clUnchanged++
+                } else {
+                    $clUpdated++
+                }
+                # entries.completed: positional zip of the two flattened
+                # glyph sequences (entries carry no identity, contract §3).
+                $clCurrentGlyphs = [System.Collections.Generic.List[bool]]::new()
+                foreach ($n in @($clCurrentNodes | ConvertFrom-Json -Depth 100)) {
+                    if ($n.type -eq 'bulletList') {
+                        foreach ($li in @($n.content)) { $clCurrentGlyphs.Add(([string]$li.content[0].content[0].text).StartsWith('☑')) }
+                    }
+                }
+                $clDesiredGlyphs = [System.Collections.Generic.List[bool]]::new()
+                foreach ($n in @($clDesiredNodesJson | ConvertFrom-Json -Depth 100)) {
+                    if ($n.type -eq 'bulletList') {
+                        foreach ($li in @($n.content)) { $clDesiredGlyphs.Add(([string]$li.content[0].content[0].text).StartsWith('☑')) }
+                    }
+                }
+                $clZipCount = [Math]::Min($clCurrentGlyphs.Count, $clDesiredGlyphs.Count)
+                for ($ci = 0; $ci -lt $clZipCount; $ci++) {
+                    if (-not $clCurrentGlyphs[$ci] -and $clDesiredGlyphs[$ci]) { $clEntriesCompleted++ }
+                }
+
+                if ($clRecordedDigest -ne '' -and $clCurrentDigest -ne $clRecordedDigest -and $clDesiredDigest -ne $clCurrentDigest) {
+                    $planWarnings.Add("reconcile: ticket $ticket's checklist differs from the one the mirror last wrote — a human appears to have edited it since. tasks.md is the source of truth and the checklist has been rewritten from it; no box in tasks.md was changed.")
+                }
+            }
 
             # Summary drift (018, T049, contracts/summary-record.md §4):
             # decided before `$fields` is built, so an omission never
@@ -454,6 +540,10 @@ function Get-JiraPlanWriteSet {
                 $storyOrigin = [string](Get-JiraPlanProp $ticketOrigins $sid)
                 if ([string]::IsNullOrEmpty($storyOrigin)) { $storyOrigin = 'bridge' }
                 $identityStamp = [ordered]@{ origin = $storyOrigin; story = $sid; role = 'story'; summary = $finalSummary }
+                if ($checklistMode -eq 'checklist') {
+                    $updateChecklistDigest = Get-JiraAdfChecklistDigest -ContentJson $storyJson
+                    if ($updateChecklistDigest -ne '') { $identityStamp['checklist'] = $updateChecklistDigest }
+                }
             }
             if ($priorityId -ne '') { $fields['priority'] = [ordered]@{ id = $priorityId } }
 
@@ -537,6 +627,12 @@ function Get-JiraPlanWriteSet {
     $result = [ordered]@{ parent = $parent; stories = $actions }
     if ($taskLabel -ne '') { $result['task_label'] = $taskLabel }
     if ($planWarnings.Count -gt 0) { $result['warnings'] = $planWarnings }
+    # 022, data-model.md §4: present only when checklist mode was active
+    # this run, so a subtask-mode or unrecorded run stays byte-for-byte
+    # unchanged (FR-002).
+    if ($checklistMode -eq 'checklist') {
+        $result['checklist_counts'] = [ordered]@{ created = $clCreated; updated = $clUpdated; unchanged = $clUnchanged; entries_completed = $clEntriesCompleted }
+    }
     return (ConvertTo-JiraJsonValue $result)
 }
 

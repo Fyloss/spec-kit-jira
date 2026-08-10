@@ -83,6 +83,7 @@ cli_parse() {
   local verbose=false help=false error="" use_team="" accept_defaults=false
   local -a positional=() styles=() enable_hooks=() child_types=() issue_types=()
   local -a field_defaults=() field_values=()
+  local -a task_mirrors=()
 
   while (($#)); do
     case "$1" in
@@ -176,6 +177,22 @@ cli_parse() {
           fi
         fi
         ;;
+      --task-mirror)
+        # The recording flag of contract §4 (022): repeatable
+        # <PROJECT_KEY>=<subtask|checklist>, accepted by the config command
+        # only — the mode is a recorded team decision, not a per-run
+        # override (contract §4).
+        if [[ $# -lt 2 ]]; then
+          error="--task-mirror requires a value (--task-mirror KEY=<subtask|checklist>)"
+        else
+          shift
+          if [[ "$1" =~ ^[A-Z][A-Z0-9_]+=(subtask|checklist)$ ]]; then
+            task_mirrors+=("$1")
+          else
+            error="invalid --task-mirror value: $1 (expected <PROJECT_KEY>=<subtask|checklist>)"
+          fi
+        fi
+        ;;
       --accept-defaults)
         # Contract §3.3/§3.10 — proceed with the recorded defaults, asking no
         # consolidated question this run.
@@ -225,7 +242,7 @@ cli_parse() {
   fi
 
   local args_joined styles_joined enable_hooks_joined child_types_joined issue_types_joined
-  local field_defaults_joined field_values_joined
+  local field_defaults_joined field_values_joined task_mirrors_joined
   args_joined="$(
     IFS=' '
     printf '%s' "${positional[*]}"
@@ -260,6 +277,10 @@ cli_parse() {
     IFS=$'\x1f'
     printf '%s' "${field_values[*]-}"
   )"
+  task_mirrors_joined="$(
+    IFS=' '
+    printf '%s' "${task_mirrors[*]-}"
+  )"
 
   printf 'command=%s\n' "${command}"
   printf 'dry_run=%s\n' "${dry_run}"
@@ -275,6 +296,7 @@ cli_parse() {
   printf 'enable_hooks=%s\n' "${enable_hooks_joined}"
   printf 'field_defaults=%s\n' "${field_defaults_joined}"
   printf 'field_values=%s\n' "${field_values_joined}"
+  printf 'task_mirrors=%s\n' "${task_mirrors_joined}"
   printf 'accept_defaults=%s\n' "${accept_defaults}"
   printf 'args=%s\n' "${args_joined}"
   printf 'exit=%s\n' "${EXIT_OK}"

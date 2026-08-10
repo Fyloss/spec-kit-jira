@@ -188,3 +188,15 @@ teardown() {
 @test "run_state_path names the recorded document after the spec's feature directory" {
   [ "$(run_state_path "${SPEC}")" = "${JIRA_CONFIG_DIR}/state/021-example.json" ]
 }
+
+# --- 022 T022: task_mirror edits invalidate the short-circuit ------------------
+
+@test "T022 [022] — editing task_mirror in config.yml changes the recorded config.yml hash" {
+  printf 'projects:\n  - key: CONSUMER\n    style: company_managed\nrouting_default: CONSUMER\n' > "${JIRA_CONFIG_DIR}/config.yml"
+  local before after
+  before="$(jq -r ".inputs[\"${JIRA_CONFIG_DIR}/config.yml\"]" <<< "$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "")")"
+  printf 'task_mirror:\n  CONSUMER: checklist\n' >> "${JIRA_CONFIG_DIR}/config.yml"
+  after="$(jq -r ".inputs[\"${JIRA_CONFIG_DIR}/config.yml\"]" <<< "$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "")")"
+  [ "${before}" != "${after}" ]
+  [ "${after}" = "$(git hash-object --no-filters "${JIRA_CONFIG_DIR}/config.yml")" ]
+}

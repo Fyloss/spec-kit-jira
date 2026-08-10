@@ -42,7 +42,7 @@ boot() {
 
 @test "an absent .gitignore is created with the three managed lines (FR-019)" {
   boot
-  run cmd_config config --json
+  run --separate-stderr cmd_config config --json
   [ "$status" -eq 0 ]
   [ "$(jq -r '.effects.gitignore.status' <<< "$output")" = "created" ]
   grep -qx '.specify/jira/personal.yml' "${WORK}/.gitignore"
@@ -53,7 +53,7 @@ boot() {
 @test "only missing lines are appended to an existing .gitignore (written)" {
   printf 'node_modules/\n.specify/jira/config.local.yml\n' > "${WORK}/.gitignore"
   boot
-  run cmd_config config --json
+  run --separate-stderr cmd_config config --json
   [ "$status" -eq 0 ]
   [ "$(jq -r '.effects.gitignore.status' <<< "$output")" = "written" ]
   # The pre-existing content survives; the missing lines were appended once.
@@ -64,10 +64,10 @@ boot() {
 
 @test "a second run reports unchanged with a byte-identical .gitignore (idempotent)" {
   boot
-  run cmd_config config --json
+  run --separate-stderr cmd_config config --json
   [ "$status" -eq 0 ]
   cp "${WORK}/.gitignore" "${WORK}/gitignore-1"
-  run cmd_config config --json
+  run --separate-stderr cmd_config config --json
   [ "$status" -eq 0 ]
   [ "$(jq -r '.effects.gitignore.status' <<< "$output")" = "unchanged" ]
   run cmp "${WORK}/gitignore-1" "${WORK}/.gitignore"
@@ -76,7 +76,7 @@ boot() {
 
 @test "--dry-run computes the status without touching the file" {
   boot
-  run cmd_config config --dry-run --json
+  run --separate-stderr cmd_config config --dry-run --json
   [ "$status" -eq 0 ]
   [ "$(jq -r '.effects.gitignore.status' <<< "$output")" = "created" ]
   [ ! -f "${WORK}/.gitignore" ]
@@ -89,7 +89,7 @@ boot() {
   boot
   printf '.specify/jira/config.local.yml\r\n.specify/jira/.env\r\n.specify/jira/personal.yml\r\n' > "${WORK}/.gitignore"
   cp "${WORK}/.gitignore" "${WORK}/.gitignore.before"
-  run cmd_config config --json
+  run --separate-stderr cmd_config config --json
   [ "$status" -eq 0 ]
   [ "$(jq -r '.effects.gitignore.status' <<< "$output")" = "unchanged" ]
   run cmp "${WORK}/.gitignore.before" "${WORK}/.gitignore"

@@ -759,7 +759,7 @@ function Test-JiraTeamConfig {
         $errs.Add('routing_default must be a valid project key')
     }
 
-    $allowedTop = @('version_compat', 'projects', 'routing', 'routing_default', 'privacy', 'teams', 'field_defaults')
+    $allowedTop = @('version_compat', 'projects', 'routing', 'routing_default', 'privacy', 'teams', 'field_defaults', 'task_mirror')
     if ($Object -is [System.Collections.IDictionary]) {
         foreach ($k in (Get-JiraOrdinalSorted $Object.Keys)) {
             if ($allowedTop -cnotcontains [string]$k) { $errs.Add("unknown top-level key: $k") }
@@ -802,6 +802,25 @@ function Test-JiraTeamConfig {
                         $errs.Add("field_defaults.$pk.$ftype.$label must be a non-empty value")
                     }
                 }
+            }
+        }
+    }
+
+    # task_mirror (022, data-model.md §1, contract/task-mirror-config.md §1-2):
+    # a per-project choice of how the task tier reaches Jira. Mirror of the
+    # Bash port's task_mirror addition to _CFG_TEAM_ERRORS_JQ.
+    $taskMirror = Get-CfgProp $Object 'task_mirror'
+    if ($null -ne $taskMirror -and $taskMirror -isnot [System.Collections.IDictionary]) {
+        $errs.Add('task_mirror must be a mapping')
+    } elseif ($taskMirror -is [System.Collections.IDictionary]) {
+        foreach ($tmk in (Get-JiraOrdinalSorted $taskMirror.Keys)) {
+            $tmv = $taskMirror[[string]$tmk]
+            if (-not $declaredKeys.Contains([string]$tmk)) {
+                $errs.Add("task_mirror.$tmk names a project key that is not declared in projects[]")
+                continue
+            }
+            if (@('subtask', 'checklist') -cnotcontains $tmv) {
+                $errs.Add("task_mirror.$tmk is '$tmv' — accepted values are: subtask, checklist (answer with --task-mirror '$tmk=checklist')")
             }
         }
     }
@@ -1310,6 +1329,28 @@ function Get-JiraFieldDefaultsFor {
     return (ConvertTo-JiraJsonValue $result)
 }
 
+function Get-JiraTaskMirrorFor {
+    <#
+    .SYNOPSIS
+      One project's `task_mirror` value (022, data-model.md §1): 'subtask',
+      'checklist', or the empty string when the team has recorded nothing for
+      this project. Absence is a third state, not a default (contract §1) —
+      the caller resolves the empty string into effective behaviour (contract
+      §7). Mirror of config_task_mirror_for.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $ProjectKey, [Parameter(Mandatory)] [string] $ConfigJson)
+    $cfg = $ConfigJson | ConvertFrom-Json -Depth 100
+    $all = $cfg.PSObject.Properties['task_mirror']
+    if ($null -ne $all -and $null -ne $all.Value) {
+        $entryProp = $all.Value.PSObject.Properties[$ProjectKey]
+        if ($null -ne $entryProp -and $null -ne $entryProp.Value) {
+            return [string] $entryProp.Value
+        }
+    }
+    return ''
+}
+
 function Get-JiraFieldDefaultsYaml {
     <#
     .SYNOPSIS
@@ -1322,6 +1363,21 @@ function Get-JiraFieldDefaultsYaml {
     param([string] $MapJson = '{}')
     if ([string]::IsNullOrEmpty($MapJson)) { $MapJson = '{}' }
     $wrapped = ConvertTo-JiraJsonValue ([ordered]@{ field_defaults = ($MapJson | ConvertFrom-Json -Depth 100) })
+    return (ConvertTo-JiraConfigYaml -Json $wrapped)
+}
+
+function Get-JiraTaskMirrorYaml {
+    <#
+    .SYNOPSIS
+      The canonical YAML text of the whole top-level `task_mirror:` mapping
+      (022, contract §3). Mirror of config_task_mirror_yaml — reuses
+      ConvertTo-JiraConfigYaml's scalar quoting/refusal rules rather than a
+      second renderer. No trailing newline; the caller adds exactly one.
+    #>
+    [CmdletBinding()]
+    param([string] $MapJson = '{}')
+    if ([string]::IsNullOrEmpty($MapJson)) { $MapJson = '{}' }
+    $wrapped = ConvertTo-JiraJsonValue ([ordered]@{ task_mirror = ($MapJson | ConvertFrom-Json -Depth 100) })
     return (ConvertTo-JiraConfigYaml -Json $wrapped)
 }
 
@@ -1464,4 +1520,4 @@ Export-ModuleMember -Function Get-JiraExtensionVersion, Assert-JiraSingleVersion
     Test-JiraPlaceholderKey, Get-JiraPlaceholderKey, `
     Get-JiraHookEventNameList, Get-JiraHooksDisabled, Add-JiraHooksDisabled, Remove-JiraHooksDisabled, `
     Get-CfgLocalPath, Get-CfgLocalObject, Get-JiraRoleNameList, Get-JiraFieldDefaultsFor, `
-    Get-JiraFieldDefaultsYaml
+    Get-JiraFieldDefaultsYaml, Get-JiraTaskMirrorFor, Get-JiraTaskMirrorYaml

@@ -351,7 +351,7 @@ teardown_e2e() {
 
 @test "E2E — recording both required fields via --field-default writes the managed region and satisfies the gate" {
   setup_e2e
-  run cmd_config config FD \
+  run --separate-stderr cmd_config config FD \
     --field-default 'FD=Deliverable=Business Owner=Platform Team' \
     --field-default 'FD=Deliverable=Program Increment=PI-2026-Q3' \
     --json
@@ -369,7 +369,7 @@ teardown_e2e() {
     --field-default 'FD=Deliverable=Program Increment=PI-2026-Q3' \
     --json > /dev/null
   cp "${JIRA_CONFIG_DIR}/config.yml" "${WORK}/before.yml"
-  run cmd_config config FD --json
+  run --separate-stderr cmd_config config FD --json
   [ "$status" -eq 0 ]
   [ "$(jq -r '.effects.field_defaults.status' <<< "$output")" = "unchanged" ]
   run cmp "${WORK}/before.yml" "${JIRA_CONFIG_DIR}/config.yml"

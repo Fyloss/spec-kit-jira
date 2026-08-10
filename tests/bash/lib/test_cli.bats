@@ -188,3 +188,34 @@ setup() {
   run cli_parse reconcile
   [[ "$output" == *"accept_defaults=false"* ]]
 }
+
+# === T068 [Phase 5, US3, 022] — --task-mirror parsing (contract §4) =========
+
+@test "T068 [022] — parse --task-mirror KEY=<subtask|checklist>, repeatable, last wins per key" {
+  run cli_parse config --task-mirror COMP=checklist --task-mirror COMP=subtask --task-mirror PLAT=checklist
+  local list; list="$(sed -n 's/^task_mirrors=//p' <<< "$output")"
+  [ "$list" = "COMP=checklist COMP=subtask PLAT=checklist" ]
+  [[ "$output" == *"exit=0"* ]]
+}
+
+@test "T068 [022] — --task-mirror requires a value" {
+  run cli_parse config --task-mirror
+  [[ "$output" == *"exit=1"* ]]
+  [[ "$output" == *"--task-mirror requires a value (--task-mirror KEY=<subtask|checklist>)"* ]]
+}
+
+@test "T068 [022] — malformed --task-mirror value (bad enum) is a usage error" {
+  run cli_parse config --task-mirror COMP=bogus
+  [[ "$output" == *"exit=1"* ]]
+  [[ "$output" == *"invalid --task-mirror value: COMP=bogus (expected <PROJECT_KEY>=<subtask|checklist>)"* ]]
+}
+
+@test "T068 [022] — task_mirrors line byte-identical across ports for repeated values" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  bash_out="$(cli_parse config --task-mirror COMP=checklist --task-mirror PLAT=subtask)"
+  ps_out="$(pwsh -NoProfile -Command "
+    Import-Module '${PS_LIB}/Cli.psm1' -Force
+    [Console]::Out.Write((Invoke-JiraCliParse -Arguments @('config','--task-mirror','COMP=checklist','--task-mirror','PLAT=subtask')))
+  ")"
+  [ "$bash_out" = "$ps_out" ]
+}

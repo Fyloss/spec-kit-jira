@@ -362,9 +362,14 @@ _reconcile_plan_context() {
   # summary-drift outcome. ticket_last_summaries omits an entry for a
   # marker that predates the record, exactly as recognition.sh's own
   # last_summary is omitted.
-  local ticket_summaries ticket_last_summaries
+  local ticket_summaries ticket_last_summaries ticket_last_checklists
   ticket_summaries="$(jq -c '(.bound // {}) | with_entries(.value |= .current.summary)' <<< "${recog}")"
   ticket_last_summaries="$(jq -c '(.bound // {}) | with_entries(select(.value.last_summary != null)) | with_entries(.value |= .last_summary)' <<< "${recog}")"
+  # ticket_last_checklists (022, data-model.md §3): the digest the mirror
+  # last WROTE for each story's checklist, mirroring ticket_last_summaries
+  # exactly — omitted for a marker predating this feature or a story never
+  # written to in checklist mode.
+  ticket_last_checklists="$(jq -c '(.bound // {}) | with_entries(select(.value.last_checklist != null)) | with_entries(.value |= .last_checklist)' <<< "${recog}")"
   # ticket_parents (T109): only the entries whose CURRENT parent is non-null —
   # a flat mirror with no parent at all is left alone (plan.md "No
   # migration"); a child linked to the wrong parent is what plan_writes
@@ -395,6 +400,18 @@ _reconcile_plan_context() {
   # byte-identical to before this feature (FR-011).
   local task_type_id task_tickets ticket_current
   task_type_id="$(jq -r '.roles.task.id // empty' <<< "${binding}")"
+  # 022, data-model.md §1, T020: the resolved task_mirror mode, carried into
+  # the plan context beside the resolved facts above — the SAME resolution
+  # `task_tier_mode` uses at the top of _reconcile_run (contract §7), so a
+  # recorded `checklist` wins over a declared role, and nothing recorded
+  # falls back to feature 012's behaviour byte-for-byte (FR-002).
+  local task_mirror_recorded_pc task_mirror_pc=""
+  task_mirror_recorded_pc="$(config_task_mirror_for "${key}" "${cfg}")"
+  if [[ "${task_mirror_recorded_pc}" == "checklist" ]]; then
+    task_mirror_pc="checklist"
+  elif [[ -n "${task_type_id}" ]]; then
+    task_mirror_pc="subtask"
+  fi
   task_tickets="$(jq -c '(.bound // {}) | with_entries(.value |= .key)' <<< "${tasks_recog}")"
   tickets="$(jq -c --argjson tt "${task_tickets}" '. + $tt' <<< "${tickets}")"
   ticket_current="$(jq -c '(.bound // {}) | with_entries(.value |= .current)' <<< "${tasks_recog}")"
@@ -410,7 +427,8 @@ _reconcile_plan_context() {
     --argjson tp "${ticket_parents}" --argjson fd "${field_defaults}" --argjson tl "${ticket_labels}" \
     --argjson dft "${defaultable_fields_by_type}" --argjson itl "${issue_types_list}" \
     --arg tt "${task_type_id}" --argjson tc "${ticket_current}" \
-  --argjson ts "${ticket_summaries}" --argjson tls "${ticket_last_summaries}" '
+  --argjson ts "${ticket_summaries}" --argjson tls "${ticket_last_summaries}" --arg tm "${task_mirror_pc}" \
+  --argjson tlc "${ticket_last_checklists}" '
     {base_url:$b}
     + (if $st == "" then {} else {story_type_id:$st} end)
     + (if $pt == "" then {} else {parent_type_id:$pt} end)
@@ -428,7 +446,9 @@ _reconcile_plan_context() {
     + (if $tt == "" then {} else {task_type_id:$tt} end)
     + (if ($tc|length) == 0 then {} else {ticket_current:$tc} end)
     + (if ($ts|length) == 0 then {} else {ticket_summaries:$ts} end)
-    + (if ($tls|length) == 0 then {} else {ticket_last_summaries:$tls} end)'
+    + (if ($tls|length) == 0 then {} else {ticket_last_summaries:$tls} end)
+    + (if ($tlc|length) == 0 then {} else {ticket_last_checklists:$tlc} end)
+    + (if $tm == "" then {} else {task_mirror:$tm} end)'
 }
 
 # cmd_reconcile <argv...> — reconcile one specification into its Jira project.
@@ -683,6 +703,20 @@ _reconcile_run() {
   # existence.
   local task_type_id_candidate=""
   [[ "${rc_gate_binding}" -eq 0 ]] && task_type_id_candidate="$(jq -r '.roles.task.id // empty' <<< "${gate_binding}")"
+  # 022, research.md §6: the ONE gate above splits into three independent
+  # conditions once `task_mirror` is in play. `task_tier_mode` is the single
+  # resolved source of truth for all three: "" (no tier), "subtask" (feature
+  # 012 unchanged), or "checklist" (022). A recorded `checklist` wins over a
+  # declared role (contract §7, FR-007) — the role is reported as recorded
+  # and not consumed, never both mirrored. With nothing recorded, this is
+  # BYTE-IDENTICAL to the pre-022 single condition (FR-002).
+  local task_mirror_recorded="" task_tier_mode=""
+  task_mirror_recorded="$(config_task_mirror_for "${project_key}" "${cfg}")"
+  if [[ "${task_mirror_recorded}" == "checklist" ]]; then
+    task_tier_mode="checklist"
+  elif [[ -n "${task_type_id_candidate}" ]]; then
+    task_tier_mode="subtask"
+  fi
   if [[ "${rc_gate_binding}" -eq 0 ]]; then
     local gate_child_type; gate_child_type="$(jq -r '.child_type.id // empty' <<< "${gate_binding}")"
     if [[ -n "${gate_child_type}" ]]; then
@@ -834,7 +868,11 @@ _reconcile_run() {
   while IFS= read -r _pf_key; do
     [[ -n "${_pf_key}" ]] && prefetch_keys+=("${_pf_key}")
   done < <(jq -r '.stories[] | select(.marker.state == "bound") | .marker.ticket' <<< "${doc}")
-  if [[ -n "${task_type_id_candidate}" ]]; then
+  # 022, research.md §6: bulk-prefetching bound task keys only serves
+  # sub-task recognition, which checklist mode never performs (no Jira read
+  # of the task tier at all) — gated on the effective mode, not merely on a
+  # declared role.
+  if [[ "${task_tier_mode}" == "subtask" ]]; then
     local _pf_tasks_file
     _pf_tasks_file="$(dirname "${spec_file}")/tasks.md"
     if [[ -f "${_pf_tasks_file}" ]]; then
@@ -890,10 +928,14 @@ _reconcile_run() {
   doc_for_write="$(jq -c --argjson bids "${blocked_ids}" \
     '.stories |= [.[] | . as $s | select(($bids | index($s.local_id)) == null)]' <<< "${doc}")"
 
-  # Phase 3, US1 (contract §1-§3): the task tier. `tasks.md` is read ONLY
-  # when a `task` role resolved in the binding (task_type_id_candidate) —
-  # its mere presence on disk is never enough (FR-011). Its absence, once
-  # the role IS declared, is a silent no-op (FR-001).
+  # Phase 3, US1 (contract §1-§3); 022 research.md §6: the task tier.
+  # `tasks.md` is read whenever EITHER mode is active (task_tier_mode
+  # non-empty) — its mere presence on disk is never enough (FR-011). Its
+  # absence, once a tier IS active, is a silent no-op (FR-001, 022 spec Edge
+  # Cases). What happens once it is read — the hierarchy_task_gate check,
+  # durable-identifier assignment, and sub-task recognition — stays
+  # `subtask`-only below (FR-005, FR-031): checklist mode needs no sub-task
+  # issue type at all.
   local tasks_file="" tasks_actions="[]" tasks_recog='{"bound":{},"new":[],"blocked":[]}'
   local task_role_active="false" task_warns="[]" task_withheld_count=0
   local task_skip_notes="[]"
@@ -902,7 +944,7 @@ _reconcile_run() {
   # yet, so it defers here; resolved once the create below (if it completes)
   # stamps a key into tasks_file.
   local pending_create_complete_ids="[]"
-  if [[ -n "${task_type_id_candidate}" ]]; then
+  if [[ -n "${task_tier_mode}" ]]; then
     local candidate_tasks_file
     candidate_tasks_file="$(dirname "${spec_file}")/tasks.md"
     if [[ -f "${candidate_tasks_file}" ]]; then
@@ -911,13 +953,52 @@ _reconcile_run() {
       local tasks_raw
       tasks_raw="$(cat "${tasks_file}" 2> /dev/null; printf x)"; tasks_raw="${tasks_raw%x}"
 
+      if [[ "${task_tier_mode}" != "subtask" ]]; then
+        # 022, US5 (FR-005): checklist mode needs no resolvable sub-task
+        # issue type and assigns no durable identifier (FR-031) — read and
+        # nest only, through the SAME shared parse/nest/skip-notes/validate
+        # path subtask mode uses below.
+        local tasks_for_doc="${tasks_raw}"
+        local tasks_parsed
+        tasks_parsed="$(printf '%s' "${tasks_for_doc}" | tasks_parse_document)"
+        doc_for_write="$(jq -c --argjson tp "${tasks_parsed}" '
+          ($tp.tasks // []) as $all
+          | (.stories | length) as $n
+          | ($all | map(select(.attribution.story_ordinal != null
+                                and .attribution.story_ordinal >= 1
+                                and .attribution.story_ordinal <= $n))) as $attributed
+          | .stories |= (to_entries | map(
+              (.key + 1) as $ord | .value as $s
+              | ($attributed | map(select(.attribution.story_ordinal == $ord))) as $ts
+              | if ($ts | length) > 0 then ($s + {tasks: $ts}) else $s end
+            ))
+        ' <<< "${doc_for_write}")"
+        task_skip_notes="$(jq -cn --argjson tp "${tasks_parsed}" --argjson n "$(jq '.stories | length' <<< "${doc_for_write}")" \
+          --arg tf "${candidate_tasks_file}" --arg sf "${spec_file}" '
+          [ ($tp.tasks // [])[]
+            | if (.attribution.story_ordinal == null) then
+                "\(.task_ref) in \($tf) carries no story attribution and was not mirrored."
+              elif (.attribution.story_ordinal < 1 or .attribution.story_ordinal > $n) then
+                "\(.task_ref) in \($tf) is attributed to User Story \(.attribution.story_ordinal), which \($sf) does not contain, and was not mirrored."
+              else empty
+              end
+          ]')"
+        if ! printf '%s' "${doc_for_write}" | interchange_validate > /dev/null 2>&1; then
+          doc_for_write="$(jq -c '.stories |= map(del(.tasks))' <<< "${doc_for_write}")"
+          task_warns="$(jq -c '. + ["reconcile: the task tier could not be validated (a malformed or duplicate task identifier) and was withheld this run; the specification and story tiers still reconciled"]' <<< "${task_warns}")"
+          task_role_active="false"
+        fi
+      fi
+
       # Task-tier verdict (Phase 5, US6, T065; data-model.md §5): a THIRD
       # gate, separate from hierarchy_mandatory_gate, over the single type
       # carrying the `task` role alone. Run BEFORE any marker is assigned
       # or spliced into tasks.md, so a withheld task is never given a
       # durable identifier (FR-039) — and before the lifecycle filter, so
       # the whole tier is dropped by construction (FR-038) rather than by
-      # omission further down.
+      # omission further down. `subtask` mode only (022, FR-005) — checklist
+      # mode needs no resolvable sub-task type and never calls this gate.
+      if [[ "${task_tier_mode}" == "subtask" ]]; then
       local task_gate_result task_gate_status
       task_gate_result="$(hierarchy_task_gate "${gate_binding}" "${project_key}" "${fd_defaults_by_type}")"
       task_gate_status="$(jq -r '.status' <<< "${task_gate_result}")"
@@ -1034,6 +1115,7 @@ _reconcile_run() {
           fi
         fi
       fi
+      fi
     fi
   fi
 
@@ -1046,8 +1128,14 @@ _reconcile_run() {
   # independent of task_role_active, so a sub-task orphaned by deleting
   # tasks.md itself (the most extreme case of "removed from tasks.md") is
   # still caught, not only one orphaned by deleting its own entry.
+  # `subtask` mode only (022, research.md §6): checklist mode never reads a
+  # sub-task's current content (tasks_recog stays empty), so this legacy
+  # mechanism would misreport every existing sub-task as orphaned on every
+  # run rather than once — Phase 6's switch report (FR-033/FR-034) is the
+  # one mechanism for that in checklist mode, built from tasks.md markers
+  # alone, no extra Jira read.
   local task_notes="[]"
-  if [[ -n "${task_type_id_candidate}" ]]; then
+  if [[ "${task_tier_mode}" == "subtask" ]]; then
     local orphan_notes
     orphan_notes="$(jq -cn --argjson recog "${recog}" --argjson doc "${doc_for_write}" --argjson trecog "${tasks_recog}" \
       --arg ttid "${task_type_id_candidate}" --arg tf "${candidate_tasks_file}" '
@@ -1078,6 +1166,36 @@ _reconcile_run() {
     task_notes="$(jq -c --argjson b "${reattribution_notes}" '. + $b' <<< "${orphan_notes}")"
   fi
   task_notes="$(jq -c --argjson s "${task_skip_notes}" '. + $s' <<< "${task_notes}")"
+
+  # 022, FR-033/FR-034, research.md §6 — the outbound switch (subtask ->
+  # checklist), detected with no extra Jira read: FR-031 leaves every
+  # durable identifier already recorded in tasks.md untouched, so a BOUND
+  # task marker under checklist mode is exactly the record of a sub-task
+  # this run no longer maintains (FR-033 already holds by construction —
+  # `task_tier_mode != "subtask"` plans zero sub-task writes). Reported
+  # once, naming the stories affected and a copy-pasteable `issue in (…)`
+  # query over exactly the keys the mirror itself created.
+  if [[ "${task_tier_mode}" == "checklist" && -n "${tasks_raw:-}" ]]; then
+    local switch_out_parsed switch_out_n
+    switch_out_parsed="$(printf '%s' "${tasks_raw}" | tasks_parse_document)"
+    switch_out_n="$(jq '[.tasks[] | select(.marker.state=="bound")] | length' <<< "${switch_out_parsed}")"
+    if ((switch_out_n > 0)); then
+      local switch_out_stories switch_out_keys
+      switch_out_stories="$(jq -r --argjson doc "${doc_for_write}" '
+        [.tasks[] | select(.marker.state=="bound") | .attribution.story_ordinal] | unique
+        | map($doc.stories[. - 1].title // empty) | join(", ")
+      ' <<< "${switch_out_parsed}")"
+      switch_out_keys="$(jq -r '[.tasks[] | select(.marker.state=="bound") | .marker.ticket] | join(", ")' <<< "${switch_out_parsed}")"
+      task_notes="$(jq -c --arg n "${switch_out_n}" --arg s "${switch_out_stories}" --arg k "${switch_out_keys}"         '. + ["reconcile: switched to checklist mode — \($n) sub-task(s) across \($s) are no longer maintained by this mirror; issue in (\($k)) selects exactly them for cleanup"]'         <<< "${task_notes}")"
+    fi
+  fi
+
+  # 022, FR-007, spec Edge Cases, data-model.md §4 — a declared `task` role
+  # alongside checklist mode is recorded, never consumed: this replaces
+  # feature 012's status line in this mode rather than adding a second one.
+  if [[ "${task_tier_mode}" == "checklist" && -n "${task_type_id_candidate}" ]]; then
+    task_notes="$(jq -c --arg p "${project_key}"       '. + ["reconcile: project \($p): a task role is declared but task_mirror is '"'"'checklist'"'"' — the role is recorded, not consumed; every task list still mirrors as a checklist"]'       <<< "${task_notes}")"
+  fi
 
   timing_phase_end "recognition"
   timing_phase_begin "plan"
@@ -1127,6 +1245,38 @@ _reconcile_run() {
       '. + {parent_key:$k, parent_current:$c, parent_origin:$o} + (if $ls == "" then {} else {parent_last_summary:$ls} end)' <<< "${plan_ctx}")"
   fi
 
+  # 022, FR-034, research.md §6 — the reverse switch (checklist -> subtask),
+  # detected from the story's ALREADY-READ current description (no extra
+  # Jira read): a checklist section still on the ticket while this run
+  # computes subtask mode is exactly the record of a story about to have it
+  # stripped by the ordinary zero-churn description update (FR-035 — no
+  # special-cased removal needed, the existing managed-section diff already
+  # does it). Reported once, naming the stories and the count of sub-tasks
+  # re-bound rather than orphaned (T093a) — no query, since nothing here is
+  # abandoned.
+  if [[ "${task_tier_mode}" == "subtask" && -n "${tasks_raw:-}" ]]; then
+    local switch_back_parsed switch_back_n=0 switch_back_stories="[]"
+    switch_back_parsed="$(printf '%s' "${tasks_raw}" | tasks_parse_document)"
+    local switch_back_lid
+    while IFS= read -r switch_back_lid; do
+      [[ -z "${switch_back_lid}" ]] && continue
+      local switch_back_existing switch_back_ordinal switch_back_title switch_back_bound
+      switch_back_existing="$(jq -c --arg k "${switch_back_lid}" '.ticket_descriptions[$k] // {}' <<< "${plan_ctx}")"
+      [[ "${switch_back_existing}" == "{}" ]] && continue
+      [[ "$(_adf_content_has_checklist "${switch_back_existing}")" == "true" ]] || continue
+      switch_back_ordinal="$(jq -r --arg k "${switch_back_lid}" '[.stories[] | .local_id] | index($k)' <<< "${doc_for_write}")"
+      [[ "${switch_back_ordinal}" == "null" ]] && continue
+      switch_back_title="$(jq -r --argjson i "${switch_back_ordinal}" '.stories[$i].title' <<< "${doc_for_write}")"
+      switch_back_stories="$(jq -c --arg t "${switch_back_title}" '. + [$t]' <<< "${switch_back_stories}")"
+      switch_back_bound="$(jq --argjson ord "$((switch_back_ordinal + 1))" '[.tasks[] | select(.attribution.story_ordinal==$ord and .marker.state=="bound")] | length' <<< "${switch_back_parsed}")"
+      switch_back_n=$((switch_back_n + switch_back_bound))
+    done < <(jq -r '.stories[].local_id' <<< "${doc_for_write}")
+    if ((switch_back_n > 0)); then
+      local switch_back_names; switch_back_names="$(jq -r 'join(", ")' <<< "${switch_back_stories}")"
+      task_notes="$(jq -c --arg n "${switch_back_n}" --arg s "${switch_back_names}"         '. + ["reconcile: switched back to subtask mode — \($n) sub-task(s) across \($s) were re-bound by their preserved identifiers, not duplicated"]'         <<< "${task_notes}")"
+    fi
+  fi
+
   # DUPLICATE PROBE (User Story 4, P3, droppable; FR-022–FR-026,
   # contracts/duplicate-probe.md §2): fires only when about to CREATE a
   # parent — parent_state "new" (no marker recorded) AND the plan context
@@ -1168,13 +1318,18 @@ _reconcile_run() {
   # degradation warning travels with theirs. Empty when no `task` role
   # resolved, or when the type cannot hold the label.
   local task_label; task_label="$(jq -r '.task_label // ""' <<< "${plan}")"
+  # 022, data-model.md §4: the checklist tallies plan_writes computed,
+  # present only in checklist mode — distinct from the specification/
+  # story/sub-task counts (FR-036).
+  local checklist_counts; checklist_counts="$(jq -c '.checklist_counts // null' <<< "${plan}")"
 
   # Phase 3, US1 (contract §4): the task tier's own plan, over the SAME
   # document and context — never through plan_lifecycle, which only knows
   # the two existing tiers. Skipped whenever the tier is inactive, so
   # `tasks_actions` stays the "[]" it was initialised to and every
-  # downstream read of it is a no-op (FR-011).
-  if [[ "${task_role_active}" == "true" ]]; then
+  # downstream read of it is a no-op (FR-011). `subtask` mode only (022,
+  # research.md §6, FR-007): checklist mode plans zero sub-task writes.
+  if [[ "${task_role_active}" == "true" && "${task_tier_mode}" == "subtask" ]]; then
     local tasks_plan
     if ! tasks_plan="$(plan_writes_tasks "${doc_for_write}" "${plan_ctx}" "${task_label}")"; then
       task_warns="$(jq -c '. + ["reconcile: the task tier'"'"'s write plan could not be assembled and was withheld this run"]' <<< "${task_warns}")"
@@ -1196,8 +1351,10 @@ _reconcile_run() {
   # contributes no entry at all, so this loop issues zero reads for it
   # (FR-031's "an unchanged re-run issues none"). The backward pull is
   # resolved here, never inside the PURE plan_lifecycle_tasks: only the
-  # command layer knows --on-drift.
-  if [[ "${task_role_active}" == "true" ]]; then
+  # command layer knows --on-drift. `subtask` mode only (022, research.md
+  # §6): a checklist entry's completion is decided by the drift table
+  # (Phase 4), not by a sub-task's status category.
+  if [[ "${task_role_active}" == "true" && "${task_tier_mode}" == "subtask" ]]; then
     local completion_tasks='{}' completion_ids completion_id
     completion_ids="$(jq -r '[.stories[] | (.tasks // [])[] | .local_id] | .[]' <<< "${doc_for_write}")"
     while IFS= read -r completion_id; do
@@ -1650,7 +1807,7 @@ _reconcile_run() {
   # identity_stamp (018, T048) is an apply-time-only instruction — never
   # part of the displayed/dry-run summary, on every branch below,
   # regardless of whether local_id itself is kept for task matching.
-  if [[ "${task_role_active}" == "true" ]]; then
+  if [[ "${task_role_active}" == "true" && "${task_tier_mode}" == "subtask" ]]; then
     disp_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b) | del(.identity_stamp)]' <<< "${actions}")"
   else
     disp_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b) | del(.local_id, .identity_stamp)]' <<< "${actions}")"
@@ -1659,8 +1816,10 @@ _reconcile_run() {
   # list, last — a --dry-run preview that reports counts.tasks but never
   # shows what it counted would not be an honest preview. `parent_local_id`
   # is kept (only the task's own local_id is stripped) so it can be matched
-  # against the story action's local_id kept above.
-  if [[ "${task_role_active}" == "true" ]]; then
+  # against the story action's local_id kept above. `subtask` mode only
+  # (022): `tasks_actions` stays "[]" in checklist mode, so this is a no-op
+  # there, but the `local_id` retention above must not leak either.
+  if [[ "${task_role_active}" == "true" && "${task_tier_mode}" == "subtask" ]]; then
     local disp_task_actions
     disp_task_actions="$(jq -c --arg b "${base}" '[.[] | .url |= ltrimstr($b) | del(.local_id, .identity_stamp)]' <<< "${tasks_actions}")"
     disp_actions="$(jq -c --argjson t "${disp_task_actions}" '. + $t' <<< "${disp_actions}")"
@@ -1676,9 +1835,11 @@ _reconcile_run() {
   # with no `task` role byte-for-byte identical to before this feature
   # (FR-011). created/updated read straight off the plan actions actually
   # applied (never through plan_lifecycle, which the task tier does not
-  # go through); unchanged is every other attributed task.
+  # go through); unchanged is every other attributed task. `subtask` mode
+  # only (022, data-model.md §4): checklist mode reports the DISTINCT
+  # `checklists.*`/`entries.completed` counts instead (never both).
   local task_counts="null"
-  if [[ "${task_role_active}" == "true" ]]; then
+  if [[ "${task_role_active}" == "true" && "${task_tier_mode}" == "subtask" ]]; then
     local task_created task_updated task_transitioned task_total task_unchanged
     task_created="$(jq '[.[] | select(.method=="POST" and (.url|endswith("/issue")))] | length' <<< "${tasks_actions}")"
     task_updated="$(jq '[.[] | select(.method=="PUT")] | length' <<< "${tasks_actions}")"
@@ -1708,12 +1869,16 @@ _reconcile_run() {
     --argjson wc "${warn_count}" --argjson w "${warns}" --argjson no "${notes}" \
     --argjson hl "${has_lifecycle}" --argjson hooks "${hooks_health}" \
     --argjson rec "${recognised_count}" --argjson asg "${assigned_count}" --argjson sk "${skipped_count}" \
-    --argjson tc "${task_counts}" '
+    --argjson tc "${task_counts}" --argjson cc "${checklist_counts}" '
     ($actions_f[0]) as $actions |
     {schema_version:"1.0", command:"reconcile", dry_run:$dry,
      counts:({created:$c, updated:$u, skipped:$sk, warnings:$wc, errors:0,
               recognised:$rec, assigned:$asg}
-             + (if $tc == null then {} else {tasks:$tc} end)),
+             + (if $tc == null then {} else {tasks:$tc} end)
+             + (if $cc == null then {} else {
+                  checklists:{created:$cc.created, updated:$cc.updated, unchanged:$cc.unchanged},
+                  entries:{completed:$cc.entries_completed}
+                } end)),
      actions:$actions}
     + (if $hl then {warnings:$w, notes:$no} else {} end)
     + {hook_health:$hooks, exit_code:$x}' | json_canonical)"

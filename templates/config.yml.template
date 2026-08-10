@@ -114,3 +114,18 @@ privacy:
 #     Story:
 #       Team: "Payments"
 # --- spec-kit-jira:field_defaults:end ---
+
+# How each project's task list reaches Jira (022): `subtask` creates one
+# sub-task per task; `checklist` writes one checklist into each story
+# instead. OPTIONAL — absence is a third state, not a default: it keeps
+# today's behaviour exactly (one sub-task per task when a `task` role is
+# declared above, no task tier otherwise). Written by `/speckit.jira.config`,
+# which asks the question once, per project, and never re-asks once a value
+# is recorded. Edit a value here by hand if you like — keep it between the
+# markers; an entry outside them is a duplicate top-level key and the next
+# read refuses it (exit 4).
+#
+# --- spec-kit-jira:task_mirror:begin ---
+# task_mirror:
+#   PROJ: checklist
+# --- spec-kit-jira:task_mirror:end ---
