@@ -639,14 +639,29 @@ function Invoke-JiraReconcileRun {
     # Split-Path -Leaf is this port's own path-splitting primitive.
     $targetName = Split-Path -Leaf $specFile
     if ($targetName -cne 'spec.md') {
-        $targetDir = Split-Path -Parent $specFile
-        if ([string]::IsNullOrEmpty($targetDir)) {
-            $targetDir = if ($specFile.StartsWith('/')) { '/' } else { '.' }
+        # The parent is cut out of the caller's OWN bytes — never through
+        # Split-Path -Parent, and never through Join-Path. Both go through the
+        # FileSystem provider, which rewrites every separator to the host's
+        # native one (`/` becomes `\` on Windows), and contract §3 requires
+        # <sibling> to be spelled the way the caller spelled the target.
+        # Splitting on the last separator the argument itself carries, then
+        # re-joining with that same character, keeps the refusal byte-identical
+        # to the Bash twin's `dirname` on every host (FR-027).
+        $cut = $specFile.LastIndexOfAny([char[]]@('/', '\'))
+        if ($cut -lt 0) {
+            $targetDir = '.'
+            $sep = '/'
         }
-        # String concatenation, NOT Join-Path: Join-Path would rewrite a
-        # forward-slash scenario path to this port's native separator and
-        # break the byte-identical refusal FR-027 requires across ports.
-        $siblingSpec = "$targetDir/spec.md"
+        else {
+            $sep = $specFile[$cut]
+            $targetDir = $specFile.Substring(0, $cut)
+            # A root-level target ("/plan.md") leaves nothing to the left of the
+            # cut; `dirname` answers the root itself, and the Bash twin's
+            # "$(dirname …)/spec.md" then doubles the separator. Mirrored here
+            # rather than tidied, because the corpus compares bytes.
+            if ($targetDir -eq '') { $targetDir = [string]$sep }
+        }
+        $siblingSpec = "$targetDir$sep" + 'spec.md'
         if (Test-Path -LiteralPath $siblingSpec -PathType Leaf) {
             $targetMsg = "reconcile: `"$specFile`" is not a feature specification — only a feature folder's spec.md is ever mirrored (zero writes); the target for this folder is `"$siblingSpec`""
         }
