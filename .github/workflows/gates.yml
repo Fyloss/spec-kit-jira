@@ -111,29 +111,34 @@ jobs:
         # with `rescue` unset and that step fails the job genuinely (FR-016).
         continue-on-error: true
         # INVARIANT: this ceiling must stay ABOVE the two inner wall clocks plus
-        # the rescue re-run below (20 + 90 + ~65 minutes). The inner clocks are
+        # the rescue re-run below (90 + 120 + ~65 minutes). The inner clocks are
         # the diagnostics — they print how far the exercise got and the tail of
         # kcov.log — and a step killed underneath them takes that record with it.
         # That inversion is what made this job red and undiagnosable from
         # 2026-07-28 on: the step died at 15 minutes with 30 minutes of inner
         # budget outstanding, so the fallback saw `rescue` unset and reported
         # "failed genuinely" for what was only ever a run that had not finished.
-        timeout-minutes: 180
+        # A ceiling is not a duration: the expected run is ~3 h, and this only
+        # decides how much earlier than GitHub's own 6-hour cap a stuck run dies.
+        timeout-minutes: 300
         env:
-          # Sized from the runner, not from a laptop: `tests/run-bash.sh` alone
-          # takes ~63 minutes on this image (CI job "Unit suites (ubuntu-latest)",
-          # 2026-08-09), and the traced phase runs the same suite with xtrace
-          # exported into every child. A 20-minute clock could never have been
-          # met — it expired on every run once the suite outgrew it.
+          # Both clocks are sized from the runner, never from a laptop.
           #
-          # The kcov phase drives all 133 conformance scenarios serially,
-          # in-process, under the tracer; it fitted in 456 s for the whole job
-          # when the corpus was smaller (2026-07-27) and no run since has been
-          # allowed to finish, so this bound is deliberately generous. A clock
-          # is a ceiling, not a duration — an unused minute costs nothing, and
-          # the runner now names which clock expired if one does.
-          SPEC_KIT_JIRA_COVERAGE_TIMEOUT: 2400
-          SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT: 5400
+          # kcov drives all 133 conformance scenarios serially, in-process,
+          # under the tracer. MEASURED 2026-08-10 (run 31379383480): killed at
+          # 2400 s having reached scenario 72 of 133, with a progress line at
+          # t=2399 s — steady throughput, no stall. That is ~33 s per scenario,
+          # so the phase needs ~74 minutes; 90 leaves room for the corpus to
+          # grow before anyone has to look at this number again.
+          #
+          # The traced phase re-runs the unit suite with xtrace exported into
+          # every child. `tests/run-bash.sh` alone is ~63 minutes on this image
+          # (CI job "Unit suites (ubuntu-latest)", 2026-08-09) and tracing only
+          # adds to it; it has never once been reached, so 120 is a first
+          # measurement rather than a fitted bound. The runner now names which
+          # clock expired, so an overrun reports instead of dying mute.
+          SPEC_KIT_JIRA_COVERAGE_TIMEOUT: 5400
+          SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT: 7200
         run: |
           set -euo pipefail
           # Never `kcov ... bats`: kcov instruments bats-core's own DEBUG-trap
