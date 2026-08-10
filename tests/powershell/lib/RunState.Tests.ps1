@@ -190,4 +190,17 @@ Describe 'RunState' {
             (Get-JiraRunStatePath -SpecPath $script:Spec) | Should -Be $want
         }
     }
+
+    Describe 'T023 [022] — task_mirror edits invalidate the short-circuit' {
+        It 'editing task_mirror in config.yml changes the recorded config.yml hash' {
+            $cfgPath = Join-Path $env:JIRA_CONFIG_DIR 'config.yml'
+            [System.IO.File]::WriteAllText($cfgPath, "projects:`n  - key: CONSUMER`n    style: company_managed`nrouting_default: CONSUMER`n")
+            $before = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' | ConvertFrom-Json -Depth 10).inputs.$cfgPath
+            Add-Content -LiteralPath $cfgPath -Value "task_mirror:`n  CONSUMER: checklist`n"
+            $after = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' | ConvertFrom-Json -Depth 10).inputs.$cfgPath
+            $after | Should -Not -Be $before
+            $expected = (& git hash-object --no-filters $cfgPath 2>$null | Select-Object -First 1).Trim()
+            $after | Should -Be $expected
+        }
+    }
 }

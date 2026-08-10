@@ -59,14 +59,12 @@ boot() {
 @test "a catalogue team whose project is not accessible produces one named warning (FR-009)" {
   write_config true
   boot '{"projects":{"IJT":"team"}}'
-  run cmd_config config --json
+  run --separate-stderr cmd_config config --json
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | grep -c '^WARNING:')" -eq 1 ]
-  [[ "$output" == *"team 'wex'"* ]]
-  [[ "$output" == *"WEX"* ]]
-  local summary
-  summary="$(printf '%s\n' "$output" | grep -v '^WARNING:')"
-  [ "$(jq -r '.counts.warnings' <<< "${summary}")" -eq 1 ]
+  [ "$(printf '%s\n' "$stderr" | grep -c '^WARNING:')" -eq 1 ]
+  [[ "$stderr" == *"team 'wex'"* ]]
+  [[ "$stderr" == *"WEX"* ]]
+  [ "$(jq -r '.counts.warnings' <<< "$output")" -eq 1 ]
   # The run still binds normally (warn, never block).
   [ -f "${JIRA_CONFIG_DIR}/config.local.yml" ]
 }
@@ -74,12 +72,10 @@ boot() {
 @test "all catalogue teams accessible: zero warnings" {
   write_config true
   boot '{"projects":{"IJT":"team","WEX":"team"}}'
-  run cmd_config config --json
+  run --separate-stderr cmd_config config --json
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | grep -c '^WARNING:' || true)" -eq 0 ]
-  local summary
-  summary="$(printf '%s\n' "$output" | grep -v '^WARNING:')"
-  [ "$(jq -r '.counts.warnings' <<< "${summary}")" -eq 0 ]
+  [ "$(printf '%s\n' "$stderr" | grep -c '^WARNING:' || true)" -eq 0 ]
+  [ "$(jq -r '.counts.warnings' <<< "$output")" -eq 0 ]
 }
 
 @test "no catalogue declared: no project/search call at all" {

@@ -154,7 +154,7 @@ boot() {
 @test "the run summary audits style + style_source per project (FR-003)" {
   write_config TEAM
   boot '{"TEAM":"team"}'
-  run cmd_config config --json
+  run --separate-stderr cmd_config config --json
   [ "$status" -eq 0 ]
   [ "$(jq -r '.effects.discovery.projects.TEAM.style' <<< "$output")" = "team_managed" ]
   [ "$(jq -r '.effects.discovery.projects.TEAM.style_source' <<< "$output")" = "api" ]

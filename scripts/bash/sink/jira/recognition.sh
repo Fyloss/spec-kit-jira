@@ -424,11 +424,18 @@ recognition_run() {
     # tasks to report (never act on) orphans and re-attribution.
     local subtasks; subtasks="$(jq -c '[(.subtasks // [])[] | {key, issuetype_id: (.fields.issuetype.id // null)}]' <<< "${fields}")"
 
+    # last_checklist (022, data-model.md §3): the digest the mirror last
+    # WROTE for this story's checklist, read from the SAME already-fetched
+    # marker — no extra request. Omitted for a marker predating this
+    # feature, or a task-kind read (a task has no checklist of its own).
+    local last_checklist; last_checklist="$(jq -r '.checklist // empty' <<< "${marker}")"
+
     local entry; entry="$(jq -cn --arg k "${key}" --arg o "${origin}" --argjson c "${current}" \
       --arg st "${status}" --arg sc "${status_category}" --argjson fl "${flagged}" --argjson bl "${blockers}" \
-      --argjson sub "${subtasks}" --arg ls "${last_summary}" \
+      --argjson sub "${subtasks}" --arg ls "${last_summary}" --arg lc "${last_checklist}" \
       '{key:$k, origin:$o, current:$c, status:$st, status_category:$sc, flagged:$fl, blockers:$bl, subtasks:$sub}
-       + (if $ls == "" then {} else {last_summary:$ls} end)')"
+       + (if $ls == "" then {} else {last_summary:$ls} end)
+       + (if $lc == "" then {} else {last_checklist:$lc} end)')"
     bound="$(jq -c --arg id "${id}" --argjson e "${entry}" '. + {($id): $e}' <<< "${bound}")"
   done
 

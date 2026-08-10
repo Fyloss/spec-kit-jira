@@ -251,3 +251,51 @@ teardown() {
   ")"
   [ "$ps" = "9990" ]
 }
+
+# =============================================================================
+# T110a [Phase 8, 022] — a checklist entry rides the story `description`
+# channel apply_writes already sweeps; this pins that it keeps doing so
+# (FR-038, Constitution IX). No new guard code — the existing full-payload
+# sweep already covers it by construction.
+# =============================================================================
+
+DOC_WITH_CHECKLIST_TASK='{
+  "routing": {"project_key":"COMP"},
+  "epic": {"title":"E", "local_id":"e1",
+    "marker":{"state":"assigned","id":"e1","lines":[2]},
+    "description":{"blocks":[]}},
+  "stories": [
+    {"local_id":"s1","title":"A story","description":{"blocks":[]},
+     "tasks":[{"title":"REPLACE_TITLE","done":false,"phase":null}]}
+  ]
+}'
+CHECKLIST_CTX='{
+  "base_url":"MOCK_BASE_URL_PLACEHOLDER", "story_type_id":"10002", "parent_type_id":"10101",
+  "parent_local_id":"e1", "priority_ids":{}, "task_mirror":"checklist"
+}'
+
+@test "T110a: a checklist entry carrying a BLOCK-tier value aborts apply_writes before the first write (FR-038)" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local doc; doc="$(jq -c '.stories[0].tasks[0].title = "leak acme-corp.atlassian.net"' <<< "${DOC_WITH_CHECKLIST_TASK}")"
+  local ctx; ctx="$(jq -c --arg b "${MOCK_BASE_URL}" '.base_url = $b' <<< "${CHECKLIST_CTX}")"
+  local plan; plan="$(plan_writes "${doc}" "${ctx}")"
+  local actions; actions="$(jq -c '[.stories[], .parent]' <<< "${plan}")"
+  run apply_writes "${actions}"
+  [ "$status" -eq 9 ]
+  run mock_calls
+  [ -z "$output" ]
+}
+
+@test "T110a: an allowlisted Confluence link inside a checklist entry passes silently" {
+  mock_start "${MOCK}/configs/default.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  export SPEC_KIT_JIRA_ALLOWLIST='["docs.example-support.atlassian.net"]'
+  local doc; doc="$(jq -c '.stories[0].tasks[0].title = "see https://docs.example-support.atlassian.net/wiki/x"' <<< "${DOC_WITH_CHECKLIST_TASK}")"
+  local ctx; ctx="$(jq -c --arg b "${MOCK_BASE_URL}" '.base_url = $b' <<< "${CHECKLIST_CTX}")"
+  local plan; plan="$(plan_writes "${doc}" "${ctx}")"
+  local actions; actions="$(jq -c '[.stories[], .parent]' <<< "${plan}")"
+  run apply_writes "${actions}"
+  [ "$status" -eq 0 ]
+  unset SPEC_KIT_JIRA_ALLOWLIST
+}

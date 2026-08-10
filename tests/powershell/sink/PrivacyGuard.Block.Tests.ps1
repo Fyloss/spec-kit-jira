@@ -174,3 +174,49 @@ Describe '018, T017 — the narrowed scan scope (contract §5, FR-024a)' {
         @(Get-JiraMockCallLog -Mock $M).Count | Should -Be 0
     }
 }
+
+Describe 'T110a [Phase 8, 022] — a checklist entry rides the same description sweep' {
+    BeforeAll {
+        $script:DocWithChecklistTask = '{
+          "routing": {"project_key":"COMP"},
+          "epic": {"title":"E", "local_id":"e1",
+            "marker":{"state":"assigned","id":"e1","lines":[2]},
+            "description":{"blocks":[]}},
+          "stories": [
+            {"local_id":"s1","title":"A story","description":{"blocks":[]},
+             "tasks":[{"title":"REPLACE_TITLE","done":false,"phase":null}],
+             "priority_logical":"P1"}
+          ]
+        }'
+    }
+    BeforeEach {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $M.BaseUrl
+    }
+    AfterEach { Stop-JiraMock -Mock $M }
+
+    It 'a checklist entry carrying a BLOCK-tier value aborts the apply before the first write (FR-038)' {
+        $doc = $script:DocWithChecklistTask | ConvertFrom-Json -Depth 100
+        $doc.stories[0].tasks[0].title = 'leak acme-corp.atlassian.net'
+        $docJson = ConvertTo-Json $doc -Depth 20 -Compress
+        $ctx = '{"base_url":"' + $M.BaseUrl + '","story_type_id":"10002","parent_type_id":"10101","parent_local_id":"e1","priority_ids":{},"task_mirror":"checklist"}'
+        $plan = Get-JiraPlanWriteSet -NeutralDocJson $docJson -PlanContextJson $ctx | ConvertFrom-Json -Depth 100
+        $actions = ConvertTo-Json (@($plan.stories) + @($plan.parent)) -Depth 20 -Compress
+        Invoke-JiraApplyWriteSet -ActionsJson $actions | Should -Be 9
+        @(Get-JiraMockCallLog -Mock $script:M).Count | Should -Be 0
+    }
+
+    It 'an allowlisted Confluence link inside a checklist entry passes silently' {
+        $env:SPEC_KIT_JIRA_ALLOWLIST = '["docs.example-support.atlassian.net"]'
+        try {
+            $doc = $script:DocWithChecklistTask | ConvertFrom-Json -Depth 100
+            $doc.stories[0].tasks[0].title = 'see https://docs.example-support.atlassian.net/wiki/x'
+            $docJson = ConvertTo-Json $doc -Depth 20 -Compress
+            $ctx = '{"base_url":"' + $M.BaseUrl + '","story_type_id":"10002","parent_type_id":"10101","parent_local_id":"e1","priority_ids":{},"task_mirror":"checklist"}'
+            $plan = Get-JiraPlanWriteSet -NeutralDocJson $docJson -PlanContextJson $ctx | ConvertFrom-Json -Depth 100
+            $actions = ConvertTo-Json (@($plan.stories) + @($plan.parent)) -Depth 20 -Compress
+            Invoke-JiraApplyWriteSet -ActionsJson $actions | Should -Be 0
+        }
+        finally { Remove-Item Env:\SPEC_KIT_JIRA_ALLOWLIST -ErrorAction SilentlyContinue }
+    }
+}

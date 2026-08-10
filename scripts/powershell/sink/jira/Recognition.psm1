@@ -442,6 +442,12 @@ function Invoke-JiraRecognitionRun {
         # same already-fetched marker, omitted for a marker predating it.
         $lastSummary = [string](Get-JiraRecognitionSafe $rmarker 'summary')
         if (-not [string]::IsNullOrEmpty($lastSummary)) { $entry['last_summary'] = $lastSummary }
+        # last_checklist (022, data-model.md §3): the digest the mirror last
+        # WROTE for this story's checklist, read from the SAME
+        # already-fetched marker — no extra request. Omitted for a marker
+        # predating this feature, or a task-kind read.
+        $lastChecklist = [string](Get-JiraRecognitionSafe $rmarker 'checklist')
+        if (-not [string]::IsNullOrEmpty($lastChecklist)) { $entry['last_checklist'] = $lastChecklist }
         $bound[$id] = $entry
     }
 

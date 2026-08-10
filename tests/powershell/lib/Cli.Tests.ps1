@@ -113,3 +113,23 @@ Describe 'Invoke-JiraCliParse — field-default flags (011, T018)' {
         $out | Should -Match 'accept_defaults=false'
     }
 }
+
+Describe 'Invoke-JiraCliParse — task-mirror flags (Phase 5, US3, 022)' {
+    It 'parses --task-mirror KEY=(subtask or checklist), repeatable, last wins per key' {
+        $out = Invoke-JiraCliParse @('config', '--task-mirror', 'COMP=checklist', '--task-mirror', 'COMP=subtask', '--task-mirror', 'PLAT=checklist')
+        $out | Should -Match ([regex]::Escape('task_mirrors=COMP=checklist COMP=subtask PLAT=checklist'))
+        $out | Should -Match 'exit=0'
+    }
+
+    It 'requires a value' {
+        $out = Invoke-JiraCliParse @('config', '--task-mirror')
+        $out | Should -Match 'exit=1'
+        $out | Should -Match ([regex]::Escape('--task-mirror requires a value (--task-mirror KEY=<subtask|checklist>)'))
+    }
+
+    It 'rejects a malformed value (bad enum)' {
+        $out = Invoke-JiraCliParse @('config', '--task-mirror', 'COMP=bogus')
+        $out | Should -Match 'exit=1'
+        $out | Should -Match ([regex]::Escape('invalid --task-mirror value: COMP=bogus (expected <PROJECT_KEY>=<subtask|checklist>)'))
+    }
+}

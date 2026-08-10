@@ -47,7 +47,7 @@ boot() {
   [ "$status" -eq 0 ]
   # All effects are present as distinct, named sections (002 adds gitignore;
   # 011 adds field_defaults).
-  [ "$(jq -r '.effects | keys | sort | join(",")' <<< "$output")" = "discovery,field_defaults,gitignore,hooks,readme" ]
+  [ "$(jq -r '.effects | keys | sort | join(",")' <<< "$output")" = "discovery,field_defaults,gitignore,hooks,readme,task_mirror" ]
   # The discovery effect performed its write this phase.
   [ "$(jq -r '.effects.discovery.status' <<< "$output")" = "written" ]
   # Every effect carries a status from the documented enumeration.
@@ -248,4 +248,27 @@ seed_disabled_registry() {
   run --separate-stderr cmd_config config --child-type COMP=Story --json
   [ "$(jq -r '.effects.hooks.status' <<< "$output")" = "healthy" ]
   [[ "$(jq -r '.effects.hooks.detail' <<< "$output")" == *"registry was not modified"* ]]
+}
+
+# =============================================================================
+# T075 [Phase 5, US3, 022] — the task-mirror per-project effect line, all
+# three forms (contract §6, FR-013): recorded, unchanged, not recorded.
+# =============================================================================
+
+@test "T075 — the task-mirror effect line reports all three forms: recorded, unchanged, not recorded" {
+  boot
+  # Run 1: no answer this run for COMP -> "not recorded".
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"Task mirror: COMP — not recorded; today's behaviour applies"* ]]
+
+  # Run 2: answered this run -> "recorded".
+  run --separate-stderr cmd_config config --child-type COMP=Story --task-mirror COMP=checklist --json
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"Task mirror: COMP — checklist (recorded)"* ]]
+
+  # Run 3: already recorded, no new answer -> "unchanged".
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"Task mirror: COMP — checklist (unchanged)"* ]]
 }

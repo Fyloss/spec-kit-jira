@@ -40,7 +40,7 @@ Describe 'Config three-effect reporting' {
         $obj = $sw.ToString().Trim() | ConvertFrom-Json
         # All effects are present as distinct, named sections (002 adds
         # gitignore; 011 adds field_defaults).
-        ($obj.effects.PSObject.Properties.Name | Sort-Object) -join ',' | Should -Be 'discovery,field_defaults,gitignore,hooks,readme'
+        ($obj.effects.PSObject.Properties.Name | Sort-Object) -join ',' | Should -Be 'discovery,field_defaults,gitignore,hooks,readme,task_mirror'
         $obj.effects.discovery.status | Should -Be 'written'
         $obj.effects.hooks.status | Should -Not -BeNullOrEmpty
         $obj.effects.readme.status | Should -Not -BeNullOrEmpty

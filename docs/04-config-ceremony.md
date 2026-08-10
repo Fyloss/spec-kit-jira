@@ -177,6 +177,32 @@ did not ask about this run (an optional field, an opted-in type not named,
 a hand-written line) is re-emitted unchanged, so a run whose answers match
 what is already recorded reproduces `config.yml` byte-for-byte.
 
+## Task mirror — how a story's task list reaches Jira (022)
+
+A project chooses, once, whether its `tasks.md` list reaches Jira as one
+sub-task per task or as a single checklist embedded in the story's
+description. Absence is a third state, not a default: a team that has
+recorded nothing keeps feature 012's behaviour exactly (one sub-task per task
+when a `task` role is declared, no task tier otherwise).
+
+```mermaid
+flowchart TD
+    Project["Per project, every run"] --> Recorded{"task_mirror<br/>already recorded?"}
+    Recorded -->|"yes"| Silent["Not asked again (FR-009)<br/>config.yml re-emitted byte-for-byte"]
+    Recorded -->|"no"| Ask["Closed question — choose one of:<br/>subtask, checklist (FR-008)"]
+    Ask --> Answer["Operator answers with --task-mirror<br/>'KEY=subtask' or 'KEY=checklist'"]
+    Answer --> Splice["Spliced into config.yml's<br/>task_mirror managed region"]
+    Answer -->|"nothing answered"| Unrecorded["Nothing recorded — the question<br/>is the report (FR-011), not an error"]
+    Splice --> Effect["Task mirror: KEY — value (recorded|unchanged)"]
+```
+
+`subtask` recorded with no sub-task issue type resolved for the project is
+reported at config time, with its remedy, rather than left to the first
+reconcile (FR-012). The region is written by the same byte-preserving
+`managed_section_splice` every other managed region uses — a hand-written
+entry the ceremony did not ask about this run is re-emitted unchanged
+(FR-010).
+
 ## Mapping validation — refusing the impossible at config time
 
 ```mermaid
@@ -195,7 +221,7 @@ non-subtask hierarchy level — never from a name compiled into the script.
 Refusing at config time is the whole point: an impossible mapping discovered at
 reconcile time would already have created tickets it cannot parent.
 
-## The four effects, reported separately
+## The five effects, reported separately
 
 A run reports what it did to each surface independently, so a partial success
 is legible rather than a single opaque "ok".
@@ -206,6 +232,7 @@ flowchart LR
     Run --> E2["Hooks<br/>present · missing · disabled · duplicated · leftover · unreadable"]
     Run --> E3["Gitignore<br/>covered · updated"]
     Run --> E4["README<br/>created · updated · unchanged · refused"]
+    Run --> E5["Task mirror (022)<br/>inert · created · written · unchanged · refused"]
 ```
 
 The README block is spliced through the neutral `engine/managed_section`

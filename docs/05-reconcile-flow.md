@@ -211,6 +211,36 @@ in the tracker survive too: a summary that no longer matches what the mirror
 last wrote is left alone and warned about by default, and only sent again
 under `--on-drift=proceed`.
 
+## The two task-mirror modes (022)
+
+`config_task_mirror_for` resolves each project to `subtask`, `checklist`, or
+the empty string — the caller, not the function, turns absence into
+behaviour. The single pre-022 gate (`task_type_id` non-empty) splits into
+independent conditions once a mode is in play:
+
+| Condition | `subtask` | `checklist` |
+| --- | --- | --- |
+| Read `tasks.md`, nest `tasks[]` under stories | yes | yes |
+| Assign durable identifiers into `tasks.md` | yes | **no** (FR-031) |
+| Plan sub-task writes (`plan_writes_tasks`) | yes | **no** |
+| Render a checklist into the story description | no | yes |
+
+In `checklist` mode the task list rides the **same** managed region every
+other block does — appended last, after the Design section — so it inherits
+the boundary guarantees above for free: a human's prose stays untouched, and
+the checklist zero-churns on an unchanged re-run through the same
+`_adf_resolve_managed` comparison. The trade this makes explicit (FR-019): a
+checklist entry carries only an entry's text and completion state — `files`,
+`depends_on`, `parallel`, and the task's own durable identifier are the detail
+the sub-task tier keeps and the checklist tier does not.
+
+Switching modes is detected from `tasks.md` alone, with no extra Jira read
+(research.md §6 of 022): a bound sub-task marker still present in `tasks.md`
+while the project is in `checklist` mode is exactly the record of a sub-task
+the mirror has abandoned (FR-033/FR-034); the reverse switch needs nothing
+new, because `recognition_run` already re-binds by that same preserved
+identifier.
+
 ## What the engine extracts from a specification
 
 ```mermaid

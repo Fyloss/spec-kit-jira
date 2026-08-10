@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # T017d [009, US2] — Mechanical guard for SC-011/FR-018/FR-019: every OS leg of
-# the `unit` job must run Pester in full AND the complete 132-scenario
+# the `unit` job must run Pester in full AND the complete 139-scenario
 # conformance corpus — never a shard of it. Decision 7 permits sharding the
 # corpus WITHIN one OS (multiple runners of the SAME os value); it explicitly
 # FORBIDS spreading scenarios ACROSS the three OSes, which would leave no host
@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (132)" {
+@test "the conformance corpus has exactly the recorded scenario count (139)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -61,8 +61,12 @@ setup() {
   # 021 adds one: us021-prefetch-immediate-consistency —
   # contracts/recognition-prefetch.md §6, the "ticket created seconds
   # earlier" immediate-consistency acceptance scenario (131 -> 132).
+  # 022 adds seven: us022-checklist-two-phases, us022-checklist-unchanged-rerun,
+  # us022-checklist-entry-completed, us022-checklist-crlf,
+  # us022-switch-to-checklist, us022-switch-to-subtask, us022-config-question
+  # (132 -> 139).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 132 ]
+  [ "${count}" -eq 139 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

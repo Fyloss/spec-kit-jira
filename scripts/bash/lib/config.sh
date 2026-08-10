@@ -680,7 +680,7 @@ def branchpattern:
    then "projects must be a non-empty array" else empty end),
   (if (.routing_default|type) != "string" or ((.routing_default|projkey) != true)
    then "routing_default must be a valid project key" else empty end),
-  (keys_unsorted[] | select(IN("version_compat","projects","routing","routing_default","privacy","teams","field_defaults")|not)
+  (keys_unsorted[] | select(IN("version_compat","projects","routing","routing_default","privacy","teams","field_defaults","task_mirror")|not)
    | "unknown top-level key: \(.)"),
   ( . as $top
     | ($top.projects // []) | map(.key) as $declaredKeys
@@ -710,6 +710,22 @@ def branchpattern:
                 )
             )
         )
+      )
+  ),
+  (if (has("task_mirror")) and ((.task_mirror|type) != "object") then
+    "task_mirror must be a mapping"
+   else empty end),
+  ( . as $top
+    | ($top.projects // []) | map(.key) as $declaredKeys
+    | (select(($top.task_mirror // {})|type == "object") | $top.task_mirror // {}) | to_entries[] as $tm
+    | ($tm.key) as $tmk | ($tm.value) as $tmv
+    | (
+        (if ($declaredKeys | index($tmk)) == null then
+          "task_mirror.\($tmk) names a project key that is not declared in projects[]"
+        else empty end),
+        (if ($tmv|IN("subtask","checklist")|not) then
+          "task_mirror.\($tmk) is '\''\($tmv)'\'' — accepted values are: subtask, checklist (answer with --task-mirror '\''\($tmk)=checklist'\'')"
+        else empty end)
       )
   ),
   ((.teams // []) | to_entries[] | .key as $i | .value as $t |
@@ -865,6 +881,28 @@ config_field_defaults_yaml() {
   local map="${1:-}"
   [[ -z "${map}" ]] && map='{}'
   jq -cn --argjson m "${map}" '{field_defaults: $m}' | config_to_yaml
+}
+
+# config_task_mirror_for <project_key> <merged-cfg-json> — one project's
+# `task_mirror` value (022, data-model.md §1): `subtask`, `checklist`, or the
+# empty string when the team has recorded nothing for this project. Absence
+# is a third state, not a default (contract §1) — the caller, not this
+# function, resolves the empty string into effective behaviour (contract
+# §7). Mirrors config_field_defaults_for in name, placement and return
+# discipline.
+config_task_mirror_for() {
+  local key="$1" cfg="$2"
+  jq -r --arg k "${key}" '(.task_mirror // {})[$k] // ""' <<< "${cfg}"
+}
+
+# config_task_mirror_yaml <task-mirror-map-json> — the canonical YAML text of
+# the whole top-level `task_mirror:` mapping (022, contract §3), keys sorted
+# so a re-run over unchanged input reproduces identical bytes. Mirrors
+# config_field_defaults_yaml in name, placement and return discipline.
+config_task_mirror_yaml() {
+  local map="${1:-}"
+  [[ -z "${map}" ]] && map='{}'
+  jq -cn --argjson m "${map}" '{task_mirror: $m}' | config_to_yaml
 }
 
 # _cfg_local_path <config_dir> — the local binding's path.

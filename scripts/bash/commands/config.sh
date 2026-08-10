@@ -182,6 +182,48 @@ _config_style_flag_for() {
   printf '%s' "${out}"
 }
 
+# _config_task_mirror_flag_for <project-key> <task-mirrors-string> — the
+# operator's --task-mirror answer for one project (last occurrence wins), or
+# empty when none was given this run (022, contract §4). Mirrors
+# _config_style_flag_for.
+_config_task_mirror_flag_for() {
+  local key="$1" task_mirrors="$2" tok out=""
+  for tok in ${task_mirrors}; do
+    [[ "${tok}" == "${key}="* ]] && out="${tok#*=}"
+  done
+  printf '%s' "${out}"
+}
+
+# _config_task_mirror_question <project-key> — the closed question line
+# (022, contract §5 "Asked"), reported per project when nothing is recorded
+# for it, whether or not a task role is declared (FR-005/FR-008).
+_config_task_mirror_question() {
+  local pkey="$1"
+  printf "config: project %s: how should tasks be mirrored — choose one of: subtask, checklist (answer with --task-mirror '%s=checklist'). Recording nothing keeps today's behaviour: one sub-task per task when a task role is declared, and no task tier otherwise." \
+    "${pkey}" "${pkey}"
+}
+
+# _config_task_mirror_fr012_note <project-key> — reported at config time
+# (022, contract §5 "FR-012 check") when the recorded value is 'subtask' and
+# no sub-task issue type can be resolved for the project.
+_config_task_mirror_fr012_note() {
+  local pkey="$1"
+  printf "config: project %s: task_mirror is 'subtask' but no sub-task issue type is resolved for this project — declare hierarchy.task, or switch with --task-mirror '%s=checklist'" \
+    "${pkey}" "${pkey}"
+}
+
+# _config_task_mirror_effect_line <project-key> <effective-value> <status> —
+# the ceremony's per-project effect line (022, contract §6), reported
+# alongside the effects the run already reports separately (FR-013).
+_config_task_mirror_effect_line() {
+  local pkey="$1" effective="$2" status="$3"
+  if [[ -z "${effective}" ]]; then
+    printf "Task mirror: %s — not recorded; today's behaviour applies" "${pkey}"
+  else
+    printf 'Task mirror: %s — %s (%s)' "${pkey}" "${effective}" "${status}"
+  fi
+}
+
 # _config_resolve_style <project-key> <api-style> <committed-style> <style-flag>
 # Per-project style resolution (002 US1, FR-001/FR-002): unambiguous API signal
 # (agreeing with any committed declaration) -> "api"; otherwise the operator's
@@ -621,6 +663,84 @@ _config_field_defaults_write() {
   return 0
 }
 
+# Marker tokens for the task_mirror managed region (022, contract §3).
+# Substrings, not full lines — mirrors _CONFIG_FIELD_DEFAULTS_BEGIN's
+# convention.
+_CONFIG_TASK_MIRROR_BEGIN='# --- spec-kit-jira:task_mirror:begin ---'
+_CONFIG_TASK_MIRROR_END='# --- spec-kit-jira:task_mirror:end ---'
+
+# _config_task_mirror_block <map-json> — the region's full text (markers
+# included), no trailing newline. Mirrors _config_field_defaults_block.
+_config_task_mirror_block() {
+  local map="${1:-}"
+  [[ -z "${map}" ]] && map='{}'
+  local yaml
+  yaml="$(config_task_mirror_yaml "${map}")" || return $?
+  cat <<BLOCK
+${_CONFIG_TASK_MIRROR_BEGIN}
+# How each project's task list reaches Jira (022), written by
+# \`/speckit.jira.config\`. \`subtask\` creates one sub-task per task;
+# \`checklist\` writes one checklist into each story instead. Edit a value
+# here by hand if you like — keep it between these markers; an entry outside
+# them is a duplicate top-level key and the next read refuses it (exit 4).
+${yaml}
+${_CONFIG_TASK_MIRROR_END}
+BLOCK
+}
+
+# _config_task_mirror_write <config.yml-path> <map-json> <dry_run> — splice
+# the resolved task_mirror map into the team config through the existing
+# managed_section_splice, mirroring _config_field_defaults_write exactly.
+# Prints a status token (created|written|unchanged|refused|inert) and
+# returns 0, or EXIT_CONFIG (4) on malformed markers (zero writes). `inert`:
+# an empty map and a file that has never carried the region are left
+# completely untouched — the key is never introduced for a team that has
+# recorded nothing (FR-002, FR-011).
+_config_task_mirror_write() {
+  local path="$1" map="${2:-}" dry="${3:-false}"
+  [[ -z "${map}" ]] && map='{}'
+
+  local current="" existed="false"
+  if [[ -f "${path}" ]]; then
+    existed="true"
+    current="$(cat "${path}"; printf x)"; current="${current%x}"
+  fi
+
+  if [[ "$(jq -r 'length' <<< "${map}")" -eq 0 && "${current}" != *"${_CONFIG_TASK_MIRROR_BEGIN}"* ]]; then
+    printf 'inert'
+    return 0
+  fi
+
+  local block
+  block="$(_config_task_mirror_block "${map}")" || return $?
+
+  local tmp
+  tmp="$(mktemp)"
+  if ! printf '%s' "${current}" | managed_section_splice \
+      "${_CONFIG_TASK_MIRROR_BEGIN}" "${_CONFIG_TASK_MIRROR_END}" "${block}" > "${tmp}"; then
+    rm -f "${tmp}"
+    printf 'refused'
+    return "${EXIT_CONFIG}"
+  fi
+
+  local status
+  if [[ "${existed}" == "true" ]] && cmp -s "${tmp}" "${path}"; then
+    status="unchanged"
+  elif [[ "${existed}" == "false" ]]; then
+    status="created"
+  else
+    status="written"
+  fi
+
+  if [[ "${dry}" != "true" && "${status}" != "unchanged" ]]; then
+    mv "${tmp}" "${path}"
+  else
+    rm -f "${tmp}"
+  fi
+  printf '%s' "${status}"
+  return 0
+}
+
 # _config_gitignore_effect <repo-root> <dry_run> — enforce gitignore coverage of
 # the gitignored config layer (002 US3, FR-019): config.local.yml, .env, and the
 # new personal.yml. Only missing exact lines are appended, idempotently; an
@@ -772,6 +892,7 @@ cmd_config() {
   # --help; re-parse here so the command is runnable standalone.
   local parsed json="false" dry_run="false" exit_code="0" error="" styles="" args="" enable_hooks="" issue_types=""
   local field_defaults=""
+  local task_mirrors=""
   parsed="$(cli_parse "$@")"
   while IFS='=' read -r key value; do
     case "${key}" in
@@ -781,6 +902,7 @@ cmd_config() {
       issue_types) issue_types="${value}" ;;
       enable_hooks) enable_hooks="${value}" ;;
       field_defaults) field_defaults="${value}" ;;
+      task_mirrors) task_mirrors="${value}" ;;
       args) args="${value}" ;;
       exit) exit_code="${value}" ;;
       error) error="${value}" ;;
@@ -872,6 +994,7 @@ cmd_config() {
   local resolved nproj=0 pkey binding rids proj_styles='{}'
   local api_style committed style_flag style_resolved style style_source
   local proj_roles='{}' role_notes="" proj_field_defaults='{}' fd_notes=""
+  local proj_task_mirror='{}' tm_notes=""
   resolved="$(jq -c '.resolved_ids // {}' <<< "${existing}")"
   while IFS= read -r pkey; do
     [[ -z "${pkey}" ]] && continue
@@ -910,6 +1033,33 @@ cmd_config() {
       printf '%s\n' "${ordering_msg}" >&2
       return "${EXIT_CONFIG}"
     fi
+
+    # Task-mirror ceremony (022, contract §5/§6): resolve this project's
+    # effective value (this run's --task-mirror answer, else whatever is
+    # already recorded), report the closed question when nothing ends up
+    # recorded, the FR-012 remedy when 'subtask' has no resolvable sub-task
+    # type, and the per-project effect line — always, in every case.
+    local tm_recorded tm_flag tm_effective tm_status
+    tm_recorded="$(config_task_mirror_for "${pkey}" "${cfg}")"
+    tm_flag="$(_config_task_mirror_flag_for "${pkey}" "${task_mirrors}")"
+    tm_effective="${tm_flag:-${tm_recorded}}"
+    if [[ -z "${tm_effective}" ]]; then
+      tm_notes="${tm_notes}${tm_notes:+$'\n'}$(_config_task_mirror_question "${pkey}")"
+    fi
+    if [[ "${tm_effective}" == "subtask" ]]; then
+      local tm_task_role_id
+      tm_task_role_id="$(jq -r '.task.id // empty' <<< "${roles}")"
+      if [[ -z "${tm_task_role_id}" ]]; then
+        tm_notes="${tm_notes}${tm_notes:+$'\n'}$(_config_task_mirror_fr012_note "${pkey}")"
+      fi
+    fi
+    if [[ -n "${tm_effective}" ]]; then
+      if [[ "${tm_effective}" != "${tm_recorded}" ]]; then tm_status="recorded"; else tm_status="unchanged"; fi
+      proj_task_mirror="$(jq -c --arg k "${pkey}" --arg v "${tm_effective}" '. + {($k): $v}' <<< "${proj_task_mirror}")"
+    else
+      tm_status=""
+    fi
+    tm_notes="${tm_notes}${tm_notes:+$'\n'}$(_config_task_mirror_effect_line "${pkey}" "${tm_effective}" "${tm_status}")"
 
     # Fetch required_fields / parent_link_available for every role id the
     # resolver selected that the initial discovery did not already cover
@@ -1062,6 +1212,21 @@ cmd_config() {
   fd_all="$(jq -cn --argjson base "$(jq -c '.field_defaults // {}' <<< "${cfg}")" --argjson upd "${proj_field_defaults}" '$base + $upd')"
   fd_write_status="$(_config_field_defaults_write "${configdir}/config.yml" "${fd_all}" "${dry_run}")" || return $?
 
+  # The task-mirror ceremony's per-project notes (022, contract §5/§6):
+  # never a warning, never a refusal — printed alongside the field-defaults
+  # and role notes.
+  [[ -n "${tm_notes}" ]] && printf '%s\n' "${tm_notes}" >&2
+
+  # Task-mirror write (022, contract §3): the union of every processed
+  # project's resolved value, overlaid onto whatever the committed config
+  # already held for OTHER projects this run did not touch. Absence is the
+  # off switch (FR-002, FR-011): `_config_task_mirror_write` never
+  # introduces the key when there is nothing to record and the region has
+  # never existed.
+  local tm_all tm_write_status
+  tm_all="$(jq -cn --argjson base "$(jq -c '.task_mirror // {}' <<< "${cfg}")" --argjson upd "${proj_task_mirror}" '$base + $upd')"
+  tm_write_status="$(_config_task_mirror_write "${configdir}/config.yml" "${tm_all}" "${dry_run}")" || return $?
+
   # Merge the resolved-id table into the machine-owned local layer, preserving
   # the operator's site_alias / overrides, and emit deterministic canonical YAML.
   local newlocal yaml
@@ -1137,13 +1302,15 @@ cmd_config() {
     --arg hs "${hooks_status}" --arg hd "${hooks_detail}" \
     --arg rs "${readme_status}" --arg rd "${readme_detail}" \
     --arg gs "${gitignore_status}" \
-    --arg fs "${fd_write_status}" '
+    --arg fs "${fd_write_status}" \
+    --arg tms "${tm_write_status}" '
     {
       discovery: {status: $ds, detail: $dd, projects: $dp},
       hooks:     {status: $hs, detail: $hd},
       readme:    {status: $rs, detail: $rd},
       gitignore: {status: $gs, detail: "personal.yml gitignore coverage"},
-      field_defaults: {status: $fs, detail: "recorded field defaults in config.yml"}
+      field_defaults: {status: $fs, detail: "recorded field defaults in config.yml"},
+      task_mirror: {status: $tms, detail: "recorded task mirror mode in config.yml"}
     }')"
 
   # §7.2/§7.3 notes (supersession, promotion): never a warning, never a

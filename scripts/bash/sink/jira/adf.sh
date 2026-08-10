@@ -24,6 +24,8 @@ source "${_adf_dir}/../../lib/output.sh"
 # The sink may consume the neutral engine (the boundary only forbids engine->sink).
 # shellcheck source=/dev/null
 source "${_adf_dir}/../../engine/managed_section.sh"
+# shellcheck source=/dev/null
+source "${_adf_dir}/../../engine/markdown.sh"
 
 # _ADF_MARK_DEFS_JQ — the neutral mark -> ADF mark map (research §1, feature
 # 016). THE ONLY place ADF mark names may appear (Constitution VIII). Shared
@@ -111,7 +113,7 @@ _adf_design_nodes() {
 # whole description for a bridge-created ticket, or the region below the delimiter
 # on a human-origin ticket.
 _adf_content_nodes() {
-  local content="$1" blocks ac design body panel design_nodes
+  local content="$1" mode="${2:-off}" blocks ac design body panel design_nodes checklist
   blocks="$(jq -c '.description.blocks // []' <<< "${content}")"
   ac="$(jq -c '.acceptance_criteria // []' <<< "${content}")"
   design="$(jq -c '.design // []' <<< "${content}")"
@@ -119,16 +121,69 @@ _adf_content_nodes() {
   body="$(_adf_blocks_to_nodes "${blocks}")"
   panel="$(_adf_gherkin_panel "${ac}")"
   design_nodes="$(_adf_design_nodes "${design}")"
+  # 022, contract §1: appended LAST, and only in checklist mode — every
+  # existing call site (mode defaulting to "off") stays byte-identical.
+  checklist="[]"
+  [[ "${mode}" == "checklist" ]] && checklist="$(_adf_checklist_nodes "${content}")"
 
   # kcov-excl-start — jq literal (string lines are not statements)
   jq -cn \
     --argjson body "${body}" \
     --argjson panel "${panel:-null}" \
-    --argjson design "$(jq -cs '.' <<< "${design_nodes}")" '
+    --argjson design "$(jq -cs '.' <<< "${design_nodes}")" \
+    --argjson checklist "${checklist}" '
     $body
     + (if $panel == null then []
        else [ {type:"heading", attrs:{level:3}, content:[{type:"text", text:"Acceptance Criteria"}]}, $panel ] end)
-    + $design'
+    + $design
+    + $checklist'
+  # kcov-excl-stop
+}
+
+# _adf_checklist_nodes <content-json> — a story's tasks rendered as one
+# checklist section (022, contracts/checklist-rendering.md §2-4): one `Tasks`
+# heading, one group per phase in first-appearance order, entries in
+# document order, a leading no-phase group carrying no phase paragraph.
+# Candidate B (research §1): the existing bulletList/listItem pair, each
+# entry's first span a state glyph — no node carries an identity attribute.
+# `[]` when there is no attributed task at all (FR-021: no heading, no empty
+# list).
+_adf_checklist_nodes() {
+  local content="$1" tasks n entries="[]" i=0
+  tasks="$(jq -c '.tasks // []' <<< "${content}")"
+  n="$(jq 'length' <<< "${tasks}")"
+  ((n == 0)) && { printf '[]'; return 0; }
+
+  while ((i < n)); do
+    local t title done_bit phase spans
+    t="$(jq -c ".[${i}]" <<< "${tasks}")"
+    title="$(jq -r '.title' <<< "${t}")"
+    done_bit="$(jq -r '.done' <<< "${t}")"
+    phase="$(jq -r '.phase // ""' <<< "${t}")"
+    spans="$(markdown_tokenize_inline "${title}")"
+    entries="$(jq -c --argjson s "${spans}" --argjson d "${done_bit}" --arg p "${phase}" \
+      '. + [{spans:$s, done:$d, phase:$p}]' <<< "${entries}")"
+    i=$((i + 1))
+  done
+
+  # kcov-excl-start — jq literal (string lines are not statements)
+  jq -c "${_ADF_MARK_DEFS_JQ}"'
+    def first_seen_order: reduce .[] as $p ([]; if index($p) then . else . + [$p] end);
+    . as $entries
+    | ($entries | map(select(.phase == ""))) as $nophase
+    | ($entries | map(select(.phase != ""))) as $phased
+    | ($phased | map(.phase) | first_seen_order) as $phase_order
+    | ( (if ($nophase|length) > 0 then [{phase:null, entries:$nophase}] else [] end)
+        + [ $phase_order[] as $ph | {phase:$ph, entries:($phased | map(select(.phase == $ph)))} ] ) as $groups
+    | [{type:"heading", attrs:{level:3}, content:[{type:"text", text:"Tasks"}]}]
+      + [ $groups[] |
+          ( if .phase != null then {type:"paragraph", content:[{type:"text", text:.phase, marks:[{type:"strong"}]}]} else empty end ),
+          {type:"bulletList", content:[ .entries[] |
+            {type:"listItem", content:[{type:"paragraph",
+               content: ([{type:"text", text:(if .done then "☑ " else "☐ " end)}] + (.spans|spans_to_adf))
+            }]}
+          ]}
+        ]' <<< "${entries}"
   # kcov-excl-stop
 }
 
@@ -297,9 +352,9 @@ _adf_resolve_managed() {
 #   Description resolution for the story/parent shape (018, T014; 019, T012).
 #   See _adf_resolve_managed for the contract §3 decision.
 adf_render_managed_description() {
-  local content="$1" existing="${2:-}" origin="${3:-}"
+  local content="$1" existing="${2:-}" origin="${3:-}" mode="${4:-off}"
   local managed
-  managed="$(_adf_content_nodes "${content}")"
+  managed="$(_adf_content_nodes "${content}" "${mode}")"
   _adf_resolve_managed "${managed}" "${existing}" "${origin}"
 }
 
@@ -314,4 +369,62 @@ adf_render_managed_task_description() {
   local managed
   managed="$(adf_render_task_description "${task}" | jq -c '.content')"
   _adf_resolve_managed "${managed}" "${existing}" "${origin}"
+}
+
+# _adf_checklist_normalise <nodes-json> — comparison-only normalisation
+# (022, contract §5): strip attrs.localId from every checklist node and
+# entry node, then the caller compares through json_canonical. A defensive
+# no-op under the shipped candidate B (bulletList/listItem carry no
+# identity attribute) — kept so a future move to candidate A is a one-file
+# change, following _summary_normalise's "for COMPARISON only" precedent.
+_adf_checklist_normalise() {
+  jq -c '[ .[] | del(.attrs.localId) | if has("content") then .content |= map(del(.attrs.localId)) else . end ]' <<< "$1"
+}
+
+# _adf_checklist_nodes_digest <nodes-json> — git hash-object --no-filters
+# over the canonical JSON of NORMALISED nodes. Empty input yields an empty
+# digest — absence means "no record yet", never "empty checklist".
+_adf_checklist_nodes_digest() {
+  local nodes="$1"
+  [[ "${nodes}" == "[]" ]] && { printf ''; return 0; }
+  _adf_checklist_normalise "${nodes}" | json_canonical | git hash-object --no-filters --stdin 2> /dev/null
+}
+
+# adf_checklist_digest <content-json> — the identity-stamp digest (022,
+# data-model.md §3): the digest of the story's DESIRED checklist nodes.
+# Empty when the story has no attributed task at all — no digest is ever
+# recorded for "no checklist" (absence means "no record yet", never "empty
+# checklist").
+adf_checklist_digest() {
+  local content="$1" nodes
+  nodes="$(_adf_checklist_nodes "${content}")"
+  _adf_checklist_nodes_digest "${nodes}"
+}
+
+# _adf_checklist_slice <managed-nodes-json> — the checklist portion of an
+# already-managed node array (022, contract §1/§5): everything from the
+# 'Tasks' heading onward — appended LAST, so this is exactly the suffix
+# starting at that heading, or [] when there is none.
+_adf_checklist_slice() {
+  local managed="$1"
+  jq -c '
+    . as $m
+    | ([range(0; ($m|length))
+        | select($m[.].type=="heading" and (($m[.].content[0].text? // "") == "Tasks"))][0]) as $idx
+    | if $idx == null then [] else $m[$idx:] end
+  ' <<< "${managed}"
+}
+
+# _adf_content_has_checklist <existing-doc-json> — true when a story's
+# CURRENT description (the full `{type, version, content}` doc, as read by
+# recognition) already carries a checklist section in its managed region
+# (022, FR-034's reverse-switch report). No new Jira read: the caller
+# already has this from recognition's own current-content fetch.
+_adf_content_has_checklist() {
+  local existing="${1:-{\}}"
+  [[ -z "${existing}" || "${existing}" == "null" ]] && existing='{}'
+  local managed
+  managed="$(jq -c '.content // []' <<< "${existing}" | managed_section_panel_split "$(adf_managed_marker)" | jq -c '.managed')"
+  local cl; cl="$(_adf_checklist_slice "${managed}")"
+  [[ "$(jq 'length' <<< "${cl}")" -gt 0 ]] && printf 'true' || printf 'false'
 }

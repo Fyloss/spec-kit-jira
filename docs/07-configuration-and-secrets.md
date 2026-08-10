@@ -14,6 +14,7 @@ flowchart TB
         A4["teams catalogue"]
         A5["privacy.allowlist"]
         A6["phase_status_map · halted_statuses"]
+        A7["task_mirror per project (022) — subtask | checklist"]
     end
 
     subgraph L2["2 · Local binding — GITIGNORED, machine-owned"]

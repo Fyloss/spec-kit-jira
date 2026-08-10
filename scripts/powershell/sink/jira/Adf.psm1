@@ -12,6 +12,10 @@ Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../lib/Output.psm1') -Force
 # The sink may consume the neutral engine (the boundary only forbids engine->sink).
 Import-Module (Join-Path $PSScriptRoot '../../engine/ManagedSection.psm1') -Force
+# No -Force: a -Force reimport here tears Markdown.psm1 out of a caller's
+# session scope when the caller already imported it (see AGENTS.md memory
+# powershell-import-force-clobbers-caller-scope).
+Import-Module (Join-Path $PSScriptRoot '../../engine/Markdown.psm1')
 
 function New-JiraAdfText {
     param([string] $Text)
@@ -196,7 +200,7 @@ function Get-JiraAdfContentNode {
     # The managed content-node list for a story (description body, acceptance
     # panel, Design section) — the bridge-owned managed section. Mirror of
     # _adf_content_nodes. Returns a List[object].
-    param([Parameter(Mandatory)] [string] $ContentJson)
+    param([Parameter(Mandatory)] [string] $ContentJson, [Parameter()] [string] $Mode = 'off')
     $content = $ContentJson | ConvertFrom-Json -Depth 100
 
     $blocks = @()
@@ -223,7 +227,164 @@ function Get-JiraAdfContentNode {
         foreach ($n in (New-JiraAdfDesignNode $design)) { $docContent.Add($n) }
     }
 
+
+    # 022, contract §1: appended LAST, and only in checklist mode — every
+    # existing call site (mode defaulting to 'off') stays byte-identical.
+    if ($Mode -eq 'checklist') {
+        foreach ($n in (Get-JiraAdfChecklistNode -ContentJson $ContentJson)) { $docContent.Add($n) }
+    }
+
     return $docContent
+}
+
+
+function Get-JiraAdfChecklistNode {
+    <#
+    .SYNOPSIS
+      A story's tasks rendered as one checklist section (022,
+      contracts/checklist-rendering.md §2-4): one 'Tasks' heading, one group
+      per phase in first-appearance order, entries in document order, a
+      leading no-phase group carrying no phase paragraph. Candidate B
+      (research §1): the existing bulletList/listItem pair, each entry's
+      first span a state glyph — no node carries an identity attribute.
+      Empty when there is no attributed task at all (FR-021). Mirror of
+      _adf_checklist_nodes.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $ContentJson)
+    $content = $ContentJson | ConvertFrom-Json -Depth 100
+    $nodes = [System.Collections.Generic.List[object]]::new()
+    $tasksProp = $content.PSObject.Properties['tasks']
+    $tasks = @()
+    if ($null -ne $tasksProp -and $null -ne $tasksProp.Value) { $tasks = @($tasksProp.Value) }
+    if ($tasks.Count -eq 0) { return $nodes }
+
+    $entries = [System.Collections.Generic.List[object]]::new()
+    foreach ($t in $tasks) {
+        $title = [string]$t.title
+        $done = [bool]$t.done
+        $phase = if ($t.PSObject.Properties.Name -contains 'phase' -and $null -ne $t.phase) { [string]$t.phase } else { '' }
+        $spansJson = ConvertTo-JiraMarkdownInlineSpanList -Text $title
+        $spans = @($spansJson | ConvertFrom-Json -Depth 100)
+        $entries.Add([pscustomobject]@{ Spans = $spans; Done = $done; Phase = $phase })
+    }
+
+    $nophase = @($entries | Where-Object { $_.Phase -eq '' })
+    $phased = @($entries | Where-Object { $_.Phase -ne '' })
+    $phaseOrder = [System.Collections.Generic.List[string]]::new()
+    foreach ($e in $phased) { if (-not $phaseOrder.Contains($e.Phase)) { $phaseOrder.Add($e.Phase) } }
+
+    $groups = [System.Collections.Generic.List[object]]::new()
+    if ($nophase.Count -gt 0) { $groups.Add([pscustomobject]@{ Phase = $null; Entries = $nophase }) }
+    foreach ($ph in $phaseOrder) {
+        $groups.Add([pscustomobject]@{ Phase = $ph; Entries = @($phased | Where-Object { $_.Phase -eq $ph }) })
+    }
+
+    $nodes.Add([ordered]@{ type = 'heading'; attrs = [ordered]@{ level = 3 }; content = @((New-JiraAdfText 'Tasks')) })
+    foreach ($g in $groups) {
+        if ($null -ne $g.Phase) {
+            $phaseText = [ordered]@{ type = 'text'; text = $g.Phase; marks = @([ordered]@{ type = 'strong' }) }
+            $nodes.Add([ordered]@{ type = 'paragraph'; content = @($phaseText) })
+        }
+        $li = [System.Collections.Generic.List[object]]::new()
+        foreach ($e in $g.Entries) {
+            $glyph = if ($e.Done) { [char]0x2611 + ' ' } else { [char]0x2610 + ' ' }
+            $paraContent = [System.Collections.Generic.List[object]]::new()
+            $paraContent.Add((New-JiraAdfText $glyph))
+            foreach ($n in (ConvertTo-JiraAdfTextNodeList -Spans $e.Spans)) { $paraContent.Add($n) }
+            $li.Add([ordered]@{ type = 'listItem'; content = @([ordered]@{ type = 'paragraph'; content = $paraContent }) })
+        }
+        $nodes.Add([ordered]@{ type = 'bulletList'; content = $li })
+    }
+    return $nodes
+}
+
+
+function ConvertTo-JiraAdfChecklistNormalized {
+    <#
+    .SYNOPSIS
+      Comparison-only normalisation (022, contract §5): strip attrs.localId
+      from every checklist node and entry node. A defensive no-op under the
+      shipped candidate B (bulletList/listItem carry no identity attribute).
+      Mirror of _adf_checklist_normalise.
+    #>
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $NodesJson)
+    $nodes = @($NodesJson | ConvertFrom-Json -Depth 100)
+    foreach ($n in $nodes) {
+        if ($n.PSObject.Properties.Name -contains 'attrs') { $n.PSObject.Properties.Remove('attrs') }
+        if ($n.PSObject.Properties.Name -contains 'content') {
+            foreach ($c in @($n.content)) {
+                if ($c.PSObject.Properties.Name -contains 'attrs') { $c.PSObject.Properties.Remove('attrs') }
+            }
+        }
+    }
+    return (ConvertTo-JiraJsonValue $nodes)
+}
+
+function Get-JiraAdfChecklistNodesDigest {
+    <#
+    .SYNOPSIS
+      git hash-object --no-filters over the canonical JSON of NORMALISED
+      nodes. Empty input yields an empty digest. Mirror of
+      _adf_checklist_nodes_digest.
+    #>
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $NodesJson)
+    if ($NodesJson -eq '[]') { return '' }
+    $normalized = ConvertTo-JiraAdfChecklistNormalized -NodesJson $NodesJson
+    $canonical = ConvertTo-JiraCanonicalJson -Json $normalized
+    $hash = ($canonical | & git hash-object --no-filters --stdin 2>$null | Select-Object -First 1)
+    if ($null -eq $hash) { return '' }
+    return $hash.Trim()
+}
+
+function Get-JiraAdfChecklistDigest {
+    <#
+    .SYNOPSIS
+      The identity-stamp digest (022, data-model.md §3): the digest of the
+      story's DESIRED checklist nodes. Empty when the story has no
+      attributed task at all. Mirror of adf_checklist_digest.
+    #>
+    param([Parameter(Mandatory)] [string] $ContentJson)
+    $nodes = ConvertTo-JiraJsonValue (Get-JiraAdfChecklistNode -ContentJson $ContentJson)
+    return (Get-JiraAdfChecklistNodesDigest -NodesJson $nodes)
+}
+
+function Get-JiraAdfChecklistSlice {
+    <#
+    .SYNOPSIS
+      The checklist portion of an already-managed node array (022, contract
+      §1/§5): everything from the 'Tasks' heading onward, or [] when there
+      is none. Mirror of _adf_checklist_slice.
+    #>
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $ManagedJson)
+    $managed = @($ManagedJson | ConvertFrom-Json -Depth 100)
+    $idx = -1
+    for ($i = 0; $i -lt $managed.Count; $i++) {
+        $n = $managed[$i]
+        if ($n.type -eq 'heading' -and $n.content -and $n.content[0].text -eq 'Tasks') { $idx = $i; break }
+    }
+    if ($idx -lt 0) { return (ConvertTo-JiraJsonValue @()) }
+    return (ConvertTo-JiraJsonValue @($managed[$idx..($managed.Count - 1)]))
+}
+
+function Test-JiraAdfContentHasChecklist {
+    <#
+    .SYNOPSIS
+      True when a story's CURRENT description (the full {type, version,
+      content} doc, as read by recognition) already carries a checklist
+      section in its managed region (022, FR-034's reverse-switch report).
+      No new Jira read: the caller already has this from recognition's own
+      current-content fetch. Mirror of _adf_content_has_checklist.
+    #>
+    param([string] $ExistingJson = '{}')
+    if ([string]::IsNullOrEmpty($ExistingJson) -or $ExistingJson -eq 'null') { $ExistingJson = '{}' }
+    $existing = $ExistingJson | ConvertFrom-Json -Depth 100
+    $contentProp = $existing.PSObject.Properties['content']
+    $contentJson = if ($null -ne $contentProp) { ConvertTo-JiraJsonValue @($contentProp.Value) } else { '[]' }
+    $managed = (Split-JiraManagedSectionPanel -Marker (Get-JiraManagedMarker) -ContentJson $contentJson | ConvertFrom-Json -Depth 100).managed
+    $managedJson = ConvertTo-JiraJsonValue @($managed)
+    $cl = Get-JiraAdfChecklistSlice -ManagedJson $managedJson | ConvertFrom-Json -Depth 100
+    return (@($cl).Count -gt 0)
 }
 
 function ConvertTo-JiraAdfDocument {
@@ -357,10 +518,11 @@ function ConvertTo-JiraManagedAdfDocument {
     param(
         [Parameter(Mandatory)] [string] $ContentJson,
         [Parameter()] [AllowEmptyString()] [string] $ExistingJson = '',
-        [Parameter()] [AllowEmptyString()] [string] $Origin = ''
+        [Parameter()] [AllowEmptyString()] [string] $Origin = '',
+        [Parameter()] [string] $Mode = 'off'
     )
     $managed = [System.Collections.Generic.List[object]]::new()
-    foreach ($n in @(Get-JiraAdfContentNode -ContentJson $ContentJson)) { $managed.Add($n) }
+    foreach ($n in @(Get-JiraAdfContentNode -ContentJson $ContentJson -Mode $Mode)) { $managed.Add($n) }
     return (Resolve-JiraManagedAdfContent -Managed $managed -ExistingJson $ExistingJson -Origin $Origin)
 }
 
@@ -460,4 +622,6 @@ function ConvertTo-JiraAdfTaskDescription {
 }
 
 Export-ModuleMember -Function ConvertTo-JiraAdfDocument, ConvertTo-JiraManagedAdfDocument, ConvertTo-JiraManagedTaskAdfDocument, `
-    Get-JiraManagedMarker, Get-JiraAdfTaskSummary, ConvertTo-JiraAdfTaskDescription
+    Get-JiraManagedMarker, Get-JiraAdfTaskSummary, ConvertTo-JiraAdfTaskDescription, Get-JiraAdfChecklistNode, `
+    ConvertTo-JiraAdfChecklistNormalized, Get-JiraAdfChecklistNodesDigest, Get-JiraAdfChecklistDigest, Get-JiraAdfChecklistSlice, `
+    Test-JiraAdfContentHasChecklist
