@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-10
+
+### Added
+
+- A new `task_mirror` setting controls how a story's `tasks.md` list reaches
+  Jira: `subtask` (the existing tier, one issue per task) or `checklist`,
+  which embeds the same list as a single checklist inside the story's own
+  ticket instead. It stays editable afterwards in `config.yml`, and
+  `--task-mirror '<project-key>=checklist'` offers the choice on
+  `specify jira config`.
+- Under `checklist` mode, reconcile keeps the embedded list current exactly
+  as the sub-task tier does — a task checked off in `tasks.md` ticks the
+  matching entry on the next run — and a switch between the two modes is
+  detected and reported rather than silently mixing the representations.
+
 ## [0.13.0] - 2026-09-07
 
 ### Added
