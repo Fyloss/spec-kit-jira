@@ -125,7 +125,14 @@ jobs:
           # 2026-08-09), and the traced phase runs the same suite with xtrace
           # exported into every child. A 20-minute clock could never have been
           # met — it expired on every run once the suite outgrew it.
-          SPEC_KIT_JIRA_COVERAGE_TIMEOUT: 1200
+          #
+          # The kcov phase drives all 133 conformance scenarios serially,
+          # in-process, under the tracer; it fitted in 456 s for the whole job
+          # when the corpus was smaller (2026-07-27) and no run since has been
+          # allowed to finish, so this bound is deliberately generous. A clock
+          # is a ceiling, not a duration — an unused minute costs nothing, and
+          # the runner now names which clock expired if one does.
+          SPEC_KIT_JIRA_COVERAGE_TIMEOUT: 2400
           SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT: 5400
         run: |
           set -euo pipefail
@@ -139,6 +146,22 @@ jobs:
           # nothing) and the xtrace-suspended credential/transport machinery
           # (NFR-3: secrets must never reach a trace).
           mkdir -p coverage
+          # The runner explains itself on stderr, and stderr is the job log —
+          # which is 403 for a reader without repository admin rights here, as
+          # is the artifact. It mirrors those explanations into a file for
+          # exactly that reason; this lifts them into an annotation, the one
+          # channel that stays readable.
+          annotate_diagnostics() {
+            local f='coverage/bash-scratch/diagnostics.log'
+            [ -s "${f}" ] || return 0
+            echo "::error::coverage runner: $(tr '\n' ' ' < "${f}" | cut -c1-900)"
+            {
+              echo "### Why the coverage runner stopped"
+              echo '```'
+              cat "${f}"
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          }
           rc=0
           # stdout is teed for the step summary; stderr is deliberately NOT
           # redirected — kcov swaps its own stderr for the traced program's pipe
@@ -156,15 +179,28 @@ jobs:
           # 2 is the runner's "could not measure" (no kcov, unusable
           # interpreter, empty report); only that hands over to the fallback.
           if [ "${rc}" -eq 2 ]; then
+            annotate_diagnostics
             # The parallel runner, not a serial `bats -r`: this re-run only
             # proves the suite is green before the fallback vouches for it,
             # and the serial form alone outgrows the step's own timeout.
-            tests/run-bash.sh
+            #
+            # Its exit code is CAPTURED, never left to `set -e`: an abort here
+            # takes the step out before `rescue` is recorded, and the fallback
+            # then reports "no verdict" for a run whose cause is known exactly.
+            # A red suite under the fallback IS a genuine failure — it just has
+            # to say so itself.
+            suite_rc=0
+            tests/run-bash.sh || suite_rc=$?
+            if [ "${suite_rc}" -ne 0 ]; then
+              echo "::error::kcov could not measure, AND the suite is red on this runner (tests/run-bash.sh exit ${suite_rc}) — the traceability fallback cannot vouch for a red suite. The FAIL lines above name the files."
+              exit 1
+            fi
             echo "suite green but coverage unmeasurable — using the traceability fallback"
             echo "rescue=true" >> "${GITHUB_OUTPUT}"
             exit 42
           fi
           if [ "${rc}" -ne 0 ]; then
+            annotate_diagnostics
             echo "::error::Bash coverage is below the 80% gate"
           fi
           exit "${rc}"
