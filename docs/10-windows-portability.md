@@ -104,10 +104,23 @@ in the *other* host's bytes, which is why it survived until the Pester twin of
 `§5 T1` was the only red test on `windows-latest`.
 
 Rule: a path that ends up in **output** — a message, a summary, a written file
-— must be cut out of the caller's own bytes (`LastIndexOfAny('/', '\')` and a
-substring), never obtained from a provider primitive. Using the primitives to
-*reach* the filesystem is fine and correct; using them to *spell* a path back
-to the operator is not.
+— must be cut out of the caller's own bytes, never obtained from a provider
+primitive. Using the primitives to *reach* the filesystem is fine and correct;
+using them to *spell* a path back to the operator is not.
+
+`String.LastIndexOfAny` takes a `char[]`, so the cast is not optional — the
+two-argument spelling matches no overload and throws:
+
+```powershell
+$cut = $path.LastIndexOfAny([char[]]@('/', '\'))
+if ($cut -ge 0) {
+    $sep    = $path[$cut]              # the separator the CALLER used
+    $parent = $path.Substring(0, $cut)
+}
+```
+
+Rejoin with `$sep`, not with a literal `/` or `\`: that is what keeps the
+bytes identical to the Bash twin's `dirname` on both hosts.
 
 ## The probe loop — how to ask Windows a question
 
