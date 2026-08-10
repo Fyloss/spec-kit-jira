@@ -40,6 +40,26 @@ BeforeAll {
     # on Unix, so a plain Get-ChildItem over .github/workflows lists nothing.
     $KcovJobs = @(Get-ChildItem -Path $WorkflowDir -Filter '*.yml' -Force |
         ForEach-Object { Get-KcovJob -Path $_.FullName })
+
+    # The step that drives tests/coverage/bash-coverage.sh: its own ceiling and
+    # the two wall clocks it hands the runner.
+    function Get-CoverageStepBudget {
+        param([string] $Path)
+
+        $budget = [pscustomobject]@{ Ceiling = $null; Kcov = $null; Bats = $null }
+        $inStep = $false
+        foreach ($line in (Get-Content -LiteralPath $Path)) {
+            if ($line -eq '      - name: Measure statement coverage with kcov') { $inStep = $true; continue }
+            if (-not $inStep) { continue }
+            if ($line -match '^      - name:') { $inStep = $false; continue }
+            if ($line -match '^        timeout-minutes: *(\d+)') { $budget.Ceiling = [int]$Matches[1]; continue }
+            if ($line -match 'SPEC_KIT_JIRA_COVERAGE_TIMEOUT: *(\d+)') { $budget.Kcov = [int]$Matches[1]; continue }
+            if ($line -match 'SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT: *(\d+)') { $budget.Bats = [int]$Matches[1]; continue }
+        }
+        return $budget
+    }
+
+    $CoverageBudget = Get-CoverageStepBudget -Path (Join-Path $WorkflowDir 'gates.yml')
 }
 
 Describe 'Workflow runner images for kcov' {
@@ -53,5 +73,20 @@ Describe 'Workflow runner images for kcov' {
         }
         $detail = ($dropped | ForEach-Object { "$($_.File): job '$($_.Name)' on $($_.RunsOn)" }) -join '; '
         $detail | Should -BeNullOrEmpty
+    }
+
+    It "the coverage step's ceiling sits above both of its inner wall clocks" {
+        # The runner bounds each phase itself so that an overrun REPORTS: how far
+        # the exercise got, the tail of kcov.log, which clock expired. A ceiling
+        # below the sum of those clocks makes that impossible — the runner is
+        # killed mid-phase and the fallback, seeing no `rescue`, calls it a
+        # genuine failure. That inversion (15 minutes of ceiling against 30
+        # minutes of inner budget) left this gate red and unreadable from
+        # 2026-07-28 on.
+        $CoverageBudget.Ceiling | Should -Not -BeNullOrEmpty
+        $CoverageBudget.Kcov | Should -Not -BeNullOrEmpty
+        $CoverageBudget.Bats | Should -Not -BeNullOrEmpty
+        ($CoverageBudget.Ceiling * 60) |
+            Should -BeGreaterThan ($CoverageBudget.Kcov + $CoverageBudget.Bats)
     }
 }

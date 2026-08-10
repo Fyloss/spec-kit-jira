@@ -29,8 +29,9 @@ env:
 
 jobs:
   changes:
-    # Cheap gate in front of the expensive one: kcov+xtrace costs 20-35 minutes
-    # per run (see bash-coverage.sh), so PRs that never touch Bash-covered paths
+    # Cheap gate in front of the expensive one: kcov+xtrace runs the whole unit
+    # suite a second time under a trace, which costs more than an hour on this
+    # image (see bash-coverage.sh), so PRs that never touch Bash-covered paths
     # skip it entirely. Push to main always runs the real job regardless of this
     # output — Constitution XIII's "measured on every CI run" holds unconditionally
     # there; this filter only saves iteration time on PRs whose diff cannot move
@@ -109,10 +110,23 @@ jobs:
         # explicit rc=2 path below, so a kill-by-timeout reaches the fallback
         # with `rescue` unset and that step fails the job genuinely (FR-016).
         continue-on-error: true
-        timeout-minutes: 15
+        # INVARIANT: this ceiling must stay ABOVE the two inner wall clocks plus
+        # the rescue re-run below (20 + 90 + ~65 minutes). The inner clocks are
+        # the diagnostics — they print how far the exercise got and the tail of
+        # kcov.log — and a step killed underneath them takes that record with it.
+        # That inversion is what made this job red and undiagnosable from
+        # 2026-07-28 on: the step died at 15 minutes with 30 minutes of inner
+        # budget outstanding, so the fallback saw `rescue` unset and reported
+        # "failed genuinely" for what was only ever a run that had not finished.
+        timeout-minutes: 180
         env:
-          SPEC_KIT_JIRA_COVERAGE_TIMEOUT: 600
-          SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT: 1200
+          # Sized from the runner, not from a laptop: `tests/run-bash.sh` alone
+          # takes ~63 minutes on this image (CI job "Unit suites (ubuntu-latest)",
+          # 2026-08-09), and the traced phase runs the same suite with xtrace
+          # exported into every child. A 20-minute clock could never have been
+          # met — it expired on every run once the suite outgrew it.
+          SPEC_KIT_JIRA_COVERAGE_TIMEOUT: 1200
+          SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT: 5400
         run: |
           set -euo pipefail
           # Never `kcov ... bats`: kcov instruments bats-core's own DEBUG-trap
@@ -159,7 +173,17 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ steps.kcov.outputs.rescue }}" != "true" ]; then
-            echo "::error::coverage gate failed genuinely (suite red or coverage below 80%)"
+            # Name the cause. A verdict line in the gate log means the gate did
+            # run and the number was short; no verdict line means the step never
+            # reached one — killed at its ceiling, or aborted before the merge —
+            # and those two are not the same failure to go and fix. The message
+            # is an annotation on purpose: it is the one part of this job a
+            # reader without repository admin rights can still see.
+            if grep -q '^Bash statement coverage:' coverage/bash-gate.log 2> /dev/null; then
+              echo "::error::$(grep -m1 '^Bash statement coverage:' coverage/bash-gate.log) — below the 80% gate"
+            else
+              echo "::error::the coverage step produced no verdict — it was killed at its ceiling or aborted before the merge; progress.log and kcov.log are in the bash-kcov-coverage artifact"
+            fi
             exit 1
           fi
           # Every shipped script must be referenced by at least one test file.
@@ -177,7 +201,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bash-kcov-coverage
-          path: coverage/bash
+          # The whole of coverage/, not coverage/bash alone: the runner writes
+          # its exercise scratch to `<report-dir>-scratch` (kcov owns the report
+          # directory itself), and progress.log lives there. Uploading only the
+          # report discarded the one record of where a stalled run got to —
+          # exactly the file the timeout diagnostics tell a reader to consult.
+          path: coverage/
           if-no-files-found: ignore
 
   coverage-pwsh:
