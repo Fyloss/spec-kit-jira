@@ -58,11 +58,11 @@ Describe 'Invoke-JiraReconcile — mode-switch detection and reporting' {
     AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
 
     It 'T088 — switching to checklist mode writes to no sub-task: zero write actions of any kind (FR-033)' {
-        $null = Invoke-Captured -ArgList @('reconcile', $Spec, '--json')
+        $null = Invoke-Captured -ArgList @('reconcile', $script:Spec, '--json')
         $callsBefore = @(Get-JiraMockCallLog -Mock $script:M).Count
 
         Add-TaskMirrorChecklist
-        $out = Invoke-Captured -ArgList @('reconcile', $Spec, '--json')
+        $out = Invoke-Captured -ArgList @('reconcile', $script:Spec, '--json')
         $r = $out | ConvertFrom-Json -Depth 100
         $r.exit_code | Should -Be 0
         $calls = @(Get-JiraMockCallLog -Mock $script:M)
@@ -72,9 +72,9 @@ Describe 'Invoke-JiraReconcile — mode-switch detection and reporting' {
     }
 
     It 'T090 — the outbound switch report names the story, the abandoned count, and an exact issue-in query (FR-034)' {
-        $null = Invoke-Captured -ArgList @('reconcile', $Spec, '--json')
+        $null = Invoke-Captured -ArgList @('reconcile', $script:Spec, '--json')
         Add-TaskMirrorChecklist
-        $out = Invoke-Captured -ArgList @('reconcile', $Spec, '--json')
+        $out = Invoke-Captured -ArgList @('reconcile', $script:Spec, '--json')
         $notes = ($out | ConvertFrom-Json -Depth 100).notes -join "`n"
         $notes | Should -Match ([regex]::Escape('switched to checklist mode'))
         $notes | Should -Match ([regex]::Escape('First story'))
@@ -83,15 +83,15 @@ Describe 'Invoke-JiraReconcile — mode-switch detection and reporting' {
     }
 
     It 'T092/T093 — switching back removes the Tasks section and re-binds rather than duplicates (FR-035)' {
-        $null = Invoke-Captured -ArgList @('reconcile', $Spec, '--json')
+        $null = Invoke-Captured -ArgList @('reconcile', $script:Spec, '--json')
         Add-TaskMirrorChecklist
-        $null = Invoke-Captured -ArgList @('reconcile', $Spec, '--json')
+        $null = Invoke-Captured -ArgList @('reconcile', $script:Spec, '--json')
         $descBefore = Invoke-RestMethod -Uri "$($script:M.BaseUrl)/rest/api/3/issue/TASKP-2"
         $hasTasksBefore = @($descBefore.fields.description.content | ForEach-Object { $_.content } | ForEach-Object { $_.text }) -contains 'Tasks'
         $hasTasksBefore | Should -BeTrue
 
         Remove-TaskMirrorChecklist
-        $out = Invoke-Captured -ArgList @('reconcile', $Spec, '--json')
+        $out = Invoke-Captured -ArgList @('reconcile', $script:Spec, '--json')
         $r = $out | ConvertFrom-Json -Depth 100
         $r.exit_code | Should -Be 0
         $descAfter = Invoke-RestMethod -Uri "$($script:M.BaseUrl)/rest/api/3/issue/TASKP-2"
@@ -102,11 +102,11 @@ Describe 'Invoke-JiraReconcile — mode-switch detection and reporting' {
     }
 
     It 'T093a/T093b — the checklist-to-subtask switch is also reported once, naming the re-bound count, no query (FR-034)' {
-        $null = Invoke-Captured -ArgList @('reconcile', $Spec, '--json')
+        $null = Invoke-Captured -ArgList @('reconcile', $script:Spec, '--json')
         Add-TaskMirrorChecklist
-        $null = Invoke-Captured -ArgList @('reconcile', $Spec, '--json')
+        $null = Invoke-Captured -ArgList @('reconcile', $script:Spec, '--json')
         Remove-TaskMirrorChecklist
-        $out = Invoke-Captured -ArgList @('reconcile', $Spec, '--json')
+        $out = Invoke-Captured -ArgList @('reconcile', $script:Spec, '--json')
         $notes = ($out | ConvertFrom-Json -Depth 100).notes -join "`n"
         $notes | Should -Match ([regex]::Escape('switched back to subtask mode'))
         $notes | Should -Match ([regex]::Escape('1 sub-task'))
@@ -115,9 +115,9 @@ Describe 'Invoke-JiraReconcile — mode-switch detection and reporting' {
     }
 
     It 'T093c — the outbound switch report never claims full migration of an unaffected story' {
-        $null = Invoke-Captured -ArgList @('reconcile', $Spec, '--json')
+        $null = Invoke-Captured -ArgList @('reconcile', $script:Spec, '--json')
         Add-TaskMirrorChecklist
-        $out = Invoke-Captured -ArgList @('reconcile', $Spec, '--json')
+        $out = Invoke-Captured -ArgList @('reconcile', $script:Spec, '--json')
         $notes = ($out | ConvertFrom-Json -Depth 100).notes -join "`n"
         $notes | Should -Not -Match 'fully migrated'
     }

@@ -300,6 +300,20 @@ function Get-JiraAdfChecklistNode {
 }
 
 
+function Remove-JiraAdfLocalId {
+    <#
+    .SYNOPSIS
+      Delete attrs.localId from one node, leaving every other attribute — and
+      the attrs object itself, even once emptied — in place. Mirror of jq's
+      del(.attrs.localId), whose exact leavings the digest is taken over.
+    #>
+    param($Node)
+    if ($null -eq $Node) { return }
+    if ($Node.PSObject.Properties.Name -notcontains 'attrs') { return }
+    if ($null -eq $Node.attrs) { return }
+    if ($Node.attrs.PSObject.Properties.Name -contains 'localId') { $Node.attrs.PSObject.Properties.Remove('localId') }
+}
+
 function ConvertTo-JiraAdfChecklistNormalized {
     <#
     .SYNOPSIS
@@ -311,11 +325,9 @@ function ConvertTo-JiraAdfChecklistNormalized {
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $NodesJson)
     $nodes = @($NodesJson | ConvertFrom-Json -Depth 100)
     foreach ($n in $nodes) {
-        if ($n.PSObject.Properties.Name -contains 'attrs') { $n.PSObject.Properties.Remove('attrs') }
+        Remove-JiraAdfLocalId -Node $n
         if ($n.PSObject.Properties.Name -contains 'content') {
-            foreach ($c in @($n.content)) {
-                if ($c.PSObject.Properties.Name -contains 'attrs') { $c.PSObject.Properties.Remove('attrs') }
-            }
+            foreach ($c in @($n.content)) { Remove-JiraAdfLocalId -Node $c }
         }
     }
     return (ConvertTo-JiraJsonValue $nodes)
@@ -332,7 +344,18 @@ function Get-JiraAdfChecklistNodesDigest {
     if ($NodesJson -eq '[]') { return '' }
     $normalized = ConvertTo-JiraAdfChecklistNormalized -NodesJson $NodesJson
     $canonical = ConvertTo-JiraCanonicalJson -Json $normalized
-    $hash = ($canonical | & git hash-object --no-filters --stdin 2>$null | Select-Object -First 1)
+    # NOT `$canonical | git hash-object --stdin`: the PowerShell pipeline hands a
+    # native command a trailing newline the bash port never hashes, so the two
+    # ports would stamp different digests for the same checklist. Hash a file
+    # holding exactly the canonical bytes instead.
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "spec-kit-jira-checklist-${PID}-$([System.IO.Path]::GetRandomFileName())"
+    $hash = $null
+    try {
+        [System.IO.File]::WriteAllText($tmp, $canonical, (New-Object System.Text.UTF8Encoding($false)))
+        $hash = (& git hash-object --no-filters $tmp 2>$null | Select-Object -First 1)
+    }
+    catch { return '' }
+    finally { Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue }
     if ($null -eq $hash) { return '' }
     return $hash.Trim()
 }

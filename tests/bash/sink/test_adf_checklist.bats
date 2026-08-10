@@ -96,3 +96,25 @@ _content_with_tasks() {
   local nodes; nodes="$(_adf_checklist_nodes "$(_content_with_tasks)")"
   [[ "$(jq -c . <<< "${nodes}")" != *"localId"* ]]
 }
+
+@test "normalisation strips attrs.localId and nothing else, on nodes and on entries" {
+  local nodes normalised
+  nodes='[{"type":"heading","attrs":{"level":3},"content":[{"type":"text","text":"Tasks"}]},
+          {"type":"bulletList","attrs":{"localId":"abc"},"content":[{"type":"listItem","attrs":{"localId":"z"},"content":[]}]}]'
+  normalised="$(_adf_checklist_normalise "${nodes}")"
+  [[ "${normalised}" != *"localId"* ]]
+  # a sibling attribute survives: the heading keeps its level
+  [ "$(jq -r '.[0].attrs.level' <<< "${normalised}")" -eq 3 ]
+  # and the emptied attrs object is left in place, not deleted with its key
+  [ "$(jq -r '.[1] | has("attrs")' <<< "${normalised}")" = "true" ]
+  [ "$(jq -r '.[1].content[0] | has("attrs")' <<< "${normalised}")" = "true" ]
+}
+
+@test "the nodes digest of a rendered checklist matches the cross-port pin" {
+  # The digest is written into the story's identity stamp, so the two ports
+  # must agree byte-for-byte or every alternating run reports phantom drift.
+  # The PowerShell mirror pins the SAME constant.
+  local nodes; nodes="$(_adf_checklist_nodes \
+    '{"description":{"blocks":[]},"tasks":[{"title":"Do a thing","done":false,"phase":null}]}')"
+  [ "$(_adf_checklist_nodes_digest "${nodes}")" = "53aeb0a57962fae37ed64e0f8aa4cefc6a0d98f4" ]
+}

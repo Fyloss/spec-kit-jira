@@ -3,6 +3,9 @@
 BeforeAll {
     $SinkDir = Join-Path $PSScriptRoot '../../../scripts/powershell/sink/jira'
     Import-Module (Join-Path $SinkDir 'Adf.psm1') -Force
+    # -Global, and LAST: Adf.psm1's nested -Force import re-scopes Output.psm1
+    # out of the session.
+    Import-Module (Join-Path $SinkDir '../../lib/Output.psm1') -Force -Global
 
     function New-ContentWithTasks {
         return @'
@@ -87,5 +90,27 @@ Describe 'Get-JiraAdfChecklistNode' {
     It 'no entry or checklist node carries an identity attribute' {
         $nodes = Get-JiraAdfChecklistNode -ContentJson (New-ContentWithTasks)
         (ConvertTo-Json $nodes -Depth 20 -Compress) | Should -Not -Match 'localId'
+    }
+
+    It 'normalisation strips attrs.localId and nothing else, on nodes and on entries' {
+        $nodes = '[{"type":"heading","attrs":{"level":3},"content":[{"type":"text","text":"Tasks"}]},
+                   {"type":"bulletList","attrs":{"localId":"abc"},"content":[{"type":"listItem","attrs":{"localId":"z"},"content":[]}]}]'
+        $normalised = ConvertTo-JiraAdfChecklistNormalized -NodesJson $nodes
+        $normalised | Should -Not -Match 'localId'
+        $parsed = $normalised | ConvertFrom-Json -Depth 100
+        # a sibling attribute survives: the heading keeps its level
+        $parsed[0].attrs.level | Should -Be 3
+        # and the emptied attrs object is left in place, not deleted with its key
+        $parsed[1].PSObject.Properties.Name | Should -Contain 'attrs'
+        $parsed[1].content[0].PSObject.Properties.Name | Should -Contain 'attrs'
+    }
+
+    It 'the nodes digest of a rendered checklist matches the cross-port pin' {
+        # The digest is written into the story's identity stamp, so the two ports
+        # must agree byte-for-byte or every alternating run reports phantom drift.
+        # The bash mirror pins the SAME constant.
+        $content = '{"description":{"blocks":[]},"tasks":[{"title":"Do a thing","done":false,"phase":null}]}'
+        $nodes = ConvertTo-JiraJsonValue (Get-JiraAdfChecklistNode -ContentJson $content)
+        Get-JiraAdfChecklistNodesDigest -NodesJson $nodes | Should -Be '53aeb0a57962fae37ed64e0f8aa4cefc6a0d98f4'
     }
 }
