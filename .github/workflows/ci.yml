@@ -88,16 +88,77 @@ jobs:
           $r = Invoke-Pester -Path tests/powershell -PassThru -Output Detailed
           if ($r.FailedCount -gt 0) { exit 1 }
 
-      # T103 (008) — the conformance corpus proves byte-identical behaviour on
-      # EVERY host this extension ships for, not just Linux: a divergence that
-      # only a real Windows or macOS host would expose (path separators, line
-      # endings, shell quoting) is exactly what a single-OS conformance run
-      # cannot catch. `curl` ships preinstalled on all three GitHub-hosted
-      # runner images, so no extra install is needed beyond the toolchain
-      # already installed above. `shell: bash` is explicit because the step's
-      # default shell on Windows is pwsh, and run-scenario.sh is a bash
-      # script — it auto-detects git-bash-on-Windows itself (MSYS_PWSH) and
-      # drives native pwsh.exe accordingly; no extra flag is needed here.
+  conformance:
+    # T103 (008) — the conformance corpus proves byte-identical behaviour on
+    # EVERY host this extension ships for, not just Linux: a divergence that
+    # only a real Windows or macOS host would expose (path separators, line
+    # endings, shell quoting) is exactly what a single-OS conformance run
+    # cannot catch.
+    #
+    # 009 Decision 7 permits sharding the corpus WITHIN one OS — several runners
+    # carrying the same `os` value, together covering every scenario exactly
+    # once — and forbids spreading scenarios ACROSS the three OSes, which would
+    # leave no host proving the whole corpus. `os` and `shard` are INDEPENDENT
+    # matrix axes here, so every OS still runs all four shards: the rule holds by
+    # construction, not by review. tests/bash/ci/test_conformance_no_cross_os_shard.bats
+    # is the guard.
+    #
+    # Lifted out of `unit` because on windows-latest the corpus is the whole
+    # cost, and because it had not completed there since 015: Pester failed
+    # first and the job died at 13 minutes, so the step never ran at all.
+    # Measured 2026-08-10, once that Pester failure was fixed — 3 h 38 and still
+    # running unsharded, against 25-60 min per shard on the four-way probe.
+    #
+    # Re-measured 2026-08-19 (run 32291244767), the first time the step ever
+    # completed on windows-latest: 2 h 44 m for 231 scenarios unsharded, which
+    # took the whole unit job from ~20 minutes to three hours. The shard slice
+    # is round-robin by index, so it follows the corpus as it grows — only
+    # these numbers age, never the arithmetic.
+    name: Conformance corpus ${{ matrix.shard }}/4 (${{ matrix.os }})
+    strategy:
+      # Every shard reports: cancelling siblings on the first divergence would
+      # hide most of them, and the corpus exists to enumerate divergences.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        shard: [0, 1, 2, 3]
+    runs-on: ${{ matrix.os }}
+    env:
+      SPEC_KIT_JIRA_SHARD_TOTAL: 4
+      SPEC_KIT_JIRA_SHARD_INDEX: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bash toolchain (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bats jq shellcheck curl
+
+      - name: Install Bash toolchain (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bats-core jq shellcheck bash
+
+      # The install harness drives the REAL `specify extension add`; without the
+      # CLI on PATH every US1/US4 case skips, which would quietly shrink the
+      # corpus this job exists to prove.
+      - name: Install the Spec Kit CLI (install-harness dependency)
+        uses: astral-sh/setup-uv@v5
+
+      - name: Cache specify-cli (uv tool)
+        id: cache-specify-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/uv/tools/specify-cli
+          key: specify-cli-${{ runner.os }}-github-spec-kit-main
+
+      - name: Install specify-cli
+        if: steps.cache-specify-cli.outputs.cache-hit != 'true'
+        run: uv tool install specify-cli --from git+https://github.com/github/spec-kit.git
+
+      # `curl` ships preinstalled on all three GitHub-hosted runner images, so no
+      # extra install is needed beyond the toolchain above. `shell: bash` is
+      # explicit because the step's default shell on Windows is pwsh, and
+      # run-scenario.sh is a bash script — it auto-detects git-bash-on-Windows
+      # itself (MSYS_PWSH) and drives native pwsh.exe accordingly.
       - name: Run the conformance corpus against both ports and diff the captures
         shell: bash
         run: bash tests/conformance/ci-conformance.sh
