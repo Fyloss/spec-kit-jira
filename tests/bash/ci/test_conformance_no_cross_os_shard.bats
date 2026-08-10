@@ -69,18 +69,46 @@ setup() {
   [ "${count}" -eq 139 ]
 }
 
-@test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {
-  # If a shard total is configured for the unit job's conformance step at all,
-  # it must be 1 (unsharded) — a value > 1 there, on a job whose matrix spans
-  # three OSes, is exactly the forbidden shape.
-  run awk '
-    /^  unit:/ { in_unit = 1 }
-    /^  [a-z-]+:$/ && !/^  unit:/ { in_unit = 0 }
-    in_unit && /SPEC_KIT_JIRA_SHARD_TOTAL/ { print }
+# Everything the conformance job declares, as one block.
+conformance_job() {
+  awk '
+    /^  conformance:/ { on = 1; next }
+    on && /^  [a-z-]+:$/ { on = 0 }
+    on
   ' "${CI_YML}"
-  if [ -n "${output}" ]; then
-    [[ "${output}" == *": 1"* || "${output}" == *"=1"* || "${output}" == *"'"'"'1'"'"'"* ]]
-  fi
+}
+
+@test "the corpus runs on all three OSes (FR-019, SC-011)" {
+  # The corpus moved out of `unit` into its own sharded job. What must not
+  # move is the rule: every OS this extension ships for proves the whole
+  # corpus, because a path-separator or line-ending divergence only that host
+  # can expose is exactly what a single-OS run cannot catch.
+  os_line="$(conformance_job | grep -E '^ +os: \[')"
+  [[ "${os_line}" == *"ubuntu-latest"* ]]
+  [[ "${os_line}" == *"macos-latest"* ]]
+  [[ "${os_line}" == *"windows-latest"* ]]
+}
+
+@test "the shards tile the corpus exactly once per OS (FR-018)" {
+  # Decision 7 permits sharding WITHIN one OS and forbids spreading scenarios
+  # ACROSS the three. `os` and `shard` must therefore be INDEPENDENT matrix
+  # axes — every OS runs every shard — and the shard count must equal the
+  # declared total, or each OS would run part of the corpus and no host would
+  # prove all of it.
+  shard_line="$(conformance_job | grep -E '^ +shard: \[')"
+  declared="$(conformance_job | grep -E 'SPEC_KIT_JIRA_SHARD_TOTAL:' | tr -dc '0-9')"
+  indices="$(printf '%s' "${shard_line#*[}" | tr -d ' ]' | tr ',' '\n' | grep -c .)"
+  [ -n "${declared}" ]
+  [ "${indices}" -eq "${declared}" ]
+  # A cross-OS split would key the index off the OS instead of its own axis.
+  [[ "$(conformance_job | grep -E 'SPEC_KIT_JIRA_SHARD_INDEX:')" == *'matrix.shard'* ]]
+}
+
+@test "no OS is excluded from the corpus by a step condition (SC-011)" {
+  run awk '
+    /Run the conformance corpus/ { print; getline; print; getline; print }
+  ' "${CI_YML}"
+  [[ "${output}" != *"if:"* ]]
 }
 
 @test "windows-latest runs Pester unconditionally in the unit job (SC-011/FR-019)" {
@@ -91,9 +119,13 @@ setup() {
   [[ "${output}" != *"if:"* ]]
 }
 
-@test "windows-latest runs the conformance corpus unconditionally in the unit job (SC-011)" {
+@test "the unit job no longer carries the corpus (it would run it a second time)" {
+  # Leaving the step behind in `unit` would restore the very cost this split
+  # removes, and windows-latest would still spend hours on it.
   run awk '
-    /Run the conformance corpus/ { print; getline; print; getline; print }
+    /^  unit:/ { on = 1; next }
+    on && /^  [a-z-]+:$/ { on = 0 }
+    on && /ci-conformance\.sh/ { print }
   ' "${CI_YML}"
-  [[ "${output}" != *"if:"* ]]
+  [ -z "${output}" ]
 }
