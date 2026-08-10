@@ -29,6 +29,33 @@ kcov_jobs() {
   ' "$1"
 }
 
+# Emits "<timeout-minutes> <kcov-seconds> <bats-seconds>" for the step that drives
+# tests/coverage/bash-coverage.sh.
+coverage_step_budget() {
+  awk '
+    /^      - name: Measure statement coverage with kcov$/ { step = 1; next }
+    step && /^      - name:/ { step = 0 }
+    step && /^        timeout-minutes:/ { tm = $2; next }
+    step && /SPEC_KIT_JIRA_COVERAGE_TIMEOUT:/ { kc = $2; next }
+    step && /SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT:/ { bt = $2; next }
+    END { if (tm != "") printf "%s %s %s\n", tm, kc, bt }
+  ' "${WORKFLOW_DIR}/gates.yml"
+}
+
+@test "the coverage step's ceiling sits above both of its inner wall clocks" {
+  # The runner bounds each phase itself so that an overrun REPORTS: it prints
+  # how far the exercise got, the tail of kcov.log, and which clock expired.
+  # A step ceiling below the sum of those clocks makes that impossible — the
+  # runner is killed mid-phase and the fallback, seeing no `rescue`, calls it a
+  # genuine failure. That inversion (15 minutes of ceiling against 30 minutes of
+  # inner budget) is what left this gate red and unreadable from 2026-07-28 on.
+  read -r tm kcov_secs bats_secs <<< "$(coverage_step_budget)"
+  [ -n "${tm}" ]
+  [ -n "${kcov_secs}" ]
+  [ -n "${bats_secs}" ]
+  [ "$((tm * 60))" -gt "$((kcov_secs + bats_secs))" ]
+}
+
 @test "the guard actually finds the workflow jobs that apt-install kcov" {
   found=""
   for wf in "${WORKFLOW_DIR}"/*.yml; do
