@@ -141,6 +141,36 @@ machines, and why the run-to-run variance is high there (EDR cost varies with lo
 **Run this on the consuming-repo machine when you next profile.** It converts that host's wall-clock numbers
 into spawn counts, which are comparable across machines and are what the suite actually asserts.
 
+## 5b. Attribute the config cost — the measurement T056a blocks on
+
+Removing one redundant local-binding resolution moved the `plan` phase by **−33.5 s** on the motivating
+machine. That is a subtraction, not an attribution: it says the second call cost 33 s, not *what inside it*
+did. Post-T038 the parse costs two process spawns, which cannot account for 33 s, so this must be isolated
+before a fix is designed.
+
+Run on the machine with the real, production-sized configuration:
+
+```bash
+wc -l .specify/jira/config.local.yml
+
+time bash -c '
+  source .specify/extensions/jira/scripts/bash/lib/output.sh
+  source .specify/extensions/jira/scripts/bash/lib/config.sh
+  config_yaml_to_json .specify/jira/config.local.yml > /dev/null
+'
+```
+
+Reading the result:
+
+| | meaning | fix |
+| --- | --- | --- |
+| **~33 s** | the read-and-parse is the cost | T057 as written (read once per run) |
+| **sub-second** | the cost is elsewhere in `_reconcile_local_binding_for` | re-open the attribution; T057 buys nothing |
+| **~33 s, few forks** | T038 traded per-line forking for slow in-process work — `_cfg_json_encode` walks every string value character by character in bash | a different fix entirely, in the encoder |
+
+To separate the last two, run the same command under the broad spawn diagnostic (§5's method, all tools
+shimmed) — a parse that is slow *and* forks little is the third row.
+
 ---
 
 ## 6. Prove nothing else moved

@@ -232,10 +232,16 @@ them, and the ranking is the reverse of what this step first assumed**:
   hardware, "proportionally more under EDR"). **Implemented (T038) and it did not move the phase**: the
   per-line `jq` calls are gone — an 82-line config that cost ~160 spawns now costs 2 — and `config` still
   costs ~34 s on the maintainer's machine. Worth keeping, correctly scoped, not the cause.
-- **Read once per run** (FR-009, FR-010, and now FR-038) — the actual dominant mechanism. One
-  `config.local.yml` read-and-parse is directly measured at **~33 s** on that machine, and the run performs
-  **two**: `config_load` for `overrides`, `_reconcile_local_binding_for` for `resolved_ids`. `config` (~34 s)
-  and `gate` (~33 s) are each one such read. Together they are 58% of the post-fix runtime.
+- **Read once per run** (FR-009, FR-010, and now FR-038) — the actual dominant mechanism. Resolving the local
+  binding a second time costs **~33 s** on that machine, measured by subtraction (removing the duplicate moved
+  `plan` by −33.5 s), and the run performs **two** such resolutions: `config_load` for `overrides`,
+  `_reconcile_local_binding_for` for `resolved_ids`. `config` (~34 s) and `gate` (~33 s) are each one.
+  Together, 58% of the post-fix runtime.
+  **Open**: which part of that resolution costs the 33 s is *not* attributed. Post-T038 the parse costs two
+  process spawns, which cannot account for it. A candidate worth eliminating before designing the fix is that
+  T038 traded forks for slow in-process work — `_cfg_json_encode` walks every string value character by
+  character in bash. The decisive test is one direct timing of `config_yaml_to_json` against the real file
+  (quickstart §5b); T057 must not be designed before it returns.
 
 **Exit**: `config.local.yml` opened and parsed **once** per run, asserted by a counting stand-in (FR-040); the
 file-read count flat in configuration line count and item count; spawn count likewise.

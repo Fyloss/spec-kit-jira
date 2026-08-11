@@ -426,11 +426,17 @@ through FR-022 above — both groups bound a per-operation cost — and are read
   process count, so that a re-read regression is caught by a test rather than by a wall-clock measurement on
   one operator's machine.
 
-> **Why this group exists.** On the machine that motivated this feature, one full read-and-parse of
-> `config.local.yml` costs **~33 s**, against **1.1 ms** for a bare process spawn on the same host — a ratio
-> of roughly 30 000 to 1. Two phases were each performing one such read of the same file. This is the
-> first-order cost; FR-016 through FR-022's process budget is the second. See "The mechanism, corrected by
-> measurement" above, and research R3a.
+> **Why this group exists.** On the machine that motivated this feature, resolving the local binding a second
+> time — opening `config.local.yml`, parsing it, and reading two keys out of it — costs **~33 s**, against
+> **1.1 ms** for a bare process spawn on the same host. Two phases each perform one such resolution of the
+> same file, and removing one of the two is the largest single improvement this feature has measured.
+>
+> **What is not yet attributed**: *which part* of that resolution costs the 33 s. It is measured by
+> subtraction (removing the second call moved `plan` by −33.5 s), not by isolating the read. The parse itself
+> now costs only two process spawns, which cannot account for it — so the cost is the file open, the parser's
+> in-process work, or something else in that path. FR-038 is written about re-reading because re-reading is
+> what is demonstrably redundant; if attribution shows the expense lies elsewhere, this group's *bound* still
+> holds and its *rationale* is corrected rather than the requirement withdrawn.
 
 **The run is fast, and predictably so**
 

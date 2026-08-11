@@ -647,7 +647,19 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   `_TIMING_FAKE_CLOCK` and the request counter already establish; or (b) counting `jq`/`cat` invocations whose
   argv names the path, which only works while every read goes through one. Prefer (a): it counts the parse,
   which is what costs, and it cannot be defeated by a read that does not fork. Record which was chosen and why.
+- [ ] T056a **[BLOCKING — T057 must not be designed before this returns]** Attribute the ~33 s. It is measured
+  by subtraction (removing the duplicate `_reconcile_local_binding_for` call moved `plan` by −33.5 s), never by
+  isolating the read — and post-T038 the parse costs **two** process spawns, which cannot account for 33 s.
+  Time `config_yaml_to_json` directly against the real `config.local.yml` on the motivating machine, and record
+  the file's line count beside it. Three outcomes, three different features: **~33 s** confirms the read and
+  T057 as written is right; **sub-second** puts the cost elsewhere in `_reconcile_local_binding_for` and T057
+  as written would buy nothing; **~33 s with few forks** indicates T038 traded per-line forking for slow
+  in-process work — `_cfg_json_encode` walks every string value character by character in bash — and the fix
+  is a different piece of code entirely. **This task exists because the attribution it checks was briefly
+  written into this feature's artefacts as a measured fact when it was an inference** (corrected 2026-08-11);
+  it is the same error class the feature itself was correcting, caught one layer up.
 - [ ] T057 [US2] Make `config.local.yml` read and parsed **once** per run (FR-009 as amended, FR-038).
+  **Conditional on T056a** — see its three outcomes.
   `config_load` (`lib/config.sh`) reads it for `.overrides`; `_reconcile_local_binding_for`
   (`commands/reconcile.sh`) reads it again for `.resolved_ids`. **T033 must be observed failing first.**
   Two options, recorded in the open finding above: (a) widen `config_load`'s return shape to carry the raw
