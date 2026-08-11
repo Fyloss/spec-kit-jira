@@ -127,6 +127,26 @@ _gen_ac_and_clauses() {
   [ "${c20}" = "${c10}" ]
 }
 
+# T027 (2026-08-11) — the clause-count test above holds SCENARIO count fixed
+# at 1 throughout; it cannot see `_parse_ac_flush`'s own cost, which scales
+# with the number of SCENARIOS, not clauses within one. The same gap-shape
+# T033 found in T037: one dimension tested, a different one left growing.
+_gen_ac_scenarios() {
+  local n="$1" i out=""
+  for ((i = 1; i <= n; i++)); do
+    out+="- **Given** starting thing ${i}"$'\n'"- **When** it happens"$'\n'"- **Then** it works"$'\n'
+  done
+  printf '%s' "${out}"
+}
+
+@test "T027: parse_acceptance_criteria spawns a bounded, non-growing count as SCENARIO count doubles (C1.2)" {
+  local c10 c20
+  c10="$(_spawn_count_for parse_acceptance_criteria "$(_gen_ac_scenarios 10)")"
+  c20="$(_spawn_count_for parse_acceptance_criteria "$(_gen_ac_scenarios 20)")"
+  [ "${c10}" -gt 0 ]
+  [ "${c20}" = "${c10}" ]
+}
+
 _gen_design_guidance() {
   local n="$1" i out="#### Design"$'\n\n'
   for ((i = 1; i <= n; i++)); do
@@ -189,4 +209,38 @@ _gen_description_paragraphs() {
   ' _ "${doc100}"; helper_spawn_count_total "${COUNT_FILE}")"
   [ "${c50}" -gt 0 ]
   [ "${c100}" = "${c50}" ]
+}
+
+# T027 (2026-08-11) — `_parse_epic_extra_blocks` (the epic's Success
+# Criteria / Out of Scope sections) has the same per-item jq-merge shape
+# `_parse_ac_flush` had: one `. + [$v]` call per bullet item. It takes the
+# whole document as an ARGUMENT, not stdin, so it needs its own harness
+# rather than `_spawn_count_for`.
+_gen_epic_sc_items() {
+  local n="$1" i out="## Success Criteria"$'\n\n'"### Measurable Outcomes"$'\n\n'
+  for ((i = 1; i <= n; i++)); do
+    out+="- **SC-$(printf '%03d' "${i}")**: Outcome number ${i} is measurable."$'\n'
+  done
+  printf '%s' "${out}"
+}
+
+@test "T027: _parse_epic_extra_blocks spawns a bounded, non-growing count as Success-Criteria item count doubles (C1.2)" {
+  local doc10 doc20 c10 c20
+  doc10="$(_gen_epic_sc_items 10)"
+  doc20="$(_gen_epic_sc_items 20)"
+  c10="$(PATH="${SHIM_DIR}:${PATH}" bash -c '
+    source "'"${ENGINE_DIR}"'/parse.sh"
+    : > "'"${COUNT_FILE}"'"
+    _parse_epic_extra_blocks "$1" > /dev/null
+  ' _ "${doc10}"; helper_spawn_count_total "${COUNT_FILE}")"
+  c20="$(PATH="${SHIM_DIR}:${PATH}" bash -c '
+    source "'"${ENGINE_DIR}"'/parse.sh"
+    : > "'"${COUNT_FILE}"'"
+    _parse_epic_extra_blocks "$1" > /dev/null
+  ' _ "${doc20}"; helper_spawn_count_total "${COUNT_FILE}")"
+  # Unlike every other function in this file, this one forks NOTHING at all
+  # (no `json_canonical` call at its own boundary either) — a stricter floor
+  # than "flat but nonzero", so the assertion is equality alone, not `-gt 0`.
+  [ "${c10}" = "0" ]
+  [ "${c20}" = "${c10}" ]
 }

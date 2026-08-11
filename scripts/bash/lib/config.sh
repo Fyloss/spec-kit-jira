@@ -604,6 +604,17 @@ config_yaml_parse_count() {
 # canonical output. FR-012's diagnostic parity is unaffected — only a
 # SUCCESSFUL parse is cached, so a still-malformed source keeps failing (and
 # reporting) on every call, exactly as before this cache existed.
+#
+# Containment (FR-014, Constitution IV, NFR-3): a credential-shaped value is
+# never written to the cache file, even on an otherwise-successful parse.
+# Before this cache existed, config_yaml_to_json's output only ever lived in
+# a shell variable — never on disk — and `config_load`'s OWN credential scan
+# (which runs on the caller's side, after this function returns) is what
+# refuses it. Caching unconditionally would put that value on disk in the
+# window between this function returning and the caller's scan running,
+# which is new exposure this feature must not introduce. `_cfg_credential_errors`
+# is therefore run here too, cache-side only — it does not change what this
+# function returns or its exit code, only whether the disk copy is made.
 config_yaml_to_json() {
   local file="$1" json cachefile=""
   [[ -f "${file}" ]] || { printf 'config: file not found: %s\n' "${file}" >&2; return 1; }
@@ -630,7 +641,9 @@ config_yaml_to_json() {
     printf 'config: %s is not valid config YAML\n' "${file}" >&2
     return 1
   }
-  [[ -n "${cachefile}" ]] && printf '%s' "${canon}" > "${cachefile}" 2> /dev/null
+  if [[ -n "${cachefile}" ]] && [[ -z "$(printf '%s' "${canon}" | _cfg_credential_errors)" ]]; then
+    printf '%s' "${canon}" > "${cachefile}" 2> /dev/null
+  fi
   printf '%s' "${canon}"
 }
 

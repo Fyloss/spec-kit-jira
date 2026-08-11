@@ -16,9 +16,9 @@
 # reads — a cache HIT never increments it, so it counts what actually costs
 # (the parse), not how many callers asked.
 #
-# T034-T035/T036a/T036b (error parity, the hooks-disabled self-write,
-# precedence/defaulting parity, containment) are still NOT added here — see
-# tasks.md Phase 6 notes.
+# T034/T035/T036a/T036b (2026-08-11) — error parity, the hooks-disabled
+# self-write, precedence/defaulting parity, and containment, all against the
+# cache T057 added.
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
@@ -97,6 +97,107 @@ _spawn_count_for_config() {
   '
   [ "${status}" -eq 0 ]
   [ "${output}" = "ok" ]
+}
+
+@test "T034: a malformed source is never cached — every call reports the identical error (FR-012)" {
+  ROOT2="${ROOT}"
+  run bash -c '
+    source "'"${ROOT2}"'/scripts/bash/commands/reconcile.sh"
+    config_yaml_cache_prime
+    DIR="'"${BATS_TEST_TMPDIR}"'/malformed"
+    mkdir -p "${DIR}"
+    printf "resolved_ids:\n  JET:\n    this line has no delimiter\n" > "${DIR}/bad.yml"
+    rc1=0; err1="$(config_yaml_to_json "${DIR}/bad.yml" 2>&1 1>/dev/null)" || rc1=$?
+    rc2=0; err2="$(config_yaml_to_json "${DIR}/bad.yml" 2>&1 1>/dev/null)" || rc2=$?
+    same="no"; [ "${err1}" = "${err2}" ] && same="yes"
+    printf "rc1=%s rc2=%s same=%s" "${rc1}" "${rc2}" "${same}"
+  '
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == "rc1=4 rc2=4 same=yes" ]]
+}
+
+@test "T034: an absent config.local.yml bypasses the cache entirely, cache primed or not (FR-012)" {
+  ROOT2="${ROOT}"
+  run bash -c '
+    source "'"${ROOT2}"'/scripts/bash/commands/reconcile.sh"
+    config_yaml_cache_prime
+    DIR="'"${BATS_TEST_TMPDIR}"'/neverbound"
+    mkdir -p "${DIR}"
+    rc=0
+    _reconcile_local_binding_for "COMP" "${DIR}" > /dev/null || rc=$?
+    printf "rc=%s" "${rc}"
+  '
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "rc=2" ]
+}
+
+@test "T035: a self-write in this process is reflected by a later read, not the pre-write cache entry (FR-013)" {
+  ROOT2="${ROOT}"
+  run bash -c '
+    source "'"${ROOT2}"'/scripts/bash/commands/reconcile.sh"
+    DIR="'"${BATS_TEST_TMPDIR}"'/selfwrite"
+    mkdir -p "${DIR}"
+    printf "resolved_ids: {}\n" > "${DIR}/config.local.yml"
+    config_yaml_cache_prime
+    before="$(config_hooks_disabled_read "${DIR}")"
+    config_hooks_disabled_add "before_specify" "${DIR}" "false" > /dev/null
+    after="$(config_hooks_disabled_read "${DIR}")"
+    printf "before=%s after=%s" "${before}" "${after}"
+  '
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"before=[]"* ]]
+  [[ "${output}" == *'after=["before_specify"]'* ]]
+}
+
+@test "T036a: the team/local merge answer is identical whether the cache is warm or cold (FR-011)" {
+  ROOT2="${ROOT}"
+  run bash -c '
+    source "'"${ROOT2}"'/scripts/bash/commands/reconcile.sh"
+    config_yaml_cache_prime
+    FIXTURE="'"${ROOT2}"'/tests/conformance/fixtures/repo-with-reconcile-binding/.specify/jira"
+    cfg="$(config_load "${FIXTURE}")"
+    printf "routing_default=%s " "$(jq -r ".routing_default" <<< "${cfg}")"
+    binding="$(_reconcile_local_binding_for "COMP" "${FIXTURE}")"
+    printf "child_type=%s " "$(jq -r ".child_type.id" <<< "${binding}")"
+    cfg2="$(config_load "${FIXTURE}")"
+    same="no"; [ "${cfg}" = "${cfg2}" ] && same="yes"
+    printf "same=%s" "${same}"
+  '
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"routing_default=COMP "* ]]
+  [[ "${output}" == *"child_type=10004 "* ]]
+  [[ "${output}" == *"same=yes"* ]]
+}
+
+@test "T036b: a credential-shaped value is never written to the cache file, even on an otherwise-successful parse (FR-014, Constitution IV)" {
+  ROOT2="${ROOT}"
+  run bash -c '
+    source "'"${ROOT2}"'/scripts/bash/lib/config.sh"
+    config_yaml_cache_prime
+    DIR="'"${BATS_TEST_TMPDIR}"'/leaky"
+    mkdir -p "${DIR}"
+    printf "resolved_ids:\n  JET:\n    token: \"ATATT3xFfGF0superSecretValue\"\n" > "${DIR}/config.local.yml"
+    config_yaml_to_json "${DIR}/config.local.yml" > /dev/null
+    hits="$(grep -rl "ATATT3xFfGF0superSecretValue" "${_CFG_YAML_CACHE_DIR}" 2>/dev/null | wc -l | tr -d " ")"
+    printf "hits=%s" "${hits}"
+  '
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "hits=0" ]
+}
+
+@test "T036b: the resolved config never touches disk anywhere else, and holds no credential material when it does cache (FR-014)" {
+  ROOT2="${ROOT}"
+  run env JIRA_API_TOKEN="ATATT3xFfGF0notInAnyConfigFile" bash -c '
+    source "'"${ROOT2}"'/scripts/bash/commands/reconcile.sh"
+    config_yaml_cache_prime
+    FIXTURE="'"${ROOT2}"'/tests/conformance/fixtures/repo-with-reconcile-binding/.specify/jira"
+    config_load "${FIXTURE}" > /dev/null
+    _reconcile_local_binding_for "COMP" "${FIXTURE}" > /dev/null
+    hits="$(grep -rl "ATATT3xFfGF0notInAnyConfigFile" "${_CFG_YAML_CACHE_DIR}" 2>/dev/null | wc -l | tr -d " ")"
+    printf "hits=%s" "${hits}"
+  '
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "hits=0" ]
 }
 
 @test "_cfg_json_encode matches jq's --arg encoding for control characters, quotes, and backslashes" {

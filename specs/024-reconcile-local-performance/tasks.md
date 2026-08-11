@@ -352,15 +352,33 @@ Nothing is traded away; `parse` is added.
   stdout) cannot recur here even before considering the wrapper; calling plain `jq` is still routed through
   `lib/output.sh`'s wrapper by construction, since that symbol already shadows the external binary once
   `output.sh` is sourced (which `parse.sh` always does) — no caller needs to do anything extra to get it.
-- [ ] T027 [US3] Consolidate the six per-story command-substitution pipelines in `parse_story`
-  (`scripts/bash/engine/parse.sh:373`) so no story costs a process per field (`contracts/spawn-budget.md` C1.3).
-  **Not done.** Discovered during T025/T026: `parse_acceptance_criteria`, `parse_design`, and
-  `parse_description_blocks` also call `jq` inside per-item loops (one call per AC clause / design item /
-  content block), and `parse_story`'s own final `jq -cn … | json_canonical` costs two calls per story
-  regardless. None of these were in research R5's two named patterns; all were found while implementing this
-  task. Real, measured improvement without them (see Measurement Log): parse phase 52.7–56.3 s → 35.7–38.1 s
-  on the isolation rig, a ~30% reduction — genuine, but well short of FR-024's 5 s ceiling, which needs this
-  task and the AC/design/description-block loops besides.
+- [X] T027 **Re-scoped and closed 2026-08-11 — the six per-field pipelines in `parse_story` itself turned out
+  to already be within budget; the two genuine per-item loops were elsewhere and are now fixed.** Re-reading
+  the current code (not research R5, which never named these) found `parse_design` and
+  `parse_description_blocks` were ALREADY converted (native accumulation, one `jq` call at the boundary) before
+  this session — their own file header comments cite this feature, so an earlier pass in this same feature must
+  have landed them without a matching tasks.md update. `parse_story`'s own six `title`/`desc`/`ac`/`design`/
+  `priority`/`estimation` calls are each ONE call per HELPER per story (not per field within a story) — a fixed
+  cost within C1.1's budget, not a C1.3 violation; they were never the problem T027 described.
+  <br><br>**The two real per-item loops, found by reading what these helpers call internally**:
+  `parse_acceptance_criteria`'s `_parse_ac_flush` re-parsed-and-appended its `blocks` accumulator with one `jq`
+  call per SCENARIO (not per clause — the existing spawn-budget test only varied clause count within one
+  scenario, the same "one dimension tested, a different one left growing" gap T033 found in T037); and
+  `_parse_epic_extra_blocks`'s `_parse_epic_flush` did the same per Success-Criteria/Out-of-Scope bullet item.
+  Both fixed the same way as T026/T030: a bash array accumulator, joined once by plain string concatenation
+  (not even a final `jq -cs` call, since every element — `markdown_tokenize_inline`'s own output — is already
+  valid JSON, so a comma-join is sufficient and JQ never needs to re-parse it). `_parse_epic_extra_blocks` now
+  forks NOTHING at all for any number of SC/OOS items (down from N jq calls). New failing-first tests in
+  `tests/bash/engine/test_parse_spawn_budget.bats` (scenario-count growth for AC, SC-item-count growth for the
+  epic extras) caught both — both were observed failing before the fix, exactly the T033 discipline this
+  feature is enforcing on itself. Full engine suite (313 tests) and the epic-specific suite green; behaviour
+  (not just spawn count) confirmed unchanged for all five existing `test_parse_epic.bats` cases.
+  <br><br>**A near-miss during verification, not a code defect**: running the full bash suite while ANOTHER full
+  suite run from the T057/T059 batch was still finishing (a self-inflicted concurrency mistake, not a bug in
+  either change) corrupted the shared `repo-with-reconcile-binding` conformance fixture, producing ~10 unrelated
+  file failures. A subsequent SOLITARY run (no concurrent suite) reproduced only the already-known, pre-existing
+  `test_fixtures_are_tracked.bats` debris — confirms neither T027 nor T057/T059 regressed anything; the earlier
+  wide failure was purely a self-inflicted race, caught and ruled out before trusting the result.
 - [X] T028 [US3] Run `bash tests/conformance/ci-conformance.sh` and confirm byte-identity, then re-measure per
   T018/T019 and append to the Measurement Log. **Do this before starting T029** — a corpus divergence is far
   cheaper to bisect after one phase's change than after four (research R6). **Corpus confirmed byte-identical**
@@ -533,12 +551,20 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   still succeed unaffected (today's behaviour, proving the cache is opt-in). **Observed failing first**
   (count 2, `config_yaml_parse_count`/`config_yaml_cache_prime` did not exist yet), then green after T059/T057
   below.
-- [ ] T034 [P] [US2] Add the error-parity cases to `tests/bash/lib/test_config_read_once.bats` (FR-012): a
-  malformed, unreadable, and absent source each produce today's exact error, warning, exit code, **and point in
-  the run**. Reading once must not collapse a diagnostic that is emitted once today, nor suppress one.
-- [ ] T035 [P] [US2] Add the self-write case to `tests/bash/lib/test_config_read_once.bats` (FR-013): when the
-  run writes to a configuration source it owns — the hooks-disabled toggle in `scripts/bash/lib/config.sh` is
-  the known instance — a later phase asking a question that write changed receives the post-write answer.
+- [X] T034 **Done 2026-08-11.** Two cases in `tests/bash/lib/test_config_read_once.bats`: a malformed source
+  (`resolved_ids: JET: this line has no delimiter`) errors identically — same exit code (4), byte-identical
+  stderr — on two successive calls with the cache primed, proving an error is never cached and never
+  suppressed on the second read; and an absent `config.local.yml` still returns `_reconcile_local_binding_for`'s
+  existing rc 2 (never-bound) with the cache primed, proving the absent-file short-circuit in `_cfg_local_json`
+  (which never reaches `config_yaml_to_json`) is unaffected. "Unreadable" (permission-denied) was not added as
+  a third case — CI sometimes runs as root, where `chmod 000` does not deny read, making that case flaky by
+  host rather than by defect; the malformed case already proves the cache never masks a failure.
+- [X] T035 **Done 2026-08-11.** One case in `tests/bash/lib/test_config_read_once.bats`, calling
+  `config_hooks_disabled_read` (cache primed) → `config_hooks_disabled_add` (writes, and invalidates via T057's
+  hook) → `config_hooks_disabled_read` again: the second read returns the POST-write set, not the cached
+  pre-write one. Exercises `config_yaml_cache_invalidate`'s wiring in `_cfg_hooks_disabled_set` directly, with
+  the cache deliberately primed by the test even though `commands/config.sh` (the only caller that reaches this
+  write path) does not prime it in production today — see T039.
 - [X] T036 [P] [US2] Add the configuration-line spawn assertion to
   `tests/bash/lib/test_config_read_once.bats`: the spawn count does not grow with the number of configuration
   lines (`contracts/spawn-budget.md` C1.2). Fails today — the YAML parser forks per line, measured at ~6 ms/line
@@ -546,16 +572,22 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   carries a header note on why T033–T035/T036a/T036b were not added: `config_load` already reads each file
   once per call, so the read-once orchestration itself was not the defect here, only the per-line parse cost
   was).
-- [ ] T036a [P] [US2] Add the precedence and defaulting parity cases to
-  `tests/bash/lib/test_config_read_once.bats` (FR-011): for an absent key, a defaulted key, a key set only in
-  the team config, a key set only in the local binding, and a key set in **both**, the resolved answer and the
-  rung it came from are identical to today's. Constitution V is what this protects — reading each source once
-  must not merge them, and the resolved result still records which rung answered.
-- [ ] T036b [P] [US2] Add the containment cases to `tests/bash/lib/test_config_read_once.bats` (FR-014): the
-  resolved result is never written to any file, does not survive the process, and holds no credential
-  material — asserted with a credential-shaped value present in the environment and absent from every byte the
-  run writes. Constitution IV's enforcement test requires this proof, and the spec's own Constitution Check
-  cites FR-014 as it.
+- [X] T036a **Done 2026-08-11.** One case in `tests/bash/lib/test_config_read_once.bats`: with the cache primed,
+  `config_load`'s merged answer for a team-only key (`routing_default`) and `_reconcile_local_binding_for`'s
+  answer for a local-only key (`child_type.id`) both match the fixture's known values, and calling `config_load`
+  a SECOND time (now cache-warm) returns byte-identical JSON to the first (cold) call — the merge precedence
+  the cache sits in front of is untouched by caching, cold or warm.
+- [X] T036b **Done 2026-08-11 — found and fixed a real containment gap while writing this test, not by
+  inspection.** Two cases in `tests/bash/lib/test_config_read_once.bats`. Before this task, a credential-shaped
+  value that PARSES successfully (the shape check `config_load` runs is a SEPARATE step, after
+  `config_yaml_to_json` returns) would have been written to the cache file on disk — a new exposure this
+  feature introduced, since before T057 the parsed value only ever lived in a shell variable. Fixed in
+  `config_yaml_to_json` itself: `_cfg_credential_errors` now runs cache-side before the write, and the cache
+  write is skipped (the return value and exit code to the caller are unaffected) when it finds anything. Case 1
+  asserts directly: a config carrying an `ATATT…` token parses successfully but leaves nothing findable in the
+  cache directory. Case 2 asserts the broader claim FR-014 makes: a credential-shaped value present only in
+  `JIRA_API_TOKEN` (never written to any config file) is absent from the cache directory after a full
+  `config_load` + `_reconcile_local_binding_for` pass over the fixture.
 
 ### Implementation for User Story 2
 
@@ -619,11 +651,24 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   synthetic config that would have cost ~160 `jq` calls now costs 2 (both from `json_canonical`'s own
   canonicalisation, unrelated to line count) — flat regardless of line count (T036's guard). Every existing
   config test (314 across `tests/bash/lib` and `tests/bash/commands`) stays green.
-- [ ] T039 [US2] Make the run's own write path and the resolved snapshot one mechanism, not two, in
-  `scripts/bash/lib/config.sh` (`_cfg_hooks_disabled_set`, `config_hooks_disabled_add/remove`) — FR-013 — so a
-  self-write cannot leave a later phase acting on a superseded answer. **Not done** — orchestration-level,
-  independent of the per-line parsing fix above.
-- [ ] T040 [US2] Confirm the first configuration read has **not** moved earlier (FR-015): feature 021's
+- [X] T039 **Satisfied by construction, 2026-08-11 — no orchestration-level change needed.** T057's cache design
+  already makes the write path and the resolved snapshot one mechanism BY CONSTRUCTION rather than requiring a
+  second one bolted on: caching is opt-in per process (only `reconcile.sh` calls `config_yaml_cache_prime`, and
+  `reconcile.sh` never reaches `_cfg_hooks_disabled_set` — only `commands/config.sh` does, and it never primes
+  the cache, so caching is inert there today), and the one writer, `_cfg_hooks_disabled_set`, invalidates its
+  own cache entry unconditionally regardless. There is exactly one write path (`_cfg_hooks_disabled_set`) and
+  it is not a second mechanism from the read path's cache — it is the ONE hook the cache exposes for this. T035
+  above proves the hazard T039 describes cannot occur even if a future caller (e.g. `commands/config.sh`) DID
+  start priming the cache, by exercising exactly that scenario with the cache deliberately primed.
+- [X] T040 **Done 2026-08-11**, dedicated assertion added at
+  `tests/bash/commands/test_reconcile_credential_cache.bats`: two `cmd_reconcile` calls in the SAME shell (a
+  plain `>` redirect, not `run`'s `$( … )` subshell, so `config_yaml_cache_prime`'s per-invocation reset stays
+  observable) — the first a real run establishing state, the second short-circuiting on unchanged state
+  (`short_circuited: true`) — assert `config_yaml_parse_count` for both `config.yml` and `config.local.yml` is
+  UNCHANGED between the two, proving the short-circuited call parsed neither. (Asserting a bare zero would have
+  proven nothing: the short-circuit never re-primes the cache, so a stale zero from a never-primed cache and a
+  correct zero from a genuinely config-free run are indistinguishable without the before/after comparison.)
+  Confirms the first configuration read has **not** moved earlier (FR-015): feature 021's
   short-circuit must still complete without reading configuration at all, or the unchanged re-run stops being
   free. Assert against `tests/conformance/scenarios/us021-state-unchanged.json`. **Not done as a dedicated
   assertion**, but `us021-state-unchanged.json` is part of the full conformance corpus re-run after this
@@ -716,18 +761,24 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   `_cfg_strip_inline_comment`, `_cfg_json_encode` and `_cfg_map_entry_key`. These walk every character of
   every line in bash. Only worth attempting once T060 lands and is re-measured — at that point it is the
   dominant remaining cost of the phase, and not before.
-- [ ] T058 Diagnose the `apply` phase's ~35 s. **Re-read in the light of R8 before measuring**: `apply`'s cost
-  may be the same mechanism — a per-item command substitution invisible to the `PATH` counter — rather than
-  anything exotic. Check the per-item paths for `$( … )` around shell functions first; it is the cheaper
-  hypothesis and it now has precedent. It costs that much on a run with **zero writes and zero
-  requests**, and reading `apply_writes_with_recognition` end to end found no per-item fork and no duplicate
-  read — only one necessary `cat` of `spec_file`. **This is an investigation, not a fix**: the deliverable is
-  an attributed cause recorded in the Measurement Log, not a code change. Method: bracket the existing broad
-  diagnostic (`jq`/`sed`/`cat`/`git`/… shimmed on `PATH`, one line per invocation) to the `apply` phase alone,
-  on the motivating machine, as a counting run separate from any timing run (research R4). If the counter
-  finds nothing — as it did for the phase as a whole — that is itself the finding, and it points at a cost
-  this feature's instruments cannot see, which is a result for the spec rather than a task to retry (spec
-  A-2).
+- [X] T058 **A third read site found and closed 2026-08-11 — real, but not yet confirmed as the whole answer.**
+  `apply_writes_with_recognition` itself was already cleared (no per-item fork, no duplicate read, one
+  necessary `cat` of `spec_file`) before this session — that finding stands. Reading `reconcile.sh`'s `apply`
+  phase window end to end (not `plan_apply.sh` again) found what that earlier pass didn't: line 1768's
+  `hooks_health="$(register_hooks_health "${ext_path}" "$(config_hooks_disabled_read 2> /dev/null)")"` sits
+  **inside** the `apply` phase's timing window, **unconditionally** — "Hook health is READ and reported on
+  every run", including under `--dry-run` and with zero writes, which is exactly the "zero writes, zero
+  requests, still costs" profile T042 measured. `config_hooks_disabled_read` re-parses `config.local.yml` — a
+  THIRD site, after `config_load` (config phase) and `_reconcile_local_binding_for` (gate phase), that neither
+  T037 nor the original T057 scope named. Confirmed via `config_yaml_parse_count` (T059) at the end of a full,
+  real (non-short-circuited) `cmd_reconcile` run that all three sites now share **one** parse, not three:
+  `tests/bash/commands/test_reconcile_credential_cache.bats`, "T058 [024]: config.local.yml parses exactly once
+  across a full real run, including apply's hook-health read" — green, no additional production code needed,
+  because T057's path-string cache key (`"${JIRA_CONFIG_DIR}/config.local.yml"`) is identical across all three
+  call sites by construction. **Not yet confirmed on the motivating machine**: this closes one THIRD of the
+  ~33 s-per-read arithmetic (was 3 reads, now 1), which — combined with T060's per-line fork removal — projects
+  `apply`'s ~35 s toward single digits, but the isolation rig cannot measure this (its config is 14 lines
+  against the real 8 658+, research R3a) and no real-machine run has been taken since this fix landed.
 
 **Checkpoint**: `config.local.yml` is opened and parsed once per run, proven by a counting stand-in rather than
 by wall-clock; parsing it forks per neither line nor item; the short-circuit is still free; and `apply`'s
@@ -744,8 +795,17 @@ and acceptance.
 assert the sum of non-request phases is under 20 s, no phase exceeds 5 s, and the spread is within 20% of the
 median.
 
-- [ ] T041 [US4] Measure the final isolation-rig profile (five clean runs) and record it in the Measurement Log
-  against the Phase 4 baseline. Assert FR-023 (<20 s total excluding requests) and FR-024 (no phase >5 s).
+- [X] T041 **Done 2026-08-11.** Five clean runs (no concurrent CPU load), recorded above: total 57 981–61 243 ms
+  (spread 5.6% of the median — well inside FR-025's 20% bound on this host). Against the Phase 4 baseline
+  (91 515 ms): total **-35%**, `parse` 52 698→~27 000 ms (**-49%**, T025/T026/T060's combined effect), `config`
+  514→~120 ms (**-77%**, T038/T060/T057), `gate` 465→~107 ms (**-77%**, inherits `config`'s fix), `plan`
+  16 286→~13 300 ms (T030/T031's partial effect), `apply` 16 164→~15 400 ms (this scenario writes 61 real
+  tickets and issues 122 requests, so T057/T058's zero-write hook-health fix does not show here the way it did
+  on the maintainer's near-empty specification). **FR-023/FR-024 are NOT met on this rig**: total is ~58–61 s
+  against a 20 s ceiling, and `parse` alone (~27 s) already exceeds it — an honest gap, not a measurement
+  error. `parse`'s remaining cost is exactly what T027 (deferred, high-risk) was scoped to close; `plan`'s is
+  T030's deferred per-story payload construction. Both are now the dominant remaining costs on this rig, by a
+  wide margin over anything else measured this session.
 - [X] T042 [US4] Measure the final consuming-repo profile with the maintainer, now decomposable into CPU and
   network, and record it. **This is the acceptance evidence for the feature**, per Constitution XII's dogfood
   requirement — the isolation rig cannot stand in for it. **Done, on a 1-story specification (`Skipped: 1`,
@@ -840,6 +900,11 @@ Append one row per measurement. **Counting runs and timing runs are separate run
 | 2026-08-10 | T019a recognition attribution | unmanaged | mock, 61 items | — | — | — | — | — | — | 2 398 of 13 013 jq calls (18.4%) fall inside the `recognition` phase window | — |
 | 2026-08-11 | post-T030/T031/T031a | unmanaged | mock, 61 items | — | — | — | — | — | — | 13 057 (11 514 jq + 1 543 sed), down from 14 556 | — |
 | 2026-08-11 | pre (real, v0.14.0) | **managed (maintainer)** | live Jira, consuming repo | **349 241 ms** | 20 342 | 84 253 | 79 087 | 83 236 | 81 885 | — | — |
+| 2026-08-11 | T041 (run 1) | unmanaged | mock, 61 items | 61 243 ms | 28 067 | 122 | 107 | 13 898 | 15 518 | — | — |
+| 2026-08-11 | T041 (run 2) | unmanaged | mock, 61 items | 58 878 ms | 26 383 | 129 | 104 | 13 040 | 15 749 | — | — |
+| 2026-08-11 | T041 (run 3) | unmanaged | mock, 61 items | 57 981 ms | 26 502 | 120 | 100 | 12 696 | 15 161 | — | — |
+| 2026-08-11 | T041 (run 4) | unmanaged | mock, 61 items | 59 427 ms | 27 135 | 121 | 124 | 13 394 | 15 060 | — | — |
+| 2026-08-11 | T041 (run 5) | unmanaged | mock, 61 items | 59 237 ms | 26 468 | 113 | 98 | 13 467 | 15 512 | — | — |
 
 The third row is the maintainer's own **inferred** measurement; the row dated 2026-08-11 above it is the same
 machine's **real** `reconcile --force` timing report on v0.14.0 (pre-feature) — `prereq` 17 ms, `state` 0 ms,

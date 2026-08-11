@@ -229,28 +229,32 @@ parse_acceptance_criteria() {
   local doc line
   doc="$(cat)"
 
-  local blocks="[]"
+  local -a scenario_json=()
   local -a given_items=() when_items=() then_items=()
   local last=""
 
-  # _parse_ac_json_array <value...> — zero or more already-JSON clause
-  # values, wrapped into a compact JSON array with ONE jq call, never one
-  # per clause (024, contracts/spawn-budget.md C1.2/C1.3). Each value is
-  # itself markdown_tokenize_inline's own compact-JSON output, so `jq -cs`
-  # (slurp) is a straight re-parse-and-wrap, never a re-tokenization.
-  _parse_ac_json_array() {
+  # _parse_ac_join <value...> — zero or more already-JSON clause values,
+  # joined into a compact JSON array by plain string concatenation, never a
+  # jq call (024, T027, contracts/spawn-budget.md C1.2/C1.3). Each value is
+  # itself markdown_tokenize_inline's own compact-JSON output — already
+  # valid JSON — so no re-parse is needed to wrap it, only a `,` join.
+  _parse_ac_join() {
     (($# == 0)) && { printf '[]'; return 0; }
-    printf '%s\n' "$@" | jq -cs '.'
+    local IFS=,
+    printf '[%s]' "$*"
   }
 
+  # Accumulates one already-JSON scenario object per flush into a bash
+  # array, joined ONCE at the very end (below) — never a `. + [$v]` jq
+  # re-parse-and-append per scenario, the same O(n) spawns / O(n²) data
+  # pattern T026/T030 fixed elsewhere.
   _parse_ac_flush() {
     if ((${#then_items[@]} > 0)); then
       local g w t
-      g="$(_parse_ac_json_array "${given_items[@]}")"
-      w="$(_parse_ac_json_array "${when_items[@]}")"
-      t="$(_parse_ac_json_array "${then_items[@]}")"
-      blocks="$(jq -c --argjson g "${g}" --argjson w "${w}" --argjson t "${t}" \
-        '. + [{given:$g, when:$w, then:$t}]' <<< "${blocks}")"
+      g="$(_parse_ac_join "${given_items[@]}")"
+      w="$(_parse_ac_join "${when_items[@]}")"
+      t="$(_parse_ac_join "${then_items[@]}")"
+      scenario_json+=("{\"given\":${g},\"when\":${w},\"then\":${t}}")
     fi
     given_items=(); when_items=(); then_items=(); last=""
   }
@@ -316,6 +320,11 @@ parse_acceptance_criteria() {
   done <<< "${doc}"
   _parse_ac_flush
 
+  local blocks="[]"
+  if ((${#scenario_json[@]} > 0)); then
+    local IFS=,
+    blocks="[${scenario_json[*]}]"
+  fi
   json_canonical <<< "${blocks}"
 }
 
@@ -468,16 +477,20 @@ _parse_strip_sc_label() {
 # under `## Out of Scope`.
 _parse_epic_extra_blocks() {
   local doc="$1" line
-  local sc_items="[]" oos_items="[]" mode="" cur="" section=""
+  local -a sc_items=() oos_items=()
+  local mode="" cur="" section=""
 
+  # Native accumulation, one join at the end (below) — never a `. + [$v]` jq
+  # re-parse-and-append per bullet item (024, T027, the same pattern
+  # T026/T030 already fixed elsewhere).
   _parse_epic_flush() {
     [[ -z "${cur}" ]] && return 0
     local trimmed; trimmed="$(_parse_trim "${cur}")"
     if [[ "${mode}" == "sc" ]]; then
       trimmed="$(_parse_strip_sc_label "${trimmed}")"
-      sc_items="$(jq -c --argjson v "$(markdown_tokenize_inline "${trimmed}")" '. + [$v]' <<< "${sc_items}")"
+      sc_items+=("$(markdown_tokenize_inline "${trimmed}")")
     elif [[ "${mode}" == "oos" ]]; then
-      oos_items="$(jq -c --argjson v "$(markdown_tokenize_inline "${trimmed}")" '. + [$v]' <<< "${oos_items}")"
+      oos_items+=("$(markdown_tokenize_inline "${trimmed}")")
     fi
     cur=""
   }
@@ -515,16 +528,23 @@ _parse_epic_extra_blocks() {
   done <<< "${doc}"
   _parse_epic_flush
 
-  local blocks="[]"
-  if [[ "$(jq 'length' <<< "${sc_items}")" -gt 0 ]]; then
-    blocks="$(jq -c --argjson items "${sc_items}" --argjson h "$(markdown_inline_plain "Success Criteria")" \
-      '. + [{type:"heading", level:3, spans:$h}, {type:"bullet_list", items:$items}]' <<< "${blocks}")"
+  local -a blocks=()
+  if ((${#sc_items[@]} > 0)); then
+    local sc_joined; local IFS=,; sc_joined="[${sc_items[*]}]"; unset IFS
+    blocks+=("{\"type\":\"heading\",\"level\":3,\"spans\":$(markdown_inline_plain "Success Criteria")}")
+    blocks+=("{\"type\":\"bullet_list\",\"items\":${sc_joined}}")
   fi
-  if [[ "$(jq 'length' <<< "${oos_items}")" -gt 0 ]]; then
-    blocks="$(jq -c --argjson items "${oos_items}" --argjson h "$(markdown_inline_plain "Out of Scope")" \
-      '. + [{type:"heading", level:3, spans:$h}, {type:"bullet_list", items:$items}]' <<< "${blocks}")"
+  if ((${#oos_items[@]} > 0)); then
+    local oos_joined; local IFS=,; oos_joined="[${oos_items[*]}]"; unset IFS
+    blocks+=("{\"type\":\"heading\",\"level\":3,\"spans\":$(markdown_inline_plain "Out of Scope")}")
+    blocks+=("{\"type\":\"bullet_list\",\"items\":${oos_joined}}")
   fi
-  printf '%s' "${blocks}"
+  if ((${#blocks[@]} == 0)); then
+    printf '[]'
+  else
+    local IFS=,
+    printf '[%s]' "${blocks[*]}"
+  fi
 }
 
 # parse_plan_summary — the feature folder's plan.md (stdin), as neutral
