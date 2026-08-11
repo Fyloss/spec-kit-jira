@@ -522,8 +522,13 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
 
 ### Tests for User Story 2 (write first, observe failing)
 
-- [ ] T033 [P] [US2] Add `tests/bash/lib/test_config_read_once.bats`: each configuration source is opened at
-  most once and parsed at most once per run (FR-009), asserted by a counting stand-in rather than by timing.
+- [ ] T033 **[BLOCKING — write before T057]** [US2] Add `tests/bash/lib/test_config_read_once.bats`: each
+  configuration source is opened at most once and parsed at most once per run (FR-009, FR-038), asserted by a
+  counting stand-in rather than by timing. **"Source" is a distinct file path** (FR-009 as amended), so the
+  decisive case is the one that fails today: a full `reconcile` run opens and parses `config.local.yml`
+  **twice** — `config_load` for `overrides`, `_reconcile_local_binding_for` for `resolved_ids`. This test is
+  what T037 lacked, and its absence is why T037 was recorded complete against a requirement it did not
+  satisfy. It MUST be observed failing (count 2, expected 1) before T057 is attempted.
 - [ ] T034 [P] [US2] Add the error-parity cases to `tests/bash/lib/test_config_read_once.bats` (FR-012): a
   malformed, unreadable, and absent source each produce today's exact error, warning, exit code, **and point in
   the run**. Reading once must not collapse a diagnostic that is emitted once today, nor suppress one.
@@ -550,8 +555,14 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
 
 ### Implementation for User Story 2
 
-- [X] T037 [US2] Resolve the configuration once in `scripts/bash/commands/reconcile.sh` and have every later
-  phase read the resolved result rather than re-reading a file (FR-009, FR-010). The resolved result is
+- [X] T037 [US2] **Scope corrected 2026-08-11 — this task removed the `plan`-phase duplicate read only; it
+  does NOT satisfy FR-009, which T057 carries.** Originally written as "resolve the configuration once in
+  `scripts/bash/commands/reconcile.sh` and have every later phase read the resolved result rather than
+  re-reading a file (FR-009, FR-010)". It was recorded complete against FR-009 because "configuration source"
+  was read as a logical layer rather than a file path, and because T033 — the counting test that would have
+  shown the file still being read twice — had not been written. FR-009 has since been amended to say "file
+  path" explicitly, and the remaining duplicate is T057. What this task did deliver is real and measured
+  (−91.2% on `plan`); what it did not is recorded here rather than left implied. The resolved result is
   process-scoped, never persisted, and holds no credential material (FR-014). **`config_load` (`config.yml` +
   `config.local.yml`'s team layer) was already single-read; a SEPARATE file, `config.local.yml`'s
   `resolved_ids` binding, was not** — `_reconcile_local_binding_for` re-opened and fully re-parsed it from
@@ -619,7 +630,42 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   assertion**, but `us021-state-unchanged.json` is part of the full conformance corpus re-run after this
   change (byte-identical, exit 0), which exercises the same invariant indirectly.
 
-**Checkpoint**: configuration is read once and parsed without forking; the short-circuit is still free.
+### The first-order cost — added by amendment 2026-08-11 *(FR-038…FR-040)*
+
+> These three tasks carry the mechanism the feature originally mis-attributed. They are the highest-value work
+> remaining: `config` (~34 s) and `gate` (~33 s) together are 58% of the post-fix runtime on the motivating
+> machine, and `apply` (~35 s) a further 30%. Between them, 88% of what is left.
+
+- [ ] T059 **[BLOCKING — T033 depends on it]** Extend the counting stand-in to file reads. `tests/bash/helpers/
+  spawn_count.bash` shims processes on `PATH`; a bash redirection or an in-process parse cannot be caught that
+  way. **The mechanism is a decision, not a given** — the two candidates are (a) an in-process counter inside
+  `lib/config.sh`, incremented by `config_yaml_to_json` and read through a test-only seam, on the pattern
+  `_TIMING_FAKE_CLOCK` and the request counter already establish; or (b) counting `jq`/`cat` invocations whose
+  argv names the path, which only works while every read goes through one. Prefer (a): it counts the parse,
+  which is what costs, and it cannot be defeated by a read that does not fork. Record which was chosen and why.
+- [ ] T057 [US2] Make `config.local.yml` read and parsed **once** per run (FR-009 as amended, FR-038).
+  `config_load` (`lib/config.sh`) reads it for `.overrides`; `_reconcile_local_binding_for`
+  (`commands/reconcile.sh`) reads it again for `.resolved_ids`. **T033 must be observed failing first.**
+  Two options, recorded in the open finding above: (a) widen `config_load`'s return shape to carry the raw
+  local JSON — changes a widely-used contract, so audit every caller first; (b) a content-keyed memoisation
+  inside `lib/config.sh` so *any* caller reading the same path twice in one run gets the second free, without
+  changing a signature. (b) is the lower-risk option and the one to try first. **Constraint**: `lib/config.sh`
+  is used by every command that reads project configuration, not `reconcile` alone — the full suite and the
+  corpus are the gate, and FR-012's diagnostic-parity clause is the specific hazard (a memoised failure must
+  still be reported at the same point, with the same text, the same number of times).
+- [ ] T058 Diagnose the `apply` phase's ~35 s. It costs that much on a run with **zero writes and zero
+  requests**, and reading `apply_writes_with_recognition` end to end found no per-item fork and no duplicate
+  read — only one necessary `cat` of `spec_file`. **This is an investigation, not a fix**: the deliverable is
+  an attributed cause recorded in the Measurement Log, not a code change. Method: bracket the existing broad
+  diagnostic (`jq`/`sed`/`cat`/`git`/… shimmed on `PATH`, one line per invocation) to the `apply` phase alone,
+  on the motivating machine, as a counting run separate from any timing run (research R4). If the counter
+  finds nothing — as it did for the phase as a whole — that is itself the finding, and it points at a cost
+  this feature's instruments cannot see, which is a result for the spec rather than a task to retry (spec
+  A-2).
+
+**Checkpoint**: `config.local.yml` is opened and parsed once per run, proven by a counting stand-in rather than
+by wall-clock; parsing it forks per neither line nor item; the short-circuit is still free; and `apply`'s
+remaining cost is attributed rather than assumed.
 
 ---
 

@@ -18,12 +18,11 @@ French-locale host, with success criteria for both halves and an explicit out-of
 Feature 021 asked where a slow reconcile spent its time, and built the instrument that answers. The answer has
 now arrived, and it is not the one 021 expected.
 
-`requests: 0ms`. Every second of a three-to-six-minute run is local CPU. The bulk fetch that 021 shipped did
-its job so completely that the network has disappeared from the profile — and what it uncovered underneath is
-four phases costing about eighty seconds each, on a machine idling at half its capacity while it spawns
-processes. Seventy-five seconds of user time and a hundred and nine seconds of system time, against three to
-six minutes of wall clock, is the signature of a program that spends most of its life waiting for the operating
-system to create and reap child processes. Nothing is slow. Everything is forked.
+A three-to-six-minute reconcile of a specification a human reads in a minute is a defect on its own terms,
+whatever the mechanism turns out to be. Seventy-five seconds of user time and a hundred and nine seconds of
+system time, against three to six minutes of wall clock, is the signature of a program spending most of its
+life inside the kernel rather than computing — a program whose cost is in the calls it makes, not in the work
+it does. Which calls, this specification first got wrong; see below.
 
 Three facts make this a defect rather than an optimisation opportunity:
 
@@ -37,6 +36,38 @@ Three facts make this a defect rather than an optimisation opportunity:
 - **The configuration phase costs 84 seconds to read files that did not change during the run.** Whatever the
   right number is for parsing a handful of YAML documents once, it is not eighty-four seconds. That phase is
   re-reading and re-parsing, and every later phase that asks a configuration question pays the parse again.
+
+### The mechanism, corrected by measurement
+
+**This specification first attributed the cost to process creation, and that was wrong.** The correction is
+recorded rather than quietly overwritten, because the reasoning that produced the error is reasoning a reader
+would otherwise repeat.
+
+The motivating profile reported `requests: 0ms` on every phase. That reading came from a **defective counter** —
+the defect FR-036 now describes, which reported zero against 123 requests actually issued. Read as "the network
+has left the profile, so every second is local CPU", and combined with a system-time-heavy signature, it
+pointed at forking: *nothing is slow, everything is forked*. The spawn count was then measured — 20 243 `jq`
+invocations for 61 items — and the attribution looked confirmed.
+
+It was not. Measured directly on the machine that motivated this feature:
+
+| | |
+| --- | ---: |
+| One bare process spawn (`jq -n '1'`, no redirection) | **1.1 ms** |
+| The same spawn with a one-byte here-string attached (`<<< "x"`) | **6.1 ms** |
+| The same, with a 50 KB payload | 8.6 ms |
+| Cutting the run's spawn count by 38% (1 350 → 836) | **−4.5% wall time** |
+| Removing **one** duplicated read of `config.local.yml` | **−91% on that phase** |
+
+A bare spawn on that host costs 1.1 ms, not the 9–18 ms the profile's arithmetic implied. Attaching a
+here-string multiplies it by five and a half, and the payload's size barely matters after that. The cost tracks
+**file operations**, not `exec`. A syscall-heavy profile looks identical under both hypotheses, which is why the
+first reading was plausible and why only a direct measurement could separate them.
+
+So the defect keeps its shape and loses its mechanism: **the run re-reads and re-parses what it has already
+read, and on the machine that matters each of those reads is expensive.** The third bullet above stated this
+correctly from the start; the paragraph that used to sit above it did not. Per-item forking is real too, worth
+removing, and bounded by FR-016 through FR-019 below — but it is the second-order cost, not the first.
 
 And underneath both of those sits a smaller defect with an outsized consequence.
 
@@ -339,7 +370,11 @@ defect they describe. They belong to the instrument group above and are read wit
 **Configuration is read once per run**
 
 - **FR-009**: Every configuration source a run consults MUST be opened at most once and parsed at most once
-  for the lifetime of that run, regardless of how many questions later phases ask of it.
+  for the lifetime of that run, regardless of how many questions later phases ask of it. **"Source" means a
+  distinct file path, not a logical configuration layer**: two phases reading different keys of the same file
+  are two reads of one source, and MUST be satisfied by one parse. This clause is not a refinement but a
+  correction — the looser reading is what allowed a run that reads `config.local.yml` twice, once for its
+  `overrides` and once for its `resolved_ids`, to be recorded as satisfying this requirement.
 - **FR-010**: Every phase after the configuration phase MUST obtain configuration answers from the resolved
   result of that single parse, and MUST NOT re-read or re-parse any configuration source.
 - **FR-011**: The resolved answer for every key MUST be identical to today's, including absent keys, defaulted
@@ -375,6 +410,27 @@ defect they describe. They belong to the instrument group above and are read wit
 - **FR-022**: No concurrency may be introduced anywhere on the reconcile path. Feature 021's determinism
   requirement stands: requests are issued in one deterministic order, and the run's output is identical
   between the two ports and between repeated runs.
+
+**The run does not re-read what it has already read**
+
+*(FR-038 through FR-040 are numbered out of sequence: they were added by amendment after implementation
+measured the cost mechanism this specification had originally mis-attributed. They belong beside FR-016
+through FR-022 above — both groups bound a per-operation cost — and are read with them.)*
+
+- **FR-038**: No file may be opened and parsed more than once in a run for content already parsed in that same
+  run. Where two phases need different parts of the same file, they MUST share a single read rather than each
+  performing their own. FR-009 is this requirement's configuration-specific instance and is not weakened by it.
+- **FR-039**: The number of file reads a run performs MUST NOT grow with the number of stories, the number of
+  tasks, or the number of configuration lines — the same bound FR-016 places on process creation.
+- **FR-040**: File reads MUST be countable by a deterministic counting stand-in, on the same terms as FR-016's
+  process count, so that a re-read regression is caught by a test rather than by a wall-clock measurement on
+  one operator's machine.
+
+> **Why this group exists.** On the machine that motivated this feature, one full read-and-parse of
+> `config.local.yml` costs **~33 s**, against **1.1 ms** for a bare process spawn on the same host — a ratio
+> of roughly 30 000 to 1. Two phases were each performing one such read of the same file. This is the
+> first-order cost; FR-016 through FR-022's process budget is the second. See "The mechanism, corrected by
+> measurement" above, and research R3a.
 
 **The run is fast, and predictably so**
 
@@ -424,6 +480,11 @@ defect they describe. They belong to the instrument group above and are read wit
 - **Phase process budget**: the number of external processes one phase is permitted to spawn. It is a property
   of the phase, never of the specification being mirrored — the operator's document size may change what the
   run does, never how many times it forks to do it.
+- **File read budget**: the number of times one run opens and parses a given file path. Like the phase process
+  budget it is a property of the code rather than of the document being mirrored. Unlike it, its unit cost is
+  set almost entirely by what the host's security software does on each open — on the motivating machine, some
+  30 000 times the cost of a process spawn — which is why it is the first-order quantity and the process
+  budget the second.
 
 ## Constitution Check *(mandatory)*
 
@@ -478,6 +539,10 @@ defect they describe. They belong to the instrument group above and are read wit
   stand-in.
 - **SC-009**: Over five consecutive runs on byte-identical input, the spread between the fastest and the
   slowest is within 20% of the median, against today's 79%.
+- **SC-015**: No file is opened and parsed twice in one run for content already parsed, asserted by a counting
+  stand-in rather than by timing. It fails against the pre-change code, in which `config.local.yml` is read
+  and parsed twice — once by the configuration load for its `overrides`, once by the binding resolution for
+  its `resolved_ids` — at a directly measured cost of ~33 s per read on the motivating machine.
 
 **Nothing else moved**
 
@@ -542,7 +607,9 @@ defect they describe. They belong to the instrument group above and are read wit
   and that decision stands; this feature's speed comes from doing less work per item, never from doing several
   items at once.
 - Caching anything across runs. The single-run resolved configuration is in scope; a persisted parse, a
-  warmed index, or a cross-run response cache is not.
+  warmed index, or a cross-run response cache is not. Sharing one parse between two phases of the **same** run
+  is not merely in scope but required (FR-038) — the exclusion here is about outliving the process, never
+  about reuse within it.
 - Rewriting either port in another language, and introducing any new runtime dependency.
 - Test-suite and CI performance, which remains a separate feature.
 - A new operator-facing switch, a configurable process budget, or a configurable snapshot policy. All three

@@ -16,20 +16,28 @@ measurement taken here against the conformance fixture and a mock tracker serves
 network time by construction, which isolates the mechanism. The two agree, and [research.md](./research.md) R3
 shows why they report different seconds for the same work:
 
-- **The spawn count is the invariant**: **20 243 `jq` invocations** for 61 items, ~332 per item.
-- **The per-spawn cost is the variable**: **2.445 ms** measured on unmanaged hardware; **9–18 ms** implied by
-  the consuming repo's 3–6 minutes. That range is the signature of an endpoint-security agent inspecting every
-  `exec`, which is standard on corporate-managed macOS — and it also explains the run-to-run variance, which a
-  pure-CPU workload would not show.
+- **What is invariant across both environments** is what the run *does*: it re-reads the same configuration
+  file in more than one phase, and it spawns a process per item in several loops. Both are machine-independent
+  properties of the code.
+- **What varies is what each of those costs.** Measured directly on the maintainer's machine: a bare spawn is
+  **1.1 ms**, the same spawn with a here-string attached is **6.1 ms**, and one full read-and-parse of
+  `config.local.yml` is **~33 s**. The security-agent multiplier is real, but it applies to **file
+  operations**, not to `exec` — see research R3a, which corrects R3.
 
 So every phase in the maintainer's profile is in scope at the priority he measured. The isolation run **adds**
 one: with network removed, `parse` alone burns 52.7 s of pure CPU, which the consuming-repo profile
 under-weights at 20 s. Nothing is traded away.
 
-**Consequence for the success criteria**: spawn count is machine-independent and wall-clock is not. Each step
-below states its exit condition as a spawn-count reduction, verifiable on any machine, with wall-clock recorded
-as supporting evidence on both the maintainer's hardware and the isolation rig. **The fix is worth 4–7× more on
-the managed machine than on the unmanaged one.**
+**Consequence for the success criteria — a correction to an earlier version of this plan.** This plan first
+designated spawn count as *the* invariant and stated every step's exit condition as a spawn-count reduction.
+Measurement retired that: cutting spawns 38% moved wall time 4.5%, while removing a single duplicated config
+read moved one phase by 91%. Spawn count remains real, useful and machine-independent, and FR-016/FR-017
+stand — but it is **no longer the primary lever**. Each step below states its exit condition in the terms its
+own evidence supports:
+
+- **Redundant reads eliminated** — the first-order cost; counted, machine-independent.
+- **Spawn count reduced** — the second-order cost; counted, still required by FR-016/FR-017.
+- **Wall clock** — recorded as evidence on both machines, asserted in no suite (A-3).
 
 ## Technical Context
 
@@ -183,7 +191,8 @@ Recorded starting points:
 | parse | 20 s | **52 698 ms** |
 | plan / apply | 83 s / 82 s | 16 286 ms / 16 164 ms |
 | spawns | ~20 000 | **20 243** |
-| cost per spawn | **9–18 ms (implied)** | **2.445 ms (measured)** |
+| cost per spawn | ~~9–18 ms (implied)~~ → **1.1 ms (measured 2026-08-11)** | **2.445 ms (measured)** |
+| cost per `config.local.yml` read | **~33 s (measured 2026-08-11)** | sub-second |
 
 ### Step 4 — Parse stops forking per line *(FR-016…FR-019)*
 
@@ -216,14 +225,20 @@ the answer to FR-024 for this phase and it is reported, not tuned.
 
 ### Step 6 — Configuration read once, and parsed without forking *(FR-009…FR-015)*
 
-The maintainer's heaviest single phase at 84 s. Two mechanisms, both addressed:
+The maintainer's heaviest single phase at 84 s. Two mechanisms were proposed; **measurement has since ranked
+them, and the ranking is the reverse of what this step first assumed**:
 
-- **Parse once per run** (FR-009, FR-010) — the resolved result is reused by every later phase.
-- **Parse without forking per line** — the YAML parser costs ~6 ms/line on unmanaged hardware and
-  proportionally more under EDR, which is what makes this phase dominate on the maintainer's machine while
-  measuring 0.5 s on the isolation rig. The per-line forking is the same defect class as Step 4.
+- **Parse without forking per line** — assumed here to be the dominant mechanism (~6 ms/line on unmanaged
+  hardware, "proportionally more under EDR"). **Implemented (T038) and it did not move the phase**: the
+  per-line `jq` calls are gone — an 82-line config that cost ~160 spawns now costs 2 — and `config` still
+  costs ~34 s on the maintainer's machine. Worth keeping, correctly scoped, not the cause.
+- **Read once per run** (FR-009, FR-010, and now FR-038) — the actual dominant mechanism. One
+  `config.local.yml` read-and-parse is directly measured at **~33 s** on that machine, and the run performs
+  **two**: `config_load` for `overrides`, `_reconcile_local_binding_for` for `resolved_ids`. `config` (~34 s)
+  and `gate` (~33 s) are each one such read. Together they are 58% of the post-fix runtime.
 
-**Exit**: each configuration source opened once and parsed once; spawn count flat in configuration line count.
+**Exit**: `config.local.yml` opened and parsed **once** per run, asserted by a counting stand-in (FR-040); the
+file-read count flat in configuration line count and item count; spawn count likewise.
 
 ### Step 7 — PowerShell: profile and record *(US5, FR-033)*
 
@@ -249,6 +264,10 @@ the port shares the Step 2 counter defect.
 2. ~~**Step 2 is an addition to the specification's scope.**~~ **Resolved 2026-08-10** — the spec was amended
    to carry FR-036 and FR-037 (and SC-014), so the request counter is now ordinary in-scope work rather than
    an unrequirement-ed addition, and FR-032 carves out the one expectation it changes.
-3. **Worth confirming when you next profile**: the per-spawn cost on the consuming-repo machine. If R3's 9–18 ms
-   estimate is right, it is independently useful — it tells you the same spawn reduction will feel dramatically
-   better there than any benchmark taken on unmanaged hardware will predict.
+3. ~~**Worth confirming when you next profile**: the per-spawn cost on the consuming-repo machine.~~
+   **Resolved 2026-08-11 — and it falsified R3's estimate.** Measured on that machine: a bare spawn is
+   **1.1 ms**, not 9–18 ms; the ×5.5 penalty appears only once a here-string is attached, and one
+   `config.local.yml` read-and-parse costs **~33 s**. The multiplier applies to file operations, not `exec`
+   (R3a). The practical consequence is the opposite of what this item anticipated: a spawn reduction will
+   feel *less* dramatic there than an unmanaged benchmark predicts, and a redundant-read reduction will feel
+   far more.

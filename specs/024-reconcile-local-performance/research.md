@@ -110,6 +110,9 @@ scenarios enable timing, one asserts counts.
 
 ## R3 — The two profiles are the same run at two different per-spawn costs
 
+> **Partly superseded, 2026-08-11 — see R3a.** The arithmetic here holds; the attribution of the multiplier
+> to `exec` does not. Kept in full because the error is instructive.
+
 This is the central finding, and it **confirms the consuming-repo profile rather than competing with it**.
 
 **The invariant across both environments is the spawn count.** A `PATH`-interposed counting stand-in recorded
@@ -160,6 +163,37 @@ pointed to per-spawn cost: the YAML parser is linear at ~6 ms/line (11→146 lin
 need ~14 000 config lines; and `marker_splice_stray_files` over a real 2 400-line spec folder costs **34 ms**.
 Neither is a bottleneck on unmanaged hardware. Multiply either by an EDR-inflated spawn cost and by a
 production-sized configuration, and the maintainer's figure follows.
+
+---
+
+## R3a — What the multiplier actually applies to (correction to R3, 2026-08-11)
+
+R3 inferred a per-spawn cost of 9–18 ms on the managed machine from spawns × time, and identified it as an
+endpoint-security agent inspecting every `exec`. R3 flagged that figure as *implied*, never measured. It has
+now been measured, on that machine:
+
+| measurement | result |
+| --- | ---: |
+| `jq -n '1'` × 100, no redirection | **1.1 ms/spawn** |
+| `jq -n '1' <<< "x"` × 100 (one-byte here-string) | **6.1 ms/spawn** |
+| `jq -R '.' <<< $BIG` × 100 (50 KB here-string) | 8.6 ms/spawn |
+| spawn count 1 350 → 836 (−38%) | **−4.5% wall time** |
+| one duplicated `config.local.yml` read removed | **−91% on that phase** |
+
+A bare spawn costs **1.1 ms** — an order of magnitude below R3's inferred range, and *lower* than the 2.4 ms
+measured on unmanaged hardware. The ×5.5 jump appears only when a here-string is attached, and a 50 KB payload
+adds just 41% on top. **The agent is not inspecting `exec`; it is inspecting file operations** — and a
+here-string is one, because the shell materialises it as a temporary file.
+
+This also closes R3's own loose end. R3 tested two config-phase hypotheses, found neither explained the 84 s,
+and concluded per-spawn cost by elimination. The elimination was sound; the hypothesis space was not — it did
+not contain *"the read itself is expensive"*. One full read-and-parse of `config.local.yml` is now directly
+measured at **~33 s** on that machine, and `config` (~34 s) and `gate` (~33 s) each perform exactly one.
+
+**Survives from R3**: the two profiles are the same run at different costs; the cost is dominated by a security
+agent; spawn count is machine-independent and worth reducing; the variance is agent-load-dependent.
+**Does not survive**: the 9–18 ms figure, the "inspecting every `exec`" mechanism, the ×4–7 per-spawn value
+claim, and conclusion 3's elevation of spawn count to *the* success criterion.
 
 ---
 
