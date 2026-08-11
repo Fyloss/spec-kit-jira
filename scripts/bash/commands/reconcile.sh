@@ -614,6 +614,13 @@ _reconcile_run() {
 
   timing_phase_begin "config" "$(jira_request_count)"
 
+  # 024, T057: prime the config-YAML read cache here, in the main shell —
+  # never inside a `$( … )` subshell, which would die with it (the same
+  # discipline as cred_prime_cache/jira_request_count_prime). This is the
+  # earliest point any configuration source may be read; a short-circuited
+  # run above never reaches here and never pays this mktemp (FR-015).
+  config_yaml_cache_prime
+
   # Spec ref: folder from the path, slug from the folder name; repo from the
   # environment. Routing + creation-context resolution (US1/US2, FR-001–FR-013):
   # per value, an explicit override wins; otherwise the value is derived from

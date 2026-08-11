@@ -526,13 +526,13 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
 
 ### Tests for User Story 2 (write first, observe failing)
 
-- [ ] T033 **[BLOCKING — write before T057]** [US2] Add `tests/bash/lib/test_config_read_once.bats`: each
-  configuration source is opened at most once and parsed at most once per run (FR-009, FR-038), asserted by a
-  counting stand-in rather than by timing. **"Source" is a distinct file path** (FR-009 as amended), so the
-  decisive case is the one that fails today: a full `reconcile` run opens and parses `config.local.yml`
-  **twice** — `config_load` for `overrides`, `_reconcile_local_binding_for` for `resolved_ids`. This test is
-  what T037 lacked, and its absence is why T037 was recorded complete against a requirement it did not
-  satisfy. It MUST be observed failing (count 2, expected 1) before T057 is attempted.
+- [X] T033 **Done 2026-08-11.** Added two cases to `tests/bash/lib/test_config_read_once.bats`, calling
+  `config_load` then `_reconcile_local_binding_for` directly (mirroring `test_request_count.bats`'s style)
+  rather than driving the whole CLI: (1) with the cache primed, the decisive case — `config.local.yml` parsed
+  **once**, not twice, over the `repo-with-reconcile-binding` fixture; (2) with the cache unprimed, both calls
+  still succeed unaffected (today's behaviour, proving the cache is opt-in). **Observed failing first**
+  (count 2, `config_yaml_parse_count`/`config_yaml_cache_prime` did not exist yet), then green after T059/T057
+  below.
 - [ ] T034 [P] [US2] Add the error-parity cases to `tests/bash/lib/test_config_read_once.bats` (FR-012): a
   malformed, unreadable, and absent source each produce today's exact error, warning, exit code, **and point in
   the run**. Reading once must not collapse a diagnostic that is emitted once today, nor suppress one.
@@ -584,7 +584,7 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   second read. One full `config.local.yml` read-and-parse costing ~33 s on this machine is now a
   directly-measured fact, not an inference.
 
-> **Open finding (2026-08-11), not implemented — next session's most promising lead.** `config.local.yml` is
+> **Finding (2026-08-11) — implemented, see T057.** `config.local.yml` was
 > still read from disk **twice** in total, not once: `config_load` (`lib/config.sh`) reads it during the
 > `config` phase for its `.overrides` (team-layer merge) key; `_reconcile_local_binding_for` reads the SAME
 > file again during `gate` for its `.resolved_ids` key — `config_load`'s own internal parse is never exposed
@@ -592,15 +592,10 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
 > durations (~34 s / ~33 s) now closely bracket the ~33 s one confirmed read costs, this redundant read is the
 > leading explanation for both remaining costs.
 >
-> **Why not fixed this session**: `config_load` is a foundational `lib/config.sh` function used by every
-> command that reads project configuration, not `reconcile.sh`-specific — widening its contract (to expose or
-> accept a pre-parsed `config.local.yml`) is a broader, higher-risk change than anything else done this pass,
-> which stayed inside `reconcile.sh`/`plan_apply.sh`/`recognition.sh`/engine parsers. Options for the next
-> pass: (a) extend `config_load`'s return shape to also carry the raw local JSON (breaks/changes a
-> widely-tested contract — audit every caller first); (b) a file-content-keyed memoisation cache inside
-> `lib/config.sh` itself (mirrors `jira_request_count`'s subshell-proof file-cache pattern, T014) so ANY
-> caller reading the same path twice in one run gets the second read free, without changing any function's
-> signature — likely the lower-risk option, but unproven.
+> **Fixed (T057)**: option (b) — a content-keyed memoisation cache inside `config_yaml_to_json` itself (mirrors
+> `jira_request_count`'s subshell-proof file-cache pattern, T014) — without changing `config_load`'s or
+> `_reconcile_local_binding_for`'s signature. See T057 and T059 above for the design and the bug found while
+> verifying it.
 >
 > **Also still open: the `apply` phase's ~35 s, unexplained.** Read through `apply_writes_with_recognition`
 > (`plan_apply.sh`) end to end for this session's "zero writes" scenario — the only disk read found is one
@@ -640,13 +635,13 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
 > remaining: `config` (~34 s) and `gate` (~33 s) together are 58% of the post-fix runtime on the motivating
 > machine, and `apply` (~35 s) a further 30%. Between them, 88% of what is left.
 
-- [ ] T059 **[BLOCKING — T033 depends on it]** Extend the counting stand-in to file reads. `tests/bash/helpers/
-  spawn_count.bash` shims processes on `PATH`; a bash redirection or an in-process parse cannot be caught that
-  way. **The mechanism is a decision, not a given** — the two candidates are (a) an in-process counter inside
-  `lib/config.sh`, incremented by `config_yaml_to_json` and read through a test-only seam, on the pattern
-  `_TIMING_FAKE_CLOCK` and the request counter already establish; or (b) counting `jq`/`cat` invocations whose
-  argv names the path, which only works while every read goes through one. Prefer (a): it counts the parse,
-  which is what costs, and it cannot be defeated by a read that does not fork. Record which was chosen and why.
+- [X] T059 **Done 2026-08-11 — chose (a).** `config_yaml_to_json` (`lib/config.sh`) now appends the path to a
+  subshell-proof log file (`_CFG_YAML_CACHE_DIR/.parse.log`) on every actual parse — never on a cache HIT — and
+  `config_yaml_parse_count <path>` reads it back with `grep -Fxc`, a test-only seam. File-backed rather than an
+  in-shell counter for the same reason `jira_request_count` (T014) is: `config_yaml_to_json` is read through
+  `$( … )` at every call site, so an in-shell increment would die with the subshell that made it (research R2).
+  Built as one mechanism with T057's cache below, not a separate counter — a HIT is exactly "not opened, not
+  parsed," so the log IS the count FR-038/FR-040 ask for.
 - [X] T056a **Answered 2026-08-11 — outcome 3, and it found the feature's actual root cause (research R8).**
   One `config_yaml_to_json` of the real 8 658-line `config.local.yml` costs **31.0 s** (11.43 s user, 16.17 s
   system), so the parse *is* the cost. But the mechanism is neither the file open nor the two remaining `jq`
@@ -667,17 +662,32 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   is a different piece of code entirely. **This task exists because the attribution it checks was briefly
   written into this feature's artefacts as a measured fact when it was an inference** (corrected 2026-08-11);
   it is the same error class the feature itself was correcting, caught one layer up.
-- [ ] T057 [US2] Make `config.local.yml` read and parsed **once** per run (FR-009 as amended, FR-038).
-  **Conditional on T056a** — see its three outcomes.
-  `config_load` (`lib/config.sh`) reads it for `.overrides`; `_reconcile_local_binding_for`
-  (`commands/reconcile.sh`) reads it again for `.resolved_ids`. **T033 must be observed failing first.**
-  Two options, recorded in the open finding above: (a) widen `config_load`'s return shape to carry the raw
-  local JSON — changes a widely-used contract, so audit every caller first; (b) a content-keyed memoisation
-  inside `lib/config.sh` so *any* caller reading the same path twice in one run gets the second free, without
-  changing a signature. (b) is the lower-risk option and the one to try first. **Constraint**: `lib/config.sh`
-  is used by every command that reads project configuration, not `reconcile` alone — the full suite and the
-  corpus are the gate, and FR-012's diagnostic-parity clause is the specific hazard (a memoised failure must
-  still be reported at the same point, with the same text, the same number of times).
+- [X] T057 **Done 2026-08-11 — option (b), content-keyed memoisation inside `config_yaml_to_json` itself.**
+  Every call site (`config_load`'s `.overrides` read, `_reconcile_local_binding_for`'s `.resolved_ids` read via
+  `_cfg_local_json`, the personal-config reader) benefits transparently — no signature changed. Keyed on the
+  literal path STRING, not a resolved realpath: every call site in this codebase builds the path from the same
+  `dir` variable within one run, so the string is already a stable key, and resolving a realpath would cost a
+  fork the cache exists to avoid. Only a SUCCESSFUL parse is cached (FR-012): a still-malformed source keeps
+  failing, and reporting, on every call, exactly as before. `config_yaml_cache_prime` is called once,
+  `reconcile.sh`'s main shell, at the top of the `config` phase — the earliest point any source may be read; a
+  short-circuited run never reaches it (FR-015 unaffected). `config_yaml_cache_invalidate` is wired into
+  `_cfg_hooks_disabled_set` (the only writer of a config source) so a self-write is never masked by a stale
+  cache entry (FR-013) — dormant today since only `commands/config.sh` reaches that function and only
+  `reconcile.sh` primes the cache, but correct if that ever changes.
+  <br><br>**A real bug found and fixed during verification, not by inspection**: priming was first written
+  guard-once-per-process (mirroring `jira_request_count_prime`'s pattern), which is correct for production
+  (one OS process per run) but wrong for two existing tests (`T085`, `T047a` in
+  `test_reconcile_lifecycle.bats`/`test_reconcile_dry_run.bats`) that call `cmd_reconcile` **twice in the same
+  shell process** to compare a dry-run against a real run, writing a fixture edit to `config.local.yml`
+  directly (bypassing `_cfg_hooks_disabled_set`) between the two calls. The second call reused the first
+  call's cache and read the pre-edit content — a functional bug, not merely a stale observability number, and
+  the two tests caught it immediately (full `lib`+`commands` suite: 732 ok / 2 not ok). Fixed by making
+  `config_yaml_cache_prime` unconditional (always a fresh `mktemp -d`) rather than guarded — it has exactly one
+  call site, so the once-per-process guard bought nothing and was actively wrong. Re-verified: `lib`+`commands`
+  734/734, full suite 1889/1889, `bash tests/conformance/ci-conformance.sh` exit 0 zero divergence, `shellcheck`
+  clean. **Not yet measured on the motivating machine** — projected to remove one of the two ~33 s
+  `config.local.yml` parses the "Open finding" below identified, alongside T060's per-line fork removal already
+  confirmed there.
 - [X] T060 **Done 2026-08-11 — measured 4.3× on the parser, sys time down 52×.** Before/after on the same
   machine, same 2 003-line synthetic config, byte-identical output (43 958 bytes both):
   **5.346 s → 1.241 s** wall; user 1.792 → 1.180 s; **system 3.158 s → 0.061 s**. The system-time collapse is

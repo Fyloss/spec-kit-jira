@@ -7,12 +7,18 @@
 # `_md_json_escape`, duplicated rather than sourced across the lib->engine
 # layer boundary).
 #
-# T033-T035/T036a/T036b (read-once orchestration, error parity, the
-# hooks-disabled self-write, precedence/defaulting parity, containment) are
-# NOT added here — `config_load` already reads each file exactly once per
-# call (one `config_yaml_to_json` per path in `commands/reconcile.sh`), and
-# changing that orchestration was out of scope for this pass: only the
-# per-line PARSING cost was fixed. See tasks.md Phase 6 notes.
+# T033 (2026-08-11) — `config.local.yml` is read and parsed TWICE per run:
+# `config_load` (this file) for `.overrides`, `_reconcile_local_binding_for`
+# (commands/reconcile.sh) for `.resolved_ids`, for the identical
+# (project-key, config-dir) pair. "Source" means a distinct file path
+# (FR-009 as amended), so this is the decisive case T037 did not satisfy.
+# Uses `config_yaml_parse_count` (T059), the counting stand-in for file
+# reads — a cache HIT never increments it, so it counts what actually costs
+# (the parse), not how many callers asked.
+#
+# T034-T035/T036a/T036b (error parity, the hooks-disabled self-write,
+# precedence/defaulting parity, containment) are still NOT added here — see
+# tasks.md Phase 6 notes.
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
@@ -64,6 +70,33 @@ _spawn_count_for_config() {
   c0="$(_spawn_count_for_config "version_compat: \">=1.0\"")"
   c20="$(_spawn_count_for_config "$(_gen_config 20)")"
   [ "${c0}" = "${c20}" ]
+}
+
+@test "T033: config.local.yml is opened and parsed at most once per run (FR-009, FR-038)" {
+  ROOT2="${ROOT}"
+  run bash -c '
+    source "'"${ROOT2}"'/scripts/bash/commands/reconcile.sh"
+    config_yaml_cache_prime
+    FIXTURE="'"${ROOT2}"'/tests/conformance/fixtures/repo-with-reconcile-binding/.specify/jira"
+    config_load "${FIXTURE}" > /dev/null
+    _reconcile_local_binding_for "COMP" "${FIXTURE}" > /dev/null
+    printf "count=%s" "$(config_yaml_parse_count "${FIXTURE}/config.local.yml")"
+  '
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == "count=1" ]]
+}
+
+@test "T033: an unprimed cache changes nothing — every call still parses (today's behaviour, unaffected)" {
+  ROOT2="${ROOT}"
+  run bash -c '
+    source "'"${ROOT2}"'/scripts/bash/commands/reconcile.sh"
+    FIXTURE="'"${ROOT2}"'/tests/conformance/fixtures/repo-with-reconcile-binding/.specify/jira"
+    a="$(config_load "${FIXTURE}")"
+    b="$(_reconcile_local_binding_for "COMP" "${FIXTURE}")"
+    [ -n "${a}" ] && [ -n "${b}" ] && printf "ok"
+  '
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "ok" ]
 }
 
 @test "_cfg_json_encode matches jq's --arg encoding for control characters, quotes, and backslashes" {

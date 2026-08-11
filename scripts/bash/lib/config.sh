@@ -534,10 +534,89 @@ _cfg_parse_sequence() {
   _CFG_RET="[${items[*]}]"
 }
 
-# config_yaml_to_json <file> — parse the YAML subset and print canonical JSON.
+# _CFG_YAML_CACHE_DIR — subshell-proof, process-scoped cache of parsed
+# config sources (024, T057/T059, FR-009/FR-038/FR-040). `config_yaml_to_json`
+# is read through `$( … )` at every call site (`config_load`, `_cfg_local_json`,
+# the personal-config reader), so an in-shell-variable cache set inside one of
+# those subshells is discarded when it exits — the same defect research R2
+# found for the request counter. A directory on disk is not: one file per
+# source path holds its last-parsed canonical JSON, and a second file logs
+# every path actually opened-and-parsed (never a cache HIT), which is what
+# `config_yaml_parse_count` (T059's counting stand-in) reads back. Unprimed
+# (`config_yaml_cache_prime` never called), every call is a fresh parse — the
+# pre-024 behaviour — so a caller that never primes it is unaffected.
+: "${_CFG_YAML_CACHE_DIR:=}"
+
+# config_yaml_cache_prime — start a FRESH cache for one run, in the MAIN
+# shell (research R2/R3, the same discipline as cred_prime_cache and
+# jira_request_count_prime): call this once at the start of a run, never
+# from inside a `$( … )` subshell, or the path itself is lost when that
+# subshell exits and every later call re-primes into a directory nothing
+# else can see. Deliberately NOT guarded to prime only once per process
+# (unlike jira_request_count_prime): `reconcile.sh` calls this exactly once
+# per logical run, but a caller that invokes `cmd_reconcile` more than once
+# in the SAME process — every test in this suite does, and nothing rules it
+# out for a real embedder — must not have the second call silently reuse the
+# first run's cache, which would serve stale content for any source a
+# THIRD-PARTY write (a test's own fixture edit; a real operator editing the
+# file between two logical runs) changed on disk in between (FR-013's spirit,
+# generalised beyond this run's own writes).
+config_yaml_cache_prime() {
+  _CFG_YAML_CACHE_DIR="$(mktemp -d)" || _CFG_YAML_CACHE_DIR=""
+}
+
+# _cfg_yaml_cache_key <file> — a filename-safe key for the cache/log below.
+# The literal argument string, not a resolved realpath: every call site in
+# this codebase builds the path from the same `dir` variable consistently
+# within one run, so the string itself is already a stable key, and resolving
+# a realpath would cost a fork this cache exists to avoid paying.
+_cfg_yaml_cache_key() {
+  local k="$1"
+  printf '%s' "${k//\//_}"
+}
+
+# config_yaml_cache_invalidate <file> — drop a cached parse (FR-013). The
+# only writer of a config source, `_cfg_hooks_disabled_set`, calls this right
+# after writing, so a later read in the same process — if that process ever
+# primes the cache, which today only `reconcile.sh` does — is never served a
+# pre-write answer instead of a fresh parse.
+config_yaml_cache_invalidate() {
+  [[ -z "${_CFG_YAML_CACHE_DIR}" ]] && return 0
+  rm -f "${_CFG_YAML_CACHE_DIR}/$(_cfg_yaml_cache_key "$1")" 2> /dev/null
+  return 0
+}
+
+# config_yaml_parse_count <file> — how many times config_yaml_to_json has
+# actually opened and parsed this path from disk so far (a cache HIT does not
+# count). Test-only seam for T033/FR-038/FR-040. 0 when priming never
+# happened or the path was never read.
+config_yaml_parse_count() {
+  local log="${_CFG_YAML_CACHE_DIR}/.parse.log" n
+  [[ -f "${log}" ]] || { printf '0'; return 0; }
+  n="$(grep -Fxc -- "$1" "${log}" 2> /dev/null)"
+  printf '%s' "${n:-0}"
+}
+
+# config_yaml_to_json <file> — parse the YAML subset and print canonical
+# JSON. Memoised per absolute-path-string within a run when the cache above
+# has been primed (T057): a source asked for twice in the same process is
+# opened and parsed once, the second caller served the first caller's
+# canonical output. FR-012's diagnostic parity is unaffected — only a
+# SUCCESSFUL parse is cached, so a still-malformed source keeps failing (and
+# reporting) on every call, exactly as before this cache existed.
 config_yaml_to_json() {
-  local file="$1" json
+  local file="$1" json cachefile=""
   [[ -f "${file}" ]] || { printf 'config: file not found: %s\n' "${file}" >&2; return 1; }
+  if [[ -n "${_CFG_YAML_CACHE_DIR}" ]]; then
+    cachefile="${_CFG_YAML_CACHE_DIR}/$(_cfg_yaml_cache_key "${file}")"
+    if [[ -f "${cachefile}" ]]; then
+      local cached=""
+      IFS= read -r -d '' cached < "${cachefile}" 2> /dev/null
+      printf '%s' "${cached}"
+      return 0
+    fi
+    printf '%s\n' "${file}" >> "${_CFG_YAML_CACHE_DIR}/.parse.log" 2> /dev/null
+  fi
   _cfg_prep "${file}"
   _cfg_parse_value
   if [[ -n "${_CFG_ERR}" ]]; then
@@ -546,10 +625,13 @@ config_yaml_to_json() {
   fi
   json="${_CFG_RET}"
   # Canonicalise (and prove well-formed). A malformed subset surfaces here.
-  printf '%s' "${json}" | jq -cS . 2> /dev/null || {
+  local canon
+  canon="$(printf '%s' "${json}" | jq -cS . 2> /dev/null)" || {
     printf 'config: %s is not valid config YAML\n' "${file}" >&2
     return 1
   }
+  [[ -n "${cachefile}" ]] && printf '%s' "${canon}" > "${cachefile}" 2> /dev/null
+  printf '%s' "${canon}"
 }
 
 # =============================================================================
@@ -1035,6 +1117,11 @@ _cfg_hooks_disabled_set() {
   yaml="$(printf '%s' "${merged}" | config_to_yaml)"
   mkdir -p "${dir}"
   printf '%s\n' "${yaml}" > "${f}"
+  # FR-013: a later read in THIS process must see the write just made, not a
+  # pre-write cache entry. No-op unless a caller has primed the cache above —
+  # today only `reconcile.sh` does, and `reconcile.sh` never reaches this
+  # function, so this is dormant until something changes that.
+  config_yaml_cache_invalidate "${f}"
 }
 
 # config_hooks_disabled_add <event> [config_dir] [dry_run] — record the operator's
