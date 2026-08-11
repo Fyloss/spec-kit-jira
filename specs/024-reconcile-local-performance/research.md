@@ -265,6 +265,54 @@ and is verified before the timing contract is updated.
 
 ---
 
+## R8 — The dominant cost is a fork the counter cannot see (2026-08-11)
+
+**This is the finding the whole feature was hunting, and it explains every anomaly the earlier rounds left
+open.** It was reached only after R3's per-spawn inference was falsified (R3a) and the "one config read costs
+33 s" attribution was itself downgraded from fact to inference.
+
+**Measured on the motivating machine**, against its real 8 658-line `config.local.yml`:
+
+| | wall | user | system |
+| --- | ---: | ---: | ---: |
+| One `config_yaml_to_json` of the real file | **31.0 s** | 11.43 s | 16.17 s |
+| `x="$(f abc)"` × 10 000 (command substitution) | 7.192 s | 1.04 s | 4.67 s |
+| `f abc; x=$_OUT` × 10 000 (out-variable) | **0.101 s** | 0.05 s | 0.01 s |
+
+One command substitution costs **0.72 ms**; the same call through a variable costs **0.010 ms** — a factor of
+**71**.
+
+**The parser forks 3–4 times per configuration line**, at four sites: `_cfg_prep:169`
+(`_cfg_strip_inline_comment`), `_cfg_parse_mapping:447` (`_cfg_scalar_json`), `_cfg_parse_mapping:471`
+(`_cfg_json_encode`), and `_cfg_scalar_json:8` (`_cfg_decode_escapes`). On 8 658 lines that is **26 000–35 000
+subshell forks**.
+
+Two independent routes agree on the count:
+
+- *Structural*: 3–4 sites × 8 658 lines = 26 000–35 000.
+- *Arithmetic*: the parse's 16.17 s of system time ÷ 0.467 ms of system time per fork = **34 600**.
+
+The 31 s therefore decompose as **~25 s of fork overhead** and **~7.8 s of real work** (the character-by-
+character loops inside those same helpers). Removing the substitutions projects the parse to **~8 s**.
+
+**Why no instrument in this feature saw it.** A `$( … )` around a shell function forks and never calls
+`exec`. The `PATH`-interposed counting stand-in (R4, T002) shims external binaries — it is structurally
+incapable of observing such a fork. The broad diagnostic reported 836 spawns for a 116-second run and was
+read as "spawns are not the problem"; the correct reading was "*this counter* cannot see the spawns". Spec
+FR-016/FR-018 said "external process", which the code satisfied while forking 34 600 times.
+
+**What this retires, and what it restores.** It retires R3a's implication that process creation is
+second-order — process creation is first-order after all, just not the kind anyone was counting. It also
+explains why T038 (removing the per-line `jq` calls from this same parser) moved nothing: it replaced `exec`
+forks with subshell forks and character loops, roughly a wash. And it explains the isolation rig's silence —
+its fixture config is 14 lines against the real 8 658, so the rig under-represents this cost by ~600×.
+
+**The fix is already idiomatic here.** `_cfg_map_entry_key` sets `_CFG_KEY`/`_CFG_REST`, the block parsers set
+`_CFG_RET`, and `lib/timing.sh` sets `_TIMING_NOW_MS` — each with a comment saying it must never be called
+through `$( … )`, for precisely this reason. The four hot helpers were simply never converted.
+
+---
+
 ## Summary of decisions
 
 | # | Decision | Drives |

@@ -392,12 +392,22 @@ defect they describe. They belong to the instrument group above and are read wit
 
 **The run stops spawning a process per item**
 
-- **FR-016**: The number of external processes a run spawns MUST NOT grow with the number of stories, the
-  number of tasks, or the number of configuration lines.
+- **FR-016**: The number of processes a run creates MUST NOT grow with the number of stories, the number of
+  tasks, or the number of configuration lines. **"Process" means any fork, not only one that goes on to
+  execute an external program** — a command substitution `$( … )` around a shell function forks without ever
+  calling `exec`, and is counted here. This clause is a correction, not a refinement: written as "external
+  process", these requirements were satisfiable by a run whose dominant cost was 34 600 command-substitution
+  subshells, because the `PATH`-interposed counter that verifies them cannot see a fork that never execs.
 - **FR-017**: The number of external processes a run spawns MUST be bounded by a small constant per phase plus
   one per Jira request issued.
-- **FR-018**: No loop on the reconcile path may spawn an external process per item, and none may spawn one per
-  field of an item.
+- **FR-018**: No loop on the reconcile path may create a process per item, and none may create one per field
+  of an item — including a command-substitution subshell around a shell function (FR-016). Where a helper is
+  called once per line, per item, or per field, it MUST return its result through a variable rather than
+  through `$( … )`; `_CFG_RET`, `_CFG_KEY`/`_CFG_REST` and `_TIMING_NOW_MS` are the pattern already
+  established in this codebase for exactly this reason.
+- **FR-041**: The counting stand-in of FR-040 MUST count forks that never `exec`, not only external program
+  invocations. A measurement instrument that cannot observe the dominant cost is not evidence of its absence —
+  this feature spent a full pass optimising against a counter blind to 97% of the processes its runs created.
 - **FR-019**: Where a transformation genuinely requires an external tool, that tool MUST be invoked a bounded
   number of times for the whole set of items rather than once per item, and its batched output MUST be
   byte-identical to the concatenation of its per-item outputs today.

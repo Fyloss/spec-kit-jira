@@ -647,7 +647,16 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   `_TIMING_FAKE_CLOCK` and the request counter already establish; or (b) counting `jq`/`cat` invocations whose
   argv names the path, which only works while every read goes through one. Prefer (a): it counts the parse,
   which is what costs, and it cannot be defeated by a read that does not fork. Record which was chosen and why.
-- [ ] T056a **[BLOCKING — T057 must not be designed before this returns]** Attribute the ~33 s. It is measured
+- [X] T056a **Answered 2026-08-11 — outcome 3, and it found the feature's actual root cause (research R8).**
+  One `config_yaml_to_json` of the real 8 658-line `config.local.yml` costs **31.0 s** (11.43 s user, 16.17 s
+  system), so the parse *is* the cost. But the mechanism is neither the file open nor the two remaining `jq`
+  calls: the parser performs a command substitution 3–4 times per line — `_cfg_prep:169`,
+  `_cfg_parse_mapping:447`, `_cfg_parse_mapping:471`, `_cfg_scalar_json:8` — for **26 000–35 000 subshell
+  forks**, confirmed independently by arithmetic (16.17 s ÷ 0.467 ms/fork = 34 600). Measured on that machine:
+  a `$( … )` costs **0.72 ms**, the same call through an out-variable **0.010 ms** (×71). The 31 s are ~25 s of
+  fork overhead and ~7.8 s of real character-loop work. **The `PATH`-interposed counter could never have seen
+  this** — a `$( … )` around a shell function forks without `exec`. See T060.
+- [ ] ~~T056a~~ *(original wording, kept for the record)* Attribute the ~33 s. It is measured
   by subtraction (removing the duplicate `_reconcile_local_binding_for` call moved `plan` by −33.5 s), never by
   isolating the read — and post-T038 the parse costs **two** process spawns, which cannot account for 33 s.
   Time `config_yaml_to_json` directly against the real `config.local.yml` on the motivating machine, and record
@@ -669,7 +678,26 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   is used by every command that reads project configuration, not `reconcile` alone — the full suite and the
   corpus are the gate, and FR-012's diagnostic-parity clause is the specific hazard (a memoised failure must
   still be reported at the same point, with the same text, the same number of times).
-- [ ] T058 Diagnose the `apply` phase's ~35 s. It costs that much on a run with **zero writes and zero
+- [ ] T060 **[US2, highest value remaining — research R8]** Convert the four per-line command substitutions in
+  `scripts/bash/lib/config.sh` to the out-variable pattern the same file already uses: `_cfg_prep:169`
+  (`_cfg_strip_inline_comment`), `_cfg_parse_mapping:447` (`_cfg_scalar_json`), `_cfg_parse_mapping:471`
+  (`_cfg_json_encode`), `_cfg_scalar_json:8` (`_cfg_decode_escapes`). Each sets a named global and returns
+  success, exactly as `_cfg_map_entry_key` sets `_CFG_KEY`/`_CFG_REST` and `_cfg_parse_value` sets `_CFG_RET`
+  today — including their header comments' warning that the function must never be called through `$( … )`.
+  **Projected**: parse 31 s → ~8 s on the motivating machine, twice per run. **Failing test first**: T059's
+  counter, extended per FR-041 to count forks that never `exec` (a `$( … )` around a shell function is
+  invisible to a `PATH` shim — count it in-process instead, e.g. by incrementing a counter inside each
+  converted helper behind a test-only seam). **Hazard**: a helper that currently prints and is captured must
+  not also print after conversion, or its output lands on stdout mid-parse; and `_cfg_scalar_json` is called
+  from two sites, so both must move together.
+- [ ] T061 [US2] *(second-order, after T060)* Reduce the ~7.8 s of character-by-character work that remains in
+  `_cfg_strip_inline_comment`, `_cfg_json_encode` and `_cfg_map_entry_key`. These walk every character of
+  every line in bash. Only worth attempting once T060 lands and is re-measured — at that point it is the
+  dominant remaining cost of the phase, and not before.
+- [ ] T058 Diagnose the `apply` phase's ~35 s. **Re-read in the light of R8 before measuring**: `apply`'s cost
+  may be the same mechanism — a per-item command substitution invisible to the `PATH` counter — rather than
+  anything exotic. Check the per-item paths for `$( … )` around shell functions first; it is the cheaper
+  hypothesis and it now has precedent. It costs that much on a run with **zero writes and zero
   requests**, and reading `apply_writes_with_recognition` end to end found no per-item fork and no duplicate
   read — only one necessary `cat` of `spec_file`. **This is an investigation, not a fix**: the deliverable is
   an attributed cause recorded in the Measurement Log, not a code change. Method: bracket the existing broad
