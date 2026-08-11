@@ -262,10 +262,18 @@ below is trustworthy; none was before.
   required to know whether it matters on the target machine.
 - [ ] T020 [P] Record the per-spawn cost of both hosts per `quickstart.md` §5a — the multiplier that reconciles
   the two profiles (research R3). Measured here: 2 445 µs. **This one needs the maintainer**, on the
-  consuming-repo machine; the 9–18 µs·10³ figure in the plan is inferred, not measured.
-- [ ] T021 Record the consuming-repo baseline: `reconcile --force` with timing on, now that per-phase request
+  consuming-repo machine; the 9–18 µs·10³ figure in the plan is inferred, not measured. **Still not run** — the
+  isolated `jq -n '1'` loop microbenchmark itself. A partial signal exists from T021/T042 instead: a single
+  Jira GET (`recognition`, one request) cost 5.5–6.6 s wall on this machine, which is request latency, not
+  per-spawn cost, and cannot substitute for T020's own number.
+- [X] T021 Record the consuming-repo baseline: `reconcile --force` with timing on, now that per-phase request
   counts are real (Phase 3). **This is the first time that profile can be decomposed into CPU and network.**
-  Requires the maintainer's environment.
+  Requires the maintainer's environment. **Done.** Two pre-fix runs (v0.14.0, 1 epic + 1 story) and one
+  post-fix run (this branch, same scenario) recorded in the Measurement Log. `requests: 0` confirmed on the
+  pre-fix runs (the same defect Phase 3 fixes, reproduced live); `requests: 1` on the post-fix run — the
+  decomposition T021 asks for. Item count was small (1 story, no tasks at `specify`-then-`plan` stage) — the
+  ~20 000-spawn/3–6 min profile the plan originally cited was never itself reproduced with an item count
+  recorded, so it remains uncharacterised at this size.
 
 **Checkpoint**: both hosts characterised, in spawns and in seconds, with requests attributed. Phases 5–7 are
 now falsifiable.
@@ -515,9 +523,14 @@ median.
 
 - [ ] T041 [US4] Measure the final isolation-rig profile (five clean runs) and record it in the Measurement Log
   against the Phase 4 baseline. Assert FR-023 (<20 s total excluding requests) and FR-024 (no phase >5 s).
-- [ ] T042 [US4] Measure the final consuming-repo profile with the maintainer, now decomposable into CPU and
+- [X] T042 [US4] Measure the final consuming-repo profile with the maintainer, now decomposable into CPU and
   network, and record it. **This is the acceptance evidence for the feature**, per Constitution XII's dogfood
-  requirement — the isolation rig cannot stand in for it.
+  requirement — the isolation rig cannot stand in for it. **Done, on a 1-story specification (`Skipped: 1`,
+  zero writes).** Total -56.5% (356 565 → 154 942 ms), CPU time -45.3%; `apply` cost 35 399 ms with the single
+  request accounted for entirely by `recognition` — confirming the reduction is real local work removed, not
+  measurement noise. **Not yet done at the scale the plan's original ~20 000-spawn/3–6 min profile implies**
+  (item count for that profile was never recorded — see T021) — this evidence is real but for a much smaller
+  specification than the one that motivated the feature.
 - [ ] T043 [US4] Record run-to-run variance on both hosts against FR-025's 20% bound. **Report the result
   rather than forcing it**: research R3 attributes the maintainer's 79% to endpoint-security inspection cost
   varying under load, which cutting ~20 000 spawns to a few hundred largely removes but does not fully control.
@@ -615,6 +628,46 @@ recorded; still needed to normalise against the 61-item reference. T020's own is
 (`quickstart.md` §5a) has not yet been run on this machine — the number above is a full-run report, not that
 micro-benchmark, so µs/spawn here is still blank pending it. Per-spawn cost is otherwise inferred from
 spawns × time and would be confirmed by T020.
+
+> **Second real pre-fix run (2026-08-11), same 1-story specification, network connected.** `prereq` 19 ms,
+> `config` 82 654 ms, `parse` 20 555 ms, `gate` 79 954 ms, `recognition` 5 497 ms, `plan` 83 726 ms, `apply`
+> 84 251 ms, total 356 565 ms, `requests: 0` throughout (same v0.14.0 defect). Outcome: `Created 0, Updated 0,
+> Skipped 1, Recognised 1` — the story already carried a ticket from the earlier run and needed no change.
+> `config`/`gate` are within 1% of the first run's figures despite the different outcome, reinforcing the
+> fixed-per-run reading above. **New finding: `apply` cost 84 251 ms while writing nothing (`Skipped: 1`)** —
+> whatever dominates `apply` here is not proportional to writes performed, at least at this item count. A
+> single `recognition` read (one ticket, already bound) cost 5 497 ms alone, suggesting **individual Jira
+> requests may cost multiple seconds on this network** (corporate proxy/TLS/inspection) — if so, part of
+> `plan`/`apply`'s cost is request latency this feature's spawn-count work cannot address, not spawn count.
+> Shell `time`: 77.69 s user, 112.02 s system, 53% CPU, 5:57.92 (357.92 s) wall. **Next**: re-run this exact
+> scenario (same spec, same already-bound story — an apples-to-apples "skip" case) on the
+> `feat/024-reconcile-local-performance` branch, without `LC_ALL=C`, to get the first real per-phase
+> **request count** on this machine and settle whether `apply`/`plan` are request-latency-bound or
+> spawn-bound.
+
+> **T042 acceptance evidence (2026-08-11) — same machine, same 1-story "skip" scenario, on
+> `feat/024-reconcile-local-performance` (all fixes in this pass, no `LC_ALL=C`).** `prereq` 22 ms, `state` 2
+> ms, `config` 33 885 ms, `parse` 6 612 ms, `gate` 33 659 ms, `recognition` 6 604 ms, `plan` 38 759 ms, `apply`
+> 35 399 ms, **total 154 942 ms, requests: 1** — the first non-zero request count ever measured on this
+> machine (Phase 3's fix confirmed live). Shell `time`: 41.18 s user, 62.71 s system, 66% CPU, 2:36.04
+> (156.04 s) wall.
+>
+> **vs. the pre-fix run above**: total -56.5% (356 565 → 154 942 ms); CPU time (user+system) -45.3%
+> (189.71 s → 103.89 s) — a genuine reduction in work done, not just less waiting. Per phase: `config` -59.0%,
+> `parse` -67.8%, `gate` -57.9%, `plan` -53.7%, `apply` -58.0%. `recognition` +20.1% (5 497 → 6 604 ms) — noise
+> from a single Jira GET's variable network latency, not a regression (recognition.sh's fix only touched local
+> `jq` calls). **`gate` and `plan` improved despite receiving no direct code change** — both resolve
+> configuration via `config.sh`, so they inherit T038's per-line-forking fix indirectly.
+>
+> **The single request this run made was `recognition`'s read; `apply` issued zero Jira requests
+> (`Skipped: 1`) yet still cost 35 399 ms, entirely local** — confirms the T030/T031 note's prediction:
+> `plan_writes`/`apply_writes`'s remaining per-story payload-building (left untouched this pass) is real,
+> substantial, non-network cost, and is where the next optimisation pass should look first.
+>
+> **Honest gap**: even at -56.5%, this machine is nowhere near FR-023 (<20 s total excluding requests) or
+> FR-024 (no phase >5 s) — every phase but `prereq`/`state` still exceeds 5 s, and the total (minus the one
+> request) is still ~155 s. The relative win is large and real; the feature's own numeric acceptance criteria
+> are not met on this machine yet.
 
 ---
 
