@@ -262,10 +262,14 @@ below is trustworthy; none was before.
   required to know whether it matters on the target machine.
 - [ ] T020 [P] Record the per-spawn cost of both hosts per `quickstart.md` §5a — the multiplier that reconciles
   the two profiles (research R3). Measured here: 2 445 µs. **This one needs the maintainer**, on the
-  consuming-repo machine; the 9–18 µs·10³ figure in the plan is inferred, not measured. **Still not run** — the
-  isolated `jq -n '1'` loop microbenchmark itself. A partial signal exists from T021/T042 instead: a single
-  Jira GET (`recognition`, one request) cost 5.5–6.6 s wall on this machine, which is request latency, not
-  per-spawn cost, and cannot substitute for T020's own number.
+  consuming-repo machine; the 9–18 µs·10³ figure in the plan is inferred, not measured. **Run 2026-08-11, and it falsified the
+  inferred figure** — which makes this the single most consequential measurement in the feature. On the
+  consuming-repo machine: `jq -n '1'` × 100 with no redirection = **1.1 ms/spawn**, an order of magnitude
+  below the 9–18 ms inferred and *below* the 2.445 ms measured on unmanaged hardware. Adding a one-byte
+  here-string (`<<< "x"`) takes it to **6.1 ms**; a 50 KB payload to 8.6 ms. The multiplier applies to file
+  operations, not `exec` (research R3a). This is the measurement that retired spawn count as the feature's
+  primary lever — and it had been an open, non-blocking task since the feature's first commit while Steps 4–6
+  executed against the figure it disproves.
 - [X] T021 Record the consuming-repo baseline: `reconcile --force` with timing on, now that per-phase request
   counts are real (Phase 3). **This is the first time that profile can be decomposed into CPU and network.**
   Requires the maintainer's environment. **Done.** Two pre-fix runs (v0.14.0, 1 epic + 1 story) and one
@@ -568,7 +572,7 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   `resolved_ids` binding, was not** — `_reconcile_local_binding_for` re-opened and fully re-parsed it from
   disk once in `gate` (`gate_binding`) and again in `plan` (`_reconcile_plan_context`), for the identical
   (project-key, config-dir) pair, in the same run. Found from the real-machine "spawn count down 38%, wall
-  time down 4.5%" disconnect: a 100 ms/call here-string-redirection cost (measured directly on that machine)
+  time down 4.5%" disconnect: a ~6 ms/call here-string-redirection cost (measured directly on that machine: 0.609 s / 100 calls)
   is real but too small to explain the gap alone; a second full file-read-and-parse most runs' security
   software would scan is a more plausible remaining piece. Fixed: `_reconcile_plan_context` takes an optional
   cached-binding parameter; `reconcile.sh` passes gate's already-resolved `gate_binding` when gate's own
