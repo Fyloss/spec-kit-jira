@@ -53,7 +53,7 @@ task_marker_format() {
 task_marker_parse_line() {
   local raw="$1" line t
   line="${raw%$'\r'}"
-  t="$(printf '%s' "${line}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+  t="$(_smk_trim "${line}")"
 
   local generic_re='^<!--[[:space:]]+speckit-jira[[:space:]]+(.*)-->[[:space:]]*$'
   if [[ ! "${t}" =~ ${generic_re} ]]; then
@@ -61,7 +61,7 @@ task_marker_parse_line() {
     return 0
   fi
   local body="${BASH_REMATCH[1]}"
-  body="$(printf '%s' "${body}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+  body="$(_smk_trim "${body}")"
 
   local task_re='^task=([^[:space:]]+)([[:space:]]+(.*))?$'
   if [[ ! "${body}" =~ ${task_re} ]]; then
@@ -75,7 +75,7 @@ task_marker_parse_line() {
     return 0
   fi
 
-  tail="$(printf '%s' "${tail}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+  tail="$(_smk_trim "${tail}")"
   if [[ -z "${tail}" ]]; then
     jq -cn --arg id "${idval}" '{kind:"valid", id:$id, state:"assigned"}' | json_canonical
     return 0
@@ -140,8 +140,16 @@ task_marker_section_info() {
     ((lineno < start)) && continue
     ((lineno > end)) && break
     info="$(task_marker_parse_line "${line}")"
+    # 024, contracts/spawn-budget.md C1.2/C1.3: this loop runs once per
+    # document line, so an extra `jq -r '.kind'` call here — the same
+    # per-line-classification pattern T025 already fixed in
+    # story_marker.sh/spec_marker.sh — would cost one process per line
+    # regardless of marker density. `task_marker_parse_line`'s "none" path
+    # is a plain `printf`, never `json_canonical`, so the literal string is
+    # exact, not approximate — every other return path is JSON-object-typed
+    # and can never collide with it.
+    [[ "${info}" == '{"kind":"none"}' ]] && continue
     kind="$(jq -r '.kind' <<< "${info}")"
-    [[ "${kind}" == "none" ]] && continue
     found_lines+=("${lineno}")
     if [[ "${kind}" == "valid" ]]; then
       found_ids+=("$(jq -r '.id' <<< "${info}")")

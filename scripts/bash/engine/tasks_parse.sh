@@ -120,6 +120,15 @@ tasks_parse_document() {
 
   local total_lines; total_lines="$(marker_splice_line_count "${doc}")"
 
+  # 024, contracts/spawn-budget.md C1.2/C1.3: `doc` split into a bash array
+  # ONCE, so the continuation-line scan below indexes memory instead of
+  # re-piping the WHOLE document through `sed -n "${j}p"` for every line of
+  # every task's span — a process per line, not merely per task.
+  local -a _tp_doc_lines=()
+  while IFS= read -r _tp_dl || [[ -n "${_tp_dl}" ]]; do
+    _tp_doc_lines+=("${_tp_dl}")
+  done <<< "${doc}"
+
   # Pass 1: collect task anchors with their checkbox/ref/rest-of-line and the
   # enclosing phase heading text + story ordinal, walking the whole document
   # once so phase context is correct at each anchor.
@@ -153,7 +162,8 @@ tasks_parse_document() {
     return 0
   fi
 
-  local tasks="[]" skipped="[]" i
+  local -a tasks_arr=() skipped_arr=()
+  local i
   for ((i = 0; i < n; i++)); do
     local a="${anchor_lines[i]}" span_end
     if ((i + 1 < n)); then span_end=$((anchor_lines[i + 1] - 1)); else span_end="${total_lines}"; fi
@@ -167,7 +177,7 @@ tasks_parse_document() {
     local -a cont=()
     local j started=0
     for ((j = a + 1; j <= span_end; j++)); do
-      local cl; cl="$(sed -n "${j}p" <<< "${doc}")"
+      local cl="${_tp_doc_lines[j - 1]:-}"
       cl="${cl%$'\r'}"
       if [[ "${cl}" =~ ${_TP_MARKER_LINE_RE} ]]; then continue; fi
       local ct; ct="$(_tp_trim "${cl}")"
@@ -214,7 +224,7 @@ tasks_parse_document() {
 
     local task_ref="${anchor_ref[i]}"
     if [[ -z "${title}" ]]; then
-      skipped="$(jq -c --arg r "${task_ref}" --arg reason "empty title" '. + [{task_ref:$r, reason:$reason}]' <<< "${skipped}")"
+      skipped_arr+=("$(jq -cn --arg r "${task_ref}" --arg reason "empty title" '{task_ref:$r, reason:$reason}')")
       continue
     fi
 
@@ -245,8 +255,11 @@ tasks_parse_document() {
         phase: $phase, parallel: $parallel, files: $files, depends_on: $deps,
         done: $is_done, marker: $marker
       }')"
-    tasks="$(jq -c --argjson t "${task}" '. + [$t]' <<< "${tasks}")"
+    tasks_arr+=("${task}")
   done
 
+  local tasks="[]" skipped="[]"
+  ((${#tasks_arr[@]} > 0)) && tasks="$(printf '%s\n' "${tasks_arr[@]}" | jq -cs '.')"
+  ((${#skipped_arr[@]} > 0)) && skipped="$(printf '%s\n' "${skipped_arr[@]}" | jq -cs '.')"
   jq -cn --argjson tasks "${tasks}" --argjson skipped "${skipped}" '{skipped:$skipped, tasks:$tasks}' | json_canonical
 }

@@ -443,6 +443,32 @@ Nothing is traded away; `parse` is added.
 > Both were found by reading the code the real-machine "zero writes, still 35 s" anomaly pointed at, not by
 > re-running research R5 — a reminder that "the two named patterns" was never a closed list.
 
+> **Second follow-up (2026-08-11), found the same way.** The two fixes above landed with no measurable change
+> on the real machine (157 255 ms vs. 154 942 ms — noise). A broad spawn-count diagnostic covering every
+> external tool the bridge calls (not just `jq`/`sed`) — run directly on the maintainer's machine, on the same
+> 1-story/10-task specification — found **981 `jq` + 267 `sed` calls (92.5% of 1 350 total)**, ruling out
+> network and every other tool. The maintainer's own `checklist` fix (previous follow-up) barely mattered
+> because the checklist itself is small; the real cost was in **parsing `tasks.md`**, never audited this pass
+> until this data pointed at it:
+>
+> - **`task_marker.sh`'s `task_marker_parse_line`** used `sed -E` for whitespace trimming — the *exact*
+>   per-line-classification pattern T025 already fixed in `story_marker.sh`/`spec_marker.sh`, just never
+>   applied here, and called for **every line** of every task's marker-search span. `_smk_trim`
+>   (`story_marker.sh`, already sourced by `task_marker.sh`) replaces all three `sed` calls; the caller
+>   (`task_marker_section_info`) now compares against the literal `{"kind":"none"}` string instead of
+>   `jq -r '.kind'`, the same T025 technique, for the same reason (a plain-`printf` return that
+>   `json_canonical` never touches cannot collide with it).
+> - **`tasks_parse.sh`'s `tasks_parse_document`** re-piped the WHOLE document through `sed -n "${j}p"` for
+>   every continuation line of every task — a process per LINE, not merely per task — plus an O(n²)
+>   `. + [$t]` accumulator for the `tasks`/`skipped` arrays (the same pattern T026 fixed in `parse.sh`). Fixed:
+>   the document is split into a bash array once; the continuation scan indexes it; the accumulators are bash
+>   arrays joined once with `jq -cs`.
+>
+> Measured (synthetic 10-task fixture, 4 lines/task, matching the real report): `sed` calls **eliminated
+> entirely** (0, from what would have been 100+); `jq` calls ~6.4/task, down from a much larger per-line cost.
+> 43 task_marker/tasks_parse tests, 10 reconcile task-tier tests, the full suite (1885 tests), and the corpus
+> stay green. **Not yet re-measured on the real machine** — this is the next thing to ask for.
+
 **Checkpoint**: spawn count is flat in item count across four phases, and every byte of observable behaviour is
 unchanged.
 
