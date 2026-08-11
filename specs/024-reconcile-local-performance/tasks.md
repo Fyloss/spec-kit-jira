@@ -902,28 +902,37 @@ conformance corpus pass unmodified and the module maps still correspond one-to-o
 
 ## Phase 9: Polish & Cross-Cutting Concerns
 
-- [ ] T049 [P] Run the full Bash suite (`tests/run-bash.sh`, ~190 s) and confirm green. Use
-  `tests/run-bash.sh --since <ref>` for the inner loop, but the final gate is the full run.
-- [ ] T050 [P] Run the full Pester suite over `tests/powershell/` and confirm green. Discovery order differs by
-  host on this project, so a green macOS run is not evidence for the Linux runner — check both.
-- [ ] T051 Run `bash tests/conformance/ci-conformance.sh` and confirm exit 0 with zero
-  `conformance divergence` lines. Success is silent — there is no pass banner, and the temp paths it prints are
-  harness noise.
-- [ ] T052 [P] Run `find scripts/bash -name '*.sh' -exec shellcheck -x -P scripts/bash {} +` and `actionlint`;
-  both must be clean. Scope the shellcheck run to `scripts/bash` — a whole-tree scan is ~1 900 lines of
-  host-script noise.
+- [X] T049 **Green throughout — last confirmed 2026-08-11**: `tests/run-bash.sh`, 1 899 tests / 200 files, 0
+  failures.
+- [X] T050 **Green — done 2026-08-11 (macOS only; the Linux runner is CI, not run locally this session).**
+  Full Pester suite: 1 497 tests / 165 files, 0 failures — this is the run that both exercised and validated
+  T047's fix (a single-file run would not have caught the defect T047 found).
+- [X] T051 **Green throughout — last confirmed 2026-08-11**: `bash tests/conformance/ci-conformance.sh` exit 0,
+  zero `conformance divergence` lines, after every change this session (parse.sh, config.sh, reconcile.sh, and
+  the seven PowerShell modules).
+- [X] T052 **Done 2026-08-11.** `find scripts/bash -name '*.sh' -exec shellcheck -x -P scripts/bash {} +` and
+  `actionlint`: both clean.
 - [ ] T053 Push to `ci/windows-probe` and confirm the conformance corpus on the real Windows runner (~11 min;
   results arrive as check-run annotations). **Take the pre-change baseline first** — `main` is not green on
   `windows-latest`, so diff against that baseline before attributing a failure to this branch. At most one
-  retry, then hand the result back.
-- [ ] T054 [P] Add the CHANGELOG entry (Constitution XII): the locale fix, the request-counter fix, and the
-  spawn reduction, with the measured before/after figures from the Measurement Log.
-- [ ] T055 [P] Update `docs/` where the timing report or the configuration snapshot semantics are described,
-  including the deliberate behaviour change of spec A-5: the configuration snapshot is per-process, so a source
-  edited on disk by a third party mid-run is not observed by the remainder of that run.
-- [ ] T056 Confirm no task in this list changed an existing test to accommodate a behaviour change, with the
-  single audited exception of T016 (FR-032). If a second one appears, stop: it is evidence the feature has
-  exceeded its scope.
+  retry, then hand the result back. **Not done this session** — a push to a dedicated CI-triggering branch is a
+  distinct, shared-visibility action from local implementation work; needs explicit direction before use.
+- [X] T054 **Done 2026-08-11.** `CHANGELOG.md`'s `[Unreleased]` section: the locale fix, the request-counter
+  fix (both ports, two different root causes), the `config.local.yml` read-once fix, and the spawn/local-time
+  reduction, each with its measured figure.
+- [X] T055 **Done 2026-08-11.** `docs/07-configuration-and-secrets.md`: a new paragraph on the per-process
+  configuration snapshot (spec A-5) — a source edited on disk mid-run is not observed until the next run, and a
+  malformed source is never cached so it keeps failing on every read that reaches it. `docs/05-reconcile-flow.md`:
+  the request-counting boundary paragraph was describing the PRE-Phase-3 defect as current behaviour (a real
+  staleness, not merely an omission) — corrected to describe the file-backed, subshell-proof counter and cite
+  the actual pre-fix undercount (123 issued, 0 reported) as history rather than a live caveat.
+- [X] T056 **Confirmed 2026-08-11.** Every test file this session added is new tests (`T033`, `T034`–`T036b`,
+  `T027`'s two spawn-budget cases, `T040`, `T058`, the PowerShell `RequestCount.Tests.ps1`) or an adaptation this
+  feature's own earlier work already made (`test_config_read_once.bats`'s `_cfg_json_encode` case, T060, FR-032
+  carve-out). No PRE-EXISTING test's assertion was altered to accommodate a behaviour change beyond T016. No
+  conformance scenario JSON changed at all (`git diff main...HEAD -- 'tests/conformance/scenarios/*.json'` is
+  empty) — T016's "carve-out" turned out not to require a file edit, since no golden expectation file exists for
+  that scenario in the first place.
 
 ---
 

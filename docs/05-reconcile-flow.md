@@ -70,12 +70,15 @@ file stay byte-identical to the same run without it — only stderr gains the
 report. A short-circuited run (the state phase above) reaches only `prereq`
 and `state` before its total.
 
-One boundary is worth knowing before reading a number: `jira_request` is
-called through command substitution at a few call sites outside the
-`recognition` and `apply` phases, and a request counted inside a subshell
-never reaches the parent's counter, so those phases can undercount. Both
-phases every success criterion is written about count exactly, because they
-redirect to a file and run in the parent. See
+The per-phase request count is exact everywhere, including at the 15 of 28
+`jira_request` call sites that are inside a `$( … )` command substitution: a
+plain shell-variable increment there would be discarded when the subshell
+exits, so the true count is tracked in a small file instead (primed once,
+in the main shell, before the first phase that can issue a request), which
+survives the same subshells that would lose an in-memory counter (024,
+research R2). Prior to that fix, this boundary undercounted every phase but
+`recognition` and `apply` — the reference scenario issued 123 requests
+while every phase reported 0. See
 [`contracts/timing-report.md`](../specs/021-reconcile-performance/contracts/timing-report.md) §6 for
 the full boundary, and §2 for the report's exact shape.
 

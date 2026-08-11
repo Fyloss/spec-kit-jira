@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `SPEC_KIT_JIRA_TIMING=1` no longer crashes on a comma-decimal locale
+  (`fr_FR`, `de_DE`, and most of continental Europe and Latin America) —
+  under the previous locale-dependent clock read, the failure mode was
+  silent on 9 readings in 10 and a hard crash on the tenth. A malformed
+  clock reading now degrades the instrument rather than the run.
+- The timing report's per-phase request counts, previously always `0` on
+  both ports regardless of how many requests a run actually issued, are now
+  real: a 61-item reference run correctly attributes all 123 of its
+  requests across the phases that issued them. On the PowerShell port this
+  was a separate defect from the Bash port's (seven sink modules each
+  independently `-Force`-reimporting the module holding the counter, tearing
+  it out from under whichever caller had it), not a shared root cause.
+- `reconcile` no longer opens and parses `config.local.yml` more than once
+  per run; on the machine that motivated this work, the parse of a real,
+  large (proportional to portfolio size) `config.local.yml` was measured at
+  ~31s, so removing every redundant read and per-line fork it forced
+  measurably tightened the run.
+
+### Changed
+
+- Local processing (parsing, gating, planning) no longer forks one external
+  process per story, task, or configuration line — reconciling the
+  reference specification a second time with double the stories and tasks
+  spawns the same number of processes, not twice as many. On unmanaged
+  hardware the reference scenario's total time fell from 91.5s to ~58s;
+  the phases now dominated by irreducible per-request work (one Jira ticket
+  per story) still scale with item count, as expected — only the local,
+  spawn-bound cost was the target.
+
 ## [0.14.0] - 2026-08-10
 
 ### Added
