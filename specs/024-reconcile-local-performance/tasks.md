@@ -417,6 +417,32 @@ Nothing is traded away; `parse` is added.
   T024/T024a's new file). No concurrency construct (`&`, background jobs) was introduced anywhere in this
   pass.
 
+> **Follow-up (2026-08-11), driven by T042's real-machine finding** (`apply` cost 35 399 ms for one story with
+> zero writes — see the Measurement Log): two more per-item loops found, neither in research R5's or this
+> session's earlier scope.
+>
+> - **`adf.sh`'s `_adf_checklist_nodes`** (022's checklist rendering) forked a per-task loop — four `jq` reads
+>   plus a fifth to re-parse-and-append the growing `entries` array, the same O(n²) accumulator pattern already
+>   fixed elsewhere — called from `plan_writes` for every checklist-mode story (both to compute
+>   `adf_checklist_digest` and, separately, `cl_desired_nodes`, so potentially **twice** per story). Fixed:
+>   one `jq` call decodes every task's title/done/phase at once; `markdown_tokenize_inline` (pure bash, no
+>   subprocess) still runs per task, its output assembled into each entry natively via `_md_json_escape`
+>   (already sourced) rather than one more `jq` call. Measured: 30 tasks, ~150 `jq` calls → 5. All 21
+>   checklist tests plus the other 50 ADF tests stay green.
+> - **`plan_apply.sh`'s `plan_lifecycle`** (the zero-churn/drift/transition decision every story's action
+>   passes through) re-read `.stories[i].local_id`, the matched action, its method, and six fields of the
+>   matched ticket — ten pure-read `jq` calls per story — with its own call each. Fixed: one call decodes the
+>   whole array (`sid`, `action`, `method`, `tk`, `status`, `target`, `category`, `flagged`, `transition_id`,
+>   `key`, `blockers`), matching `.[i] // null`'s exact out-of-bounds semantics (`$acts[$i]` past a shorter
+>   `actions` array is `null` in jq too). **Not touched**: the PUT-branch zero-churn comparison (`current`/
+>   `desired`/description-drift, conditional and involving `del()`) and the `kept`/`warns`/`notes`
+>   accumulators (same O(n²) pattern, lower call count in the common case — judged lower-value for the
+>   remaining risk budget this pass). 27/27 lifecycle tests, full suite (1885 tests), and the corpus stay
+>   green.
+>
+> Both were found by reading the code the real-machine "zero writes, still 35 s" anomaly pointed at, not by
+> re-running research R5 — a reminder that "the two named patterns" was never a closed list.
+
 **Checkpoint**: spawn count is flat in item count across four phases, and every byte of observable behaviour is
 unchanged.
 

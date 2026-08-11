@@ -1021,16 +1021,46 @@ plan_lifecycle() {
   local on_drift order n i
   on_drift="$(jq -r '.on_drift // "abort"' <<< "${lc}")"
   order="$(jq -c '.order // []' <<< "${lc}")"
-  n="$(jq '.stories | length' <<< "${doc}")"
+
+  # 024, contracts/spawn-budget.md C1.2/C1.3: the loop below used to re-read
+  # `.stories[i].local_id`, `.[i]` (the action), `.method`, and six fields of
+  # the matched ticket — ten `jq` calls per story, every one of them a pure
+  # read — with their OWN `jq` call per story. One call decodes all of it
+  # for the WHOLE array instead, matching `.[i] // null`'s exact semantics
+  # (a shorter `actions` array than `doc.stories`, `$acts[$i]` past the end,
+  # is `null` in jq too — the same as the per-index `// null` it replaces).
+  local _lc_sep=$'\x1f'
+  local -a _lc_sid=() _lc_action=() _lc_method=() _lc_tk=() _lc_status=() _lc_target=() \
+    _lc_category=() _lc_flagged=() _lc_transition_id=() _lc_key=() _lc_blockers=()
+  local _lc_i=0 _f1 _f2 _f3 _f4 _f5 _f6 _f7 _f8 _f9 _f10 _f11
+  while IFS="${_lc_sep}" read -r _f1 _f2 _f3 _f4 _f5 _f6 _f7 _f8 _f9 _f10 _f11; do
+    _lc_sid[_lc_i]="${_f1}"; _lc_action[_lc_i]="${_f2}"; _lc_method[_lc_i]="${_f3}"
+    _lc_tk[_lc_i]="${_f4}"; _lc_status[_lc_i]="${_f5}"; _lc_target[_lc_i]="${_f6}"
+    _lc_category[_lc_i]="${_f7}"; _lc_flagged[_lc_i]="${_f8}"; _lc_transition_id[_lc_i]="${_f9}"
+    _lc_key[_lc_i]="${_f10}"; _lc_blockers[_lc_i]="${_f11}"
+    _lc_i=$((_lc_i + 1))
+  done < <(jq -r --arg sep "${_lc_sep}" --argjson acts "${actions}" --argjson lc "${lc}" '
+    .stories | to_entries[] | (.value.local_id) as $sid | (($acts[.key]) // null) as $act |
+    (($lc.tickets[$sid]) // {}) as $tk | [
+      $sid,
+      ($act | tostring),
+      (if $act == null then "" else ($act.method // "") end),
+      ($tk | tostring),
+      ($tk.status // ""), ($tk.target // ""), ($tk.category // "unknown"),
+      (($tk.flagged // false) | tostring), ($tk.transition_id // ""), ($tk.key // ""),
+      ($tk.blockers // [] | tostring)
+    ] | join($sep)
+  ' <<< "${doc}")
+  n="${_lc_i}"
 
   local kept="[]" warns="[]" notes="[]"
   for ((i = 0; i < n; i++)); do
     local sid action method tk
-    sid="$(jq -r ".stories[${i}].local_id" <<< "${doc}")"
-    action="$(jq -c ".[${i}] // null" <<< "${actions}")"
+    sid="${_lc_sid[i]}"
+    action="${_lc_action[i]}"
     [[ "${action}" == "null" ]] && continue
-    method="$(jq -r '.method' <<< "${action}")"
-    tk="$(jq -c --arg s "${sid}" '.tickets[$s] // {}' <<< "${lc}")"
+    method="${_lc_method[i]}"
+    tk="${_lc_tk[i]}"
 
     local drop_content="false" do_transition="false"
     # --- Zero churn: drop an unchanged UPDATE ---------------------------------
@@ -1058,12 +1088,12 @@ plan_lifecycle() {
 
     # --- Drift / Flagged: decide the transition -------------------------------
     local status target category flagged transition_id key
-    status="$(jq -r '.status // ""' <<< "${tk}")"
-    target="$(jq -r '.target // ""' <<< "${tk}")"
-    category="$(jq -r '.category // "unknown"' <<< "${tk}")"
-    flagged="$(jq -r '.flagged // false' <<< "${tk}")"
-    transition_id="$(jq -r '.transition_id // ""' <<< "${tk}")"
-    key="$(jq -r '.key // ""' <<< "${tk}")"
+    status="${_lc_status[i]}"
+    target="${_lc_target[i]}"
+    category="${_lc_category[i]}"
+    flagged="${_lc_flagged[i]}"
+    transition_id="${_lc_transition_id[i]}"
+    key="${_lc_key[i]}"
 
     if [[ -n "${status}" && -n "${target}" && "${status}" != "${target}" ]]; then
       if [[ "${flagged}" == "true" ]]; then
@@ -1087,7 +1117,7 @@ plan_lifecycle() {
     if [[ "${do_transition}" == "true" && -n "${transition_id}" && -n "${key}" ]]; then
       local base tres note
       base="$(jq -r '.base_url // ""' <<< "${lc}")"
-      tres="$(_plan_transition_action "${base}" "${key}" "${transition_id}" "$(jq -c '.blockers // []' <<< "${tk}")" "${sid}")"
+      tres="$(_plan_transition_action "${base}" "${key}" "${transition_id}" "${_lc_blockers[i]}" "${sid}")"
       kept="$(jq -c --argjson a "$(jq -c '.action' <<< "${tres}")" '. + [$a]' <<< "${kept}")"
       note="$(jq -r '.note // empty' <<< "${tres}")"
       [[ -n "${note}" ]] && notes="$(jq -c --arg n "${note}" '. + [$n]' <<< "${notes}")"
