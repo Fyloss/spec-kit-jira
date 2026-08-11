@@ -405,9 +405,22 @@ defect they describe. They belong to the instrument group above and are read wit
   called once per line, per item, or per field, it MUST return its result through a variable rather than
   through `$( … )`; `_CFG_RET`, `_CFG_KEY`/`_CFG_REST` and `_TIMING_NOW_MS` are the pattern already
   established in this codebase for exactly this reason.
-- **FR-041**: The counting stand-in of FR-040 MUST count forks that never `exec`, not only external program
-  invocations. A measurement instrument that cannot observe the dominant cost is not evidence of its absence —
-  this feature spent a full pass optimising against a counter blind to 97% of the processes its runs created.
+- **FR-041**: That a per-line, per-item or per-field helper is **not** invoked through `$( … )` MUST be
+  asserted directly and deterministically — by inspecting the call sites, not by counting forks at runtime.
+  A runtime fork counter is rejected on measurement grounds, and the rejection is measured rather than
+  assumed: an in-process counter is lost to the very subshell it would count (the FR-036 defect, in this same
+  feature), and a file-backed one costs a write per call — 34 600 of them on the motivating configuration,
+  which exceeds what it would measure, exactly as the `PATH` shim's own 61% wall-clock distortion does
+  (research R4). Where the event is *rare* rather than per-item — a whole-file read, of which a run performs
+  two — a file-backed counter is proportionate and is what FR-040 asks for. The frequency decides the
+  instrument.
+
+> **Two instrument failures, recorded because the second was committed to this specification.** A measurement
+> instrument that cannot observe the dominant cost is not evidence of its absence: this feature spent a full
+> pass optimising against a `PATH`-interposed counter blind to 97% of the processes its runs created. It then
+> briefly specified, in this very requirement, a replacement counter that would have distorted what it
+> measured. Both errors have the same shape as the feature's original mis-attribution — a quantity trusted
+> before it was checked.
 - **FR-019**: Where a transformation genuinely requires an external tool, that tool MUST be invoked a bounded
   number of times for the whole set of items rather than once per item, and its batched output MUST be
   byte-identical to the concatenation of its per-item outputs today.

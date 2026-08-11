@@ -117,7 +117,16 @@ _cfg_file=""
 _CFG_ERR=""
 
 # _cfg_strip_inline_comment <line> — drop a ` #...` trailing comment that is not
-# inside quotes. Prints the cleaned line.
+# inside quotes. Sets _CFG_STRIPPED.
+#
+# 024, FR-018/FR-041, research R8: this is called once per retained configuration
+# line, so it MUST NOT be invoked through `$( … )` — a command substitution
+# around a shell function forks a subshell, and on a production-sized
+# config.local.yml (8 658 lines) the parser's six such call sites cost 26 000-
+# 35 000 forks and ~25 s of its 31 s. It returns through a global for the same
+# reason `_cfg_map_entry_key` sets `_CFG_KEY`/`_CFG_REST` and `_cfg_parse_value`
+# sets `_CFG_RET`.
+_CFG_STRIPPED=""
 _cfg_strip_inline_comment() {
   local line="$1"
   local out="" i=0 n=${#line} ch nxt in_s=0 in_d=0 prev=""
@@ -146,7 +155,7 @@ _cfg_strip_inline_comment() {
   done
   # rtrim
   out="${out%"${out##*[![:space:]]}"}"
-  printf '%s' "${out}"
+  _CFG_STRIPPED="${out}"
 }
 
 # _cfg_prep <file> — populate the parser arrays from a YAML file.
@@ -166,7 +175,7 @@ _cfg_prep() {
     [[ -z "${body}" ]] && continue              # blank line
     [[ "${body}" == "#"* ]] && continue         # full-line comment
     indent=$((${#raw} - ${#body}))
-    body="$(_cfg_strip_inline_comment "${body}")"
+    _cfg_strip_inline_comment "${body}"; body="${_CFG_STRIPPED}"
     [[ -z "${body}" ]] && continue
     _cfg_indents+=("${indent}")
     _cfg_lines+=("${body}")
@@ -185,6 +194,12 @@ _cfg_prep() {
 # `_md_json_escape`, duplicated rather than sourced across the lib->engine
 # layer boundary this module's own header declares ("Port infrastructure
 # only").
+#
+# 024, FR-018/FR-041, research R8: sets _CFG_JSON rather than printing. Removing
+# the `jq` spawn was only half the cost — capturing this function's stdout with
+# `$( … )` forked a subshell per key and per scalar, which on a production-sized
+# configuration was the larger half. It MUST NOT be called through `$( … )`.
+_CFG_JSON=""
 _cfg_json_encode() {
   local s="$1" out="" c code i n
   n=${#s}
@@ -209,7 +224,7 @@ _cfg_json_encode() {
         ;;
     esac
   done
-  printf '"%s"' "${out}"
+  _CFG_JSON="\"${out}\""
 }
 
 # _cfg_redact_shape <line> <ere-pattern> <case_insensitive:0|1> — replace every
@@ -270,9 +285,13 @@ _cfg_raise_duplicate_key() {
 # yaml-string-escaping.md §2.1): a left-to-right walk where `\"` becomes `"`
 # and `\\` becomes `\`; any other backslash, including one at the end of the
 # body, is kept literal (FR-012) rather than treated as a parse failure.
+# Sets _CFG_DECODED rather than printing (024, FR-018/FR-041 — see
+# _cfg_strip_inline_comment): it is called once per quoted key and once per
+# quoted scalar, so a `$( … )` here is a fork per value.
+_CFG_DECODED=""
 _cfg_decode_escapes() {
   local s="$1"
-  [[ "${s}" != *"\\"* ]] && { printf '%s' "${s}"; return; }
+  [[ "${s}" != *"\\"* ]] && { _CFG_DECODED="${s}"; return; }
   local out="" i=0 n=${#s} ch nxt
   while ((i < n)); do
     ch="${s:i:1}"
@@ -287,7 +306,7 @@ _cfg_decode_escapes() {
     out+="${ch}"
     i=$((i + 1))
   done
-  printf '%s' "${out}"
+  _CFG_DECODED="${out}"
 }
 
 # _cfg_map_entry_key <content> — locate a mapping entry's DELIMITER COLON by
@@ -339,7 +358,7 @@ _cfg_map_entry_key() {
     [[ -n "${nxt}" && "${nxt}" != " " && "${nxt}" != $'\t' ]] && return 1
     local key="${content:1:close-1}"
     [[ -z "${key}" ]] && return 1
-    [[ "${q}" == '"' ]] && key="$(_cfg_decode_escapes "${key}")"
+    if [[ "${q}" == '"' ]]; then _cfg_decode_escapes "${key}"; key="${_CFG_DECODED}"; fi
     _CFG_KEY="${key}"
     local tail="${content:after_idx}"
     _CFG_REST="${tail#"${tail%%[![:space:]]*}"}"
@@ -375,7 +394,10 @@ _cfg_is_map_entry() {
   _cfg_map_entry_key "$1"
 }
 
-# _cfg_scalar_json <raw> — encode a YAML scalar as a JSON value.
+# _cfg_scalar_json <raw> — encode a YAML scalar as a JSON value into
+# _CFG_SCALAR. Called once per mapping value and once per sequence item, so it
+# MUST NOT be invoked through `$( … )` (024, FR-018/FR-041, research R8).
+_CFG_SCALAR=""
 _cfg_scalar_json() {
   local s="$1"
   s="${s#"${s%%[![:space:]]*}"}"
@@ -383,24 +405,24 @@ _cfg_scalar_json() {
   case "${s}" in
     '"'*'"')
       s="${s#\"}"; s="${s%\"}"
-      s="$(_cfg_decode_escapes "${s}")"
-      _cfg_json_encode "${s}"
+      _cfg_decode_escapes "${s}"; s="${_CFG_DECODED}"
+      _cfg_json_encode "${s}"; _CFG_SCALAR="${_CFG_JSON}"
       ;;
     "'"*"'")
       s="${s#\'}"; s="${s%\'}"
-      _cfg_json_encode "${s}"
+      _cfg_json_encode "${s}"; _CFG_SCALAR="${_CFG_JSON}"
       ;;
-    true) printf 'true' ;;
-    false) printf 'false' ;;
-    null | '~' | '') printf 'null' ;;
+    true) _CFG_SCALAR='true' ;;
+    false) _CFG_SCALAR='false' ;;
+    null | '~' | '') _CFG_SCALAR='null' ;;
     # The two EMPTY flow forms, and only those. They are in the subset because
     # config_to_yaml emits exactly them for an empty collection, and the writer
     # is documented above as a fixed point of this reader — without these, a
     # file this module wrote reads back with the strings "[]" and "{}" where it
     # wrote collections. Non-empty flow collections stay out of scope.
-    '[]') printf '[]' ;;
-    '{}') printf '{}' ;;
-    *) _cfg_json_encode "${s}" ;;
+    '[]') _CFG_SCALAR='[]' ;;
+    '{}') _CFG_SCALAR='{}' ;;
+    *) _cfg_json_encode "${s}"; _CFG_SCALAR="${_CFG_JSON}" ;;
   esac
 }
 
@@ -444,7 +466,7 @@ _cfg_parse_mapping() {
     seen["${key}"]="${_cfg_linenos[_cfg_i]}"
     ((_cfg_i++))
     if [[ -n "${rest}" ]]; then
-      val="$(_cfg_scalar_json "${rest}")"
+      _cfg_scalar_json "${rest}"; val="${_CFG_SCALAR}"
     elif ((_cfg_i < _cfg_n)) && ((_cfg_indents[_cfg_i] > ind)); then
       _cfg_parse_value; val="${_CFG_RET}"
       [[ -n "${_CFG_ERR}" ]] && return
@@ -468,7 +490,8 @@ _cfg_parse_mapping() {
     else
       val="null"
     fi
-    parts+=("$(_cfg_json_encode "${key}")":"${val}")
+    _cfg_json_encode "${key}"
+    parts+=("${_CFG_JSON}":"${val}")
   done
   local IFS=,
   _CFG_RET="{${parts[*]}}"
@@ -503,7 +526,7 @@ _cfg_parse_sequence() {
       [[ -n "${_CFG_ERR}" ]] && return
     else
       ((_cfg_i++))
-      item="$(_cfg_scalar_json "${rest}")"
+      _cfg_scalar_json "${rest}"; item="${_CFG_SCALAR}"
     fi
     items+=("${item}")
   done

@@ -678,7 +678,19 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   is used by every command that reads project configuration, not `reconcile` alone — the full suite and the
   corpus are the gate, and FR-012's diagnostic-parity clause is the specific hazard (a memoised failure must
   still be reported at the same point, with the same text, the same number of times).
-- [ ] T060 **[US2, highest value remaining — research R8]** Convert the four per-line command substitutions in
+- [X] T060 **Done 2026-08-11 — measured 4.3× on the parser, sys time down 52×.** Before/after on the same
+  machine, same 2 003-line synthetic config, byte-identical output (43 958 bytes both):
+  **5.346 s → 1.241 s** wall; user 1.792 → 1.180 s; **system 3.158 s → 0.061 s**. The system-time collapse is
+  the forks going away and nothing else — exactly what R8 predicts. Six call sites converted, not the four
+  first counted (`_cfg_map_entry_key:342` and `_cfg_parse_sequence:506` were missed until the failing test
+  listed them, which is the argument for writing it first). Helpers now return through `_CFG_STRIPPED`,
+  `_CFG_DECODED`, `_CFG_JSON`, `_CFG_SCALAR`, each documented as never to be called through `$( … )`, matching
+  `_CFG_KEY`/`_CFG_REST`/`_CFG_RET` already in the file. Gate: full bash suite green (1 887 tests), conformance
+  corpus exit 0 with zero divergence, `shellcheck` clean. One test adapted — `test_config_read_once.bats`'s
+  `_cfg_json_encode` case captured stdout; it is a test this feature added, so FR-032's carve-out covers it,
+  and the assertion it makes (byte-identity against `jq -Rn --arg`) is unchanged. **Projected on the
+  motivating machine**: parse 31 s → ~7 s, twice per run. Not yet measured there.
+- [ ] ~~T060~~ *(original wording)* Convert the four per-line command substitutions in
   `scripts/bash/lib/config.sh` to the out-variable pattern the same file already uses: `_cfg_prep:169`
   (`_cfg_strip_inline_comment`), `_cfg_parse_mapping:447` (`_cfg_scalar_json`), `_cfg_parse_mapping:471`
   (`_cfg_json_encode`), `_cfg_scalar_json:8` (`_cfg_decode_escapes`). Each sets a named global and returns

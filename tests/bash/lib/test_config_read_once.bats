@@ -69,9 +69,15 @@ _spawn_count_for_config() {
 @test "_cfg_json_encode matches jq's --arg encoding for control characters, quotes, and backslashes" {
   ROOT_DIR="${BATS_TEST_DIRNAME}/../../.."
   local got want
+  # 024, T060: _cfg_json_encode returns through _CFG_JSON rather than stdout —
+  # it is called once per key and once per scalar, so capturing it with
+  # `$( … )` forked a subshell per value (research R8). The encoding it
+  # produces is unchanged, which is what this test asserts; only how the caller
+  # receives it moved.
   got="$(bash -c '
     source "'"${ROOT_DIR}"'/scripts/bash/lib/config.sh"
     _cfg_json_encode "$1"
+    printf "%s" "${_CFG_JSON}"
   ' _ $'a "quoted" \\ value\twith\ttabs and \x01 control')"
   want="$(jq -Rn --arg v $'a "quoted" \\ value\twith\ttabs and \x01 control' '$v')"
   [ "${got}" = "${want}" ]
