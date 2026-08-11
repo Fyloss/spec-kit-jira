@@ -175,6 +175,43 @@ _cfg_prep() {
   done < "${file}"
 }
 
+# _cfg_json_encode <text> — JSON-string-encode TEXT exactly as `jq -Rn --arg v
+# … '$v'` would, quotes included: " \ and the named control escapes, \u00XX
+# for other C0 controls, raw UTF-8 otherwise (non-ASCII is never \u-escaped).
+# No subprocess (024, contracts/spawn-budget.md C1.2) — the YAML parser calls
+# this once per key and once per string scalar, so a config file of N lines
+# used to cost up to 2N `jq` spawns (~6 ms/line unmanaged hardware, per
+# research); this is the same escaper as engine/markdown.sh's
+# `_md_json_escape`, duplicated rather than sourced across the lib->engine
+# layer boundary this module's own header declares ("Port infrastructure
+# only").
+_cfg_json_encode() {
+  local s="$1" out="" c code i n
+  n=${#s}
+  for ((i = 0; i < n; i++)); do
+    c="${s:i:1}"
+    case "${c}" in
+      '"') out+='\"' ;;
+      $'\\') out+=$'\\\\' ;;
+      $'\n') out+='\n' ;;
+      $'\r') out+='\r' ;;
+      $'\t') out+='\t' ;;
+      $'\b') out+='\b' ;;
+      $'\f') out+='\f' ;;
+      *)
+        printf -v code '%d' "'${c}"
+        if ((code < 32)); then
+          printf -v c '\\u%04x' "${code}"
+          out+="${c}"
+        else
+          out+="${c}"
+        fi
+        ;;
+    esac
+  done
+  printf '"%s"' "${out}"
+}
+
 # _cfg_redact_shape <line> <ere-pattern> <case_insensitive:0|1> — replace every
 # match of pattern in line with [redacted]. Prints the result.
 _cfg_redact_shape() {
@@ -347,11 +384,11 @@ _cfg_scalar_json() {
     '"'*'"')
       s="${s#\"}"; s="${s%\"}"
       s="$(_cfg_decode_escapes "${s}")"
-      jq -Rn --arg v "${s}" '$v'
+      _cfg_json_encode "${s}"
       ;;
     "'"*"'")
       s="${s#\'}"; s="${s%\'}"
-      jq -Rn --arg v "${s}" '$v'
+      _cfg_json_encode "${s}"
       ;;
     true) printf 'true' ;;
     false) printf 'false' ;;
@@ -363,7 +400,7 @@ _cfg_scalar_json() {
     # wrote collections. Non-empty flow collections stay out of scope.
     '[]') printf '[]' ;;
     '{}') printf '{}' ;;
-    *) jq -Rn --arg v "${s}" '$v' ;;
+    *) _cfg_json_encode "${s}" ;;
   esac
 }
 
@@ -431,7 +468,7 @@ _cfg_parse_mapping() {
     else
       val="null"
     fi
-    parts+=("$(jq -Rn --arg k "${key}" '$k')":"${val}")
+    parts+=("$(_cfg_json_encode "${key}")":"${val}")
   done
   local IFS=,
   _CFG_RET="{${parts[*]}}"

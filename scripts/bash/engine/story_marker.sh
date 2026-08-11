@@ -21,6 +21,17 @@ source "${_smk_dir}/../lib/output.sh"
 # shellcheck source=/dev/null
 source "${_smk_dir}/marker_splice.sh"
 
+# _smk_trim <string> — strip leading and trailing whitespace, fork-free
+# (024, contracts/spawn-budget.md C1.3): the sed equivalent it replaces here
+# and in spec_marker.sh ran once per line of the whole document, which is
+# where most of the parse phase's process count came from (research R5).
+_smk_trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "${s}"
+}
+
 # _smk_id_index_file — where the SPEC_KIT_JIRA_ID_SOURCE seam's cursor is kept.
 # A bash function invoked through command substitution (the normal way every
 # caller here consumes one) runs in a FORKED SUBSHELL, so a plain shell
@@ -85,7 +96,7 @@ story_marker_format() {
 story_marker_parse_line() {
   local raw="$1" line t
   line="${raw%$'\r'}"
-  t="$(printf '%s' "${line}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+  t="$(_smk_trim "${line}")"
 
   local generic_re='^<!--[[:space:]]+speckit-jira[[:space:]]+(.*)-->[[:space:]]*$'
   if [[ ! "${t}" =~ ${generic_re} ]]; then
@@ -93,7 +104,7 @@ story_marker_parse_line() {
     return 0
   fi
   local body="${BASH_REMATCH[1]}"
-  body="$(printf '%s' "${body}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+  body="$(_smk_trim "${body}")"
 
   local story_re='^story=([^[:space:]]+)([[:space:]]+(.*))?$'
   if [[ ! "${body}" =~ ${story_re} ]]; then
@@ -107,7 +118,7 @@ story_marker_parse_line() {
     return 0
   fi
 
-  tail="$(printf '%s' "${tail}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+  tail="$(_smk_trim "${tail}")"
   if [[ -z "${tail}" ]]; then
     jq -cn --arg id "${idval}" '{kind:"valid", id:$id, state:"assigned"}' | json_canonical
     return 0
@@ -185,9 +196,12 @@ story_marker_section_info() {
     ((lineno < start)) && continue
     ((lineno > end)) && break
     info="$(story_marker_parse_line "${line}")"
-    kind="$(jq -r '.kind' <<< "${info}")"
-    [[ "${kind}" == "none" ]] && continue
+    # Same literal-comparison technique as _parse_strip_marker_lines (024,
+    # contracts/spawn-budget.md C1.2): every "none" result is this exact
+    # string, so the common case costs no `jq -r '.kind'` fork per line.
+    [[ "${info}" == '{"kind":"none"}' ]] && continue
     found_lines+=("${lineno}")
+    kind="$(jq -r '.kind' <<< "${info}")"
     if [[ "${kind}" == "valid" ]]; then
       found_ids+=("$(jq -r '.id' <<< "${info}")")
       found_states+=("$(jq -r '.state' <<< "${info}")")

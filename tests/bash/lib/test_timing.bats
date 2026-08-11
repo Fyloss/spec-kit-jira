@@ -175,6 +175,166 @@ teardown() {
   [ "${_TIMING_NOW_MS}" = "42" ]
 }
 
+# --- Locale-independent clock reading (spec FR-001…FR-006, contracts/clock-reading.md) ---
+#
+# T004-T006. V1-V3 must assert the DURATION, never the absence of an error
+# (FR-005): research R1 measured the pre-fix code as error-free for roughly
+# nine readings in ten while returning a bogus duration derived from the
+# fractional microseconds alone (magnitude ~10^5-10^8, unrelated to real
+# elapsed time) — an error-absence test passes against that ~90% of the time.
+# A short real sleep, checked against a generous tolerance, fails reliably
+# against the bug either way: the ~10% loud branch aborts arithmetic
+# evaluation (nonzero status), and the ~90% silent branch returns a duration
+# many orders of magnitude outside the tolerance.
+
+@test "T004: tier 1 clock reports a correct duration under fr_FR.UTF-8 (comma decimal)" {
+  run env LC_ALL=fr_FR.UTF-8 bash -c '
+    source "'"${LIB_DIR}"'/timing.sh"
+    _TIMING_FORCE_CLOCK_TIER=1
+    _timing_now_ms; start="${_TIMING_NOW_MS}"
+    sleep 0.15
+    _timing_now_ms; end="${_TIMING_NOW_MS}"
+    printf "%s" "$(( end - start ))"
+  '
+  [ "${status}" -eq 0 ]
+  [ "${output}" -ge 100 ]
+  [ "${output}" -le 3000 ]
+}
+
+@test "T005: tier 1 clock reports a correct duration under de_DE.UTF-8 (comma decimal)" {
+  run env LC_ALL=de_DE.UTF-8 bash -c '
+    source "'"${LIB_DIR}"'/timing.sh"
+    _TIMING_FORCE_CLOCK_TIER=1
+    _timing_now_ms; start="${_TIMING_NOW_MS}"
+    sleep 0.15
+    _timing_now_ms; end="${_TIMING_NOW_MS}"
+    printf "%s" "$(( end - start ))"
+  '
+  [ "${status}" -eq 0 ]
+  [ "${output}" -ge 100 ]
+  [ "${output}" -le 3000 ]
+}
+
+@test "T005: tier 1 clock reports a correct duration under LC_ALL=C (dot decimal)" {
+  run env LC_ALL=C bash -c '
+    source "'"${LIB_DIR}"'/timing.sh"
+    _TIMING_FORCE_CLOCK_TIER=1
+    _timing_now_ms; start="${_TIMING_NOW_MS}"
+    sleep 0.15
+    _timing_now_ms; end="${_TIMING_NOW_MS}"
+    printf "%s" "$(( end - start ))"
+  '
+  [ "${status}" -eq 0 ]
+  [ "${output}" -ge 100 ]
+  [ "${output}" -le 3000 ]
+}
+
+@test "T005: the injected-clock report is byte-identical across C, fr_FR.UTF-8, and de_DE.UTF-8" {
+  local report_c report_fr report_de
+  report_c="$(env LC_ALL=C bash -c '
+    source "'"${LIB_DIR}"'/timing.sh"
+    export SPEC_KIT_JIRA_TIMING=1
+    _TIMING_FAKE_CLOCK="0 12 12 19"
+    timing_phase_begin prereq; timing_phase_end prereq
+    timing_phase_begin state; timing_phase_end state
+    timing_report
+  ' 2>&1)"
+  report_fr="$(env LC_ALL=fr_FR.UTF-8 bash -c '
+    source "'"${LIB_DIR}"'/timing.sh"
+    export SPEC_KIT_JIRA_TIMING=1
+    _TIMING_FAKE_CLOCK="0 12 12 19"
+    timing_phase_begin prereq; timing_phase_end prereq
+    timing_phase_begin state; timing_phase_end state
+    timing_report
+  ' 2>&1)"
+  report_de="$(env LC_ALL=de_DE.UTF-8 bash -c '
+    source "'"${LIB_DIR}"'/timing.sh"
+    export SPEC_KIT_JIRA_TIMING=1
+    _TIMING_FAKE_CLOCK="0 12 12 19"
+    timing_phase_begin prereq; timing_phase_end prereq
+    timing_phase_begin state; timing_phase_end state
+    timing_report
+  ' 2>&1)"
+  [ "${report_c}" = "${report_fr}" ]
+  [ "${report_fr}" = "${report_de}" ]
+}
+
+# --- Fail-open: the instrument never decides an outcome (contracts/clock-reading.md §2) ---
+#
+# T006. `_TIMING_FORCE_RAW_CLOCK` stands in for whatever the active tier would
+# have read (EPOCHREALTIME, `date +%s%N`, or `date +%s`), letting a test force
+# a malformed reading deterministically — EPOCHREALTIME itself cannot be
+# assigned (bash treats it as a live dynamic variable; an assignment is
+# silently discarded on read).
+
+@test "T006: a malformed reading on tier 1 does not abort the shell under set -e" {
+  run bash -c '
+    set -euo pipefail
+    source "'"${LIB_DIR}"'/timing.sh"
+    _TIMING_FORCE_CLOCK_TIER=1
+    _TIMING_FORCE_RAW_CLOCK="not-a-clock-reading"
+    _timing_now_ms
+    printf "survived %s" "${_TIMING_NOW_MS}"
+  '
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == survived* ]]
+}
+
+@test "T006: a malformed reading on tier 2 does not abort the shell under set -e" {
+  run bash -c '
+    set -euo pipefail
+    source "'"${LIB_DIR}"'/timing.sh"
+    _TIMING_FORCE_CLOCK_TIER=2
+    _TIMING_FORCE_RAW_CLOCK=""
+    _timing_now_ms
+    printf "survived %s" "${_TIMING_NOW_MS}"
+  '
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == survived* ]]
+}
+
+@test "T006: a malformed reading on tier 3 does not abort the shell under set -e" {
+  run bash -c '
+    set -euo pipefail
+    source "'"${LIB_DIR}"'/timing.sh"
+    _TIMING_FORCE_CLOCK_TIER=3
+    _TIMING_FORCE_RAW_CLOCK="garbage"
+    _timing_now_ms
+    printf "survived %s" "${_TIMING_NOW_MS}"
+  '
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == survived* ]]
+}
+
+@test "T006: a malformed reading emits nothing extra on stderr (C2.4)" {
+  run bash -c '
+    source "'"${LIB_DIR}"'/timing.sh"
+    export SPEC_KIT_JIRA_TIMING=1
+    _TIMING_FORCE_CLOCK_TIER=1
+    _TIMING_FORCE_RAW_CLOCK="garbage"
+    timing_phase_begin prereq
+    timing_phase_end prereq
+    timing_report
+  '
+  [ "${status}" -eq 0 ]
+  [[ "${output}" != *"no sub-second clock"* ]]
+}
+
+@test "T006: a run with a forced malformed reading writes nothing extra and exits like timing-off (V5)" {
+  run bash -c '
+    set -euo pipefail
+    source "'"${LIB_DIR}"'/timing.sh"
+    export SPEC_KIT_JIRA_TIMING=1
+    _TIMING_FORCE_CLOCK_TIER=1
+    _TIMING_FORCE_RAW_CLOCK="garbage"
+    timing_phase_begin prereq
+    timing_phase_end prereq
+    echo "reconcile outcome unaffected"
+  '
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"reconcile outcome unaffected"* ]]
+}
+
 # A set-but-empty _TIMING_FAKE_CLOCK supplies zero readings, so the cursor
 # clamp computes index -1 over an empty array. §4 says an under-supplied
 # fixture shows 0 ms phases rather than crashing a run, and that has to hold

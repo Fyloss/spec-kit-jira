@@ -84,13 +84,46 @@ JIRA_LAST_ERROR_BODY=''
 export JIRA_LAST_ERROR_BODY
 
 # Total curl attempts issued so far, including retries (contracts/timing-report.md
-# §5). NOT exported: lib/timing.sh reads it directly, since bash sourcing shares
-# one flat process namespace and no export is needed for that. A caller that
-# invokes jira_request via `$( … )` (discovery.sh, ticket.sh, duplicate_probe.sh)
-# loses its increment to the subshell — an accepted undercount, not a bug
-# (contracts/timing-report.md §6, research R5): `calls.log` is the authoritative
-# request count for any test, never this variable.
+# §5). NOT exported. A caller that invokes jira_request via `$( … )` (discovery.sh,
+# ticket.sh, duplicate_probe.sh — 15 of 28 call sites) loses this variable's
+# increment to the subshell on exit, so it is not itself a reliable total; the
+# counter file below (jira_request_count_prime / jira_request_count) is what
+# survives a subshell, and is what a caller wanting the true count reads instead.
 : "${JIRA_REQUEST_COUNT:=0}"
+
+# _JIRA_REQUEST_COUNT_FILE — the true, subshell-proof request tally
+# (data-model.md §3, contracts/request-counting.md). A bash variable
+# increment made inside a `$( … )` subshell is discarded when that subshell
+# exits (research R2); a byte appended to a file on disk is not, and needs no
+# external process to append or to read back (see jira_request_count below) —
+# spawning one per request would defeat the very feature this counter serves.
+: "${_JIRA_REQUEST_COUNT_FILE:=}"
+
+# jira_request_count_prime — create the counter file once, in the parent
+# shell, before the first phase that can issue a request (contracts/
+# request-counting.md C2.1). Call this the same way cred_prime_cache is
+# called (research R3/R5, feature 021): from the main shell only, never from
+# inside a `$( … )` subshell, or the path itself is lost when that subshell
+# exits and every later call re-primes into a file nothing else can see.
+jira_request_count_prime() {
+  [[ -n "${_JIRA_REQUEST_COUNT_FILE}" ]] && return 0
+  _JIRA_REQUEST_COUNT_FILE="$(mktemp)" || _JIRA_REQUEST_COUNT_FILE=""
+}
+
+# jira_request_count — the true total requests issued so far, read back with
+# no external process (a `read … -d ''` slurp is a shell builtin). 0 when
+# priming never happened — a run that issues no request never creates the
+# file — and fail-open (FR-037, C2.4): an unreadable file counts as zero
+# rather than failing the caller.
+jira_request_count() {
+  if [[ -z "${_JIRA_REQUEST_COUNT_FILE}" || ! -s "${_JIRA_REQUEST_COUNT_FILE}" ]]; then
+    printf '0'
+    return 0
+  fi
+  local content=""
+  IFS= read -r -d '' content < "${_JIRA_REQUEST_COUNT_FILE}" 2> /dev/null
+  printf '%s' "${#content}"
+}
 
 # kcov-excl-start — jira_request suspends xtrace for its whole duration
 # (NFR-3 / SC-007: the credential must never be traced), so kcov's tracer
@@ -151,6 +184,10 @@ jira_request() {
     [[ -n "${bodyfile}" ]] && cfg="${cfg}"$'\n'"data = \"@$(_jira_curl_path "${bodyfile}")\""
 
     JIRA_REQUEST_COUNT=$((JIRA_REQUEST_COUNT + 1))
+    # C2.2/C2.4: every attempt, retries included, tallies here too — this is
+    # the increment that survives a `$( … )` subshell (research R2). A write
+    # failure must never fail the request it is counting (FR-037).
+    [[ -n "${_JIRA_REQUEST_COUNT_FILE}" ]] && { printf 'x' >> "${_JIRA_REQUEST_COUNT_FILE}"; } 2> /dev/null
     local http_code curl_rc
     http_code="$(
       printf '%s\n' "${cfg}" | curl --silent --config - \

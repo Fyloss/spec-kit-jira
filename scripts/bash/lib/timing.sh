@@ -105,40 +105,50 @@ _timing_now_ms() {
   fi
 
   _timing_resolve_clock
+  local raw digits divisor multiplier
   case "${_TIMING_CLOCK_TIER}" in
-    1)
-      # No fork at all: pure parameter expansion, so the instrument does not
-      # distort what it measures.
-      local sec="${EPOCHREALTIME%.*}"
-      local usec="${EPOCHREALTIME#*.}"
-      _TIMING_NOW_MS=$(( sec * 1000 + (10#${usec} / 1000) ))
-      ;;
-    2)
-      local ns
-      ns="$(date +%s%N)"
-      _TIMING_NOW_MS=$(( ns / 1000000 ))
-      ;;
-    *)
-      _TIMING_NOW_MS=$(( $(date +%s) * 1000 ))
-      ;;
+    1) raw="${_TIMING_FORCE_RAW_CLOCK-${EPOCHREALTIME}}"; divisor=1000; multiplier=1 ;;
+    2) raw="${_TIMING_FORCE_RAW_CLOCK-$(date +%s%N 2> /dev/null)}"; divisor=1000000; multiplier=1 ;;
+    *) raw="${_TIMING_FORCE_RAW_CLOCK-$(date +%s 2> /dev/null)}"; divisor=1; multiplier=1000 ;;
   esac
+
+  # Reduced to digits before any arithmetic touches it: no code path names,
+  # matches, or branches on a decimal separator character, so the read is
+  # correct on every locale without enumerating any of them (contracts/
+  # clock-reading.md C1.1/C1.2). An empty or malformed reading degrades
+  # rather than raising a `set -e`-fatal arithmetic error (C2.1-C2.3); the
+  # tier-3 "no sub-second clock" notice is a distinct, expected condition
+  # (_TIMING_DEGRADED above) and stays separate from this silent degrade.
+  digits="${raw//[!0-9]/}"
+  if [[ "${digits}" =~ ^[0-9]+$ ]]; then
+    _TIMING_NOW_MS=$(( (10#${digits} / divisor) * multiplier ))
+  else
+    _TIMING_NOW_MS=0
+  fi
   return 0
 }
 
-# timing_phase_begin <phase> — mark the start of one phase. A no-op when
-# timing is off.
+# timing_phase_begin <phase> [request-count] — mark the start of one phase.
+# A no-op when timing is off. The request count defaults to JIRA_REQUEST_COUNT
+# (correct only for a phase whose requests never cross a `$( … )` subshell);
+# a caller wanting the true count for every phase passes it explicitly —
+# reconcile.sh does, from jira_request_count (contracts/request-counting.md
+# C2.1, FR-036). Optional-second-argument shape mirrors the PowerShell port's
+# -RequestCount, which has always had to pass it explicitly (no shared
+# process namespace to read a global from).
 timing_phase_begin() {
   timing_enabled || return 0
   local phase="$1"
   _timing_now_ms
   _TIMING_START_MS["${phase}"]="${_TIMING_NOW_MS}"
-  _TIMING_START_REQ["${phase}"]="${JIRA_REQUEST_COUNT:-0}"
+  _TIMING_START_REQ["${phase}"]="${2:-${JIRA_REQUEST_COUNT:-0}}"
 }
 
-# timing_phase_end <phase> — mark the end of one phase, recording elapsed
-# wall time and the JIRA_REQUEST_COUNT delta since the matching begin. A
-# no-op when timing is off, and silently ignored if there is no matching
-# begin (never errors the run it is instrumenting).
+# timing_phase_end <phase> [request-count] — mark the end of one phase,
+# recording elapsed wall time and the request-count delta since the matching
+# begin. A no-op when timing is off, and silently ignored if there is no
+# matching begin (never errors the run it is instrumenting). See
+# timing_phase_begin for the optional request-count argument.
 timing_phase_end() {
   timing_enabled || return 0
   local phase="$1"
@@ -147,7 +157,8 @@ timing_phase_end() {
   _timing_now_ms
   _TIMING_ELAPSED_MS["${phase}"]=$(( _TIMING_NOW_MS - start ))
   local start_req="${_TIMING_START_REQ[${phase}]:-0}"
-  _TIMING_REQS["${phase}"]=$(( ${JIRA_REQUEST_COUNT:-0} - start_req ))
+  local now_req="${2:-${JIRA_REQUEST_COUNT:-0}}"
+  _TIMING_REQS["${phase}"]=$(( now_req - start_req ))
 }
 
 # timing_report — print one line per phase reached, in fixed order, plus a

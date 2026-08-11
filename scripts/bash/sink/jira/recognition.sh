@@ -248,48 +248,69 @@ recognition_run() {
   local repo
   repo="$(jq -r '.repo // ""' <<< "${spec_ref}")"
 
-  local bound="{}" new="[]" blocked="[]" rerouted="{}"
+  # 024, contracts/spawn-budget.md C1.2/C1.3: the three loops below each used
+  # to re-read `.local_id` / `.marker.state` / `.marker.lines` / `.marker.ticket`
+  # off `stories` with their OWN `jq` call per item — the read is native
+  # accumulation once instead: one `jq -r … | @tsv` call for the WHOLE array,
+  # decoded into parallel bash arrays, so every loop below indexes memory
+  # rather than forking. `new`/`blocked`/`bound`/`rerouted` are collected the
+  # same way `_parse_lines_to_json` (024, T026) collects lines — bash arrays
+  # of already-JSON fragments, joined with ONE `jq -cs` at the very end —
+  # rather than a `. + […]`/`. + {…}` merge re-parsed on every append (O(n²)
+  # data movement, and one process per append).
+  # A literal tab (`@tsv`, `IFS=$'\t'`) is bash-IFS *whitespace*: consecutive
+  # delimiters are squeezed into one, so an empty field (no ticket, no
+  # duplicate lines — the common case) silently shifts every field after it.
+  # The unit separator is not whitespace, so `read` preserves empty fields.
+  local _tsv_sep=$'\x1f'
+  local -a _rid=() _rstate=() _rlines0=() _rlinescsv=() _rticket=()
+  local _tsv_i=0 _tsv_id _tsv_state _tsv_lines0 _tsv_linescsv _tsv_ticket
+  while IFS="${_tsv_sep}" read -r _tsv_id _tsv_state _tsv_lines0 _tsv_linescsv _tsv_ticket; do
+    _rid[_tsv_i]="${_tsv_id}"
+    _rstate[_tsv_i]="${_tsv_state}"
+    _rlines0[_tsv_i]="${_tsv_lines0}"
+    _rlinescsv[_tsv_i]="${_tsv_linescsv}"
+    _rticket[_tsv_i]="${_tsv_ticket}"
+    _tsv_i=$((_tsv_i + 1))
+  done < <(jq -r --arg sep "${_tsv_sep}" '.[] | [
+      .local_id,
+      (.marker.state // "absent"),
+      ((.marker.lines[0] // 0) | tostring),
+      ((.marker.lines // []) | join(", ")),
+      (.marker.ticket // "")
+    ] | join($sep)' <<< "${stories}")
+  local n="${_tsv_i}"
   local all_ids; all_ids="$(jq -c '[.[].local_id]' <<< "${stories}")"
 
+  local -a blocked_items=() new_items=() bound_frags=() rerouted_frags=()
+  local i
+
   # --- Parse-level marker problems: malformed / duplicate-in-section -------
-  local n i
-  n="$(jq 'length' <<< "${stories}")"
   for ((i = 0; i < n; i++)); do
-    local st id state
-    st="$(jq -c ".[${i}]" <<< "${stories}")"
-    id="$(jq -r '.local_id' <<< "${st}")"
-    state="$(jq -r '.marker.state // "absent"' <<< "${st}")"
-    case "${state}" in
+    case "${_rstate[i]}" in
       malformed)
-        local lines; lines="$(jq -r '.marker.lines[0] // 0' <<< "${st}")"
-        blocked="$(jq -c --arg s "${id}" --arg r "marker-malformed" \
-          --arg d "${spec_path} line ${lines}: malformed speckit-jira marker; nothing was written for that ${kind}. Expected \`<!-- speckit-jira ${kind}=<16 hex> ticket=<KEY> -->\`." \
-          '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
+        blocked_items+=("$(jq -cn --arg s "${_rid[i]}" --arg r "marker-malformed" \
+          --arg d "${spec_path} line ${_rlines0[i]}: malformed speckit-jira marker; nothing was written for that ${kind}. Expected \`<!-- speckit-jira ${kind}=<16 hex> ticket=<KEY> -->\`." \
+          '{story:$s, reason:$r, detail:$d}')")
         ;;
       duplicate)
-        local lines_csv; lines_csv="$(jq -r '.marker.lines | join(", ")' <<< "${st}")"
-        local dup_id; dup_id="$(jq -r '.local_id' <<< "${st}")"
-        blocked="$(jq -c --arg s "${dup_id}" --arg r "duplicate-claim" \
-          --arg d "${kind^} identifier ${dup_id} appears on 2 ${kind}s in ${spec_path} (lines ${lines_csv}); nothing was written for any of them. Give each ${kind} its own marker line, or delete the duplicates to have them mirrored as new tickets." \
-          '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
+        blocked_items+=("$(jq -cn --arg s "${_rid[i]}" --arg r "duplicate-claim" \
+          --arg d "${kind^} identifier ${_rid[i]} appears on 2 ${kind}s in ${spec_path} (lines ${_rlinescsv[i]}); nothing was written for any of them. Give each ${kind} its own marker line, or delete the duplicates to have them mirrored as new tickets." \
+          '{story:$s, reason:$r, detail:$d}')")
         ;;
     esac
   done
 
   # --- New (assigned, no ticket yet) and creating (fail-closed window) -----
   for ((i = 0; i < n; i++)); do
-    local st id state
-    st="$(jq -c ".[${i}]" <<< "${stories}")"
-    id="$(jq -r '.local_id' <<< "${st}")"
-    state="$(jq -r '.marker.state // "absent"' <<< "${st}")"
-    case "${state}" in
+    case "${_rstate[i]}" in
       assigned)
-        new="$(jq -c --arg s "${id}" '. + [$s]' <<< "${new}")"
+        new_items+=("${_rid[i]}")
         ;;
       creating)
-        blocked="$(jq -c --arg s "${id}" --arg r "key-unrecorded" \
-          --arg d "${kind^} ${id} in ${spec_path} is marked \`creating\`: a previous run was interrupted after creating its ticket and before recording the key, so whether a ticket exists cannot be determined. Check the project for a ticket carrying that identifier and record it as \`<!-- speckit-jira ${kind}=${id} ticket=<KEY> -->\`, or replace \`creating\` with nothing to mirror the ${kind} as a new ticket." \
-          '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
+        blocked_items+=("$(jq -cn --arg s "${_rid[i]}" --arg r "key-unrecorded" \
+          --arg d "${kind^} ${_rid[i]} in ${spec_path} is marked \`creating\`: a previous run was interrupted after creating its ticket and before recording the key, so whether a ticket exists cannot be determined. Check the project for a ticket carrying that identifier and record it as \`<!-- speckit-jira ${kind}=${_rid[i]} ticket=<KEY> -->\`, or replace \`creating\` with nothing to mirror the ${kind} as a new ticket." \
+          '{story:$s, reason:$r, detail:$d}')")
         ;;
     esac
   done
@@ -297,23 +318,24 @@ recognition_run() {
   # --- Bound stories: cross-story duplicate-claim on identifier or key -----
   local -a bound_idx=()
   for ((i = 0; i < n; i++)); do
-    local state; state="$(jq -r ".[${i}].marker.state // \"absent\"" <<< "${stories}")"
-    [[ "${state}" == "bound" ]] && bound_idx+=("${i}")
+    [[ "${_rstate[i]}" == "bound" ]] && bound_idx+=("${i}")
   done
 
-  # Duplicate KEY: two+ bound stories recording the same ticket key.
-  local dup_keys; dup_keys="$(jq -c '[.[] | select(.marker.state=="bound") | .marker.ticket] | group_by(.) | map(select(length>1)) | flatten | unique' <<< "${stories}")"
+  # Duplicate KEY: two+ bound stories recording the same ticket key — a plain
+  # bash tally over the already-decoded tickets rather than a `group_by` jq
+  # call re-reading `stories`.
+  local -A _ticket_count=()
+  for i in "${bound_idx[@]}"; do
+    _ticket_count["${_rticket[i]}"]=$(( ${_ticket_count["${_rticket[i]}"]:-0} + 1 ))
+  done
 
   for i in "${bound_idx[@]}"; do
-    local st id key
-    st="$(jq -c ".[${i}]" <<< "${stories}")"
-    id="$(jq -r '.local_id' <<< "${st}")"
-    key="$(jq -r '.marker.ticket' <<< "${st}")"
+    local id="${_rid[i]}" key="${_rticket[i]}"
 
-    if jq -e --arg k "${key}" 'index($k) != null' <<< "${dup_keys}" > /dev/null 2>&1; then
-      blocked="$(jq -c --arg s "${id}" --arg r "duplicate-claim" \
+    if (( ${_ticket_count[${key}]:-0} > 1 )); then
+      blocked_items+=("$(jq -cn --arg s "${id}" --arg r "duplicate-claim" \
         --arg d "Ticket ${key} is recorded for more than one ${kind} in ${spec_path}; nothing was written for any of them. Give each ${kind} its own ticket, or correct the ticket= value." \
-        '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
+        '{story:$s, reason:$r, detail:$d}')")
       continue
     fi
 
@@ -321,10 +343,11 @@ recognition_run() {
     # the routed project instead (US3, Phase 5) — treated as NEW, former
     # ticket left untouched. Recorded here so the command layer can emit the
     # catalogued `re-routed` notice once the new key is known (T071).
-    if [[ -n "${project}" ]] && [[ "$(_recognition_project_of "${key}")" != "${project}" ]]; then
-      new="$(jq -c --arg s "${id}" '. + [$s]' <<< "${new}")"
-      rerouted="$(jq -c --arg s "${id}" --arg fk "${key}" --arg fp "$(_recognition_project_of "${key}")" \
-        '. + {($s): {former_key:$fk, former_project:$fp}}' <<< "${rerouted}")"
+    local _key_proj; _key_proj="$(_recognition_project_of "${key}")"
+    if [[ -n "${project}" ]] && [[ "${_key_proj}" != "${project}" ]]; then
+      new_items+=("${id}")
+      rerouted_frags+=("$(jq -cn --arg s "${id}" --arg fk "${key}" --arg fp "${_key_proj}" \
+        '{($s): {former_key:$fk, former_project:$fp}}')")
       continue
     fi
 
@@ -341,22 +364,25 @@ recognition_run() {
 
     local gone; gone="$(jq -r '.gone' <<< "${read_result}")"
     if [[ "${gone}" == "true" ]]; then
-      new="$(jq -c --arg s "${id}" '. + [$s]' <<< "${new}")"
+      new_items+=("${id}")
       continue
     fi
 
     local marker; marker="$(jq -c '.marker' <<< "${read_result}")"
     if [[ "${marker}" == "null" ]]; then
-      blocked="$(jq -c --arg s "${id}" --arg k "${key}" --arg r "marker-mismatch" \
+      blocked_items+=("$(jq -cn --arg s "${id}" --arg k "${key}" --arg r "marker-mismatch" \
         --arg d "Ticket ${key} recorded for ${kind} ${id} in ${spec_path} does not carry that ${kind}'s identity marker; nothing was written to it. Correct the ticket= value in ${spec_path}, or delete the marker line to mirror the ${kind} as a new ticket." \
-        '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
+        '{story:$s, reason:$r, detail:$d}')")
       continue
     fi
 
-    local m_story m_repo m_slug
-    m_story="$(jq -r '.story // ""' <<< "${marker}")"
-    m_repo="$(jq -r '.repo // ""' <<< "${marker}")"
-    m_slug="$(jq -r '.spec_slug // ""' <<< "${marker}")"
+    # One combined read (024, C1.2/C1.3) — `story`/`repo`/`spec_slug` for the
+    # verification below, `origin`/`summary`/`checklist` for the bound entry
+    # further down, all off the SAME already-fetched marker object, which
+    # used to cost up to five separate `jq -r` calls.
+    local m_story m_repo m_slug m_origin m_last_summary m_last_checklist
+    IFS="${_tsv_sep}" read -r m_story m_repo m_slug m_origin m_last_summary m_last_checklist \
+      < <(jq -r --arg sep "${_tsv_sep}" '[(.story // ""), (.repo // ""), (.spec_slug // ""), (.origin // "bridge"), (.summary // ""), (.checklist // "")] | join($sep)' <<< "${marker}")
 
     # Decision order (first match wins, per contracts/recognition-contract.md
     # "Marker verification — decision table"): a marker with no `story` field
@@ -372,72 +398,73 @@ recognition_run() {
     # once repo agrees does a non-matching `story` resolve to orphan or
     # marker-mismatch.
     if [[ -z "${m_story}" ]]; then
-      blocked="$(jq -c --arg s "${id}" --arg k "${key}" --arg r "marker-mismatch" \
+      blocked_items+=("$(jq -cn --arg s "${id}" --arg k "${key}" --arg r "marker-mismatch" \
         --arg d "Ticket ${key} recorded for ${kind} ${id} in ${spec_path} does not carry that ${kind}'s identity marker; nothing was written to it. Correct the ticket= value in ${spec_path}, or delete the marker line to mirror the ${kind} as a new ticket." \
-        '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
+        '{story:$s, reason:$r, detail:$d}')")
       continue
     fi
 
     if [[ "${m_repo}" != "${repo}" ]]; then
-      blocked="$(jq -c --arg s "${id}" --arg k "${key}" --arg other "${m_slug}" --arg r "claimed-by-other" \
+      blocked_items+=("$(jq -cn --arg s "${id}" --arg k "${key}" --arg other "${m_slug}" --arg r "claimed-by-other" \
         --arg d "Ticket ${key} recorded for ${kind} ${id} in ${spec_path} is claimed by specification ${m_slug}; nothing was written to it. Correct the ticket= value in ${spec_path}, or reconcile that specification instead." \
-        '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
+        '{story:$s, reason:$r, detail:$d}')")
       continue
     fi
 
     if [[ "${m_story}" != "${id}" ]]; then
       if ! jq -e --arg mid "${m_story}" 'index($mid) != null' <<< "${all_ids}" > /dev/null 2>&1; then
-        blocked="$(jq -c --arg s "${id}" --arg k "${key}" --arg other "${m_story}" --arg r "orphan" \
+        blocked_items+=("$(jq -cn --arg s "${id}" --arg k "${key}" --arg other "${m_story}" --arg r "orphan" \
           --arg d "Ticket ${key} recorded in ${spec_path} carries ${kind} identifier ${m_story}, which no ${kind} in ${spec_path} claims; nothing was written to it. Restore ${m_story} as that ${kind}'s identifier with \`<!-- speckit-jira ${kind}=${m_story} ticket=${key} -->\`, or delete the marker line to mirror the ${kind} as a new ticket and close ${key} in Jira." \
-          '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
+          '{story:$s, reason:$r, detail:$d}')")
       else
-        blocked="$(jq -c --arg s "${id}" --arg k "${key}" --arg r "marker-mismatch" \
+        blocked_items+=("$(jq -cn --arg s "${id}" --arg k "${key}" --arg r "marker-mismatch" \
           --arg d "Ticket ${key} recorded for story ${id} in ${spec_path} does not carry that story's identity marker; nothing was written to it. Correct the ticket= value in ${spec_path}, or delete the marker line to mirror the story as a new ticket." \
-          '. + [{story:$s, reason:$r, detail:$d}]' <<< "${blocked}")"
+          '{story:$s, reason:$r, detail:$d}')")
       fi
       continue
     fi
 
     # Bound: recognised. current/status/status_category/flagged/blockers
-    # feed the plan and lifecycle contexts (Phase 4/6).
-    local fields origin current status status_category flagged blockers last_summary
-    fields="$(jq -c '.fields' <<< "${read_result}")"
-    origin="$(jq -r '.origin // "bridge"' <<< "${marker}")"
-    # last_summary (018, T044; contracts/summary-record.md §1): the summary
-    # this mirror last WROTE, read from the SAME already-fetched marker — no
-    # extra request. Omitted for a marker written by a previous release,
-    # which carries no `summary` field at all.
-    last_summary="$(jq -r '.summary // empty' <<< "${marker}")"
-    # parent (T109): the child's CURRENT parent key, or null when it carries
-    # none at all — a flat mirror from before this feature, which the "no
-    # migration" boundary (plan.md "Scope boundaries worth stating") leaves
-    # untouched. A non-null value that disagrees with the resolved parent is
-    # a different case, and IS in scope: plan_writes corrects it (T109).
-    current="$(jq -c '{summary:(.summary // ""), description:(.description // {}), priority:(.priority // null), parent:(.parent.key // null), labels:((.labels // []) | unique)}' <<< "${fields}")"
-    status="$(jq -r '.status.name // ""' <<< "${fields}")"
-    status_category="$(jq -r '.status.statusCategory.key // ""' <<< "${fields}")"
-    flagged="$(jq -r 'if (.["Flagged"]? // [] | length) > 0 then true else false end' <<< "${fields}")"
-    blockers="$(jq -c '[(.issuelinks // [])[] | select(.type.inward? and .inwardIssue?) | .inwardIssue.key]' <<< "${fields}")"
-    # subtasks (T073, FR-021): the story's current Jira-side sub-tasks, {key,
-    # issuetype_id} each — empty for a task-kind read, which never requests
-    # this extra field. reconcile.sh diffs this against tasks.md's attributed
-    # tasks to report (never act on) orphans and re-attribution.
-    local subtasks; subtasks="$(jq -c '[(.subtasks // [])[] | {key, issuetype_id: (.fields.issuetype.id // null)}]' <<< "${fields}")"
-
-    # last_checklist (022, data-model.md §3): the digest the mirror last
-    # WROTE for this story's checklist, read from the SAME already-fetched
-    # marker — no extra request. Omitted for a marker predating this
-    # feature, or a task-kind read (a task has no checklist of its own).
-    local last_checklist; last_checklist="$(jq -r '.checklist // empty' <<< "${marker}")"
-
-    local entry; entry="$(jq -cn --arg k "${key}" --arg o "${origin}" --argjson c "${current}" \
-      --arg st "${status}" --arg sc "${status_category}" --argjson fl "${flagged}" --argjson bl "${blockers}" \
-      --argjson sub "${subtasks}" --arg ls "${last_summary}" --arg lc "${last_checklist}" \
-      '{key:$k, origin:$o, current:$c, status:$st, status_category:$sc, flagged:$fl, blockers:$bl, subtasks:$sub}
-       + (if $ls == "" then {} else {last_summary:$ls} end)
-       + (if $lc == "" then {} else {last_checklist:$lc} end)')"
-    bound="$(jq -c --arg id "${id}" --argjson e "${entry}" '. + {($id): $e}' <<< "${bound}")"
+    # feed the plan and lifecycle contexts (Phase 4/6). One `jq` call builds
+    # the whole keyed entry off `read_result`/`marker` — the nine-plus reads
+    # (fields, origin, last_summary, current, status, status_category,
+    # flagged, blockers, subtasks, last_checklist, the entry assembly, and
+    # the keyed-merge wrap) this replaces are algebraically the same filter,
+    # just evaluated by one process instead of a dozen (024, C1.2/C1.3;
+    # verified byte-identical against the pre-024 per-field form before this
+    # landed).
+    bound_frags+=("$(jq -c --arg k "${key}" --arg o "${m_origin}" --arg ls "${m_last_summary}" --arg lc "${m_last_checklist}" --arg id "${id}" '
+      .fields as $f
+      | {
+          ($id): (
+            {
+              key: $k,
+              origin: $o,
+              current: {
+                summary: ($f.summary // ""),
+                description: ($f.description // {}),
+                priority: ($f.priority // null),
+                parent: ($f.parent.key // null),
+                labels: (($f.labels // []) | unique)
+              },
+              status: ($f.status.name // ""),
+              status_category: ($f.status.statusCategory.key // ""),
+              flagged: (if (($f["Flagged"]? // []) | length) > 0 then true else false end),
+              blockers: [($f.issuelinks // [])[] | select(.type.inward? and .inwardIssue?) | .inwardIssue.key],
+              subtasks: [($f.subtasks // [])[] | {key, issuetype_id: (.fields.issuetype.id // null)}]
+            }
+            + (if $ls == "" then {} else {last_summary: $ls} end)
+            + (if $lc == "" then {} else {last_checklist: $lc} end)
+          )
+        }
+    ' <<< "${read_result}")")
   done
+
+  local bound="{}" new="[]" blocked="[]" rerouted="{}"
+  ((${#bound_frags[@]} > 0)) && bound="$(printf '%s\n' "${bound_frags[@]}" | jq -cs 'add')"
+  ((${#new_items[@]} > 0)) && new="$(printf '%s\n' "${new_items[@]}" | jq -Rn -c '[inputs]')"
+  ((${#blocked_items[@]} > 0)) && blocked="$(printf '%s\n' "${blocked_items[@]}" | jq -cs '.')"
+  ((${#rerouted_frags[@]} > 0)) && rerouted="$(printf '%s\n' "${rerouted_frags[@]}" | jq -cs 'add')"
 
   jq -cn --argjson b "${bound}" --argjson nw "${new}" --argjson bl "${blocked}" --argjson rr "${rerouted}" \
     '{bound:$b, new:$nw, blocked:$bl, rerouted:$rr}' | json_canonical

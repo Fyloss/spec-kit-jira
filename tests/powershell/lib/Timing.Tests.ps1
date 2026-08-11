@@ -170,4 +170,61 @@ Describe 'The _TIMING_FAKE_CLOCK seam' {
     }
 }
 
+# T007 — locale-independence regression guard (spec FR-001…FR-005, A-7,
+# research R7). Get-TimingClockReading is `[datetime]::UtcNow.Ticks / 10000`,
+# Int64 arithmetic with no textual rendering anywhere in the path, so no
+# decimal separator exists for a comma-decimal culture to corrupt. This is
+# expected to pass immediately — it exists to keep it sound under measurement
+# rather than by assumption, confirming A-7. Culture is restored in AfterEach
+# regardless of test outcome, since a leaked culture would bleed into every
+# later Pester test in the same process.
+Describe 'Locale independence (research R7, spec A-7)' {
+    BeforeEach {
+        Import-Module $ModulePath -Force
+        $env:SPEC_KIT_JIRA_TIMING = '1'
+        $script:OriginalCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+    }
+
+    AfterEach {
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = $script:OriginalCulture
+        Remove-Item Env:\SPEC_KIT_JIRA_TIMING -ErrorAction SilentlyContinue
+        Remove-Item Env:\_TIMING_FAKE_CLOCK -ErrorAction SilentlyContinue
+    }
+
+    It 'reports a correct duration under a comma-decimal culture (fr-FR)' {
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::new('fr-FR')
+        Start-JiraTimingPhase -Phase prereq
+        Start-Sleep -Milliseconds 30
+        Stop-JiraTimingPhase -Phase prereq
+
+        $lines = (Invoke-TimingReportCaptured) -split "`r?`n" | Where-Object { $_ -ne '' }
+        $lines[0] | Should -Match '^timing: prereq\s+\d+ ms\s+0 requests$'
+        if ($lines[0] -match '(\d+) ms') { [int]$Matches[1] | Should -BeGreaterOrEqual 0 }
+    }
+
+    It 'reports a correct duration under a comma-decimal culture (de-DE)' {
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::new('de-DE')
+        Start-JiraTimingPhase -Phase prereq
+        Start-Sleep -Milliseconds 30
+        Stop-JiraTimingPhase -Phase prereq
+
+        $lines = (Invoke-TimingReportCaptured) -split "`r?`n" | Where-Object { $_ -ne '' }
+        $lines[0] | Should -Match '^timing: prereq\s+\d+ ms\s+0 requests$'
+    }
+
+    It 'produces a byte-identical report across cultures under the injected clock' {
+        $reports = foreach ($culture in @('en-US', 'fr-FR', 'de-DE')) {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::new($culture)
+            Import-Module $ModulePath -Force
+            $env:SPEC_KIT_JIRA_TIMING = '1'
+            $env:_TIMING_FAKE_CLOCK = '0 12'
+            Start-JiraTimingPhase -Phase prereq
+            Stop-JiraTimingPhase -Phase prereq
+            Invoke-TimingReportCaptured
+        }
+        $reports[0] | Should -Be $reports[1]
+        $reports[1] | Should -Be $reports[2]
+    }
+}
+
 }

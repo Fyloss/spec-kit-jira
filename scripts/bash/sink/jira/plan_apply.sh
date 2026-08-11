@@ -339,6 +339,11 @@ plan_writes() {
     [[ -n "${story_label_warning}" ]] && plan_warnings="$(jq -c --arg w "${story_label_warning}" '. + [$w]' <<< "${plan_warnings}")"
   fi
 
+  # 024, C1.2: native accumulation (a bash array of already-JSON actions,
+  # joined with ONE `jq -cs` after the loop) rather than a `. + [$a]` merge
+  # re-parsed on every story — the same O(n²)-avoidance already applied in
+  # parse.sh (T026) and recognition.sh.
+  local -a stories_arr=()
   local stories="[]" n i
   n="$(jq '.stories | length' <<< "${doc}")"
   for ((i = 0; i < n; i++)); do
@@ -518,8 +523,9 @@ plan_writes() {
       action="$(jq -cn --arg u "${base}/rest/api/3/issue/${ticket}" --argjson f "${fields}" --argjson stamp "${identity_stamp}" \
         '{method:"PUT", url:$u, body:{fields:$f}, role:"story"} + (if $stamp == null then {} else {identity_stamp:$stamp} end)')"
     fi
-    stories="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${stories}")"
+    stories_arr+=("${action}")
   done
+  ((${#stories_arr[@]} > 0)) && stories="$(printf '%s\n' "${stories_arr[@]}" | jq -cs '.')"
 
   # The parent type's own label decision (017, contract §4) — resolved here,
   # independently of the story type's, and reused whether the parent is
@@ -1298,6 +1304,17 @@ _plan_apply_privacy_projection() {
   jq -c --argjson m "${managed}" 'if (.fields.description | type) == "object" then (.fields.description.content = $m) else . end' <<< "${body}"
 }
 
+# _apply_writes_decode_rows <actions-json> <sep> — one row per action,
+# `<sep>`-joined method/url/body(compact JSON or the literal "null"). The
+# WHOLE array decoded by one `jq` call regardless of action count (024,
+# C1.2) — split out so the count itself is directly testable
+# (test_plan_apply_spawn_budget.bats), the same shape as parse.sh's
+# `_parse_lines_to_json`.
+_apply_writes_decode_rows() {
+  local actions="$1" sep="$2"
+  jq -r --arg sep "${sep}" '.[] | [.method, .url, ((.body // null) | tostring)] | join($sep)' <<< "${actions}"
+}
+
 # apply_writes <actions-json> [extra-known-coords-json] — guard every payload,
 # then perform the writes in order. Returns EXIT_BLOCK (9) with zero writes if any
 # payload is blocked; otherwise returns the worst (highest) transport exit code.
@@ -1309,13 +1326,31 @@ apply_writes() {
   # they never false-block; it is empty unless the caller supplies one out of band.
   allow="${SPEC_KIT_JIRA_ALLOWLIST:-[]}"
 
-  local n
-  n="$(jq 'length' <<< "${actions}")"
+  # 024, C1.2/C1.3: both loops below used to re-read `.method`/`.url`/`.body`
+  # off `actions` with their OWN `jq` call per action, per loop (up to 3N+3N
+  # calls for N actions). One `jq -c` call decodes the WHOLE array into
+  # parallel bash arrays instead — `\x1f` (not a literal tab: bash's `read`
+  # treats tab as IFS *whitespace* and silently squeezes an empty field, the
+  # same defect fixed in recognition.sh) separates the three columns, `\n`
+  # separates the rows; `.body`'s own compact JSON can never contain a raw
+  # 0x1f byte (jq escapes every control character in a string value), so it
+  # is safe as a field inside this row.
+  local _aw_sep=$'\x1f'
+  local -a _amethod=() _aurl=() _abody=()
+  local _aw_i=0 _aw_method _aw_url _aw_body
+  while IFS="${_aw_sep}" read -r _aw_method _aw_url _aw_body; do
+    _amethod[_aw_i]="${_aw_method}"
+    _aurl[_aw_i]="${_aw_url}"
+    _abody[_aw_i]="${_aw_body}"
+    _aw_i=$((_aw_i + 1))
+  done < <(_apply_writes_decode_rows "${actions}" "${_aw_sep}")
+  local n="${_aw_i}"
 
   # (1) Pre-write gate — scan every content payload before writing anything.
   local i body
   for ((i = 0; i < n; i++)); do
-    body="$(jq -c ".[${i}].body // {}" <<< "${actions}")"
+    body="${_abody[i]}"
+    [[ "${body}" == "null" ]] && body="{}"
     privacy_guard_scan "$(_plan_apply_privacy_projection "${body}")" "${coords}" "${allow}" || return $?
   done
 
@@ -1325,9 +1360,10 @@ apply_writes() {
   # is attempted once a read/write is unreliable (FR-032, monotonic escalation).
   local worst=0 method url rc
   for ((i = 0; i < n; i++)); do
-    method="$(jq -r ".[${i}].method" <<< "${actions}")"
-    url="$(jq -r ".[${i}].url" <<< "${actions}")"
-    body="$(jq -c ".[${i}].body // empty" <<< "${actions}")"
+    method="${_amethod[i]}"
+    url="${_aurl[i]}"
+    body="${_abody[i]}"
+    [[ "${body}" == "null" ]] && body=""
     _plan_apply_write "${method}" "${url}" "${body}" /dev/null
     rc=$?
     ((rc > worst)) && worst=${rc}
