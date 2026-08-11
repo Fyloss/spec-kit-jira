@@ -550,11 +550,20 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
 
 ### Implementation for User Story 2
 
-- [ ] T037 [US2] Resolve the configuration once in `scripts/bash/commands/reconcile.sh` and have every later
+- [X] T037 [US2] Resolve the configuration once in `scripts/bash/commands/reconcile.sh` and have every later
   phase read the resolved result rather than re-reading a file (FR-009, FR-010). The resolved result is
-  process-scoped, never persisted, and holds no credential material (FR-014). **Not done** — `config_load` is
-  already called once per `reconcile.sh` run (not re-read per phase); this task is about confirming/locking
-  that invariant with a test, not a code change, and neither the test nor the confirmation was done this pass.
+  process-scoped, never persisted, and holds no credential material (FR-014). **`config_load` (`config.yml` +
+  `config.local.yml`'s team layer) was already single-read; a SEPARATE file, `config.local.yml`'s
+  `resolved_ids` binding, was not** — `_reconcile_local_binding_for` re-opened and fully re-parsed it from
+  disk once in `gate` (`gate_binding`) and again in `plan` (`_reconcile_plan_context`), for the identical
+  (project-key, config-dir) pair, in the same run. Found from the real-machine "spawn count down 38%, wall
+  time down 4.5%" disconnect: a 100 ms/call here-string-redirection cost (measured directly on that machine)
+  is real but too small to explain the gap alone; a second full file-read-and-parse most runs' security
+  software would scan is a more plausible remaining piece. Fixed: `_reconcile_plan_context` takes an optional
+  cached-binding parameter; `reconcile.sh` passes gate's already-resolved `gate_binding` when gate's own
+  resolution succeeded (empty otherwise, so a gate-time failure still reaches `_reconcile_plan_context`'s own
+  fault path unchanged — behaviour-preserving by construction, not merely by testing). 12 plan-context tests,
+  the full suite (1885 tests), and the corpus stay green. **Not yet re-measured on the real machine.**
 - [X] T038 [US2] Remove the per-line forking from the YAML parser in `scripts/bash/lib/config.sh`
   (`_cfg_prep` / `_cfg_parse_value`), applying the Phase 5 technique. Every resolved answer must be identical to
   today's for every key, including absent keys, defaulted keys, keys resolved through the

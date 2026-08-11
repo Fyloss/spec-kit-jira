@@ -271,7 +271,8 @@ _reconcile_local_binding_for() {
 }
 
 # _reconcile_plan_context <base-url> <project-key> <config-dir> <merged-cfg-json>
-#   [recognition-result-json]
+#   [recognition-result-json] [field-values-json] [tasks-recognition-json]
+#   [cached-binding-json]
 #   The plan context (US2, FR-007–FR-011, FR-013): base_url plus either the
 #   caller's SPEC_KIT_JIRA_PLAN_CONTEXT override (wholesale) or the creation
 #   context built from the resolved project's persisted binding — story_type_id,
@@ -281,8 +282,19 @@ _reconcile_local_binding_for() {
 #   (data-model.md "Plan context — tickets, ticket_origins, ticket_descriptions").
 #   base_url always wins. Returns 2 / 3 exactly as _reconcile_local_binding_for
 #   when no override is set and the binding cannot be read.
+#
+#   cached-binding-json (024, T037, contracts/spawn-budget.md C1.2): the SAME
+#   binding the gate phase already resolved via _reconcile_local_binding_for,
+#   when it did — config.local.yml read and fully re-parsed from disk a
+#   second time otherwise, for the identical (project-key, config-dir) pair,
+#   within the same run. Passed only when gate's own resolution succeeded;
+#   empty (the caller's fault path is otherwise untouched, still calling
+#   _reconcile_local_binding_for itself here) when it did not, so a gate-time
+#   failure never masks whatever _reconcile_plan_context's OWN read would
+#   have reported for it.
 _reconcile_plan_context() {
   local base="$1" key="$2" dir="$3" cfg="$4" recog="${5:-}" field_values="${6:-}" tasks_recog="${7:-}"
+  local cached_binding="${8:-}"
   # NOT "${5:-{}}" as the default inline: bash's brace-matching for a
   # `${...}` parameter expansion misparses a `{}`-shaped default value,
   # corrupting how the REST OF THE FUNCTION is parsed (a real, reproduced
@@ -297,8 +309,12 @@ _reconcile_plan_context() {
   fi
 
   local binding rc=0
-  binding="$(_reconcile_local_binding_for "${key}" "${dir}")" || rc=$?
-  [[ "${rc}" -ne 0 ]] && return "${rc}"
+  if [[ -n "${cached_binding}" ]]; then
+    binding="${cached_binding}"
+  else
+    binding="$(_reconcile_local_binding_for "${key}" "${dir}")" || rc=$?
+    [[ "${rc}" -ne 0 ]] && return "${rc}"
+  fi
 
   local story_type priority_map priorities est_field priority_ids
   local parent_type_id parent_supports_link
@@ -1215,8 +1231,15 @@ _reconcile_run() {
   # map instead of only from the override). An explicit
   # SPEC_KIT_JIRA_PLAN_CONTEXT overrides the derived object wholesale;
   # otherwise it is built from the resolved project's persisted binding.
+  # 024, T037: reuse gate's already-resolved binding rather than having
+  # _reconcile_plan_context read and re-parse config.local.yml from disk a
+  # second time for the identical (project-key, config-dir) pair — only
+  # when gate's own resolution succeeded, so a gate-time failure still
+  # reaches _reconcile_plan_context's own fault path unchanged.
+  local _plan_ctx_cached_binding=""
+  [[ "${rc_gate_binding}" -eq 0 ]] && _plan_ctx_cached_binding="${gate_binding}"
   local plan_ctx rc_pc=0
-  plan_ctx="$(_reconcile_plan_context "${base}" "${project_key}" "${cfg_dir}" "${cfg}" "${recog}" "${field_values}" "${tasks_recog}")" || rc_pc=$?
+  plan_ctx="$(_reconcile_plan_context "${base}" "${project_key}" "${cfg_dir}" "${cfg}" "${recog}" "${field_values}" "${tasks_recog}" "${_plan_ctx_cached_binding}")" || rc_pc=$?
   # on_drift (018, T046; contracts/summary-record.md §4): the SAME
   # --on-drift the lifecycle context already carries — plan_writes' summary
   # decision reads it from here rather than a second flag.
