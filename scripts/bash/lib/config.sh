@@ -129,6 +129,14 @@ _CFG_ERR=""
 _CFG_STRIPPED=""
 _cfg_strip_inline_comment() {
   local line="$1"
+  # Fast path (024, T061): no `#` at all means nothing to strip — skip the
+  # quote-tracking scan entirely and just rtrim, the same way the slow
+  # path's own last step does (with no `#`, that loop copies every
+  # character through unchanged, so the two are equivalent).
+  if [[ "${line}" != *'#'* ]]; then
+    _CFG_STRIPPED="${line%"${line##*[![:space:]]}"}"
+    return 0
+  fi
   local out="" i=0 n=${#line} ch nxt in_s=0 in_d=0 prev=""
   while ((i < n)); do
     ch="${line:i:1}"
@@ -201,7 +209,19 @@ _cfg_prep() {
 # configuration was the larger half. It MUST NOT be called through `$( … )`.
 _CFG_JSON=""
 _cfg_json_encode() {
-  local s="$1" out="" c code i n
+  local s="$1"
+  # Fast path (024, T061): most config string values (project keys, labels,
+  # ids) contain none of the six named escapes or a control character, so
+  # skip the per-character loop below entirely for them — one pattern match
+  # instead of up to N character comparisons. `[[:cntrl:]]` covers every
+  # byte the slow path treats specially (\n \r \t \b \f are all < 0x20);
+  # NUL cannot occur in a bash string at all, so it needs no separate check.
+  # shellcheck disable=SC1003 # a literal backslash glob character, not an escape mistake
+  if [[ "${s}" != *'"'* && "${s}" != *'\'* && ! "${s}" =~ [[:cntrl:]] ]]; then
+    _CFG_JSON="\"${s}\""
+    return 0
+  fi
+  local out="" c code i n
   n=${#s}
   for ((i = 0; i < n; i++)); do
     c="${s:i:1}"

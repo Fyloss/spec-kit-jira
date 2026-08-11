@@ -269,7 +269,7 @@ below is trustworthy; none was before.
   distinguished from "the managed host's specification has fewer bound items." T031a (recognition consolidation)
   is unblocked by this finding — recognition **is** in scope for the Phase 5 technique — but T021 is still
   required to know whether it matters on the target machine.
-- [ ] T020 [P] Record the per-spawn cost of both hosts per `quickstart.md` §5a — the multiplier that reconciles
+- [X] T020 [P] Record the per-spawn cost of both hosts per `quickstart.md` §5a — the multiplier that reconciles
   the two profiles (research R3). Measured here: 2 445 µs. **This one needs the maintainer**, on the
   consuming-repo machine; the 9–18 µs·10³ figure in the plan is inferred, not measured. **Run 2026-08-11, and it falsified the
   inferred figure** — which makes this the single most consequential measurement in the feature. On the
@@ -766,10 +766,23 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   converted helper behind a test-only seam). **Hazard**: a helper that currently prints and is captured must
   not also print after conversion, or its output lands on stdout mid-parse; and `_cfg_scalar_json` is called
   from two sites, so both must move together.
-- [ ] T061 [US2] *(second-order, after T060)* Reduce the ~7.8 s of character-by-character work that remains in
-  `_cfg_strip_inline_comment`, `_cfg_json_encode` and `_cfg_map_entry_key`. These walk every character of
-  every line in bash. Only worth attempting once T060 lands and is re-measured — at that point it is the
-  dominant remaining cost of the phase, and not before.
+- [X] T061 **Partial — two of three functions done 2026-08-11, measured 19–20× on the common case.**
+  `_cfg_json_encode` and `_cfg_strip_inline_comment` each gained a fast path that skips the character-by-
+  character loop entirely when it can prove up front that the loop would change nothing: `_cfg_json_encode`
+  when the string contains none of `"`, `\`, or a control character (`[[:cntrl:]]` covers every byte the slow
+  path treats specially, including the five named escapes); `_cfg_strip_inline_comment` when the line has no
+  `#` at all (the slow path's quote-tracking scan exists only to find an unquoted `#`). Both conditions are the
+  OVERWHELMING common case for a real config file — most string values need no escaping, most lines carry no
+  inline comment. Measured on the same machine (200 000 calls, before/after via `git show HEAD:...`):
+  `_cfg_json_encode` on a 40-char plain string, **70.7 s → 3.5 s (20.1×)**; `_cfg_strip_inline_comment` on a
+  40-char no-`#` line, **87.5 s → 4.5 s (19.5×)**. Correctness unchanged: `test_config.bats` (91 tests),
+  `test_config_read_once.bats`, `test_config_no_subshell.bats` all green; full suite 1 899/1 899; conformance
+  corpus exit 0 zero divergence; `shellcheck` clean (one `SC1003` info false-positive on an intentional literal-
+  backslash glob, disabled inline with a reason). **`_cfg_map_entry_key` NOT attempted** — its scan is
+  quote-STATE-tracking to locate a delimiter colon, not a single yes/no predicate like the other two, so it
+  cannot take the same "prove nothing changes, skip the loop" shape without a genuinely different algorithm; a
+  higher-risk rewrite for a later pass, matching this session's standing rule about not rushing the class of
+  change T030 already deferred for the same reason. **Not yet re-measured on the motivating machine.**
 - [X] T058 **A third read site found and closed 2026-08-11 — real, but not yet confirmed as the whole answer.**
   `apply_writes_with_recognition` itself was already cleared (no per-item fork, no duplicate read, one
   necessary `cat` of `spec_file`) before this session — that finding stands. Reading `reconcile.sh`'s `apply`
