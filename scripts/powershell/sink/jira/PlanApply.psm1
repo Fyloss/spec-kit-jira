@@ -20,7 +20,7 @@ Import-Module (Join-Path $PSScriptRoot '../../engine/Drift.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../../engine/Idempotency.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../../engine/ManagedSection.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PrivacyGuard.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'Client.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Client.psm1')    # No -Force — see project memory: powershell-import-force-clobbers-caller-scope
 Import-Module (Join-Path $PSScriptRoot 'Ticket.psm1') -Force # Get-JiraCreateFieldsBase — the shared creation-fields builder (research R3)
 Import-Module (Join-Path $PSScriptRoot '../../engine/MarkerSplice.psm1') -Force # Write-JiraMarkerSpliceFile — a nested import inside StoryMarker.psm1 is not enough
 Import-Module (Join-Path $PSScriptRoot '../../engine/StoryMarker.psm1') -Force -Global # R5 steps 4/6 — mark `creating`, stamp + record per ticket

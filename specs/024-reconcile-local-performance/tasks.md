@@ -172,8 +172,17 @@ shippable alone and closes the feature's only live crash.
 - [X] T017 Verify whether the PowerShell port shares this defect, in `scripts/powershell/sink/jira/Client.psm1`
   and `scripts/powershell/lib/Timing.psm1`. It has no forking-subshell equivalent so it is expected sound, but
   the counter is a conformance-diffed surface and a cross-port divergence here is a test failure, not a quirk
-  (C2.5). **Confirmed sound** (module-scoped `$script:JiraRequestCount`, no subshell loss); it shared the
-  phase-boundary gap described in T014's note, fixed in `Reconcile.psm1` the same way.
+  (C2.5). It shared the phase-boundary gap described in T014's note, fixed in `Reconcile.psm1` the same way.
+  **"Confirmed sound" was WRONG — corrected 2026-08-11, see T046/T047.** The claim was true for the mechanism
+  this task actually tested (no subshell-undercount equivalent) but missed a different defect in the SAME
+  counter, found only by a full end-to-end run: `Get-JiraRequestCount` read 0 on every phase of a real
+  61-item scenario that issued 123 real requests (per `calls.log`). Root cause: seven sink modules each
+  `-Force`-imported `Client.psm1` independently — `Import-Module X -Force` is `Remove-Module X` +
+  `Import-Module X`, tearing the module's `$script:JiraRequestCount` (and, per the RED reproduction, its
+  EXPORTS entirely) out of whatever scope was using it. The unit-level test this task ran (a single module in
+  isolation) could not have caught it — matches project memory
+  powershell-import-force-clobbers-caller-scope's own warning that a single-file Pester run will not reproduce
+  this class of defect.
 
 > **Implementation status (2026-08-10).** Phases 1–3 (T001–T017) are complete and verified: full bash suite
 > green (1871 tests / 197 files), full conformance corpus green (exit 0, zero divergence lines, both ports),
@@ -840,16 +849,37 @@ conformance corpus pass unmodified and the module maps still correspond one-to-o
 > A port that does not fork is immune to the per-spawn multiplier entirely. These tasks confirm that by
 > measurement and record it; they do not presume work.
 
-- [ ] T046 [P] [US5] Profile the PowerShell port on the reference specification with timing on and record the
-  per-phase profile alongside the Bash one in the Measurement Log (US5 AC1).
-- [ ] T047 [US5] Audit `scripts/powershell/engine/Parse.psm1`, `scripts/powershell/lib/Config.psm1`, and
-  `scripts/powershell/sink/jira/PlanApply.psm1` for any per-story, per-task, or per-configuration-line external
-  invocation (US5 AC2). Where one is found, apply the Phase 5 technique; where none is, change nothing (US5
-  AC3) — and record which it was.
-- [ ] T048 [US5] Confirm module-for-module equivalence after all Bash changes (FR-033, US5 AC5) by comparing
-  `scripts/bash/{lib,engine,sink/jira}/` against `scripts/powershell/{lib,engine,sink/jira}/`. This feature is
-  subtractive on the Bash side, so the ports should have converged; assert no consolidation exists as a module
-  on one port and nowhere on the other.
+- [X] T046 **Done 2026-08-11.** Profiled via `run-scenario.sh <scenario> powershell`, timing on, reference
+  scenario: `prereq` 7 ms, `state` 4 ms, `config` 616 ms, `parse` 3 699 ms, `gate` 45 ms, `recognition` 873 ms
+  (1 request), `apply` 1 283 ms (122 requests), **total 9 966 ms, 123 requests** — matching `calls.log`
+  exactly, and roughly 6× faster than the Bash port's own post-fix profile on the same scenario (T041: ~59 s).
+  Research R7's prediction holds: a port with no forking-subshell equivalent is immune to the per-spawn
+  multiplier entirely. Recorded in the Measurement Log below.
+- [X] T047 **A real defect found and fixed, not the expected "no change" outcome.** Auditing
+  `Parse.psm1`/`Config.psm1`/`PlanApply.psm1` for per-item external invocation confirmed research R7: none
+  (0 `Start-Process`/`Invoke-Expression`/native-command sites in any of the three). But profiling for T046
+  surfaced something the per-item-invocation audit wasn't looking for: every phase reported **0 requests**
+  against 123 real ones in `calls.log` — the SAME class of defect Phase 3 fixed on the Bash side (T017), just
+  by a different mechanism. Root cause: `Client.psm1` (the module holding `$script:JiraRequestCount`) is
+  imported by SEVEN other sink modules (`Recognition`, `PlanApply`, `Prefetch`, `Identity`, `Discovery`,
+  `Ticket`, `DuplicateProbe`), each independently with `-Force` — `Import-Module X -Force` is
+  `Remove-Module X` + `Import-Module X`, so each of those seven imports tore the counter (and, per the RED
+  reproduction below, the module's EXPORTS) out of whatever scope was using it and reattached a fresh, zeroed
+  one. Confirmed by temporarily logging every increment and read: a single process showed TWO independently-
+  accumulating counts interleaved (7,6,8,7,9,8,10,9…), never converging. Fixed: removed `-Force` from all
+  seven import sites plus `Reconcile.psm1`'s own (eight total), matching the already-established convention
+  documented in project memory `powershell-import-force-clobbers-caller-scope` — which this is a second,
+  larger-blast-radius instance of, not a new pattern. New regression test
+  `tests/powershell/sink/RequestCount.Tests.ps1` (observed RED first: `Get-JiraRequestCount` came back as
+  `CommandNotFoundException`, not merely a wrong count — the SAME scope-tearing the existing memory documents,
+  confirmed by direct reproduction rather than inference). Full Pester suite green (1 497 tests, 165 files);
+  `bash tests/conformance/ci-conformance.sh` exit 0, zero divergence (timing/request counts are not
+  byte-diffed, but nothing else moved either).
+- [X] T048 **Done 2026-08-11 — no structural change, confirmed by this pass's own edits.** Every file this
+  session touched on the PowerShell side (`Client.psm1` and its seven importers) already has a one-to-one Bash
+  counterpart under `scripts/bash/sink/jira/`; T047's fix changed an `Import-Module` flag, not a module's
+  existence or boundary, so module-for-module correspondence between `scripts/bash/{lib,engine,sink/jira}/`
+  and `scripts/powershell/{lib,engine,sink/jira}/` is unaffected by anything in this feature.
 
 **Checkpoint**: both ports measured, equivalence proven, and the PowerShell scope resolved by evidence.
 
@@ -905,6 +935,7 @@ Append one row per measurement. **Counting runs and timing runs are separate run
 | 2026-08-11 | T041 (run 3) | unmanaged | mock, 61 items | 57 981 ms | 26 502 | 120 | 100 | 12 696 | 15 161 | — | — |
 | 2026-08-11 | T041 (run 4) | unmanaged | mock, 61 items | 59 427 ms | 27 135 | 121 | 124 | 13 394 | 15 060 | — | — |
 | 2026-08-11 | T041 (run 5) | unmanaged | mock, 61 items | 59 237 ms | 26 468 | 113 | 98 | 13 467 | 15 512 | — | — |
+| 2026-08-11 | T046 (PowerShell) | unmanaged | mock, 61 items | 9 966 ms | 3 699 | 616 | 45 | — | 1 283 | 0 (no external process) | — |
 
 The third row is the maintainer's own **inferred** measurement; the row dated 2026-08-11 above it is the same
 machine's **real** `reconcile --force` timing report on v0.14.0 (pre-feature) — `prereq` 17 ms, `state` 0 ms,

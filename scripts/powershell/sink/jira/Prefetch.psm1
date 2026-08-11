@@ -11,7 +11,7 @@
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot '../../lib/Output.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'Client.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Client.psm1')    # No -Force — see project memory: powershell-import-force-clobbers-caller-scope
 
 function Get-JiraPrefetchSafe {
     # A StrictMode-safe property read: `.PSObject.Properties.Name -contains`
