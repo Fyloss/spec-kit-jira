@@ -467,7 +467,25 @@ Nothing is traded away; `parse` is added.
 > Measured (synthetic 10-task fixture, 4 lines/task, matching the real report): `sed` calls **eliminated
 > entirely** (0, from what would have been 100+); `jq` calls ~6.4/task, down from a much larger per-line cost.
 > 43 task_marker/tasks_parse tests, 10 reconcile task-tier tests, the full suite (1885 tests), and the corpus
-> stay green. **Not yet re-measured on the real machine** — this is the next thing to ask for.
+> stay green.
+
+> **Re-measured on the real machine (2026-08-11): spawn count and wall time disagree.** The broad diagnostic,
+> re-run after this fix, same scenario: `jq` 981 → 729 (-25.7%), `sed` 267 → 5 (-98.1%), every other tool
+> unchanged, **total 1 350 → 836 (-38.1%)**. Timing, same scenario: total 154 942 → 147 957 ms (**-4.5%
+> only**) — `config`/`gate`/`plan`/`apply` each moved by 1-5%, within run-to-run noise; `parse` (the phase
+> that reads `tasks.md`) is unchanged (6 612 → 6 543 ms), suggesting this fix's code path may not even be the
+> one the checklist render actually exercises for the story-tasks link.
+>
+> **A 38% spawn-count cut producing a 4.5% wall-time cut contradicts every earlier measurement in this
+> feature**, where spawn count and wall time moved together (config.sh's fix: -59% both; recognition.sh: -58%
+> both). Leading hypothesis, not yet tested: **payload size, not call count, may be what this machine's
+> security stack actually charges for** — the calls removed here were all small (one document line at a
+> time); the ~836 calls remaining include `plan_writes` re-piping the full merged config and a story's whole
+> ADF payload through `jq` repeatedly, which this session's work has not targeted (T030's own note: "the
+> ~60-80 jq calls per UPDATE-branch story" was left alone as higher-risk). If true, the next lever is
+> reducing how much data crosses each remaining `jq` boundary, not how many boundaries there are — a
+> different optimisation axis than everything done so far, and one this session did not have real-Jira
+> access to validate further. Reported as a finding for the next pass, not chased further this session.
 
 **Checkpoint**: spawn count is flat in item count across four phases, and every byte of observable behaviour is
 unchanged.
