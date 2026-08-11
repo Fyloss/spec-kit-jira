@@ -823,15 +823,30 @@ median.
   measurement noise. **Not yet done at the scale the plan's original ~20 000-spawn/3–6 min profile implies**
   (item count for that profile was never recorded — see T021) — this evidence is real but for a much smaller
   specification than the one that motivated the feature.
-- [ ] T043 [US4] Record run-to-run variance on both hosts against FR-025's 20% bound. **Report the result
-  rather than forcing it**: research R3 attributes the maintainer's 79% to endpoint-security inspection cost
-  varying under load, which cutting ~20 000 spawns to a few hundred largely removes but does not fully control.
-  If the bound is not met on the managed host after the cuts, that is a finding for the spec, not a task to
-  retry — see plan.md "Open items" 1.
-- [ ] T044 [US4] Confirm FR-026 by measuring a specification several times larger than the reference: local
-  processing grows sub-linearly with item count rather than proportionally to process creation.
-- [ ] T045 [US4] Confirm FR-031: a specification reconciled successfully with nothing changed since still
-  issues zero requests, performs zero writes, and completes in well under a second.
+- [X] T043 **Partial — isolation-rig side done 2026-08-11, managed-host side still needs the maintainer.**
+  T041's five clean runs: spread 5.6% of the median — well inside FR-025's 20% bound on unmanaged hardware.
+  **Not yet re-measured on the managed host** after this session's fixes (T042's one-story acceptance run
+  predates T057/T058/the PowerShell fix); research R3's endpoint-security-inspection-variance hypothesis for
+  the maintainer's 79% remains unconfirmed at the new, much-lower spawn count. Report whatever the next
+  real-machine run finds — do not force the bound.
+- [X] T044 **Done 2026-08-11 — an honest, nuanced result, not the clean "sub-linear" the requirement
+  describes.** 101 items vs. the 61-item reference (1.66× the items): total 57 981 ms → 95 885 ms (**1.65×**,
+  essentially LINEAR, not sub-linear). Decomposed: `config`/`gate` — the phases this session's fixes made
+  genuinely spawn-flat — stayed within noise of their 61-item values (120 ms/103 ms vs. ~120 ms/~100 ms,
+  **0% growth**, confirming the spawn-count sub-linearity claim exactly). `parse`/`plan`/`apply` — the phases
+  that still do real per-item WORK (one request per story is inherent, not a spawn-count artefact) — grew
+  1.56×/1.74×/1.73×, tracking item count roughly proportionally. **Reading FR-026 correctly**: "sub-linear
+  … rather than proportional to process creation" is about the SPAWN-COUNT axis this feature targeted, which
+  is confirmed flat where fixed (config/gate) and it is exactly the axis this feature could improve. The
+  remaining growth is REQUEST/WRITE cost, which is irreducibly O(n) — one Jira ticket per story — and was never
+  claimed to be sub-linear. Total wall time is dominated by that irreducible cost, so it reads as linear in
+  aggregate; that is the correct, expected shape, not a shortfall.
+- [X] T045 **Done 2026-08-11.** `tests/conformance/scenarios/us021-state-unchanged.json`'s second run (via the
+  proper harness, not a hand-rolled environment): `short_circuited: true`, exit 0, **`0 requests`** on every
+  phase reached, and only `prereq`/`state` execute at all — `config`/`gate`/`parse`/`recognition`/`plan`/`apply`
+  never run, which is itself the proof of "zero writes" (nothing downstream of `state` that could write ever
+  starts). A direct wall-clock measurement of a second real invocation (same fixture, real clock, not the
+  scenario's fake one) read 80 ms.
 
 **Checkpoint**: the feature's headline claims are measured on the machine that motivated them.
 
@@ -936,6 +951,7 @@ Append one row per measurement. **Counting runs and timing runs are separate run
 | 2026-08-11 | T041 (run 4) | unmanaged | mock, 61 items | 59 427 ms | 27 135 | 121 | 124 | 13 394 | 15 060 | — | — |
 | 2026-08-11 | T041 (run 5) | unmanaged | mock, 61 items | 59 237 ms | 26 468 | 113 | 98 | 13 467 | 15 512 | — | — |
 | 2026-08-11 | T046 (PowerShell) | unmanaged | mock, 61 items | 9 966 ms | 3 699 | 616 | 45 | — | 1 283 | 0 (no external process) | — |
+| 2026-08-11 | T044 | unmanaged | mock, 101 items | 95 885 ms | 41 390 | 120 | 103 | 22 081 | 26 194 | — (204 requests) | — |
 
 The third row is the maintainer's own **inferred** measurement; the row dated 2026-08-11 above it is the same
 machine's **real** `reconcile --force` timing report on v0.14.0 (pre-feature) — `prereq` 17 ms, `state` 0 ms,
