@@ -563,7 +563,39 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   cached-binding parameter; `reconcile.sh` passes gate's already-resolved `gate_binding` when gate's own
   resolution succeeded (empty otherwise, so a gate-time failure still reaches `_reconcile_plan_context`'s own
   fault path unchanged — behaviour-preserving by construction, not merely by testing). 12 plan-context tests,
-  the full suite (1885 tests), and the corpus stay green. **Not yet re-measured on the real machine.**
+  the full suite (1885 tests), and the corpus stay green. **Confirmed on the real machine (2026-08-11)**: same
+  1-story/10-task scenario, `plan` 36 826 ms → **3 244 ms (-91.2%)**; total 147 957 → 116 559 ms (-21.2%).
+  `config`/`gate`/`apply` unchanged (~33-35 s each), as expected — this fix only removed `plan`'s redundant
+  second read. One full `config.local.yml` read-and-parse costing ~33 s on this machine is now a
+  directly-measured fact, not an inference.
+
+> **Open finding (2026-08-11), not implemented — next session's most promising lead.** `config.local.yml` is
+> still read from disk **twice** in total, not once: `config_load` (`lib/config.sh`) reads it during the
+> `config` phase for its `.overrides` (team-layer merge) key; `_reconcile_local_binding_for` reads the SAME
+> file again during `gate` for its `.resolved_ids` key — `config_load`'s own internal parse is never exposed
+> to callers, so this second read cannot reuse it without changing `config_load`. Given the `config`/`gate`
+> durations (~34 s / ~33 s) now closely bracket the ~33 s one confirmed read costs, this redundant read is the
+> leading explanation for both remaining costs.
+>
+> **Why not fixed this session**: `config_load` is a foundational `lib/config.sh` function used by every
+> command that reads project configuration, not `reconcile.sh`-specific — widening its contract (to expose or
+> accept a pre-parsed `config.local.yml`) is a broader, higher-risk change than anything else done this pass,
+> which stayed inside `reconcile.sh`/`plan_apply.sh`/`recognition.sh`/engine parsers. Options for the next
+> pass: (a) extend `config_load`'s return shape to also carry the raw local JSON (breaks/changes a
+> widely-tested contract — audit every caller first); (b) a file-content-keyed memoisation cache inside
+> `lib/config.sh` itself (mirrors `jira_request_count`'s subshell-proof file-cache pattern, T014) so ANY
+> caller reading the same path twice in one run gets the second read free, without changing any function's
+> signature — likely the lower-risk option, but unproven.
+>
+> **Also still open: the `apply` phase's ~35 s, unexplained.** Read through `apply_writes_with_recognition`
+> (`plan_apply.sh`) end to end for this session's "zero writes" scenario — the only disk read found is one
+> `cat` of `spec_file` (necessary, to decide whether a `creating` marker needs splicing; unconditional but
+> single and small), and the story/task write loops iterate zero times when `plan_lifecycle` has already
+> dropped every action (matching `requests: 1` — recognition's read alone). Nothing else in this function
+> reads a file or forks per item. Confirmed NOT a duplicate-config-read case like `gate`/`plan` were.
+> **Unresolved** — needs either a phase-scoped broad-diagnostic run (the existing `broad_spawn_count.sh`
+> script, but bracketed to just the `apply` phase) or a different profiling approach on the real machine to
+> find what it is.
 - [X] T038 [US2] Remove the per-line forking from the YAML parser in `scripts/bash/lib/config.sh`
   (`_cfg_prep` / `_cfg_parse_value`), applying the Phase 5 technique. Every resolved answer must be identical to
   today's for every key, including absent keys, defaulted keys, keys resolved through the
