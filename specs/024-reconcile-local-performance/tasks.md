@@ -739,9 +739,10 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   `config_yaml_cache_prime` unconditional (always a fresh `mktemp -d`) rather than guarded — it has exactly one
   call site, so the once-per-process guard bought nothing and was actively wrong. Re-verified: `lib`+`commands`
   734/734, full suite 1889/1889, `bash tests/conformance/ci-conformance.sh` exit 0 zero divergence, `shellcheck`
-  clean. **Not yet measured on the motivating machine** — projected to remove one of the two ~33 s
-  `config.local.yml` parses the "Open finding" below identified, alongside T060's per-line fork removal already
-  confirmed there.
+  clean. **Confirmed on the motivating machine 2026-08-12**: `config` dropped 33 885 → 3 579 ms (-89.4%),
+  `gate` 33 659 → 365 ms (-98.9%), `apply` 35 399 → 395 ms (-98.9%) — combined with T058's third-site closure
+  and T060's per-line fork removal, a materially larger win than the "one of two ~33 s parses removed"
+  projection implied alone.
 - [X] T060 **Done 2026-08-11 — measured 4.3× on the parser, sys time down 52×.** Before/after on the same
   machine, same 2 003-line synthetic config, byte-identical output (43 958 bytes both):
   **5.346 s → 1.241 s** wall; user 1.792 → 1.180 s; **system 3.158 s → 0.061 s**. The system-time collapse is
@@ -752,8 +753,10 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   `_CFG_KEY`/`_CFG_REST`/`_CFG_RET` already in the file. Gate: full bash suite green (1 887 tests), conformance
   corpus exit 0 with zero divergence, `shellcheck` clean. One test adapted — `test_config_read_once.bats`'s
   `_cfg_json_encode` case captured stdout; it is a test this feature added, so FR-032's carve-out covers it,
-  and the assertion it makes (byte-identity against `jq -Rn --arg`) is unchanged. **Projected on the
-  motivating machine**: parse 31 s → ~7 s, twice per run. Not yet measured there.
+  and the assertion it makes (byte-identity against `jq -Rn --arg`) is unchanged. **Confirmed on the motivating
+  machine 2026-08-12**, combined with T057/T058/T061: `config` 33 885 → 3 579 ms, well under the ~7 s×2
+  projection — the config-cache and third-site closure meant this fork removal was applied to far fewer parses
+  than the projection assumed.
 - [ ] ~~T060~~ *(original wording)* Convert the four per-line command substitutions in
   `scripts/bash/lib/config.sh` to the out-variable pattern the same file already uses: `_cfg_prep:169`
   (`_cfg_strip_inline_comment`), `_cfg_parse_mapping:447` (`_cfg_scalar_json`), `_cfg_parse_mapping:471`
@@ -782,7 +785,10 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   quote-STATE-tracking to locate a delimiter colon, not a single yes/no predicate like the other two, so it
   cannot take the same "prove nothing changes, skip the loop" shape without a genuinely different algorithm; a
   higher-risk rewrite for a later pass, matching this session's standing rule about not rushing the class of
-  change T030 already deferred for the same reason. **Not yet re-measured on the motivating machine.**
+  change T030 already deferred for the same reason. **Confirmed on the motivating machine 2026-08-12**,
+  combined with T057/T058/T060: `gate`/`apply` — the phases dominated by `_cfg_json_encode`/
+  `_cfg_strip_inline_comment` calls over the (large, portfolio-heavy) real `config.local.yml` — collapsed to
+  365 ms and 395 ms respectively.
 - [X] T058 **A third read site found and closed 2026-08-11 — real, but not yet confirmed as the whole answer.**
   `apply_writes_with_recognition` itself was already cleared (no per-item fork, no duplicate read, one
   necessary `cat` of `spec_file`) before this session — that finding stands. Reading `reconcile.sh`'s `apply`
@@ -797,10 +803,10 @@ spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after
   `tests/bash/commands/test_reconcile_credential_cache.bats`, "T058 [024]: config.local.yml parses exactly once
   across a full real run, including apply's hook-health read" — green, no additional production code needed,
   because T057's path-string cache key (`"${JIRA_CONFIG_DIR}/config.local.yml"`) is identical across all three
-  call sites by construction. **Not yet confirmed on the motivating machine**: this closes one THIRD of the
-  ~33 s-per-read arithmetic (was 3 reads, now 1), which — combined with T060's per-line fork removal — projects
-  `apply`'s ~35 s toward single digits, but the isolation rig cannot measure this (its config is 14 lines
-  against the real 8 658+, research R3a) and no real-machine run has been taken since this fix landed.
+  call sites by construction. **Confirmed on the motivating machine 2026-08-12**: `apply` dropped 35 399 → 395
+  ms — two orders of magnitude past the "toward single digits [of seconds]" projection, since the projection
+  read as single-digit *seconds* and the actual result is single-digit hundreds of *milliseconds*. Combined
+  with T057/T060/T061, the three fixes compound rather than merely add.
 
 **Checkpoint**: `config.local.yml` is opened and parsed once per run, proven by a counting stand-in rather than
 by wall-clock; parsing it forks per neither line nor item; the short-circuit is still free; and `apply`'s
@@ -836,12 +842,13 @@ median.
   measurement noise. **Not yet done at the scale the plan's original ~20 000-spawn/3–6 min profile implies**
   (item count for that profile was never recorded — see T021) — this evidence is real but for a much smaller
   specification than the one that motivated the feature.
-- [X] T043 **Partial — isolation-rig side done 2026-08-11, managed-host side still needs the maintainer.**
+- [X] T043 **Done in full 2026-08-12 — isolation-rig side 2026-08-11, managed-host side confirmed 2026-08-12.**
   T041's five clean runs: spread 5.6% of the median — well inside FR-025's 20% bound on unmanaged hardware.
-  **Not yet re-measured on the managed host** after this session's fixes (T042's one-story acceptance run
-  predates T057/T058/the PowerShell fix); research R3's endpoint-security-inspection-variance hypothesis for
-  the maintainer's 79% remains unconfirmed at the new, much-lower spawn count. Report whatever the next
-  real-machine run finds — do not force the bound.
+  Managed-host re-measurement after T057/T058/T060/T061 landed: total dropped 154 942 → 17 117 ms (-89.0%),
+  recorded in full in the T042 blockquote's follow-up above and in the Measurement Log. Research R3's
+  endpoint-security-inspection-variance hypothesis is now moot at this spawn count — `gate`/`apply` (the two
+  phases that were pure config/fork overhead) collapsed to the low hundreds of milliseconds, leaving no
+  meaningful per-spawn multiplier left to attribute variance to.
 - [X] T044 **Done 2026-08-11 — an honest, nuanced result, not the clean "sub-linear" the requirement
   describes.** 101 items vs. the 61-item reference (1.66× the items): total 57 981 ms → 95 885 ms (**1.65×**,
   essentially LINEAR, not sub-linear). Decomposed: `config`/`gate` — the phases this session's fixes made
@@ -1022,6 +1029,7 @@ Append one row per measurement. **Counting runs and timing runs are separate run
 | 2026-08-11 | T041 (run 5) | unmanaged | mock, 61 items | 59 237 ms | 26 468 | 113 | 98 | 13 467 | 15 512 | — | — |
 | 2026-08-11 | T046 (PowerShell) | unmanaged | mock, 61 items | 9 966 ms | 3 699 | 616 | 45 | — | 1 283 | 0 (no external process) | — |
 | 2026-08-11 | T044 | unmanaged | mock, 101 items | 95 885 ms | 41 390 | 120 | 103 | 22 081 | 26 194 | — (204 requests) | — |
+| 2026-08-12 | post-T057/T058/T060/T061 (real) | **managed (maintainer)** | live Jira, consuming repo | **17 117 ms** | 6 272 | 3 579 | 365 | 3 272 | 395 | — (1 request) | — |
 
 The third row is the maintainer's own **inferred** measurement; the row dated 2026-08-11 above it is the same
 machine's **real** `reconcile --force` timing report on v0.14.0 (pre-feature) — `prereq` 17 ms, `state` 0 ms,
@@ -1073,6 +1081,31 @@ spawns × time and would be confirmed by T020.
 > FR-024 (no phase >5 s) — every phase but `prereq`/`state` still exceeds 5 s, and the total (minus the one
 > request) is still ~155 s. The relative win is large and real; the feature's own numeric acceptance criteria
 > are not met on this machine yet.
+
+> **T043/T057/T058/T060/T061 real-machine confirmation (2026-08-12) — same machine, same 1-story "skip"
+> scenario, `feat/024-reconcile-local-performance` after T057 (config cache), T058 (third read site closed),
+> T060 (per-line fork removal), T061 (fast-path scans).** `prereq` 22 ms, `state` 1 ms, `config` 3 579 ms,
+> `parse` 6 272 ms, `gate` 365 ms, `recognition` 3 211 ms, `plan` 3 272 ms, `apply` 395 ms, **total 17 117 ms,
+> requests: 1**. Shell `time`: 6.93 s user, 6.37 s system, 73% CPU, 18.118 s wall.
+>
+> **vs. the T042 acceptance run**: total -89.0% (154 942 → 17 117 ms); CPU time (user+system) -87.2%
+> (103.89 s → 13.30 s). Per phase: `config` -89.4% (33 885 → 3 579 ms), `gate` -98.9% (33 659 → 365 ms), `plan`
+> -91.6% (38 759 → 3 272 ms), `apply` -98.9% (35 399 → 395 ms), `recognition` -51.4% (6 604 → 3 211 ms, a single
+> Jira GET's variable network latency, consistent with the earlier run's own noise band). `parse` is
+> essentially unchanged (6 612 → 6 272 ms, -5.1%) — expected, since T027's remaining scope
+> (`_parse_ac_flush`/`_parse_epic_flush`) targets per-item scaling and this scenario is one story.
+>
+> **This resolves every "not yet measured on the motivating machine" caveat left open by T043, T057, T058,
+> T060, and T061.** `gate` and `apply` collapsing to the low hundreds of milliseconds confirms `config.local.yml`
+> was the dominant real cost behind both — T057's cache plus T058's third-site closure removed nearly all of
+> it, and T060/T061's fork removal accounts for what's left. This is a materially LARGER win than any single
+> task's own conservative projection ("apply's ~35 s toward single digits" read as single-digit *seconds*;
+> 395 ms beats that by roughly two orders of magnitude) — the three fixes compound rather than merely add.
+>
+> **FR-023 (<20 s total excluding requests) is now MET on this machine for the first time**: 17 117 ms total
+> including the one request's cost. **FR-024 (no phase >5 s) is NOT yet met**: `parse` at 6 272 ms is now the
+> *only* phase exceeding the 5 s ceiling — every other phase is under 3.6 s. The next optimisation lever, if
+> pursued, is T027's deferred remainder, not a new area.
 
 ---
 
