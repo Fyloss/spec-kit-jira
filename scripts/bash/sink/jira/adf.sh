@@ -154,22 +154,27 @@ _adf_content_nodes() {
 # `[]` when there is no attributed task at all (FR-021: no heading, no empty
 # list).
 _adf_checklist_nodes() {
-  local content="$1" tasks n entries="[]" i=0
+  local content="$1" tasks
   tasks="$(jq -c '.tasks // []' <<< "${content}")"
-  n="$(jq 'length' <<< "${tasks}")"
-  ((n == 0)) && { printf '[]'; return 0; }
+  [[ "${tasks}" == "[]" ]] && { printf '[]'; return 0; }
 
-  while ((i < n)); do
-    local t title done_bit phase spans
-    t="$(jq -c ".[${i}]" <<< "${tasks}")"
-    title="$(jq -r '.title' <<< "${t}")"
-    done_bit="$(jq -r '.done' <<< "${t}")"
-    phase="$(jq -r '.phase // ""' <<< "${t}")"
-    spans="$(markdown_tokenize_inline "${title}")"
-    entries="$(jq -c --argjson s "${spans}" --argjson d "${done_bit}" --arg p "${phase}" \
-      '. + [{spans:$s, done:$d, phase:$p}]' <<< "${entries}")"
-    i=$((i + 1))
-  done
+  # 024, contracts/spawn-budget.md C1.2/C1.3: one jq call decodes every
+  # task's title/done/phase at once (a per-task loop used to cost four `jq`
+  # reads plus a fifth to re-parse-and-append the growing `entries` array —
+  # the same O(n^2) accumulator pattern already fixed in parse.sh/
+  # recognition.sh/plan_apply.sh). `markdown_tokenize_inline` is pure bash
+  # (no subprocess) so it stays a per-task call; the JSON fragment it feeds
+  # is built natively (`_md_json_escape`, already sourced via
+  # engine/markdown.sh) rather than through one more `jq` per task.
+  local _acn_sep=$'\x1f'
+  local -a entries_arr=()
+  local _acn_title _acn_done _acn_phase
+  while IFS="${_acn_sep}" read -r _acn_title _acn_done _acn_phase; do
+    local spans; spans="$(markdown_tokenize_inline "${_acn_title}")"
+    entries_arr+=("{\"spans\":${spans},\"done\":${_acn_done},\"phase\":\"$(_md_json_escape "${_acn_phase}")\"}")
+  done < <(jq -r --arg sep "${_acn_sep}" '.[] | [.title, (.done | tostring), (.phase // "")] | join($sep)' <<< "${tasks}")
+
+  local entries; entries="$(printf '%s\n' "${entries_arr[@]}" | jq -cs '.')"
 
   # kcov-excl-start — jq literal (string lines are not statements)
   jq -c "${_ADF_MARK_DEFS_JQ}"'

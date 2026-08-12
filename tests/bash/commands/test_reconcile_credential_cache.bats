@@ -88,6 +88,62 @@ teardown() {
   [ "${output}" = "0" ]
 }
 
+@test "T040 [024]: config_yaml_to_json adds no NEW parse for a run that short-circuits on run state (FR-015)" {
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  local cfg
+  cfg="$(mock_write_config '{"projects":{"TASKP":"t"}}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  # Deliberately NOT `run` (a `$( … )` subshell): config_yaml_cache_prime is
+  # called again inside EVERY invocation of cmd_reconcile (024, T057), and a
+  # subshell's own priming is invisible to the parent once it exits — the
+  # same reason cred_prime_cache/jira_request_count_prime must run in the
+  # main shell. A plain `>` redirect keeps both calls in the test's own
+  # shell, so the SAME cache (primed fresh by the first, real, run) is what
+  # the second, short-circuited, call and the assertion below both see —
+  # the short-circuit itself never reaches the `config` phase, so it never
+  # re-primes; a stale-zero count from a never-primed cache would prove
+  # nothing, which is why this compares before/after rather than asserting 0.
+  cmd_reconcile reconcile "${SPEC}" --json > /dev/null
+  local before_team before_local
+  before_team="$(config_yaml_parse_count "${JIRA_CONFIG_DIR}/config.yml")"
+  before_local="$(config_yaml_parse_count "${JIRA_CONFIG_DIR}/config.local.yml")"
+  [ "${before_team}" -gt 0 ]
+  [ "${before_local}" -gt 0 ]
+
+  local out
+  out="${BATS_TEST_TMPDIR}/second_run.json"
+  cmd_reconcile reconcile "${SPEC}" --json > "${out}" 2>&1
+  [ "$?" -eq 0 ]
+  [ "$(jq -r '.short_circuited' < "${out}")" = "true" ]
+
+  [ "$(config_yaml_parse_count "${JIRA_CONFIG_DIR}/config.yml")" = "${before_team}" ]
+  [ "$(config_yaml_parse_count "${JIRA_CONFIG_DIR}/config.local.yml")" = "${before_local}" ]
+}
+
+@test "T058 [024]: config.local.yml parses exactly once across a full real run, including apply's hook-health read" {
+  # T058 asked where `apply`'s unexplained ~35s on the motivating machine
+  # came from. Reading `reconcile.sh` end to end (not measuring) found a
+  # THIRD call site nobody had named: `config_hooks_disabled_read` (hook
+  # health, "read and reported on every run") sits inside the `apply` phase's
+  # timing window, unconditionally — even under --dry-run, even with zero
+  # writes — and it re-parses config.local.yml exactly like `config_load`
+  # (config phase) and `_reconcile_local_binding_for` (gate phase) do. T057's
+  # cache already covers it for free, since all three build the identical
+  # "${JIRA_CONFIG_DIR}/config.local.yml" path string — this test is the
+  # proof, not a fix: it exercises a REAL, non-short-circuited `cmd_reconcile`
+  # call (not the two functions in isolation, as T033 does) and asserts the
+  # THIRD site never adds a second parse.
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  local cfg
+  cfg="$(mock_write_config '{"projects":{"TASKP":"t"}}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${SPEC}" --json > /dev/null
+  [ "$(config_yaml_parse_count "${JIRA_CONFIG_DIR}/config.local.yml")" = "1" ]
+}
+
 @test "zero secret-store consultations for a run in a repository with no base URL (T035)" {
   helper_secret_store_install "${BIN}" "${COUNTER}" "should-never-be-read"
   unset SPEC_KIT_JIRA_BASE_URL

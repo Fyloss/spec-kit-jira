@@ -271,7 +271,8 @@ _reconcile_local_binding_for() {
 }
 
 # _reconcile_plan_context <base-url> <project-key> <config-dir> <merged-cfg-json>
-#   [recognition-result-json]
+#   [recognition-result-json] [field-values-json] [tasks-recognition-json]
+#   [cached-binding-json]
 #   The plan context (US2, FR-007–FR-011, FR-013): base_url plus either the
 #   caller's SPEC_KIT_JIRA_PLAN_CONTEXT override (wholesale) or the creation
 #   context built from the resolved project's persisted binding — story_type_id,
@@ -281,8 +282,19 @@ _reconcile_local_binding_for() {
 #   (data-model.md "Plan context — tickets, ticket_origins, ticket_descriptions").
 #   base_url always wins. Returns 2 / 3 exactly as _reconcile_local_binding_for
 #   when no override is set and the binding cannot be read.
+#
+#   cached-binding-json (024, T037, contracts/spawn-budget.md C1.2): the SAME
+#   binding the gate phase already resolved via _reconcile_local_binding_for,
+#   when it did — config.local.yml read and fully re-parsed from disk a
+#   second time otherwise, for the identical (project-key, config-dir) pair,
+#   within the same run. Passed only when gate's own resolution succeeded;
+#   empty (the caller's fault path is otherwise untouched, still calling
+#   _reconcile_local_binding_for itself here) when it did not, so a gate-time
+#   failure never masks whatever _reconcile_plan_context's OWN read would
+#   have reported for it.
 _reconcile_plan_context() {
   local base="$1" key="$2" dir="$3" cfg="$4" recog="${5:-}" field_values="${6:-}" tasks_recog="${7:-}"
+  local cached_binding="${8:-}"
   # NOT "${5:-{}}" as the default inline: bash's brace-matching for a
   # `${...}` parameter expansion misparses a `{}`-shaped default value,
   # corrupting how the REST OF THE FUNCTION is parsed (a real, reproduced
@@ -297,8 +309,12 @@ _reconcile_plan_context() {
   fi
 
   local binding rc=0
-  binding="$(_reconcile_local_binding_for "${key}" "${dir}")" || rc=$?
-  [[ "${rc}" -ne 0 ]] && return "${rc}"
+  if [[ -n "${cached_binding}" ]]; then
+    binding="${cached_binding}"
+  else
+    binding="$(_reconcile_local_binding_for "${key}" "${dir}")" || rc=$?
+    [[ "${rc}" -ne 0 ]] && return "${rc}"
+  fi
 
   local story_type priority_map priorities est_field priority_ids
   local parent_type_id parent_supports_link
@@ -483,7 +499,7 @@ _reconcile_run() {
     return "${exit_code}"
   fi
 
-  timing_phase_begin "prereq"
+  timing_phase_begin "prereq" "$(jira_request_count)"
 
   # (0) DISPATCH GUARD — the operator's disable decision, honoured before any
   # prerequisite check, any config read and any network call (FR-020). The exit
@@ -563,7 +579,7 @@ _reconcile_run() {
     return 0
   fi
 
-  timing_phase_end "prereq"
+  timing_phase_end "prereq" "$(jira_request_count)"
 
   # `state` — the run-state short-circuit (Phase 4, US2, contracts/run-state.md
   # §2–§3). Runs after the dispatch and target guards and before the config
@@ -572,7 +588,7 @@ _reconcile_run() {
   # reconcile in both cases, §3); every other run compares against the
   # recorded document and, on a byte match, short-circuits with zero Jira
   # requests and zero writes.
-  timing_phase_begin "state"
+  timing_phase_begin "state" "$(jira_request_count)"
   local short_circuited="false"
   local email="${JIRA_EMAIL:-}"
   if [[ "${force}" != "true" && "${dry_run}" != "true" ]]; then
@@ -580,7 +596,7 @@ _reconcile_run() {
       short_circuited="true"
     fi
   fi
-  timing_phase_end "state"
+  timing_phase_end "state" "$(jira_request_count)"
 
   if [[ "${short_circuited}" == "true" ]]; then
     local sc_summary
@@ -596,7 +612,14 @@ _reconcile_run() {
     return 0
   fi
 
-  timing_phase_begin "config"
+  timing_phase_begin "config" "$(jira_request_count)"
+
+  # 024, T057: prime the config-YAML read cache here, in the main shell —
+  # never inside a `$( … )` subshell, which would die with it (the same
+  # discipline as cred_prime_cache/jira_request_count_prime). This is the
+  # earliest point any configuration source may be read; a short-circuited
+  # run above never reaches here and never pays this mktemp (FR-015).
+  config_yaml_cache_prime
 
   # Spec ref: folder from the path, slug from the folder name; repo from the
   # environment. Routing + creation-context resolution (US1/US2, FR-001–FR-013):
@@ -679,8 +702,8 @@ _reconcile_run() {
   phase_status_map="$(_reconcile_phase_status_map "${project_key}" "${cfg}")"
   halted_statuses="$(_reconcile_halted_statuses "${project_key}" "${cfg}")"
 
-  timing_phase_end "config"
-  timing_phase_begin "gate"
+  timing_phase_end "config" "$(jira_request_count)"
+  timing_phase_begin "gate" "$(jira_request_count)"
 
   # Mandatory-field gate (Phase 6, US3, T086/T087/T088; contracts/
   # hierarchy-resolution.md §4/§5), moved ahead of spec-marker assignment by
@@ -776,8 +799,8 @@ _reconcile_run() {
     fi
   fi
 
-  timing_phase_end "gate"
-  timing_phase_begin "parse"
+  timing_phase_end "gate" "$(jira_request_count)"
+  timing_phase_begin "parse" "$(jira_request_count)"
 
   # R5 step 1 — ASSIGN (Phase 2/3, contracts/story-marker.md, research R5):
   # every story section with no marker at all gets a durable identifier,
@@ -845,7 +868,7 @@ _reconcile_run() {
     doc="$(jq -c --argjson pb "${plan_blocks}" '.epic.description.blocks += $pb' <<< "${doc}")"
   fi
 
-  timing_phase_end "parse"
+  timing_phase_end "parse" "$(jira_request_count)"
 
   # 021 US3, contracts/credential-cache.md §2: prime the credential cache
   # exactly once, HERE, in the main shell — never inside a `$(jira_request …)`
@@ -853,6 +876,18 @@ _reconcile_run() {
   # established a base URL (so a run with none never pays a Keychain unlock)
   # and right before the first phase that issues a real Jira request.
   cred_prime_cache
+  # 024, contracts/request-counting.md C2.1: the request counter file, primed
+  # the same way and for the same reason — a run that short-circuits above
+  # never reaches here and never pays this mktemp.
+  jira_request_count_prime
+
+  # 024, contracts/request-counting.md C2.3: recognition's own phase window
+  # opens here, wrapping the prefetch bulk read below — it is recognition's
+  # request, issued on recognition's behalf (021 US4), and a request issued
+  # between two phases rather than inside one would escape every phase's
+  # count while still landing in the run total, breaking FR-036's "the
+  # summed per-phase counts equal the number of requests issued" (SC-014).
+  timing_phase_begin "recognition" "$(jira_request_count)"
 
   # 021 US4, contracts/recognition-prefetch.md: gather every recorded key
   # this run is about to read — parent, stories, tasks — and prime the
@@ -884,8 +919,6 @@ _reconcile_run() {
     fi
   fi
   prefetch_load "${prefetch_keys[@]}"
-
-  timing_phase_begin "recognition"
 
   # R5 step 2a — RECOGNISE THE PARENT (Phase 5, US2, T070/T077;
   # contracts/parent-marker.md "Ordering within one run" step 5). One read
@@ -1197,16 +1230,23 @@ _reconcile_run() {
     task_notes="$(jq -c --arg p "${project_key}"       '. + ["reconcile: project \($p): a task role is declared but task_mirror is '"'"'checklist'"'"' — the role is recorded, not consumed; every task list still mirrors as a checklist"]'       <<< "${task_notes}")"
   fi
 
-  timing_phase_end "recognition"
-  timing_phase_begin "plan"
+  timing_phase_end "recognition" "$(jira_request_count)"
+  timing_phase_begin "plan" "$(jira_request_count)"
 
   # SINK: the plan context (US2, FR-007–FR-011; Phase 3, US1: tickets/
   # ticket_origins/ticket_descriptions now come from recognition's `bound`
   # map instead of only from the override). An explicit
   # SPEC_KIT_JIRA_PLAN_CONTEXT overrides the derived object wholesale;
   # otherwise it is built from the resolved project's persisted binding.
+  # 024, T037: reuse gate's already-resolved binding rather than having
+  # _reconcile_plan_context read and re-parse config.local.yml from disk a
+  # second time for the identical (project-key, config-dir) pair — only
+  # when gate's own resolution succeeded, so a gate-time failure still
+  # reaches _reconcile_plan_context's own fault path unchanged.
+  local _plan_ctx_cached_binding=""
+  [[ "${rc_gate_binding}" -eq 0 ]] && _plan_ctx_cached_binding="${gate_binding}"
   local plan_ctx rc_pc=0
-  plan_ctx="$(_reconcile_plan_context "${base}" "${project_key}" "${cfg_dir}" "${cfg}" "${recog}" "${field_values}" "${tasks_recog}")" || rc_pc=$?
+  plan_ctx="$(_reconcile_plan_context "${base}" "${project_key}" "${cfg_dir}" "${cfg}" "${recog}" "${field_values}" "${tasks_recog}" "${_plan_ctx_cached_binding}")" || rc_pc=$?
   # on_drift (018, T046; contracts/summary-record.md §4): the SAME
   # --on-drift the lifecycle context already carries — plan_writes' summary
   # decision reads it from here rather than a second flag.
@@ -1581,8 +1621,8 @@ _reconcile_run() {
     fi
   fi
 
-  timing_phase_end "plan"
-  timing_phase_begin "apply"
+  timing_phase_end "plan" "$(jira_request_count)"
+  timing_phase_begin "apply" "$(jira_request_count)"
 
   if [[ "${dry_run}" != "true" ]]; then
     # `|| rc=$?` keeps a fail-closed apply (exit >= 2) from aborting the command
@@ -1883,7 +1923,7 @@ _reconcile_run() {
     + (if $hl then {warnings:$w, notes:$no} else {} end)
     + {hook_health:$hooks, exit_code:$x}' | json_canonical)"
 
-  timing_phase_end "apply"
+  timing_phase_end "apply" "$(jira_request_count)"
 
   # run_state_record (021, T031, contracts/run-state.md §4): only a real run
   # (never --dry-run) that applied every planned action (the pre-downgrade

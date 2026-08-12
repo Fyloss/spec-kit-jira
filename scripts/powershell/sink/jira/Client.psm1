@@ -27,6 +27,20 @@ Import-Module (Join-Path $PSScriptRoot '../../lib/Credentials.psm1') -Force
 # There is no subshell-undercount boundary to document here the way
 # client.sh's comment does (contracts/timing-report.md §6, research R5) —
 # PowerShell has no command-substitution equivalent that discards this state.
+#
+# 024, T046/T047 (2026-08-11): EVERY caller of this module — Recognition,
+# PlanApply, Prefetch, Identity, Discovery, Ticket, DuplicateProbe — MUST
+# import it WITHOUT -Force. `Import-Module X -Force` is `Remove-Module X` +
+# `Import-Module X`: seven of those callers each did their own `-Force`
+# nested import, so every one of them (loaded before the last one wins)
+# ended up bound to its OWN orphaned $script:JiraRequestCount, incrementing
+# independently of whichever instance Reconcile.psm1's own
+# Get-JiraRequestCount calls happened to read. The measured symptom was every
+# phase reporting 0 requests while `calls.log` showed 123 real ones — proven
+# by temporarily logging each increment/read, which showed TWO interleaved,
+# independently-accumulating counts within a single process. See project
+# memory: powershell-import-force-clobbers-caller-scope. This is the same
+# defect class, just with seven origin sites instead of one.
 $script:JiraRequestCount = 0
 
 function Get-JiraRequestCount {

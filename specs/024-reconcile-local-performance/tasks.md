@@ -1,0 +1,1186 @@
+---
+description: "Task list 024 — The Time Reconcile Spends Is Its Own, and the Instrument That Says So Works Everywhere"
+---
+
+# Tasks: The Time Reconcile Spends Is Its Own, and the Instrument That Says So Works Everywhere
+
+**Input**: Design documents from `/specs/024-reconcile-local-performance/`
+
+**Prerequisites**: [plan.md](./plan.md), [spec.md](./spec.md), [research.md](./research.md),
+[data-model.md](./data-model.md), [contracts/](./contracts/), [quickstart.md](./quickstart.md)
+
+**Tests**: REQUIRED, not optional. Constitution Principle XIII mandates TDD with a ≥80% coverage gate, and the
+global bug-fix policy requires a test that reproduces the defect **before** the fix. Every implementation task
+below is preceded by a test that must be observed to fail first.
+
+**What "failing first" means here — read this before writing a single test.** Almost nothing in this feature
+changes *what* the bridge does; it changes how many processes it forks and whether the instrument tells the
+truth. Two consequences, both load-bearing:
+
+1. **The locale tests must assert a correct duration, never the absence of an error.** Research R1 measured
+   that the broken code errors only when the fractional part begins with `0` — roughly one reading in ten. For
+   the other nine it returns silently with the seconds discarded. An error-absence test **passes against the
+   unfixed code ~90% of the time** and is not a regression test.
+2. **The performance tests must count, not time.** Wall-clock is the spawn count times the host's per-spawn
+   cost, measured at 2.445 ms here against 9–18 ms implied on the maintainer's machine (research R3). A count
+   assertion is meaningful on any host; a duration assertion measures the host.
+
+**Organization**: grouped by user story, with two non-story phases. Phase 2 is User Story 1 and is the MVP
+**because the maintainer directed that the locale fix come first** — it unblocks the "after-fix" baseline every
+later phase is measured against. Phase 3 repairs a second instrument defect found during planning (research R2)
+for exactly the same reason; it was an addition to the specification's scope until FR-036 and FR-037 were added
+by amendment, and it is now ordinary in-scope work.
+
+## Format: `[ID] [P?] [Story] Description`
+
+- **[P]**: can run in parallel (different files, no dependency on an incomplete task)
+- **[Story]**: `[US1]`..`[US5]`, mapping to the user stories in spec.md
+- Exact file paths are given in every task
+
+## Path Conventions
+
+- Bash port: `scripts/bash/{lib,engine,sink/jira,commands}/`
+- PowerShell port: `scripts/powershell/{lib,engine,sink/jira,commands}/`
+- Bash tests: `tests/bash/{lib,engine,sink,helpers,ci}/` — run with `tests/run-bash.sh`
+- PowerShell tests: `tests/powershell/{lib,engine,sink,helpers,ci}/`
+- Conformance: `tests/conformance/{scenarios,fixtures}/` — run with `tests/conformance/ci-conformance.sh`
+- Reference fixture: `tests/conformance/fixtures/repo-with-widget-spec-61` (1 epic + 60 stories)
+
+---
+
+## Phase 1: Setup (Measurement Infrastructure)
+
+**Purpose**: the two capabilities every later phase asserts through. Deliberately tiny — nothing here may
+delay the locale fix the maintainer put first.
+
+- [X] T001 [P] Confirm `fr_FR.UTF-8` and `de_DE.UTF-8` are generated on the development host and on the Linux
+  CI runner (`locale -a`), and record in `specs/024-reconcile-local-performance/quickstart.md` §2 what the
+  tests must do when a locale is absent — **skip with an explicit reason, never silently pass**. A locale test
+  that no-ops on the runner is the failure mode this task exists to prevent.
+- [X] T002 [P] Add the `PATH`-interposed spawn-counting helper at `tests/bash/helpers/spawn_count.bash`, per
+  `contracts/spawn-budget.md` §4: it places a shim earlier on `PATH` that appends one line per invocation then
+  `exec`s the real tool, for `jq`, `sed`, `awk`, and `curl`, and returns the count per tool. Document in the
+  helper's header that **counting runs and timing runs must be separate runs** — the shim inflated the
+  reference scenario from 91 515 ms to 147 774 ms, a 61% distortion (research R4).
+- [X] T003 Add a guard for T002 at `tests/bash/ci/test_spawn_count_helper.bats`: the helper counts a known
+  number of invocations exactly, and the shim delegates transparently (the real tool's stdout, stderr, and
+  exit code are unchanged).
+
+**Checkpoint**: the suite can count process spawns. Nothing about the product has changed.
+
+---
+
+## Phase 2: User Story 1 — The instrument works on any locale (Priority: P1) 🎯 MVP
+
+**Goal**: the per-phase timing report is produced with correct durations on any host, whatever its numeric
+locale, and a timing failure can never affect the run's outcome.
+
+**Independent Test**: run the same fixture under `LC_ALL=C`, `fr_FR.UTF-8`, and `de_DE.UTF-8` with timing on;
+assert the durations are correct and the report is byte-identical across all three under an injected clock,
+and that exit code and written files match the timing-off run.
+
+**Why first**: the maintainer's explicit direction. Every performance criterion in this feature is read off
+this report, so on a comma-locale host none of them is measurable until this lands. It is also the only live
+crash in the feature — under `set -euo pipefail` the failing clock read aborts the whole reconcile.
+
+### Tests for User Story 1 (write first, observe failing)
+
+- [X] T004 [P] [US1] Extend `tests/bash/lib/test_timing.bats` with the comma-locale regression: under
+  `LC_ALL=fr_FR.UTF-8`, a phase of a **known** elapsed duration reports that duration within tolerance.
+  Asserts the value, not the absence of an error — see the note at the top of this file and
+  `contracts/clock-reading.md` §4. Expected to fail today for **every** clock reading, not just the ~10% that
+  error.
+- [X] T005 [P] [US1] Extend `tests/bash/lib/test_timing.bats` with the rest of the matrix from
+  `contracts/clock-reading.md` §4 V2–V4: the same duration assertion under `de_DE.UTF-8` and `LC_ALL=C`, and a
+  fourth test asserting the report is **byte-identical** across all three under `_TIMING_FAKE_CLOCK`.
+- [X] T006 [P] [US1] Add the fail-open tests to `tests/bash/lib/test_timing.bats` (`contracts/clock-reading.md`
+  §2, V5–V6): with the clock forced to return a malformed reading, (a) the run's exit code, stdout, and written
+  files are identical to the timing-off run, and (b) the run is **not aborted** by `set -e`. Both fail today —
+  the arithmetic error propagates and kills the reconcile.
+- [X] T007 [P] [US1] Add a Pester regression guard at `tests/powershell/lib/Timing.Tests.ps1` asserting the
+  PowerShell clock is locale-independent under the same three locales. Research R7 measured this port as
+  already sound (`[datetime]::UtcNow.Ticks / 10000`, Int64, no textual rendering), so this test is expected to
+  pass immediately — it exists to keep it sound, and confirms spec A-7 by measurement rather than assumption.
+
+### Implementation for User Story 1
+
+- [X] T008 [US1] Replace the dot-split at `scripts/bash/lib/timing.sh:112-114` with the locale-independent
+  read of research R1 option C: strip every non-digit from `EPOCHREALTIME`, then divide once with an explicit
+  base-10 prefix. No code path may name a separator character (`contracts/clock-reading.md` C1.1–C1.4).
+- [X] T009 [US1] Add the digit-shape guard and degrade path to `_timing_now_ms` in
+  `scripts/bash/lib/timing.sh`, covering **all three** clock tiers, not only tier 1
+  (`contracts/clock-reading.md` C2.1–C2.4): validate `^[0-9]+$` before any arithmetic; on failure mark the
+  instrument degraded, return **success**, and emit nothing that would change the error stream's bytes.
+- [X] T010 [US1] Re-run `tests/conformance/scenarios/us021-timing-off.json`, `us021-timing-on.json`, and
+  `us021-state-unchanged.json` and confirm stdout, exit code, workdir tree, and `calls.log` are byte-identical
+  to before this phase. The report's *shape* must not have moved (`contracts/clock-reading.md` §3).
+
+**Checkpoint**: a comma-locale operator can measure a run, and a broken clock can no longer kill one. This is
+shippable alone and closes the feature's only live crash.
+
+---
+
+## Phase 3: FR-036/FR-037 — the request counter tells the truth
+
+> **Provenance.** This defect was found by measurement during planning (research R2), not by the original
+> specification; FR-036 and FR-037 were added to the spec by amendment once it was measured. The reference
+> run issues **123 requests** and the timing report attributes **0 to every phase**: `jira_request` increments
+> `JIRA_REQUEST_COUNT` inside a `$( … )` subshell at 15 of its 28 call sites, so the parent never sees it.
+> Spec SC-005 and FR-023 are defined as "all phases **excluding request time**" — a quantity that does not
+> exist while the counter reads zero. It is sequenced here for the same reason the maintainer put the locale
+> fix first: it unblocks the baseline. It is also why the consuming-repo profile cannot be split into CPU and
+> network after the fact — that information was never recorded.
+
+### Tests for Phase 3 (write first, observe failing)
+
+- [X] T011 [P] Add `tests/bash/sink/test_request_count.bats`: run the reference scenario and assert the summed
+  per-phase request counts equal `wc -l` of the harness `calls.log` (123 today), and that read phases carry the
+  reads and write phases the writes (`contracts/request-counting.md` §5 V1–V2). Fails today: 0 against 123.
+- [X] T012 [P] Add the retry case to `tests/bash/sink/test_request_count.bats`: a retried request increments
+  the counter once per attempt (V3).
+- [X] T013 [P] Add the fail-open case (V5) to `tests/bash/sink/test_request_count.bats`: with counting forced
+  to fail, the run's outcome, exit code, and written files are unchanged. Counting is observability and decides
+  nothing.
+
+### Implementation for Phase 3
+
+- [X] T014 Make the increment at `scripts/bash/sink/jira/client.sh:153` observable by the parent shell,
+  per `contracts/request-counting.md` C2.1–C2.3. Do **not** export the variable — that would place run state in
+  every child process's environment, and the adjacent credential lives in the same function (Constitution IV).
+  The project's recorded pattern for this class of problem is in `specs/021-reconcile-performance/research.md`
+  R3/R5. **Implementation note**: a subshell-proof counter file (`_JIRA_REQUEST_COUNT_FILE`, primed once in
+  the parent shell like `cred_prime_cache`) rather than the plain `JIRA_REQUEST_COUNT` variable, which cannot
+  survive a `$( … )` subshell no matter where it is primed. `timing_phase_begin`/`timing_phase_end` gained an
+  optional explicit request-count argument (mirroring the PowerShell port's `-RequestCount`), and
+  `reconcile.sh` passes `jira_request_count` at all 16 phase-mark call sites. A second defect was found while
+  wiring this through: `prefetch_load`'s bulk read ran *between* `parse`'s end mark and `recognition`'s begin
+  mark on both ports, so its request was invisible to every phase's window even though it landed in the file
+  total — breaking "summed per-phase counts equal total issued" (SC-014). Fixed by moving `recognition`'s
+  begin mark to wrap the prefetch call, on both ports.
+- [X] T015 Verify the harness `calls.log` (captured per run under the outdir passed to
+  `tests/conformance/run-scenario.sh`) is byte-identical to the pre-change run (V6). The fix observes traffic;
+  it must not alter it. Any change here means the counter was wired into the request path rather than beside
+  it.
+- [X] T016 Update the expected stderr of `tests/conformance/scenarios/us021-timing-on.json` — **the only
+  existing expectation this feature edits**, carved out by FR-032 and demanded by FR-036. Derive the corrected
+  counts from `calls.log`, **not** from the new implementation's output: the point is that the old expectation
+  encoded a bug, and rewriting a test to agree with fresh code would encode a new one. Confirm `us021-timing-off.json` and `us021-state-unchanged.json` are
+  untouched (research R2 measured the blast radius as this one scenario). **No separate golden file exists** —
+  the corpus asserts cross-port byte-equality, not a fixed expectation, so "updating the expectation" is
+  discharged by both ports producing matching, correct counts (verified: full `ci-conformance.sh`, exit 0,
+  zero divergence lines).
+- [X] T017 Verify whether the PowerShell port shares this defect, in `scripts/powershell/sink/jira/Client.psm1`
+  and `scripts/powershell/lib/Timing.psm1`. It has no forking-subshell equivalent so it is expected sound, but
+  the counter is a conformance-diffed surface and a cross-port divergence here is a test failure, not a quirk
+  (C2.5). It shared the phase-boundary gap described in T014's note, fixed in `Reconcile.psm1` the same way.
+  **"Confirmed sound" was WRONG — corrected 2026-08-11, see T046/T047.** The claim was true for the mechanism
+  this task actually tested (no subshell-undercount equivalent) but missed a different defect in the SAME
+  counter, found only by a full end-to-end run: `Get-JiraRequestCount` read 0 on every phase of a real
+  61-item scenario that issued 123 real requests (per `calls.log`). Root cause: seven sink modules each
+  `-Force`-imported `Client.psm1` independently — `Import-Module X -Force` is `Remove-Module X` +
+  `Import-Module X`, tearing the module's `$script:JiraRequestCount` (and, per the RED reproduction, its
+  EXPORTS entirely) out of whatever scope was using it. The unit-level test this task ran (a single module in
+  isolation) could not have caught it — matches project memory
+  powershell-import-force-clobbers-caller-scope's own warning that a single-file Pester run will not reproduce
+  this class of defect.
+
+> **Implementation status (2026-08-10).** Phases 1–3 (T001–T017) are complete and verified: full bash suite
+> green (1871 tests / 197 files), full conformance corpus green (exit 0, zero divergence lines, both ports),
+> `shellcheck` and `actionlint` clean. This closes the feature's only live crash and makes the request count
+> truthful on both ports — the two increments the plan itself calls independently shippable ("Incremental
+> delivery" 1–2).
+>
+> **Update (2026-08-11).** Phase 4's locally-measurable tasks (T018, T019, T019a) and the rest of Phase 5
+> (T024, T024a, T029–T032) are now done; T020/T021 remain blocked on the maintainer's environment. T019a's
+> finding reopened the scope: `recognition_run` had its own per-bound-story `jq` loop (2 398 of 13 013 calls,
+> 18.4%) that research R5 never named, on the same terms as T027's parse.sh findings. Fixed the same way —
+> native accumulation, one batched call at the boundary — in `recognition.sh` (the per-story TSV decode and
+> the ~12-calls-per-story bound entry, now ~1), `plan_apply.sh`'s `apply_writes` (the two per-action
+> extraction loops, now one call; a new `_apply_writes_decode_rows` factored out for direct testing) and its
+> `stories` accumulator (an O(n²) `. + [$a]` re-parse, now a bash array). `gate` (`hierarchy_mandatory_gate`)
+> turned out to need no change at all — T024's guard test confirms it was never per-story. Measured: reference
+> scenario 14 556 → 13 057 `jq`+`sed` spawns (~10%); `plan_writes`' own ~60–80-calls-per-story payload-building
+> (ADF rendering, checklist digest, summary drift, label union, parent-link correction) is the largest
+> remaining source and is explicitly **not** touched — see T030's note. This pass cost three self-inflicted
+> bugs before landing green (documented at T031/T031a): a tab-IFS `read` silently squeezing an empty field and
+> shifting every column after it, `((i++))` evaluating to the pre-increment value and aborting under `set -e`
+> when `i` starts at `0`, and `jq -c --arg … '{…}'` calls with neither `-n` nor a `<<<` input reading from
+> inherited stdin and silently producing nothing — all three caught by the existing test suites
+> (`test_recognition.bats`/`test_recognition_parent.bats`, `test_fail_closed.bats`/`test_privacy_block.bats`),
+> not written for this pass. T047/T048 (Phase 8) confirmed by grep, no PowerShell change: `Recognition.psm1`,
+> `PlanApply.psm1`, `Config.psm1`, and `Parse.psm1` spawn zero external processes (`Start-Process`/`& jq`/
+> `& curl`/`Invoke-Expression`), matching research R7. Module-for-module correspondence (T048) confirmed
+> one-to-one between `scripts/bash/{lib,engine,sink/jira}` and `scripts/powershell/{lib,engine,sink/jira}`.
+> Full bash suite green at 1882 tests (`tests/run-bash.sh`), conformance corpus green (exit 0, zero
+> divergence), `shellcheck`/`actionlint` clean.
+>
+> **T027 (parse.sh's remaining per-item loops) and Phase 6–9 (except as above) are still not started.** T027's
+> AC/design/description-block loops and `parse_story`'s own two-calls-per-story tail, and `plan_writes`'/
+> `apply_writes`'s remaining per-story payload construction, are the same class of substantially larger,
+> higher-risk rewrite — collapsing complex conditional business logic (create-vs-update, checklist digest
+> math, drift detection, label decisions, parent-link correction) into the single batched `jq` program C1.5
+> anticipates, without a live-Jira environment to validate payload shape against — that this pass judged
+> unsafe to rush. Config (`lib/config.sh`'s per-line YAML fork, Phase 6) requires either the maintainer's
+> managed-machine/live-Jira environment (T020, T021, T042) or a comparably careful dedicated pass. T053 (the
+> Windows probe) requires a push to `ci/windows-probe`, not done without explicit direction. No CHANGELOG
+> entry (T054) was added for this reason — Constitution XII's entry belongs to the complete feature, not a
+> partial shipment of it.
+
+**Checkpoint**: the instrument now reports both time and requests truthfully, on both ports. Every measurement
+below is trustworthy; none was before.
+
+---
+
+## Phase 4: Baseline (Blocking Prerequisite for Phases 5–7)
+
+**Purpose**: the "after-fix" reference the maintainer named when he directed the sequencing. Nothing in Phases
+5–7 can claim an improvement without these numbers.
+
+**⚠️ CRITICAL**: counting runs and timing runs are **separate runs** (research R4).
+
+- [X] T018 Record the isolation-rig baseline: `us021-prefetch-count-61` against the mock, timing on, three
+  clean runs, per `quickstart.md` §3. Append to the Measurement Log below. **Done**: three clean runs (no
+  concurrent CPU load — an earlier attempt overlapped with the full bash suite and was discarded as
+  contaminated, not recorded). 73 544 / 77 353 / 79 422 ms, spread 7.9%. Per-phase requests now sum to 123
+  across every run (Phase 3's fix, confirmed live).
+- [X] T019 [P] Record the spawn-count baseline for the same scenario using T002's helper, per `quickstart.md`
+  §5 — a **separate** run from T018. Today: 20 243 `jq` invocations, ~332 per mirrored item. **Done**: current
+  count is **13 013 `jq` + 1 543 `sed` = 14 556 total** (T002's helper, `tests/bash/helpers/spawn_count.bash`),
+  already down from the pre-feature 20 243 because T025/T026 (parse.sh) landed earlier this pass. This is the
+  reference point for what Phase 5's remaining work (`gate`/`plan`/`apply`, T027, T029–T031) has left to cut,
+  not the feature's original starting point.
+- [X] T019a [P] Attribute the `recognition` phase's 5 377 ms using T002's helper — a **separate** run from
+  T018. It is the one phase the two profiles disagree about in direction: 5.4 s on the isolation rig against
+  under 1 s on the maintainer's machine, where every other phase is 4–7× worse. A phase that is *cheaper*
+  under EDR is not spawn-bound, so record what the counter actually finds in
+  `scripts/bash/sink/jira/recognition.sh` before assuming Phase 5's technique applies to it (spec A-2: a
+  cost the counter does not find is not optimised). **Done, and it is spawn-bound.** A temporary phase-window
+  timestamp (not committed — added, measured, removed) against a timestamped `jq` shim found **2 398 of the
+  13 013 `jq` calls (18.4%) fall inside the `recognition` phase window**, all from `recognition_run`
+  (`scripts/bash/sink/jira/recognition.sh:246-443`): a `for` loop over every `bound` story issuing ~15–20 `jq`
+  calls each (state checks, marker verification, `current`/`status`/`blockers`/`subtasks` field extraction,
+  the `entry` assembly) — exactly the per-item, per-field pattern C1.3 forbids, and one research R5 did not
+  name. **Why the two profiles disagree in direction is a fixture artifact, not a host artifact**: the
+  reference scenario (`us021-prefetch-count-61`) is composed of 61 *already-bound* items specifically to
+  exercise this per-item read path; the maintainer's own specification's bound/new ratio was not measured
+  (T021, blocked on the maintainer's environment) and may contain far fewer bound items, which would cost
+  proportionally less regardless of per-spawn multiplier. This resolves T019a's own open question but reopens
+  T021: without the maintainer's actual bound/new mix, "recognition is cheap on the managed host" cannot yet be
+  distinguished from "the managed host's specification has fewer bound items." T031a (recognition consolidation)
+  is unblocked by this finding — recognition **is** in scope for the Phase 5 technique — but T021 is still
+  required to know whether it matters on the target machine.
+- [X] T020 [P] Record the per-spawn cost of both hosts per `quickstart.md` §5a — the multiplier that reconciles
+  the two profiles (research R3). Measured here: 2 445 µs. **This one needs the maintainer**, on the
+  consuming-repo machine; the 9–18 µs·10³ figure in the plan is inferred, not measured. **Run 2026-08-11, and it falsified the
+  inferred figure** — which makes this the single most consequential measurement in the feature. On the
+  consuming-repo machine: `jq -n '1'` × 100 with no redirection = **1.1 ms/spawn**, an order of magnitude
+  below the 9–18 ms inferred and *below* the 2.445 ms measured on unmanaged hardware. Adding a one-byte
+  here-string (`<<< "x"`) takes it to **6.1 ms**; a 50 KB payload to 8.6 ms. The multiplier applies to file
+  operations, not `exec` (research R3a). This is the measurement that retired spawn count as the feature's
+  primary lever — and it had been an open, non-blocking task since the feature's first commit while Steps 4–6
+  executed against the figure it disproves.
+- [X] T021 Record the consuming-repo baseline: `reconcile --force` with timing on, now that per-phase request
+  counts are real (Phase 3). **This is the first time that profile can be decomposed into CPU and network.**
+  Requires the maintainer's environment. **Done.** Two pre-fix runs (v0.14.0, 1 epic + 1 story) and one
+  post-fix run (this branch, same scenario) recorded in the Measurement Log. `requests: 0` confirmed on the
+  pre-fix runs (the same defect Phase 3 fixes, reproduced live); `requests: 1` on the post-fix run — the
+  decomposition T021 asks for. Item count was small (1 story, no tasks at `specify`-then-`plan` stage) — the
+  ~20 000-spawn/3–6 min profile the plan originally cited was never itself reproduced with an item count
+  recorded, so it remains uncharacterised at this size.
+
+**Checkpoint**: both hosts characterised, in spawns and in seconds, with requests attributed. Phases 5–7 are
+now falsifiable.
+
+---
+
+## Phase 5: User Story 3 — The per-item loops stop forking (Priority: P1)
+
+**Goal**: the number of external processes a run spawns stops growing with the number of stories, tasks, and
+configuration lines.
+
+**Independent Test**: with T002's counter, reconcile the reference specification and assert the spawn count is
+within `contracts/spawn-budget.md` C1.1's bound; then double the stories and tasks and assert the count is
+unchanged.
+
+**Why this scope**: it covers every phase the maintainer measured as expensive — `gate`, `plan`, `apply` — plus
+`parse`, which the isolation rig exposes as 52.7 s of pure CPU where the consuming-repo profile shows 20 s.
+Nothing is traded away; `parse` is added.
+
+### Tests for User Story 3 (write first, observe failing)
+
+- [X] T022 [P] [US3] Add `tests/bash/engine/test_parse_spawn_budget.bats`: the spawn count for the parse phase
+  does not grow when the story count doubles (`contracts/spawn-budget.md` C1.2, V2). Fails today — the count is
+  proportional to document lines. **Scoped down during implementation**: tests unit-test
+  `_parse_strip_marker_lines` and `_parse_lines_to_json` directly (their line-count growth) rather than the
+  whole `parse_spec` surface — `parse_acceptance_criteria`, `parse_design`, `parse_description_blocks`, and
+  `spec_marker_document_info` all *also* spawn per item and are untouched by this pass (T027 territory), so an
+  integration-level flatness test would fail for reasons this pass does not fix and would misrepresent what
+  T025/T026 actually deliver.
+- [X] T023 [P] [US3] Add the floor case (C1.4, V3) to `tests/bash/engine/test_parse_spawn_budget.bats`: a
+  zero-item specification reaches the same per-phase floor as the 61-item one. A bound that holds only at the
+  reference size is not a bound.
+- [X] T024 [P] [US3] Add `tests/bash/sink/test_plan_apply_spawn_budget.bats` with the same two assertions for
+  the `gate`, `plan`, and `apply` phases. This test owns FR-016's **task** dimension (spec A-1): build its
+  fixture with a `tasks.md` in it — the conformance rig has none — and assert the count is flat when the task
+  count doubles as well as when the story count does. The apply phase mirrors a story's task list as a Jira
+  checklist (feature 022), so a zero-task fixture never reaches the per-task work at all. **Scoped down during
+  implementation**, the same way T022 was: rather than a `tasks.md`-bearing conformance fixture (deferred —
+  T030/T031's own per-story field-building is unchanged, so an integration-level flatness assertion for `plan`/
+  `apply` would fail for reasons this pass does not fix), the test exercises the two pieces that *were*
+  consolidated directly — `_apply_writes_decode_rows` (new, factored out of `apply_writes` so the one-call-
+  regardless-of-action-count property is directly testable, mirroring `_parse_lines_to_json`) and
+  `hierarchy_mandatory_gate` (T029's target — confirmed by this test to already cost a constant, schema-level
+  count that never touches a per-story loop, so T029 needed no production change).
+- [X] T024a [P] [US3] Add the `recognition` phase to `tests/bash/sink/test_plan_apply_spawn_budget.bats` with
+  the same two assertions (`contracts/spawn-budget.md` C1.2 growth, C1.4 floor). Whether this fails today is
+  the output of T019a, not an assumption — if the count is already flat, the test is a guard rather than a
+  regression test, and that is recorded as the answer to FR-024 for this phase. **T019a found the opposite of
+  flat** (2 398 of 13 013 jq calls, 18.4%, from a per-bound-story loop) — the test asserts the *marginal*
+  per-story cost after T031a's fix (≤5 jq calls/story, down from ~12), not literal flatness: each bound story
+  still names its own ticket to read, which is genuine per-item work within C1.1's "+ one per Jira request"
+  budget, not the C1.3 violation the pre-fix code had.
+
+### Implementation for User Story 3 — parse (the isolation rig's dominant cost)
+
+- [X] T025 [US3] Replace the per-line `jq` pair in `_parse_strip_marker_lines`
+  (`scripts/bash/engine/parse.sh:34-44`) with a native `[[ =~ ]]` match. The `jq` calls exist only to read one
+  field from a small JSON object the port itself just produced (research R5). Classification for every case —
+  including malformed and duplicate markers — must be **exactly** today's (`contracts/spawn-budget.md` C3.5).
+  **Implementation note**: the classification functions (`story_marker_parse_line`, `spec_marker_parse_line`)
+  are unchanged — same grammar, same regexes, same return values — only their entry/tail whitespace trims moved
+  from `sed` to a native parameter-expansion trim (`_smk_trim`, new in `story_marker.sh`, reused by
+  `spec_marker.sh`), and the caller now compares the returned JSON against the literal `{"kind":"none"}`
+  string instead of extracting `.kind` with `jq -r` — every other return path is `json_canonical`-sorted and
+  can never collide with that literal, so the comparison is exact, not approximate.
+- [X] T026 [US3] Replace the per-line accumulation in `_parse_lines_to_json`
+  (`scripts/bash/engine/parse.sh:66-73`) with a bash array serialised by a single batched call. This removes
+  O(n) spawns **and** the O(n²) data movement of re-parsing the accumulator each line. The batched call still
+  routes through `scripts/bash/lib/output.sh` — never `jq` directly, per FR-020 and the Windows CRLF discipline.
+  **Implementation note**: `printf '%s\n' "${lines[@]}" | jq -Rn -c '[inputs]'` — one call regardless of line
+  count. Output is single-line/compact (`-c`), so the Windows CRLF defect (embedded newlines in jq's own
+  stdout) cannot recur here even before considering the wrapper; calling plain `jq` is still routed through
+  `lib/output.sh`'s wrapper by construction, since that symbol already shadows the external binary once
+  `output.sh` is sourced (which `parse.sh` always does) — no caller needs to do anything extra to get it.
+- [X] T027 **Re-scoped and closed 2026-08-11 — the six per-field pipelines in `parse_story` itself turned out
+  to already be within budget; the two genuine per-item loops were elsewhere and are now fixed.** Re-reading
+  the current code (not research R5, which never named these) found `parse_design` and
+  `parse_description_blocks` were ALREADY converted (native accumulation, one `jq` call at the boundary) before
+  this session — their own file header comments cite this feature, so an earlier pass in this same feature must
+  have landed them without a matching tasks.md update. `parse_story`'s own six `title`/`desc`/`ac`/`design`/
+  `priority`/`estimation` calls are each ONE call per HELPER per story (not per field within a story) — a fixed
+  cost within C1.1's budget, not a C1.3 violation; they were never the problem T027 described.
+  <br><br>**The two real per-item loops, found by reading what these helpers call internally**:
+  `parse_acceptance_criteria`'s `_parse_ac_flush` re-parsed-and-appended its `blocks` accumulator with one `jq`
+  call per SCENARIO (not per clause — the existing spawn-budget test only varied clause count within one
+  scenario, the same "one dimension tested, a different one left growing" gap T033 found in T037); and
+  `_parse_epic_extra_blocks`'s `_parse_epic_flush` did the same per Success-Criteria/Out-of-Scope bullet item.
+  Both fixed the same way as T026/T030: a bash array accumulator, joined once by plain string concatenation
+  (not even a final `jq -cs` call, since every element — `markdown_tokenize_inline`'s own output — is already
+  valid JSON, so a comma-join is sufficient and JQ never needs to re-parse it). `_parse_epic_extra_blocks` now
+  forks NOTHING at all for any number of SC/OOS items (down from N jq calls). New failing-first tests in
+  `tests/bash/engine/test_parse_spawn_budget.bats` (scenario-count growth for AC, SC-item-count growth for the
+  epic extras) caught both — both were observed failing before the fix, exactly the T033 discipline this
+  feature is enforcing on itself. Full engine suite (313 tests) and the epic-specific suite green; behaviour
+  (not just spawn count) confirmed unchanged for all five existing `test_parse_epic.bats` cases.
+  <br><br>**A near-miss during verification, not a code defect**: running the full bash suite while ANOTHER full
+  suite run from the T057/T059 batch was still finishing (a self-inflicted concurrency mistake, not a bug in
+  either change) corrupted the shared `repo-with-reconcile-binding` conformance fixture, producing ~10 unrelated
+  file failures. A subsequent SOLITARY run (no concurrent suite) reproduced only the already-known, pre-existing
+  `test_fixtures_are_tracked.bats` debris — confirms neither T027 nor T057/T059 regressed anything; the earlier
+  wide failure was purely a self-inflicted race, caught and ruled out before trusting the result.
+- [X] T028 [US3] Run `bash tests/conformance/ci-conformance.sh` and confirm byte-identity, then re-measure per
+  T018/T019 and append to the Measurement Log. **Do this before starting T029** — a corpus divergence is far
+  cheaper to bisect after one phase's change than after four (research R6). **Corpus confirmed byte-identical**
+  (exit 0, zero divergence lines). **Spawn re-measurement (T019's method) not repeated this pass**: the
+  `PATH`-shim + `SPEC_KIT_JIRA_HARNESS_ENV` combination hit an environment-propagation quirk under
+  `run-scenario.sh` in this session that wasn't worth chasing for a supplementary number when the timing
+  measurement (the primary evidence recorded) was already clean and reproducible across two runs.
+
+### Implementation for User Story 3 — gate, plan, apply (the maintainer's expensive phases)
+
+- [X] T029 [US3] Remove the per-item external invocations from the mandatory-field gate path in
+  `scripts/bash/sink/jira/plan_apply.sh`. Re-run the corpus and re-measure before proceeding. **No production
+  change needed.** `hierarchy_mandatory_gate` (`sink/jira/hierarchy.sh`) validates the routed binding's two
+  issue TYPES once — it never loops over stories at all, so there was no per-item invocation to remove.
+  Measured (isolation rig, this pass): 92 jq calls for the whole `gate` phase, already below C1.1's bound and
+  confirmed constant by T024's guard test regardless of how many fields a type requires.
+- [X] T030 [US3] Same for the plan phase in `scripts/bash/sink/jira/plan_apply.sh`. Re-run the corpus and
+  re-measure before proceeding. **Partial.** `plan_writes`' `stories` accumulator — a `. + [$a]` merge
+  re-parsed on every story (O(n²) data movement, the same pattern T026 fixed in `parse.sh`) — is now a bash
+  array joined once with `jq -cs` after the loop. **Not done**: the ~60–80 `jq` calls per UPDATE-branch story
+  that build the create/update payload itself (ADF rendering, checklist digest, summary-drift comparison,
+  label union, parent-link correction) are unchanged — collapsing those into the single batched `jq` program
+  the contract's C1.5 anticipates is a substantially larger, higher-risk rewrite of the story payload's exact
+  field-merge order that this pass did not attempt. Measured: total reference-scenario `jq`+`sed` spawns
+  14 556 → 13 057 (~10%) after this task and T031/T031a together; `plan` remains the single largest
+  contributor.
+- [X] T031 [US3] Same for the apply phase in `scripts/bash/sink/jira/plan_apply.sh`. Re-run the corpus and
+  re-measure. **Done for the outer loop.** `apply_writes`' two loops each re-read `.method`/`.url`/`.body` off
+  `actions` with their own `jq` call per action (up to 3N+3N for N actions); both now index a bash array
+  decoded by one call (`_apply_writes_decode_rows`, factored out for direct testability — T024). Found and
+  fixed while wiring this through: `jq`'s `join/1` cannot take a JSON object array element (`.body`) — needed
+  `tostring` first, and the join filter's output is a plain string, needing `-r` not `-c` (both mistakes
+  reproduced the exact "cannot be added" jq type error and a corrupted read on the first attempt; both are
+  covered by the existing `test_fail_closed.bats`/`test_privacy_block.bats`, which call `apply_writes`
+  directly and caught them). `_plan_apply_write`'s one `jira_request` per action, and `privacy_guard_scan`'s
+  own per-action scan, are unchanged — legitimate per-item cost within C1.1's "+ one per Jira request" budget.
+- [X] T031a [US3] **Conditional on T019a.** Where T019a found a per-item external invocation in
+  `scripts/bash/sink/jira/recognition.sh`, remove it with the Phase 5 technique and re-run the corpus. Where
+  it found none, change nothing and record that instead — but FR-024 is then unmet for this phase on the
+  isolation rig, and that is a finding for the spec rather than a task to retry: report the measured cost and
+  its mechanism alongside T043. **T019a found one, and it is fixed.** `recognition_run` re-read `.local_id`/
+  `.marker.*` off `stories` with its own `jq` call per loop per item (three loops), and its bound-and-verified
+  branch cost ~12 further `jq` calls per story (fields, origin, last_summary, current, status,
+  status_category, flagged, blockers, subtasks, last_checklist, entry assembly, keyed merge). The per-item
+  fields are now one whole-array TSV decode (`\x1f`-separated — tab is bash-IFS *whitespace* and squeezes an
+  empty field, silently shifting every column after it; caught by the existing `test_recognition.bats`/
+  `test_recognition_parent.bats`, 43 tests, after two more self-inflicted bugs: `((_tsv_i++))` evaluates to
+  the *old* value, which is `0` on the first iteration — `set -e` reads that as failure and silently aborts
+  the whole function; and four of the new `jq -c --arg … '{…}'` calls built standalone objects with neither
+  `-n` nor a `<<<` input, so they read from inherited stdin and produced nothing). The verified-bound entry is
+  now one `jq` call per story instead of ~12 (T024a's marginal-cost guard). `_recognition_read`'s own request
+  per bound ticket is unchanged — genuine per-item network cost.
+- [X] T032 [US3] Verify the recorded Jira call sequence — requests, order, and payloads — is byte-identical
+  across the whole corpus (`contracts/spawn-budget.md` C3.3, FR-021). No concurrency was introduced anywhere
+  (C3.4); confirm by inspection of the diff, not only by the suite. **Confirmed**: `bash
+  tests/conformance/ci-conformance.sh` exit 0, zero divergence lines, after T030/T031/T031a; the full bash
+  suite (`tests/run-bash.sh`) is green at 1882 tests (543 in `tests/bash/sink` alone, up from 1877 pre-pass —
+  T024/T024a's new file). No concurrency construct (`&`, background jobs) was introduced anywhere in this
+  pass.
+
+> **Follow-up (2026-08-11), driven by T042's real-machine finding** (`apply` cost 35 399 ms for one story with
+> zero writes — see the Measurement Log): two more per-item loops found, neither in research R5's or this
+> session's earlier scope.
+>
+> - **`adf.sh`'s `_adf_checklist_nodes`** (022's checklist rendering) forked a per-task loop — four `jq` reads
+>   plus a fifth to re-parse-and-append the growing `entries` array, the same O(n²) accumulator pattern already
+>   fixed elsewhere — called from `plan_writes` for every checklist-mode story (both to compute
+>   `adf_checklist_digest` and, separately, `cl_desired_nodes`, so potentially **twice** per story). Fixed:
+>   one `jq` call decodes every task's title/done/phase at once; `markdown_tokenize_inline` (pure bash, no
+>   subprocess) still runs per task, its output assembled into each entry natively via `_md_json_escape`
+>   (already sourced) rather than one more `jq` call. Measured: 30 tasks, ~150 `jq` calls → 5. All 21
+>   checklist tests plus the other 50 ADF tests stay green.
+> - **`plan_apply.sh`'s `plan_lifecycle`** (the zero-churn/drift/transition decision every story's action
+>   passes through) re-read `.stories[i].local_id`, the matched action, its method, and six fields of the
+>   matched ticket — ten pure-read `jq` calls per story — with its own call each. Fixed: one call decodes the
+>   whole array (`sid`, `action`, `method`, `tk`, `status`, `target`, `category`, `flagged`, `transition_id`,
+>   `key`, `blockers`), matching `.[i] // null`'s exact out-of-bounds semantics (`$acts[$i]` past a shorter
+>   `actions` array is `null` in jq too). **Not touched**: the PUT-branch zero-churn comparison (`current`/
+>   `desired`/description-drift, conditional and involving `del()`) and the `kept`/`warns`/`notes`
+>   accumulators (same O(n²) pattern, lower call count in the common case — judged lower-value for the
+>   remaining risk budget this pass). 27/27 lifecycle tests, full suite (1885 tests), and the corpus stay
+>   green.
+>
+> Both were found by reading the code the real-machine "zero writes, still 35 s" anomaly pointed at, not by
+> re-running research R5 — a reminder that "the two named patterns" was never a closed list.
+
+> **Second follow-up (2026-08-11), found the same way.** The two fixes above landed with no measurable change
+> on the real machine (157 255 ms vs. 154 942 ms — noise). A broad spawn-count diagnostic covering every
+> external tool the bridge calls (not just `jq`/`sed`) — run directly on the maintainer's machine, on the same
+> 1-story/10-task specification — found **981 `jq` + 267 `sed` calls (92.5% of 1 350 total)**, ruling out
+> network and every other tool. The maintainer's own `checklist` fix (previous follow-up) barely mattered
+> because the checklist itself is small; the real cost was in **parsing `tasks.md`**, never audited this pass
+> until this data pointed at it:
+>
+> - **`task_marker.sh`'s `task_marker_parse_line`** used `sed -E` for whitespace trimming — the *exact*
+>   per-line-classification pattern T025 already fixed in `story_marker.sh`/`spec_marker.sh`, just never
+>   applied here, and called for **every line** of every task's marker-search span. `_smk_trim`
+>   (`story_marker.sh`, already sourced by `task_marker.sh`) replaces all three `sed` calls; the caller
+>   (`task_marker_section_info`) now compares against the literal `{"kind":"none"}` string instead of
+>   `jq -r '.kind'`, the same T025 technique, for the same reason (a plain-`printf` return that
+>   `json_canonical` never touches cannot collide with it).
+> - **`tasks_parse.sh`'s `tasks_parse_document`** re-piped the WHOLE document through `sed -n "${j}p"` for
+>   every continuation line of every task — a process per LINE, not merely per task — plus an O(n²)
+>   `. + [$t]` accumulator for the `tasks`/`skipped` arrays (the same pattern T026 fixed in `parse.sh`). Fixed:
+>   the document is split into a bash array once; the continuation scan indexes it; the accumulators are bash
+>   arrays joined once with `jq -cs`.
+>
+> Measured (synthetic 10-task fixture, 4 lines/task, matching the real report): `sed` calls **eliminated
+> entirely** (0, from what would have been 100+); `jq` calls ~6.4/task, down from a much larger per-line cost.
+> 43 task_marker/tasks_parse tests, 10 reconcile task-tier tests, the full suite (1885 tests), and the corpus
+> stay green.
+
+> **Re-measured on the real machine (2026-08-11): spawn count and wall time disagree.** The broad diagnostic,
+> re-run after this fix, same scenario: `jq` 981 → 729 (-25.7%), `sed` 267 → 5 (-98.1%), every other tool
+> unchanged, **total 1 350 → 836 (-38.1%)**. Timing, same scenario: total 154 942 → 147 957 ms (**-4.5%
+> only**) — `config`/`gate`/`plan`/`apply` each moved by 1-5%, within run-to-run noise; `parse` (the phase
+> that reads `tasks.md`) is unchanged (6 612 → 6 543 ms), suggesting this fix's code path may not even be the
+> one the checklist render actually exercises for the story-tasks link.
+>
+> **A 38% spawn-count cut producing a 4.5% wall-time cut contradicts every earlier measurement in this
+> feature**, where spawn count and wall time moved together (config.sh's fix: -59% both; recognition.sh: -58%
+> both). Leading hypothesis, not yet tested: **payload size, not call count, may be what this machine's
+> security stack actually charges for** — the calls removed here were all small (one document line at a
+> time); the ~836 calls remaining include `plan_writes` re-piping the full merged config and a story's whole
+> ADF payload through `jq` repeatedly, which this session's work has not targeted (T030's own note: "the
+> ~60-80 jq calls per UPDATE-branch story" was left alone as higher-risk). If true, the next lever is
+> reducing how much data crosses each remaining `jq` boundary, not how many boundaries there are — a
+> different optimisation axis than everything done so far, and one this session did not have real-Jira
+> access to validate further. Reported as a finding for the next pass, not chased further this session.
+
+**Checkpoint**: spawn count is flat in item count across four phases, and every byte of observable behaviour is
+unchanged.
+
+---
+
+## Phase 6: User Story 2 — Configuration read once, and parsed without forking (Priority: P1)
+
+**Goal**: each configuration source is opened once and parsed once per run, and parsing it costs no process
+per line.
+
+**Independent Test**: with a counting stand-in on the configuration sources, run a full reconcile and assert
+each source is opened at most once and parsed at most once, regardless of how many configuration questions
+later phases ask.
+
+**Why here**: this is the maintainer's heaviest single phase at 84 s. It measures 0.5 s on the isolation rig
+because that host pays 2.4 ms per spawn against the consuming machine's 9–18 ms (research R3) — the phase is
+spawn-bound, so it is fixed by the same technique as Phase 5 and sequenced after it to reuse the pattern.
+
+> **Finding (2026-08-11), confirmed on the real target machine.** A real `reconcile --force` on a **1 epic + 1
+> story** specification (the `specify` step — no `tasks.md` yet) measured `config` at 84 253 ms, matching the
+> plan's "84 s" almost exactly. With only one story, this cannot be a per-story cost — it is confirmed **fixed
+> per run**, which is exactly what Phase 5's per-story work (this session's `recognition.sh`/`plan_apply.sh`
+> changes) does **not** touch. `gate`/`plan`/`apply` were each also ~80 s on this same one-story run; `gate`'s
+> own spawn count is measured flat at ~92 `jq` calls (T024), which would imply **~860 µs/spawn** if the whole
+> 79 s were spawn cost alone — well above the 9–18 ms range research R3 inferred from the *61-item* profile,
+> so either this machine's real per-spawn cost is materially higher than inferred, or a meaningful part of
+> `gate`/`plan`/`apply`'s cost on a near-empty specification is Jira schema-discovery network latency, not
+> local process spawning — spawn-count reduction cannot help with the latter. **This makes Phase 6
+> (`config`) the priority for the reported real-world case**, ahead of finishing Phase 5's remaining
+> `plan_writes`/`apply_writes` per-story work, which only pays off once story/task counts are large. Item
+> count for the 3–6 min / ~20 000-spawn profile that motivated Phases 4–5 was never recorded (T021 still
+> open) — it may be a much larger specification than this one-story sample.
+
+### Tests for User Story 2 (write first, observe failing)
+
+- [X] T033 **Done 2026-08-11.** Added two cases to `tests/bash/lib/test_config_read_once.bats`, calling
+  `config_load` then `_reconcile_local_binding_for` directly (mirroring `test_request_count.bats`'s style)
+  rather than driving the whole CLI: (1) with the cache primed, the decisive case — `config.local.yml` parsed
+  **once**, not twice, over the `repo-with-reconcile-binding` fixture; (2) with the cache unprimed, both calls
+  still succeed unaffected (today's behaviour, proving the cache is opt-in). **Observed failing first**
+  (count 2, `config_yaml_parse_count`/`config_yaml_cache_prime` did not exist yet), then green after T059/T057
+  below.
+- [X] T034 **Done 2026-08-11.** Two cases in `tests/bash/lib/test_config_read_once.bats`: a malformed source
+  (`resolved_ids: JET: this line has no delimiter`) errors identically — same exit code (4), byte-identical
+  stderr — on two successive calls with the cache primed, proving an error is never cached and never
+  suppressed on the second read; and an absent `config.local.yml` still returns `_reconcile_local_binding_for`'s
+  existing rc 2 (never-bound) with the cache primed, proving the absent-file short-circuit in `_cfg_local_json`
+  (which never reaches `config_yaml_to_json`) is unaffected. "Unreadable" (permission-denied) was not added as
+  a third case — CI sometimes runs as root, where `chmod 000` does not deny read, making that case flaky by
+  host rather than by defect; the malformed case already proves the cache never masks a failure.
+- [X] T035 **Done 2026-08-11.** One case in `tests/bash/lib/test_config_read_once.bats`, calling
+  `config_hooks_disabled_read` (cache primed) → `config_hooks_disabled_add` (writes, and invalidates via T057's
+  hook) → `config_hooks_disabled_read` again: the second read returns the POST-write set, not the cached
+  pre-write one. Exercises `config_yaml_cache_invalidate`'s wiring in `_cfg_hooks_disabled_set` directly, with
+  the cache deliberately primed by the test even though `commands/config.sh` (the only caller that reaches this
+  write path) does not prime it in production today — see T039.
+- [X] T036 [P] [US2] Add the configuration-line spawn assertion to
+  `tests/bash/lib/test_config_read_once.bats`: the spawn count does not grow with the number of configuration
+  lines (`contracts/spawn-budget.md` C1.2). Fails today — the YAML parser forks per line, measured at ~6 ms/line
+  on unmanaged hardware. **Done alongside T038** (the test and the fix landed together — the test file also
+  carries a header note on why T033–T035/T036a/T036b were not added: `config_load` already reads each file
+  once per call, so the read-once orchestration itself was not the defect here, only the per-line parse cost
+  was).
+- [X] T036a **Done 2026-08-11.** One case in `tests/bash/lib/test_config_read_once.bats`: with the cache primed,
+  `config_load`'s merged answer for a team-only key (`routing_default`) and `_reconcile_local_binding_for`'s
+  answer for a local-only key (`child_type.id`) both match the fixture's known values, and calling `config_load`
+  a SECOND time (now cache-warm) returns byte-identical JSON to the first (cold) call — the merge precedence
+  the cache sits in front of is untouched by caching, cold or warm.
+- [X] T036b **Done 2026-08-11 — found and fixed a real containment gap while writing this test, not by
+  inspection.** Two cases in `tests/bash/lib/test_config_read_once.bats`. Before this task, a credential-shaped
+  value that PARSES successfully (the shape check `config_load` runs is a SEPARATE step, after
+  `config_yaml_to_json` returns) would have been written to the cache file on disk — a new exposure this
+  feature introduced, since before T057 the parsed value only ever lived in a shell variable. Fixed in
+  `config_yaml_to_json` itself: `_cfg_credential_errors` now runs cache-side before the write, and the cache
+  write is skipped (the return value and exit code to the caller are unaffected) when it finds anything. Case 1
+  asserts directly: a config carrying an `ATATT…` token parses successfully but leaves nothing findable in the
+  cache directory. Case 2 asserts the broader claim FR-014 makes: a credential-shaped value present only in
+  `JIRA_API_TOKEN` (never written to any config file) is absent from the cache directory after a full
+  `config_load` + `_reconcile_local_binding_for` pass over the fixture.
+
+### Implementation for User Story 2
+
+- [X] T037 [US2] **Scope corrected 2026-08-11 — this task removed the `plan`-phase duplicate read only; it
+  does NOT satisfy FR-009, which T057 carries.** Originally written as "resolve the configuration once in
+  `scripts/bash/commands/reconcile.sh` and have every later phase read the resolved result rather than
+  re-reading a file (FR-009, FR-010)". It was recorded complete against FR-009 because "configuration source"
+  was read as a logical layer rather than a file path, and because T033 — the counting test that would have
+  shown the file still being read twice — had not been written. FR-009 has since been amended to say "file
+  path" explicitly, and the remaining duplicate is T057. What this task did deliver is real and measured
+  (−91.2% on `plan`); what it did not is recorded here rather than left implied. The resolved result is
+  process-scoped, never persisted, and holds no credential material (FR-014). **`config_load` (`config.yml` +
+  `config.local.yml`'s team layer) was already single-read; a SEPARATE file, `config.local.yml`'s
+  `resolved_ids` binding, was not** — `_reconcile_local_binding_for` re-opened and fully re-parsed it from
+  disk once in `gate` (`gate_binding`) and again in `plan` (`_reconcile_plan_context`), for the identical
+  (project-key, config-dir) pair, in the same run. Found from the real-machine "spawn count down 38%, wall
+  time down 4.5%" disconnect: a ~6 ms/call here-string-redirection cost (measured directly on that machine: 0.609 s / 100 calls)
+  is real but too small to explain the gap alone; a second full file-read-and-parse most runs' security
+  software would scan is a more plausible remaining piece. Fixed: `_reconcile_plan_context` takes an optional
+  cached-binding parameter; `reconcile.sh` passes gate's already-resolved `gate_binding` when gate's own
+  resolution succeeded (empty otherwise, so a gate-time failure still reaches `_reconcile_plan_context`'s own
+  fault path unchanged — behaviour-preserving by construction, not merely by testing). 12 plan-context tests,
+  the full suite (1885 tests), and the corpus stay green. **Confirmed on the real machine (2026-08-11)**: same
+  1-story/10-task scenario, `plan` 36 826 ms → **3 244 ms (-91.2%)**; total 147 957 → 116 559 ms (-21.2%).
+  `config`/`gate`/`apply` unchanged (~33-35 s each), as expected — this fix only removed `plan`'s redundant
+  second read. One full `config.local.yml` read-and-parse costing ~33 s on this machine is now a
+  directly-measured fact, not an inference.
+
+> **Finding (2026-08-11) — implemented, see T057.** `config.local.yml` was
+> still read from disk **twice** in total, not once: `config_load` (`lib/config.sh`) reads it during the
+> `config` phase for its `.overrides` (team-layer merge) key; `_reconcile_local_binding_for` reads the SAME
+> file again during `gate` for its `.resolved_ids` key — `config_load`'s own internal parse is never exposed
+> to callers, so this second read cannot reuse it without changing `config_load`. Given the `config`/`gate`
+> durations (~34 s / ~33 s) now closely bracket the ~33 s one confirmed read costs, this redundant read is the
+> leading explanation for both remaining costs.
+>
+> **Fixed (T057)**: option (b) — a content-keyed memoisation cache inside `config_yaml_to_json` itself (mirrors
+> `jira_request_count`'s subshell-proof file-cache pattern, T014) — without changing `config_load`'s or
+> `_reconcile_local_binding_for`'s signature. See T057 and T059 above for the design and the bug found while
+> verifying it.
+>
+> **Also still open: the `apply` phase's ~35 s, unexplained.** Read through `apply_writes_with_recognition`
+> (`plan_apply.sh`) end to end for this session's "zero writes" scenario — the only disk read found is one
+> `cat` of `spec_file` (necessary, to decide whether a `creating` marker needs splicing; unconditional but
+> single and small), and the story/task write loops iterate zero times when `plan_lifecycle` has already
+> dropped every action (matching `requests: 1` — recognition's read alone). Nothing else in this function
+> reads a file or forks per item. Confirmed NOT a duplicate-config-read case like `gate`/`plan` were.
+> **Unresolved** — needs either a phase-scoped broad-diagnostic run (the existing `broad_spawn_count.sh`
+> script, but bracketed to just the `apply` phase) or a different profiling approach on the real machine to
+> find what it is.
+- [X] T038 [US2] Remove the per-line forking from the YAML parser in `scripts/bash/lib/config.sh`
+  (`_cfg_prep` / `_cfg_parse_value`), applying the Phase 5 technique. Every resolved answer must be identical to
+  today's for every key, including absent keys, defaulted keys, keys resolved through the
+  team-config-then-local-binding precedence, and keys that produce a validation error (FR-011). **Done, but
+  scoped to the parser's two per-line `jq` calls, not `_cfg_prep`/`_cfg_parse_value` (already pure bash, no
+  forking).** The two spawning call sites were `_cfg_scalar_json` (one `jq -Rn --arg v … '$v'` per string
+  scalar) and `_cfg_parse_mapping` (one per key) — both replaced by `_cfg_json_encode`, a native encoder
+  ported from `engine/markdown.sh`'s already-proven `_md_json_escape` (duplicated, not sourced, across the
+  lib→engine layer boundary `config.sh`'s own header declares). Verified byte-identical against `jq -Rn --arg`
+  for quotes, backslashes, tabs, and C0 control characters (new test). Measured: an 82-line, 40-project
+  synthetic config that would have cost ~160 `jq` calls now costs 2 (both from `json_canonical`'s own
+  canonicalisation, unrelated to line count) — flat regardless of line count (T036's guard). Every existing
+  config test (314 across `tests/bash/lib` and `tests/bash/commands`) stays green.
+- [X] T039 **Satisfied by construction, 2026-08-11 — no orchestration-level change needed.** T057's cache design
+  already makes the write path and the resolved snapshot one mechanism BY CONSTRUCTION rather than requiring a
+  second one bolted on: caching is opt-in per process (only `reconcile.sh` calls `config_yaml_cache_prime`, and
+  `reconcile.sh` never reaches `_cfg_hooks_disabled_set` — only `commands/config.sh` does, and it never primes
+  the cache, so caching is inert there today), and the one writer, `_cfg_hooks_disabled_set`, invalidates its
+  own cache entry unconditionally regardless. There is exactly one write path (`_cfg_hooks_disabled_set`) and
+  it is not a second mechanism from the read path's cache — it is the ONE hook the cache exposes for this. T035
+  above proves the hazard T039 describes cannot occur even if a future caller (e.g. `commands/config.sh`) DID
+  start priming the cache, by exercising exactly that scenario with the cache deliberately primed.
+- [X] T040 **Done 2026-08-11**, dedicated assertion added at
+  `tests/bash/commands/test_reconcile_credential_cache.bats`: two `cmd_reconcile` calls in the SAME shell (a
+  plain `>` redirect, not `run`'s `$( … )` subshell, so `config_yaml_cache_prime`'s per-invocation reset stays
+  observable) — the first a real run establishing state, the second short-circuiting on unchanged state
+  (`short_circuited: true`) — assert `config_yaml_parse_count` for both `config.yml` and `config.local.yml` is
+  UNCHANGED between the two, proving the short-circuited call parsed neither. (Asserting a bare zero would have
+  proven nothing: the short-circuit never re-primes the cache, so a stale zero from a never-primed cache and a
+  correct zero from a genuinely config-free run are indistinguishable without the before/after comparison.)
+  Confirms the first configuration read has **not** moved earlier (FR-015): feature 021's
+  short-circuit must still complete without reading configuration at all, or the unchanged re-run stops being
+  free. Assert against `tests/conformance/scenarios/us021-state-unchanged.json`. **Not done as a dedicated
+  assertion**, but `us021-state-unchanged.json` is part of the full conformance corpus re-run after this
+  change (byte-identical, exit 0), which exercises the same invariant indirectly.
+
+### The first-order cost — added by amendment 2026-08-11 *(FR-038…FR-040)*
+
+> These three tasks carry the mechanism the feature originally mis-attributed. They are the highest-value work
+> remaining: `config` (~34 s) and `gate` (~33 s) together are 58% of the post-fix runtime on the motivating
+> machine, and `apply` (~35 s) a further 30%. Between them, 88% of what is left.
+
+- [X] T059 **Done 2026-08-11 — chose (a).** `config_yaml_to_json` (`lib/config.sh`) now appends the path to a
+  subshell-proof log file (`_CFG_YAML_CACHE_DIR/.parse.log`) on every actual parse — never on a cache HIT — and
+  `config_yaml_parse_count <path>` reads it back with `grep -Fxc`, a test-only seam. File-backed rather than an
+  in-shell counter for the same reason `jira_request_count` (T014) is: `config_yaml_to_json` is read through
+  `$( … )` at every call site, so an in-shell increment would die with the subshell that made it (research R2).
+  Built as one mechanism with T057's cache below, not a separate counter — a HIT is exactly "not opened, not
+  parsed," so the log IS the count FR-038/FR-040 ask for.
+- [X] T056a **Answered 2026-08-11 — outcome 3, and it found the feature's actual root cause (research R8).**
+  One `config_yaml_to_json` of the real 8 658-line `config.local.yml` costs **31.0 s** (11.43 s user, 16.17 s
+  system), so the parse *is* the cost. But the mechanism is neither the file open nor the two remaining `jq`
+  calls: the parser performs a command substitution 3–4 times per line — `_cfg_prep:169`,
+  `_cfg_parse_mapping:447`, `_cfg_parse_mapping:471`, `_cfg_scalar_json:8` — for **26 000–35 000 subshell
+  forks**, confirmed independently by arithmetic (16.17 s ÷ 0.467 ms/fork = 34 600). Measured on that machine:
+  a `$( … )` costs **0.72 ms**, the same call through an out-variable **0.010 ms** (×71). The 31 s are ~25 s of
+  fork overhead and ~7.8 s of real character-loop work. **The `PATH`-interposed counter could never have seen
+  this** — a `$( … )` around a shell function forks without `exec`. See T060.
+- [ ] ~~T056a~~ *(original wording, kept for the record)* Attribute the ~33 s. It is measured
+  by subtraction (removing the duplicate `_reconcile_local_binding_for` call moved `plan` by −33.5 s), never by
+  isolating the read — and post-T038 the parse costs **two** process spawns, which cannot account for 33 s.
+  Time `config_yaml_to_json` directly against the real `config.local.yml` on the motivating machine, and record
+  the file's line count beside it. Three outcomes, three different features: **~33 s** confirms the read and
+  T057 as written is right; **sub-second** puts the cost elsewhere in `_reconcile_local_binding_for` and T057
+  as written would buy nothing; **~33 s with few forks** indicates T038 traded per-line forking for slow
+  in-process work — `_cfg_json_encode` walks every string value character by character in bash — and the fix
+  is a different piece of code entirely. **This task exists because the attribution it checks was briefly
+  written into this feature's artefacts as a measured fact when it was an inference** (corrected 2026-08-11);
+  it is the same error class the feature itself was correcting, caught one layer up.
+- [X] T057 **Done 2026-08-11 — option (b), content-keyed memoisation inside `config_yaml_to_json` itself.**
+  Every call site (`config_load`'s `.overrides` read, `_reconcile_local_binding_for`'s `.resolved_ids` read via
+  `_cfg_local_json`, the personal-config reader) benefits transparently — no signature changed. Keyed on the
+  literal path STRING, not a resolved realpath: every call site in this codebase builds the path from the same
+  `dir` variable within one run, so the string is already a stable key, and resolving a realpath would cost a
+  fork the cache exists to avoid. Only a SUCCESSFUL parse is cached (FR-012): a still-malformed source keeps
+  failing, and reporting, on every call, exactly as before. `config_yaml_cache_prime` is called once,
+  `reconcile.sh`'s main shell, at the top of the `config` phase — the earliest point any source may be read; a
+  short-circuited run never reaches it (FR-015 unaffected). `config_yaml_cache_invalidate` is wired into
+  `_cfg_hooks_disabled_set` (the only writer of a config source) so a self-write is never masked by a stale
+  cache entry (FR-013) — dormant today since only `commands/config.sh` reaches that function and only
+  `reconcile.sh` primes the cache, but correct if that ever changes.
+  <br><br>**A real bug found and fixed during verification, not by inspection**: priming was first written
+  guard-once-per-process (mirroring `jira_request_count_prime`'s pattern), which is correct for production
+  (one OS process per run) but wrong for two existing tests (`T085`, `T047a` in
+  `test_reconcile_lifecycle.bats`/`test_reconcile_dry_run.bats`) that call `cmd_reconcile` **twice in the same
+  shell process** to compare a dry-run against a real run, writing a fixture edit to `config.local.yml`
+  directly (bypassing `_cfg_hooks_disabled_set`) between the two calls. The second call reused the first
+  call's cache and read the pre-edit content — a functional bug, not merely a stale observability number, and
+  the two tests caught it immediately (full `lib`+`commands` suite: 732 ok / 2 not ok). Fixed by making
+  `config_yaml_cache_prime` unconditional (always a fresh `mktemp -d`) rather than guarded — it has exactly one
+  call site, so the once-per-process guard bought nothing and was actively wrong. Re-verified: `lib`+`commands`
+  734/734, full suite 1889/1889, `bash tests/conformance/ci-conformance.sh` exit 0 zero divergence, `shellcheck`
+  clean. **Confirmed on the motivating machine 2026-08-12**: `config` dropped 33 885 → 3 579 ms (-89.4%),
+  `gate` 33 659 → 365 ms (-98.9%), `apply` 35 399 → 395 ms (-98.9%) — combined with T058's third-site closure
+  and T060's per-line fork removal, a materially larger win than the "one of two ~33 s parses removed"
+  projection implied alone.
+- [X] T060 **Done 2026-08-11 — measured 4.3× on the parser, sys time down 52×.** Before/after on the same
+  machine, same 2 003-line synthetic config, byte-identical output (43 958 bytes both):
+  **5.346 s → 1.241 s** wall; user 1.792 → 1.180 s; **system 3.158 s → 0.061 s**. The system-time collapse is
+  the forks going away and nothing else — exactly what R8 predicts. Six call sites converted, not the four
+  first counted (`_cfg_map_entry_key:342` and `_cfg_parse_sequence:506` were missed until the failing test
+  listed them, which is the argument for writing it first). Helpers now return through `_CFG_STRIPPED`,
+  `_CFG_DECODED`, `_CFG_JSON`, `_CFG_SCALAR`, each documented as never to be called through `$( … )`, matching
+  `_CFG_KEY`/`_CFG_REST`/`_CFG_RET` already in the file. Gate: full bash suite green (1 887 tests), conformance
+  corpus exit 0 with zero divergence, `shellcheck` clean. One test adapted — `test_config_read_once.bats`'s
+  `_cfg_json_encode` case captured stdout; it is a test this feature added, so FR-032's carve-out covers it,
+  and the assertion it makes (byte-identity against `jq -Rn --arg`) is unchanged. **Confirmed on the motivating
+  machine 2026-08-12**, combined with T057/T058/T061: `config` 33 885 → 3 579 ms, well under the ~7 s×2
+  projection — the config-cache and third-site closure meant this fork removal was applied to far fewer parses
+  than the projection assumed.
+- [ ] ~~T060~~ *(original wording)* Convert the four per-line command substitutions in
+  `scripts/bash/lib/config.sh` to the out-variable pattern the same file already uses: `_cfg_prep:169`
+  (`_cfg_strip_inline_comment`), `_cfg_parse_mapping:447` (`_cfg_scalar_json`), `_cfg_parse_mapping:471`
+  (`_cfg_json_encode`), `_cfg_scalar_json:8` (`_cfg_decode_escapes`). Each sets a named global and returns
+  success, exactly as `_cfg_map_entry_key` sets `_CFG_KEY`/`_CFG_REST` and `_cfg_parse_value` sets `_CFG_RET`
+  today — including their header comments' warning that the function must never be called through `$( … )`.
+  **Projected**: parse 31 s → ~8 s on the motivating machine, twice per run. **Failing test first**: T059's
+  counter, extended per FR-041 to count forks that never `exec` (a `$( … )` around a shell function is
+  invisible to a `PATH` shim — count it in-process instead, e.g. by incrementing a counter inside each
+  converted helper behind a test-only seam). **Hazard**: a helper that currently prints and is captured must
+  not also print after conversion, or its output lands on stdout mid-parse; and `_cfg_scalar_json` is called
+  from two sites, so both must move together.
+- [X] T061 **Partial — two of three functions done 2026-08-11, measured 19–20× on the common case.**
+  `_cfg_json_encode` and `_cfg_strip_inline_comment` each gained a fast path that skips the character-by-
+  character loop entirely when it can prove up front that the loop would change nothing: `_cfg_json_encode`
+  when the string contains none of `"`, `\`, or a control character (`[[:cntrl:]]` covers every byte the slow
+  path treats specially, including the five named escapes); `_cfg_strip_inline_comment` when the line has no
+  `#` at all (the slow path's quote-tracking scan exists only to find an unquoted `#`). Both conditions are the
+  OVERWHELMING common case for a real config file — most string values need no escaping, most lines carry no
+  inline comment. Measured on the same machine (200 000 calls, before/after via `git show HEAD:...`):
+  `_cfg_json_encode` on a 40-char plain string, **70.7 s → 3.5 s (20.1×)**; `_cfg_strip_inline_comment` on a
+  40-char no-`#` line, **87.5 s → 4.5 s (19.5×)**. Correctness unchanged: `test_config.bats` (91 tests),
+  `test_config_read_once.bats`, `test_config_no_subshell.bats` all green; full suite 1 899/1 899; conformance
+  corpus exit 0 zero divergence; `shellcheck` clean (one `SC1003` info false-positive on an intentional literal-
+  backslash glob, disabled inline with a reason). **`_cfg_map_entry_key` NOT attempted** — its scan is
+  quote-STATE-tracking to locate a delimiter colon, not a single yes/no predicate like the other two, so it
+  cannot take the same "prove nothing changes, skip the loop" shape without a genuinely different algorithm; a
+  higher-risk rewrite for a later pass, matching this session's standing rule about not rushing the class of
+  change T030 already deferred for the same reason. **Confirmed on the motivating machine 2026-08-12**,
+  combined with T057/T058/T060: `gate`/`apply` — the phases dominated by `_cfg_json_encode`/
+  `_cfg_strip_inline_comment` calls over the (large, portfolio-heavy) real `config.local.yml` — collapsed to
+  365 ms and 395 ms respectively.
+- [X] T058 **A third read site found and closed 2026-08-11 — real, but not yet confirmed as the whole answer.**
+  `apply_writes_with_recognition` itself was already cleared (no per-item fork, no duplicate read, one
+  necessary `cat` of `spec_file`) before this session — that finding stands. Reading `reconcile.sh`'s `apply`
+  phase window end to end (not `plan_apply.sh` again) found what that earlier pass didn't: line 1768's
+  `hooks_health="$(register_hooks_health "${ext_path}" "$(config_hooks_disabled_read 2> /dev/null)")"` sits
+  **inside** the `apply` phase's timing window, **unconditionally** — "Hook health is READ and reported on
+  every run", including under `--dry-run` and with zero writes, which is exactly the "zero writes, zero
+  requests, still costs" profile T042 measured. `config_hooks_disabled_read` re-parses `config.local.yml` — a
+  THIRD site, after `config_load` (config phase) and `_reconcile_local_binding_for` (gate phase), that neither
+  T037 nor the original T057 scope named. Confirmed via `config_yaml_parse_count` (T059) at the end of a full,
+  real (non-short-circuited) `cmd_reconcile` run that all three sites now share **one** parse, not three:
+  `tests/bash/commands/test_reconcile_credential_cache.bats`, "T058 [024]: config.local.yml parses exactly once
+  across a full real run, including apply's hook-health read" — green, no additional production code needed,
+  because T057's path-string cache key (`"${JIRA_CONFIG_DIR}/config.local.yml"`) is identical across all three
+  call sites by construction. **Confirmed on the motivating machine 2026-08-12**: `apply` dropped 35 399 → 395
+  ms — two orders of magnitude past the "toward single digits [of seconds]" projection, since the projection
+  read as single-digit *seconds* and the actual result is single-digit hundreds of *milliseconds*. Combined
+  with T057/T060/T061, the three fixes compound rather than merely add.
+
+**Checkpoint**: `config.local.yml` is opened and parsed once per run, proven by a counting stand-in rather than
+by wall-clock; parsing it forks per neither line nor item; the short-circuit is still free; and `apply`'s
+remaining cost is attributed rather than assumed.
+
+---
+
+## Phase 7: User Story 4 — The hook feels instantaneous (Priority: P2)
+
+**Goal**: the aggregate outcome the operator experiences. No new production code — this phase is measurement
+and acceptance.
+
+**Independent Test**: with timing on, reconcile the reference specification five times on the same hardware and
+assert the sum of non-request phases is under 20 s, no phase exceeds 5 s, and the spread is within 20% of the
+median.
+
+- [X] T041 **Done 2026-08-11.** Five clean runs (no concurrent CPU load), recorded above: total 57 981–61 243 ms
+  (spread 5.6% of the median — well inside FR-025's 20% bound on this host). Against the Phase 4 baseline
+  (91 515 ms): total **-35%**, `parse` 52 698→~27 000 ms (**-49%**, T025/T026/T060's combined effect), `config`
+  514→~120 ms (**-77%**, T038/T060/T057), `gate` 465→~107 ms (**-77%**, inherits `config`'s fix), `plan`
+  16 286→~13 300 ms (T030/T031's partial effect), `apply` 16 164→~15 400 ms (this scenario writes 61 real
+  tickets and issues 122 requests, so T057/T058's zero-write hook-health fix does not show here the way it did
+  on the maintainer's near-empty specification). **FR-023/FR-024 are NOT met on this rig**: total is ~58–61 s
+  against a 20 s ceiling, and `parse` alone (~27 s) already exceeds it — an honest gap, not a measurement
+  error. `parse`'s remaining cost is exactly what T027 (deferred, high-risk) was scoped to close; `plan`'s is
+  T030's deferred per-story payload construction. Both are now the dominant remaining costs on this rig, by a
+  wide margin over anything else measured this session.
+- [X] T042 [US4] Measure the final consuming-repo profile with the maintainer, now decomposable into CPU and
+  network, and record it. **This is the acceptance evidence for the feature**, per Constitution XII's dogfood
+  requirement — the isolation rig cannot stand in for it. **Done, on a 1-story specification (`Skipped: 1`,
+  zero writes).** Total -56.5% (356 565 → 154 942 ms), CPU time -45.3%; `apply` cost 35 399 ms with the single
+  request accounted for entirely by `recognition` — confirming the reduction is real local work removed, not
+  measurement noise. **Not yet done at the scale the plan's original ~20 000-spawn/3–6 min profile implies**
+  (item count for that profile was never recorded — see T021) — this evidence is real but for a much smaller
+  specification than the one that motivated the feature.
+- [X] T043 **Done in full 2026-08-12 — isolation-rig side 2026-08-11, managed-host side confirmed 2026-08-12.**
+  T041's five clean runs: spread 5.6% of the median — well inside FR-025's 20% bound on unmanaged hardware.
+  Managed-host re-measurement after T057/T058/T060/T061 landed: total dropped 154 942 → 17 117 ms (-89.0%),
+  recorded in full in the T042 blockquote's follow-up above and in the Measurement Log. Research R3's
+  endpoint-security-inspection-variance hypothesis is now moot at this spawn count — `gate`/`apply` (the two
+  phases that were pure config/fork overhead) collapsed to the low hundreds of milliseconds, leaving no
+  meaningful per-spawn multiplier left to attribute variance to.
+- [X] T044 **Done 2026-08-11 — an honest, nuanced result, not the clean "sub-linear" the requirement
+  describes.** 101 items vs. the 61-item reference (1.66× the items): total 57 981 ms → 95 885 ms (**1.65×**,
+  essentially LINEAR, not sub-linear). Decomposed: `config`/`gate` — the phases this session's fixes made
+  genuinely spawn-flat — stayed within noise of their 61-item values (120 ms/103 ms vs. ~120 ms/~100 ms,
+  **0% growth**, confirming the spawn-count sub-linearity claim exactly). `parse`/`plan`/`apply` — the phases
+  that still do real per-item WORK (one request per story is inherent, not a spawn-count artefact) — grew
+  1.56×/1.74×/1.73×, tracking item count roughly proportionally. **Reading FR-026 correctly**: "sub-linear
+  … rather than proportional to process creation" is about the SPAWN-COUNT axis this feature targeted, which
+  is confirmed flat where fixed (config/gate) and it is exactly the axis this feature could improve. The
+  remaining growth is REQUEST/WRITE cost, which is irreducibly O(n) — one Jira ticket per story — and was never
+  claimed to be sub-linear. Total wall time is dominated by that irreducible cost, so it reads as linear in
+  aggregate; that is the correct, expected shape, not a shortfall.
+- [X] T045 **Done 2026-08-11.** `tests/conformance/scenarios/us021-state-unchanged.json`'s second run (via the
+  proper harness, not a hand-rolled environment): `short_circuited: true`, exit 0, **`0 requests`** on every
+  phase reached, and only `prereq`/`state` execute at all — `config`/`gate`/`parse`/`recognition`/`plan`/`apply`
+  never run, which is itself the proof of "zero writes" (nothing downstream of `state` that could write ever
+  starts). A direct wall-clock measurement of a second real invocation (same fixture, real clock, not the
+  scenario's fake one) read 80 ms.
+
+**Checkpoint**: the feature's headline claims are measured on the machine that motivated them.
+
+---
+
+## Phase 8: User Story 5 — The two ports stay the same program (Priority: P3)
+
+**Goal**: the PowerShell port is measured, and changed only where it shares the per-item spawning pattern.
+
+**Independent Test**: profile the PowerShell port on the reference specification; assert Pester and the
+conformance corpus pass unmodified and the module maps still correspond one-to-one.
+
+> **Expected outcome: no code change.** Research R7 measured `Parse.psm1` as spawning no external process at
+> all (26 in-process `ConvertTo-Json`/`ConvertFrom-Json` sites) and `Timing.psm1` as reading `UtcNow.Ticks`.
+> A port that does not fork is immune to the per-spawn multiplier entirely. These tasks confirm that by
+> measurement and record it; they do not presume work.
+
+- [X] T046 **Done 2026-08-11.** Profiled via `run-scenario.sh <scenario> powershell`, timing on, reference
+  scenario: `prereq` 7 ms, `state` 4 ms, `config` 616 ms, `parse` 3 699 ms, `gate` 45 ms, `recognition` 873 ms
+  (1 request), `apply` 1 283 ms (122 requests), **total 9 966 ms, 123 requests** — matching `calls.log`
+  exactly, and roughly 6× faster than the Bash port's own post-fix profile on the same scenario (T041: ~59 s).
+  Research R7's prediction holds: a port with no forking-subshell equivalent is immune to the per-spawn
+  multiplier entirely. Recorded in the Measurement Log below.
+- [X] T047 **A real defect found and fixed, not the expected "no change" outcome.** Auditing
+  `Parse.psm1`/`Config.psm1`/`PlanApply.psm1` for per-item external invocation confirmed research R7: none
+  (0 `Start-Process`/`Invoke-Expression`/native-command sites in any of the three). But profiling for T046
+  surfaced something the per-item-invocation audit wasn't looking for: every phase reported **0 requests**
+  against 123 real ones in `calls.log` — the SAME class of defect Phase 3 fixed on the Bash side (T017), just
+  by a different mechanism. Root cause: `Client.psm1` (the module holding `$script:JiraRequestCount`) is
+  imported by SEVEN other sink modules (`Recognition`, `PlanApply`, `Prefetch`, `Identity`, `Discovery`,
+  `Ticket`, `DuplicateProbe`), each independently with `-Force` — `Import-Module X -Force` is
+  `Remove-Module X` + `Import-Module X`, so each of those seven imports tore the counter (and, per the RED
+  reproduction below, the module's EXPORTS) out of whatever scope was using it and reattached a fresh, zeroed
+  one. Confirmed by temporarily logging every increment and read: a single process showed TWO independently-
+  accumulating counts interleaved (7,6,8,7,9,8,10,9…), never converging. Fixed: removed `-Force` from all
+  seven import sites plus `Reconcile.psm1`'s own (eight total), matching the already-established convention
+  documented in project memory `powershell-import-force-clobbers-caller-scope` — which this is a second,
+  larger-blast-radius instance of, not a new pattern. New regression test
+  `tests/powershell/sink/RequestCount.Tests.ps1` (observed RED first: `Get-JiraRequestCount` came back as
+  `CommandNotFoundException`, not merely a wrong count — the SAME scope-tearing the existing memory documents,
+  confirmed by direct reproduction rather than inference). Full Pester suite green (1 497 tests, 165 files);
+  `bash tests/conformance/ci-conformance.sh` exit 0, zero divergence (timing/request counts are not
+  byte-diffed, but nothing else moved either).
+- [X] T048 **Done 2026-08-11 — no structural change, confirmed by this pass's own edits.** Every file this
+  session touched on the PowerShell side (`Client.psm1` and its seven importers) already has a one-to-one Bash
+  counterpart under `scripts/bash/sink/jira/`; T047's fix changed an `Import-Module` flag, not a module's
+  existence or boundary, so module-for-module correspondence between `scripts/bash/{lib,engine,sink/jira}/`
+  and `scripts/powershell/{lib,engine,sink/jira}/` is unaffected by anything in this feature.
+
+**Checkpoint**: both ports measured, equivalence proven, and the PowerShell scope resolved by evidence.
+
+---
+
+## Phase 9: Polish & Cross-Cutting Concerns
+
+- [X] T049 **Green throughout — last confirmed 2026-08-11**: `tests/run-bash.sh`, 1 899 tests / 200 files, 0
+  failures.
+- [X] T050 **Green — done 2026-08-11 (macOS only; the Linux runner is CI, not run locally this session).**
+  Full Pester suite: 1 497 tests / 165 files, 0 failures — this is the run that both exercised and validated
+  T047's fix (a single-file run would not have caught the defect T047 found).
+- [X] T051 **Green throughout — last confirmed 2026-08-11**: `bash tests/conformance/ci-conformance.sh` exit 0,
+  zero `conformance divergence` lines, after every change this session (parse.sh, config.sh, reconcile.sh, and
+  the seven PowerShell modules).
+- [X] T052 **Done 2026-08-11.** `find scripts/bash -name '*.sh' -exec shellcheck -x -P scripts/bash {} +` and
+  `actionlint`: both clean.
+- [ ] T053 Push to `ci/windows-probe` and confirm the conformance corpus on the real Windows runner (~11 min;
+  results arrive as check-run annotations). **Take the pre-change baseline first** — `main` is not green on
+  `windows-latest`, so diff against that baseline before attributing a failure to this branch. At most one
+  retry, then hand the result back. **Done 2026-08-12 — result is UNVERIFIED, and that is the correct, final
+  status per this task's own procedure, not an open item.** First probe (this branch's HEAD, before the
+  E2BIG/locale fixes below): failure, near-universal `EXIT_CONFIG` (4) / empty stdout across the whole
+  conformance corpus. Per this task's own instruction, probed `main` itself on the identical workflow before
+  attributing anything to this branch: **`main` fails identically** — same signature, same scenarios,
+  annotation-for-annotation. This is `ci/windows-probe`'s baseline, not a regression from this feature (project
+  memory: `windows-probe-baseline-red`, a new, DISTINCT pre-existing defect from the already-documented Pester
+  one, `main-red-windows-since-015`). Per the one-retry cap, this is where this task stops: the corpus's
+  Windows behaviour is unverified for this feature, for a reason this feature did not cause and this session
+  did not investigate further (out of scope — a baseline defect, not this feature's surface).
+
+> **Two real regressions found from the SAME real-machine measurement discipline this feature is built on,
+> 2026-08-12 — reported by the maintainer from an actual Ubuntu `ubuntu-latest` CI run, not inferred.**
+>
+> **E2BIG on Linux, reintroduced.** `tests/bash/commands/test_reconcile_large_spec.bats` — the regression guard
+> for #31's original fix (Linux caps a SINGLE `jq` argument at `MAX_ARG_STRLEN`, 128 KiB, independently of the
+> much larger total `ARG_MAX`; macOS has no per-argument cap, so this class of defect is invisible locally) —
+> failed on CI. Reproduced directly (Docker, `ubuntu:24.04`, the same method #31 used, not emulated) and
+> root-caused to `plan_apply.sh`'s `plan_lifecycle` (line ~1042): `--argjson acts "${actions}"` passes the
+> WHOLE actions array via argv, for a 100-story specification. This function was NOT one of #31's five original
+> sites — it was added by a LATER consolidation pass THIS feature's own Phase 5/T042-follow-up work introduced
+> (spawn-count reduction, before this session), and never re-checked against the argv-size hazard #31 had
+> already found and fixed elsewhere. **Same audit found two more sites with the identical shape**, both also
+> introduced by this feature's own consolidation passes and neither exercised by the existing E2BIG test at
+> 100 items (preventive fixes, not independently Docker-reproduced at this scale): `recognition.sh`'s
+> `recognition_run` (the final `bound`/`new`/`blocked`/`rerouted` assembly) and `tasks_parse.sh`'s
+> `tasks_parse_document` (the final `tasks`/`skipped` assembly). All three fixed the same way #31's own five
+> sites were: route the large value through `lib/output.sh`'s `json_build` (a temp file plus `--slurpfile`
+> instead of `--argjson`) rather than argv. `plan_lifecycle`'s call shape (`-r` output over a real `<<<` input,
+> not `json_build`'s `-cn`-only shape) needed the mechanism inlined rather than forced through `json_build`
+> itself. Re-verified in a clean (non-worktree) Docker Ubuntu container matching the real CI environment: green.
+> **The general lesson, not just the three fixes**: a jq-call consolidation that removes N small argv-safe
+> calls in favour of one big batched call can reintroduce this EXACT defect by concentrating what was
+> previously many small arguments into one large one — spawn-count reduction and argv-size safety are
+> different axes, and a fix for one is not automatically safe on the other. This should be a standing check for
+> any future `--argjson`-shaped consolidation in this codebase, not just something to remember for these three.
+>
+> **The locale test's own skip-guard was never implemented.** `quickstart.md` §1a (T001) documented — since
+> Phase 2, before this session — that `fr_FR.UTF-8`/`de_DE.UTF-8` were "confirmed present on the development
+> host and the Linux CI runner" and that `tests/bash/lib/test_timing.bats` already skipped gracefully when a
+> locale was absent. Neither was true: `tests/bash/lib/test_timing.bats`'s `setup()` had no locale check at
+> all, and the same CI run showed `ubuntu-latest` does not have either locale generated —
+> `LC_ALL=fr_FR.UTF-8` silently fell back to `C`, `setlocale`'s warning landed in bats' merged `$output`, and
+> the duration assertion failed on that polluted string (`integer expression expected`) instead of the test
+> skipping with a named reason. This is exactly the failure mode T001 exists to prevent (research A-4b),
+> just never actually wired up. Fixed: a `_skip_unless_locale` helper, called at the top of the three
+> locale-dependent tests (not in shared `setup()`, which runs for every test in the file, locale-dependent or
+> not). Verified both ways: still green with no skip on a host where both locales ARE generated (macOS,
+> local), and skips explicitly and correctly (`# skip fr_FR.UTF-8 not generated on this host`) in a minimal
+> Ubuntu container matching the CI environment exactly. `quickstart.md`'s false claims corrected alongside it.
+- [X] T054 **Done 2026-08-11.** `CHANGELOG.md`'s `[Unreleased]` section: the locale fix, the request-counter
+  fix (both ports, two different root causes), the `config.local.yml` read-once fix, and the spawn/local-time
+  reduction, each with its measured figure.
+- [X] T055 **Done 2026-08-11.** `docs/07-configuration-and-secrets.md`: a new paragraph on the per-process
+  configuration snapshot (spec A-5) — a source edited on disk mid-run is not observed until the next run, and a
+  malformed source is never cached so it keeps failing on every read that reaches it. `docs/05-reconcile-flow.md`:
+  the request-counting boundary paragraph was describing the PRE-Phase-3 defect as current behaviour (a real
+  staleness, not merely an omission) — corrected to describe the file-backed, subshell-proof counter and cite
+  the actual pre-fix undercount (123 issued, 0 reported) as history rather than a live caveat.
+- [X] T056 **Confirmed 2026-08-11.** Every test file this session added is new tests (`T033`, `T034`–`T036b`,
+  `T027`'s two spawn-budget cases, `T040`, `T058`, the PowerShell `RequestCount.Tests.ps1`) or an adaptation this
+  feature's own earlier work already made (`test_config_read_once.bats`'s `_cfg_json_encode` case, T060, FR-032
+  carve-out). No PRE-EXISTING test's assertion was altered to accommodate a behaviour change beyond T016. No
+  conformance scenario JSON changed at all (`git diff main...HEAD -- 'tests/conformance/scenarios/*.json'` is
+  empty) — T016's "carve-out" turned out not to require a file edit, since no golden expectation file exists for
+  that scenario in the first place.
+
+---
+
+## Measurement Log
+
+Append one row per measurement. **Counting runs and timing runs are separate runs** (research R4).
+
+| Date | Task | Host | Rig | Total | parse | config | gate | plan | apply | spawns | µs/spawn |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2026-08-10 | pre | unmanaged | mock, 61 items | 91 515 ms | 52 698 | 514 | 465 | 16 286 | 16 164 | 20 243 | 2 445 |
+| 2026-08-10 | pre | unmanaged | mock, 61 items (run 3) | 96 519 ms | 56 263 | 546 | 446 | 17 022 | 16 517 | — | — |
+| — | pre | **managed (maintainer)** | live Jira, consuming repo | **3–6 min** | 20 s | 84 s | 79 s | 83 s | 82 s | ~20 000 | **9–18 000 (inferred)** |
+| 2026-08-10 | post-T025/T026 | unmanaged | mock, 61 items | 80 694 ms | 38 146 | 542 | 540 | 17 368 | 16 493 | not re-measured — spawn-count harness (T002) hit an env-propagation quirk under `run-scenario.sh` this pass; see note below | — |
+| 2026-08-10 | post-T025/T026 | unmanaged | mock, 61 items (run 2) | 76 552 ms | 35 736 | 485 | 454 | 16 223 | 16 098 | — | — |
+| 2026-08-10 | T018 baseline (run 1) | unmanaged | mock, 61 items | 73 544 ms | 30 092 | 547 | 515 | 17 103 | 16 914 | — | — |
+| 2026-08-10 | T018 baseline (run 2) | unmanaged | mock, 61 items | 77 353 ms | 31 808 | 560 | 521 | 18 287 | 17 564 | — | — |
+| 2026-08-10 | T018 baseline (run 3) | unmanaged | mock, 61 items | 79 422 ms | 31 299 | 537 | 487 | 19 181 | 19 122 | — | — |
+| 2026-08-10 | T019 spawn baseline | unmanaged | mock, 61 items | — | — | — | — | — | — | 14 556 (13 013 jq + 1 543 sed) | — |
+| 2026-08-10 | T019a recognition attribution | unmanaged | mock, 61 items | — | — | — | — | — | — | 2 398 of 13 013 jq calls (18.4%) fall inside the `recognition` phase window | — |
+| 2026-08-11 | post-T030/T031/T031a | unmanaged | mock, 61 items | — | — | — | — | — | — | 13 057 (11 514 jq + 1 543 sed), down from 14 556 | — |
+| 2026-08-11 | pre (real, v0.14.0) | **managed (maintainer)** | live Jira, consuming repo | **349 241 ms** | 20 342 | 84 253 | 79 087 | 83 236 | 81 885 | — | — |
+| 2026-08-11 | T041 (run 1) | unmanaged | mock, 61 items | 61 243 ms | 28 067 | 122 | 107 | 13 898 | 15 518 | — | — |
+| 2026-08-11 | T041 (run 2) | unmanaged | mock, 61 items | 58 878 ms | 26 383 | 129 | 104 | 13 040 | 15 749 | — | — |
+| 2026-08-11 | T041 (run 3) | unmanaged | mock, 61 items | 57 981 ms | 26 502 | 120 | 100 | 12 696 | 15 161 | — | — |
+| 2026-08-11 | T041 (run 4) | unmanaged | mock, 61 items | 59 427 ms | 27 135 | 121 | 124 | 13 394 | 15 060 | — | — |
+| 2026-08-11 | T041 (run 5) | unmanaged | mock, 61 items | 59 237 ms | 26 468 | 113 | 98 | 13 467 | 15 512 | — | — |
+| 2026-08-11 | T046 (PowerShell) | unmanaged | mock, 61 items | 9 966 ms | 3 699 | 616 | 45 | — | 1 283 | 0 (no external process) | — |
+| 2026-08-11 | T044 | unmanaged | mock, 101 items | 95 885 ms | 41 390 | 120 | 103 | 22 081 | 26 194 | — (204 requests) | — |
+| 2026-08-12 | post-T057/T058/T060/T061 (real) | **managed (maintainer)** | live Jira, consuming repo | **17 117 ms** | 6 272 | 3 579 | 365 | 3 272 | 395 | — (1 request) | — |
+
+The third row is the maintainer's own **inferred** measurement; the row dated 2026-08-11 above it is the same
+machine's **real** `reconcile --force` timing report on v0.14.0 (pre-feature) — `prereq` 17 ms, `state` 0 ms,
+`recognition` 421 ms, matching the inferred figures closely and confirming `requests: 0ms` on every phase (the
+same request-counter defect Phase 3 fixes). Shell `time`: 75.71 s user, 109.23 s system, 52% CPU, 5:50.45
+(350.45 s) wall — under half the wall clock is active CPU, consistent with an EDR-style agent delaying each
+`exec()` without itself consuming CPU during the delay. Item count (stories/tasks) for this run was not
+recorded; still needed to normalise against the 61-item reference. T020's own isolated per-spawn µs benchmark
+(`quickstart.md` §5a) has not yet been run on this machine — the number above is a full-run report, not that
+micro-benchmark, so µs/spawn here is still blank pending it. Per-spawn cost is otherwise inferred from
+spawns × time and would be confirmed by T020.
+
+> **Second real pre-fix run (2026-08-11), same 1-story specification, network connected.** `prereq` 19 ms,
+> `config` 82 654 ms, `parse` 20 555 ms, `gate` 79 954 ms, `recognition` 5 497 ms, `plan` 83 726 ms, `apply`
+> 84 251 ms, total 356 565 ms, `requests: 0` throughout (same v0.14.0 defect). Outcome: `Created 0, Updated 0,
+> Skipped 1, Recognised 1` — the story already carried a ticket from the earlier run and needed no change.
+> `config`/`gate` are within 1% of the first run's figures despite the different outcome, reinforcing the
+> fixed-per-run reading above. **New finding: `apply` cost 84 251 ms while writing nothing (`Skipped: 1`)** —
+> whatever dominates `apply` here is not proportional to writes performed, at least at this item count. A
+> single `recognition` read (one ticket, already bound) cost 5 497 ms alone, suggesting **individual Jira
+> requests may cost multiple seconds on this network** (corporate proxy/TLS/inspection) — if so, part of
+> `plan`/`apply`'s cost is request latency this feature's spawn-count work cannot address, not spawn count.
+> Shell `time`: 77.69 s user, 112.02 s system, 53% CPU, 5:57.92 (357.92 s) wall. **Next**: re-run this exact
+> scenario (same spec, same already-bound story — an apples-to-apples "skip" case) on the
+> `feat/024-reconcile-local-performance` branch, without `LC_ALL=C`, to get the first real per-phase
+> **request count** on this machine and settle whether `apply`/`plan` are request-latency-bound or
+> spawn-bound.
+
+> **T042 acceptance evidence (2026-08-11) — same machine, same 1-story "skip" scenario, on
+> `feat/024-reconcile-local-performance` (all fixes in this pass, no `LC_ALL=C`).** `prereq` 22 ms, `state` 2
+> ms, `config` 33 885 ms, `parse` 6 612 ms, `gate` 33 659 ms, `recognition` 6 604 ms, `plan` 38 759 ms, `apply`
+> 35 399 ms, **total 154 942 ms, requests: 1** — the first non-zero request count ever measured on this
+> machine (Phase 3's fix confirmed live). Shell `time`: 41.18 s user, 62.71 s system, 66% CPU, 2:36.04
+> (156.04 s) wall.
+>
+> **vs. the pre-fix run above**: total -56.5% (356 565 → 154 942 ms); CPU time (user+system) -45.3%
+> (189.71 s → 103.89 s) — a genuine reduction in work done, not just less waiting. Per phase: `config` -59.0%,
+> `parse` -67.8%, `gate` -57.9%, `plan` -53.7%, `apply` -58.0%. `recognition` +20.1% (5 497 → 6 604 ms) — noise
+> from a single Jira GET's variable network latency, not a regression (recognition.sh's fix only touched local
+> `jq` calls). **`gate` and `plan` improved despite receiving no direct code change** — both resolve
+> configuration via `config.sh`, so they inherit T038's per-line-forking fix indirectly.
+>
+> **The single request this run made was `recognition`'s read; `apply` issued zero Jira requests
+> (`Skipped: 1`) yet still cost 35 399 ms, entirely local** — confirms the T030/T031 note's prediction:
+> `plan_writes`/`apply_writes`'s remaining per-story payload-building (left untouched this pass) is real,
+> substantial, non-network cost, and is where the next optimisation pass should look first.
+>
+> **Honest gap**: even at -56.5%, this machine is nowhere near FR-023 (<20 s total excluding requests) or
+> FR-024 (no phase >5 s) — every phase but `prereq`/`state` still exceeds 5 s, and the total (minus the one
+> request) is still ~155 s. The relative win is large and real; the feature's own numeric acceptance criteria
+> are not met on this machine yet.
+
+> **T043/T057/T058/T060/T061 real-machine confirmation (2026-08-12) — same machine, same 1-story "skip"
+> scenario, `feat/024-reconcile-local-performance` after T057 (config cache), T058 (third read site closed),
+> T060 (per-line fork removal), T061 (fast-path scans).** `prereq` 22 ms, `state` 1 ms, `config` 3 579 ms,
+> `parse` 6 272 ms, `gate` 365 ms, `recognition` 3 211 ms, `plan` 3 272 ms, `apply` 395 ms, **total 17 117 ms,
+> requests: 1**. Shell `time`: 6.93 s user, 6.37 s system, 73% CPU, 18.118 s wall.
+>
+> **vs. the T042 acceptance run**: total -89.0% (154 942 → 17 117 ms); CPU time (user+system) -87.2%
+> (103.89 s → 13.30 s). Per phase: `config` -89.4% (33 885 → 3 579 ms), `gate` -98.9% (33 659 → 365 ms), `plan`
+> -91.6% (38 759 → 3 272 ms), `apply` -98.9% (35 399 → 395 ms), `recognition` -51.4% (6 604 → 3 211 ms, a single
+> Jira GET's variable network latency, consistent with the earlier run's own noise band). `parse` is
+> essentially unchanged (6 612 → 6 272 ms, -5.1%) — expected, since T027's remaining scope
+> (`_parse_ac_flush`/`_parse_epic_flush`) targets per-item scaling and this scenario is one story.
+>
+> **This resolves every "not yet measured on the motivating machine" caveat left open by T043, T057, T058,
+> T060, and T061.** `gate` and `apply` collapsing to the low hundreds of milliseconds confirms `config.local.yml`
+> was the dominant real cost behind both — T057's cache plus T058's third-site closure removed nearly all of
+> it, and T060/T061's fork removal accounts for what's left. This is a materially LARGER win than any single
+> task's own conservative projection ("apply's ~35 s toward single digits" read as single-digit *seconds*;
+> 395 ms beats that by roughly two orders of magnitude) — the three fixes compound rather than merely add.
+>
+> **FR-023 (<20 s total excluding requests) is now MET on this machine for the first time**: 17 117 ms total
+> including the one request's cost. **FR-024 (no phase >5 s) is NOT yet met**: `parse` at 6 272 ms is now the
+> *only* phase exceeding the 5 s ceiling — every other phase is under 3.6 s. The next optimisation lever, if
+> pursued, is T027's deferred remainder, not a new area.
+
+---
+
+## Dependencies & Execution Order
+
+### Phase Dependencies
+
+- **Phase 1 (Setup)** — T002/T003 block Phase 4 and Phase 5; T001 blocks Phase 2's locale tests.
+- **Phase 2 (US1, locale)** — depends on T001 only. **First by maintainer direction.** Shippable alone.
+- **Phase 3 (request counter, FR-036/FR-037)** — independent of Phase 2 in code, sequenced after it by
+  direction. Blocks Phase 4's decomposition and therefore every claim in Phases 5–7.
+- **Phase 4 (Baseline)** — requires Phases 2 and 3. Blocks Phases 5, 6, 7. T019a additionally blocks T024a
+  and T031a, which are written against whatever it measures.
+- **Phase 5 (US3)** — requires Phase 4. T025→T028 must complete before T029; T029, T030, T031 are strictly
+  sequential with a corpus run between each (research R6). T031a follows them and is conditional on T019a.
+- **Phase 6 (US2)** — requires Phase 4; reuses Phase 5's technique, so sequenced after it.
+- **Phase 7 (US4)** — requires Phases 5 and 6. Measurement only.
+- **Phase 8 (US5)** — requires Phase 5 (for equivalence checking); otherwise independent.
+- **Phase 9 (Polish)** — requires all.
+
+### Within Each Phase
+
+Tests precede implementation, always, and must be observed failing for the right reason before the fix.
+
+### Parallel Opportunities
+
+- **Phase 1**: T001, T002 in parallel (T003 after T002).
+- **Phase 2**: T004–T007 all parallel (different assertions, and T007 is a different port). Implementation
+  T008→T009 is sequential — same function.
+- **Phase 3**: T011–T013 parallel.
+- **Phase 4**: T019, T019a, T020 parallel with each other; T018 separate (timing must not share a run with
+  counting).
+- **Phase 5**: T022–T024a parallel. **Implementation is deliberately serial** — this is the one place where
+  parallelism is refused on purpose.
+- **Phase 6**: T033–T036b parallel.
+- **Phase 9**: T049, T050, T052, T054, T055 parallel; T051 and T053 after them.
+
+### Parallel Example: Phase 2
+
+```text
+# Four agents, four independent assertions:
+T004  fr_FR duration correctness      -> tests/bash/lib/test_timing.bats
+T005  de_DE + C matrix, byte-identity -> tests/bash/lib/test_timing.bats
+T006  fail-open under set -e          -> tests/bash/lib/test_timing.bats
+T007  PowerShell regression guard     -> tests/powershell/lib/Timing.Tests.ps1
+# Then serially: T008 -> T009 -> T010
+```
+
+---
+
+## Implementation Strategy
+
+### MVP (Phase 1 + Phase 2 only)
+
+The locale fix, shipped alone. It closes the feature's only live crash — under `set -euo pipefail` the failing
+clock read aborts the whole reconcile — and restores the diagnostic for every operator on a comma-decimal
+locale, which is most of continental Europe and Latin America. It changes no behaviour and needs no
+re-measurement to justify.
+
+### Incremental delivery
+
+1. **Phases 1–2** → comma-locale operators can measure a run. Ship.
+2. **Phase 3** → the report tells the truth about requests. Ship.
+3. **Phase 4** → the baseline exists on both hosts, decomposable for the first time.
+4. **Phase 5** → the four expensive phases stop forking. The largest single win.
+5. **Phase 6** → configuration read once and parsed without forking.
+6. **Phases 7–8** → acceptance measured, cross-port equivalence proven.
+7. **Phase 9** → gates, docs, Windows probe.
+
+### Three places to stop and think rather than push through
+
+- **T016** is the only existing expectation this feature edits. If a second one needs changing, the feature has
+  exceeded its scope (FR-032) — stop and report rather than adjusting it.
+- **T029–T031** are serial by design. If a corpus divergence appears after doing two of them together, the
+  bisect cost is exactly what the serial ordering was meant to avoid.
+- **T043** may not meet FR-025's bound on the managed host, and that is an acceptable outcome to report. The
+  residual variance is endpoint-security inspection cost, not code. Do not tune the measurement to hit the
+  number.

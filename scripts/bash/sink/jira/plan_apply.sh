@@ -339,6 +339,11 @@ plan_writes() {
     [[ -n "${story_label_warning}" ]] && plan_warnings="$(jq -c --arg w "${story_label_warning}" '. + [$w]' <<< "${plan_warnings}")"
   fi
 
+  # 024, C1.2: native accumulation (a bash array of already-JSON actions,
+  # joined with ONE `jq -cs` after the loop) rather than a `. + [$a]` merge
+  # re-parsed on every story — the same O(n²)-avoidance already applied in
+  # parse.sh (T026) and recognition.sh.
+  local -a stories_arr=()
   local stories="[]" n i
   n="$(jq '.stories | length' <<< "${doc}")"
   for ((i = 0; i < n; i++)); do
@@ -518,8 +523,9 @@ plan_writes() {
       action="$(jq -cn --arg u "${base}/rest/api/3/issue/${ticket}" --argjson f "${fields}" --argjson stamp "${identity_stamp}" \
         '{method:"PUT", url:$u, body:{fields:$f}, role:"story"} + (if $stamp == null then {} else {identity_stamp:$stamp} end)')"
     fi
-    stories="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${stories}")"
+    stories_arr+=("${action}")
   done
+  ((${#stories_arr[@]} > 0)) && stories="$(printf '%s\n' "${stories_arr[@]}" | jq -cs '.')"
 
   # The parent type's own label decision (017, contract §4) — resolved here,
   # independently of the story type's, and reused whether the parent is
@@ -1015,16 +1021,69 @@ plan_lifecycle() {
   local on_drift order n i
   on_drift="$(jq -r '.on_drift // "abort"' <<< "${lc}")"
   order="$(jq -c '.order // []' <<< "${lc}")"
-  n="$(jq '.stories | length' <<< "${doc}")"
+
+  # 024, contracts/spawn-budget.md C1.2/C1.3: the loop below used to re-read
+  # `.stories[i].local_id`, `.[i]` (the action), `.method`, and six fields of
+  # the matched ticket — ten `jq` calls per story, every one of them a pure
+  # read — with their OWN `jq` call per story. One call decodes all of it
+  # for the WHOLE array instead, matching `.[i] // null`'s exact semantics
+  # (a shorter `actions` array than `doc.stories`, `$acts[$i]` past the end,
+  # is `null` in jq too — the same as the per-index `// null` it replaces).
+  local _lc_sep=$'\x1f'
+  local -a _lc_sid=() _lc_action=() _lc_method=() _lc_tk=() _lc_status=() _lc_target=() \
+    _lc_category=() _lc_flagged=() _lc_transition_id=() _lc_key=() _lc_blockers=()
+  local _lc_i=0 _f1 _f2 _f3 _f4 _f5 _f6 _f7 _f8 _f9 _f10 _f11
+  # 024, T053 real-machine finding: `actions` and `doc` both grow with story
+  # count, and Linux caps a SINGLE jq argument at MAX_ARG_STRLEN (128 KiB)
+  # independently of the much larger total ARG_MAX (research/#31's original
+  # fix for the same class of defect, at different call sites — see
+  # lib/output.sh's `json_build`). A hundred-story specification's `actions`
+  # crossed that cap here and failed with E2BIG on Linux only (never on
+  # macOS, which has no per-argument limit) — reproduced in a Ubuntu
+  # container, not inferred. `json_build` itself is `-cn`-shaped (null input,
+  # builds a JSON value) and this call is `-r` over a real `<<<` input, so
+  # its exact mechanism — a temp file plus `--slurpfile` instead of
+  # `--argjson` — is inlined here rather than forcing this call into
+  # `json_build`'s shape.
+  local _lc_acts_f _lc_lc_f _lc_acts_arg _lc_lc_arg
+  _lc_acts_f="$(mktemp)"; printf '%s' "${actions}" > "${_lc_acts_f}"
+  _lc_lc_f="$(mktemp)"; printf '%s' "${lc}" > "${_lc_lc_f}"
+  _lc_acts_arg="${_lc_acts_f}"
+  _lc_lc_arg="${_lc_lc_f}"
+  if [[ "${JIRA_PATH_STYLE}" == "native" ]] && command -v cygpath > /dev/null 2>&1; then
+    _lc_acts_arg="$(cygpath -m "${_lc_acts_f}")"
+    _lc_lc_arg="$(cygpath -m "${_lc_lc_f}")"
+  fi
+  while IFS="${_lc_sep}" read -r _f1 _f2 _f3 _f4 _f5 _f6 _f7 _f8 _f9 _f10 _f11; do
+    _lc_sid[_lc_i]="${_f1}"; _lc_action[_lc_i]="${_f2}"; _lc_method[_lc_i]="${_f3}"
+    _lc_tk[_lc_i]="${_f4}"; _lc_status[_lc_i]="${_f5}"; _lc_target[_lc_i]="${_f6}"
+    _lc_category[_lc_i]="${_f7}"; _lc_flagged[_lc_i]="${_f8}"; _lc_transition_id[_lc_i]="${_f9}"
+    _lc_key[_lc_i]="${_f10}"; _lc_blockers[_lc_i]="${_f11}"
+    _lc_i=$((_lc_i + 1))
+  done < <(jq -r --arg sep "${_lc_sep}" --slurpfile acts_f "${_lc_acts_arg}" --slurpfile lc_f "${_lc_lc_arg}" '
+    ($acts_f[0]) as $acts | ($lc_f[0]) as $lc |
+    .stories | to_entries[] | (.value.local_id) as $sid | (($acts[.key]) // null) as $act |
+    (($lc.tickets[$sid]) // {}) as $tk | [
+      $sid,
+      ($act | tostring),
+      (if $act == null then "" else ($act.method // "") end),
+      ($tk | tostring),
+      ($tk.status // ""), ($tk.target // ""), ($tk.category // "unknown"),
+      (($tk.flagged // false) | tostring), ($tk.transition_id // ""), ($tk.key // ""),
+      ($tk.blockers // [] | tostring)
+    ] | join($sep)
+  ' <<< "${doc}")
+  rm -f "${_lc_acts_f}" "${_lc_lc_f}"
+  n="${_lc_i}"
 
   local kept="[]" warns="[]" notes="[]"
   for ((i = 0; i < n; i++)); do
     local sid action method tk
-    sid="$(jq -r ".stories[${i}].local_id" <<< "${doc}")"
-    action="$(jq -c ".[${i}] // null" <<< "${actions}")"
+    sid="${_lc_sid[i]}"
+    action="${_lc_action[i]}"
     [[ "${action}" == "null" ]] && continue
-    method="$(jq -r '.method' <<< "${action}")"
-    tk="$(jq -c --arg s "${sid}" '.tickets[$s] // {}' <<< "${lc}")"
+    method="${_lc_method[i]}"
+    tk="${_lc_tk[i]}"
 
     local drop_content="false" do_transition="false"
     # --- Zero churn: drop an unchanged UPDATE ---------------------------------
@@ -1052,12 +1111,12 @@ plan_lifecycle() {
 
     # --- Drift / Flagged: decide the transition -------------------------------
     local status target category flagged transition_id key
-    status="$(jq -r '.status // ""' <<< "${tk}")"
-    target="$(jq -r '.target // ""' <<< "${tk}")"
-    category="$(jq -r '.category // "unknown"' <<< "${tk}")"
-    flagged="$(jq -r '.flagged // false' <<< "${tk}")"
-    transition_id="$(jq -r '.transition_id // ""' <<< "${tk}")"
-    key="$(jq -r '.key // ""' <<< "${tk}")"
+    status="${_lc_status[i]}"
+    target="${_lc_target[i]}"
+    category="${_lc_category[i]}"
+    flagged="${_lc_flagged[i]}"
+    transition_id="${_lc_transition_id[i]}"
+    key="${_lc_key[i]}"
 
     if [[ -n "${status}" && -n "${target}" && "${status}" != "${target}" ]]; then
       if [[ "${flagged}" == "true" ]]; then
@@ -1081,7 +1140,7 @@ plan_lifecycle() {
     if [[ "${do_transition}" == "true" && -n "${transition_id}" && -n "${key}" ]]; then
       local base tres note
       base="$(jq -r '.base_url // ""' <<< "${lc}")"
-      tres="$(_plan_transition_action "${base}" "${key}" "${transition_id}" "$(jq -c '.blockers // []' <<< "${tk}")" "${sid}")"
+      tres="$(_plan_transition_action "${base}" "${key}" "${transition_id}" "${_lc_blockers[i]}" "${sid}")"
       kept="$(jq -c --argjson a "$(jq -c '.action' <<< "${tres}")" '. + [$a]' <<< "${kept}")"
       note="$(jq -r '.note // empty' <<< "${tres}")"
       [[ -n "${note}" ]] && notes="$(jq -c --arg n "${note}" '. + [$n]' <<< "${notes}")"
@@ -1298,6 +1357,17 @@ _plan_apply_privacy_projection() {
   jq -c --argjson m "${managed}" 'if (.fields.description | type) == "object" then (.fields.description.content = $m) else . end' <<< "${body}"
 }
 
+# _apply_writes_decode_rows <actions-json> <sep> — one row per action,
+# `<sep>`-joined method/url/body(compact JSON or the literal "null"). The
+# WHOLE array decoded by one `jq` call regardless of action count (024,
+# C1.2) — split out so the count itself is directly testable
+# (test_plan_apply_spawn_budget.bats), the same shape as parse.sh's
+# `_parse_lines_to_json`.
+_apply_writes_decode_rows() {
+  local actions="$1" sep="$2"
+  jq -r --arg sep "${sep}" '.[] | [.method, .url, ((.body // null) | tostring)] | join($sep)' <<< "${actions}"
+}
+
 # apply_writes <actions-json> [extra-known-coords-json] — guard every payload,
 # then perform the writes in order. Returns EXIT_BLOCK (9) with zero writes if any
 # payload is blocked; otherwise returns the worst (highest) transport exit code.
@@ -1309,13 +1379,31 @@ apply_writes() {
   # they never false-block; it is empty unless the caller supplies one out of band.
   allow="${SPEC_KIT_JIRA_ALLOWLIST:-[]}"
 
-  local n
-  n="$(jq 'length' <<< "${actions}")"
+  # 024, C1.2/C1.3: both loops below used to re-read `.method`/`.url`/`.body`
+  # off `actions` with their OWN `jq` call per action, per loop (up to 3N+3N
+  # calls for N actions). One `jq -c` call decodes the WHOLE array into
+  # parallel bash arrays instead — `\x1f` (not a literal tab: bash's `read`
+  # treats tab as IFS *whitespace* and silently squeezes an empty field, the
+  # same defect fixed in recognition.sh) separates the three columns, `\n`
+  # separates the rows; `.body`'s own compact JSON can never contain a raw
+  # 0x1f byte (jq escapes every control character in a string value), so it
+  # is safe as a field inside this row.
+  local _aw_sep=$'\x1f'
+  local -a _amethod=() _aurl=() _abody=()
+  local _aw_i=0 _aw_method _aw_url _aw_body
+  while IFS="${_aw_sep}" read -r _aw_method _aw_url _aw_body; do
+    _amethod[_aw_i]="${_aw_method}"
+    _aurl[_aw_i]="${_aw_url}"
+    _abody[_aw_i]="${_aw_body}"
+    _aw_i=$((_aw_i + 1))
+  done < <(_apply_writes_decode_rows "${actions}" "${_aw_sep}")
+  local n="${_aw_i}"
 
   # (1) Pre-write gate — scan every content payload before writing anything.
   local i body
   for ((i = 0; i < n; i++)); do
-    body="$(jq -c ".[${i}].body // {}" <<< "${actions}")"
+    body="${_abody[i]}"
+    [[ "${body}" == "null" ]] && body="{}"
     privacy_guard_scan "$(_plan_apply_privacy_projection "${body}")" "${coords}" "${allow}" || return $?
   done
 
@@ -1325,9 +1413,10 @@ apply_writes() {
   # is attempted once a read/write is unreliable (FR-032, monotonic escalation).
   local worst=0 method url rc
   for ((i = 0; i < n; i++)); do
-    method="$(jq -r ".[${i}].method" <<< "${actions}")"
-    url="$(jq -r ".[${i}].url" <<< "${actions}")"
-    body="$(jq -c ".[${i}].body // empty" <<< "${actions}")"
+    method="${_amethod[i]}"
+    url="${_aurl[i]}"
+    body="${_abody[i]}"
+    [[ "${body}" == "null" ]] && body=""
     _plan_apply_write "${method}" "${url}" "${body}" /dev/null
     rc=$?
     ((rc > worst)) && worst=${rc}

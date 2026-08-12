@@ -33,7 +33,14 @@ Import-Module (Join-Path $PSScriptRoot '../sink/jira/Hierarchy.psm1') -Force -Gl
 Import-Module (Join-Path $PSScriptRoot '../lib/Prereq.psm1') -Force          # the bridge-unavailable cause
 Import-Module (Join-Path $PSScriptRoot '../lib/Timing.psm1') -Force          # phase timing (021, T015)
 Import-Module (Join-Path $PSScriptRoot '../lib/RunState.psm1') -Force        # the run-state short-circuit (021, T030)
-Import-Module (Join-Path $PSScriptRoot '../sink/jira/Client.psm1') -Force    # Get-JiraRequestCount — a nested import inside Recognition.psm1/PlanApply.psm1 is not enough (module-scope, not session)
+# No -Force (024, T046/T047): Recognition.psm1 (imported above) already loads
+# this module internally; a -Force reimport here would tear its
+# $script:JiraRequestCount out of Recognition.psm1's (and every other sink
+# module's) scope and reattach a fresh, zeroed one to this scope instead —
+# the exact defect this comment used to justify with -Force, reasoning
+# backwards from the symptom. See project memory:
+# powershell-import-force-clobbers-caller-scope.
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/Client.psm1')
 # No -Force: a nested import inside PlanApply.psm1 is not enough (module-scope,
 # not session) to reach Test-JiraAdfContentHasChecklist/Get-JiraAdfChecklistSlice
 # from here — but -Force here would tear Adf.psm1 out of a caller that already
@@ -1005,6 +1012,15 @@ function Invoke-JiraReconcileRun {
 
     Stop-JiraTimingPhase -Phase 'parse' -RequestCount (Get-JiraRequestCount)
 
+    # 024, contracts/request-counting.md C2.3: recognition's own phase window
+    # opens here, wrapping the prefetch bulk read below — it is recognition's
+    # request, issued on recognition's behalf (021 US4), and a request issued
+    # between two phases rather than inside one would escape every phase's
+    # count while still landing in the run total, breaking FR-036's "the
+    # summed per-phase counts equal the number of requests issued" (SC-014).
+    # Mirror of the bash port's equivalent move in reconcile.sh.
+    Start-JiraTimingPhase -Phase 'recognition' -RequestCount (Get-JiraRequestCount)
+
     # 021 US4, contracts/recognition-prefetch.md: gather every recorded key
     # this run is about to read — parent, stories, tasks — and prime the
     # prefetch cache with ONE bulk read before the per-key phase begins.
@@ -1046,8 +1062,6 @@ function Invoke-JiraReconcileRun {
         }
     }
     Invoke-JiraPrefetchLoad -Keys $prefetchKeys.ToArray()
-
-    Start-JiraTimingPhase -Phase 'recognition' -RequestCount (Get-JiraRequestCount)
 
     # R5 step 2a — RECOGNISE THE PARENT (Phase 5, US2, T070/T077;
     # contracts/parent-marker.md "Ordering within one run" step 5). One read

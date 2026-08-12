@@ -32,12 +32,19 @@ source "${_parse_dir}/markdown.sh" # the Markdown subset tokenizer (016, contrac
 # acceptance criterion, or design item. Preserves every other line,
 # including blank ones.
 _parse_strip_marker_lines() {
-  local doc line story_kind spec_kind first=1 out=""
+  local doc line story_json spec_json first=1 out=""
   doc="$(cat)"
   while IFS= read -r line || [[ -n "${line}" ]]; do
-    story_kind="$(story_marker_parse_line "${line}" | jq -r '.kind')"
-    spec_kind="$(spec_marker_parse_line "${line}" | jq -r '.kind')"
-    [[ "${story_kind}" != "none" || "${spec_kind}" != "none" ]] && continue
+    # Both parsers return the exact literal `{"kind":"none"}` for the
+    # common case (every other return path routes through json_canonical,
+    # whose sorted keys never match this literal) — a string comparison
+    # reads that answer without a `jq -r '.kind'` fork per line, which
+    # research R5 measured as the parse phase's dominant cost (024,
+    # contracts/spawn-budget.md C1.2/C1.3). The classification itself is
+    # untouched: still the same two functions, same grammar, same result.
+    story_json="$(story_marker_parse_line "${line}")"
+    spec_json="$(spec_marker_parse_line "${line}")"
+    [[ "${story_json}" != '{"kind":"none"}' || "${spec_json}" != '{"kind":"none"}' ]] && continue
     if ((first)); then out="${line}"; first=0; else out="${out}"$'\n'"${line}"; fi
   done <<< "${doc}"
   printf '%s' "${out}"
@@ -62,14 +69,22 @@ _parse_strip_marker() {
 }
 
 # _parse_lines_to_json — read lines on stdin, emit a compact JSON array of the
-# non-empty lines as strings ([] when none).
+# non-empty lines as strings ([] when none). Accumulates into a bash array
+# and encodes it with ONE jq call at the end, rather than one jq call per
+# line re-parsing the whole accumulator each time (O(n) spawns, O(n²) data —
+# 024, research R5).
 _parse_lines_to_json() {
-  local acc="[]" line
+  local -a lines=()
+  local line
   while IFS= read -r line || [[ -n "${line}" ]]; do
     [[ -z "${line}" ]] && continue
-    acc="$(jq -c --arg v "${line}" '. + [$v]' <<< "${acc}")"
+    lines+=("${line}")
   done
-  printf '%s' "${acc}"
+  if ((${#lines[@]} == 0)); then
+    printf '[]'
+    return 0
+  fi
+  printf '%s\n' "${lines[@]}" | jq -Rn -c '[inputs]'
 }
 
 # parse_title <folder-slug> — the deterministic title ladder (FR 013), first
@@ -179,26 +194,20 @@ parse_description_blocks() {
 
   # B9 cap: content blocks (paragraph/bullet_list/ordered_list/code) are kept
   # up to the first two; headings are always carried through, then a heading
-  # left trailing with nothing kept after it is dropped.
-  local kept="[]" content_count=0 nb idx
-  nb="$(jq 'length' <<< "${all_blocks}")"
-  for ((idx = 0; idx < nb; idx++)); do
-    local blk btype
-    blk="$(jq -c ".[${idx}]" <<< "${all_blocks}")"
-    btype="$(jq -r '.type' <<< "${blk}")"
-    if [[ "${btype}" == "heading" ]]; then
-      kept="$(jq -c --argjson b "${blk}" '. + [$b]' <<< "${kept}")"
-      continue
-    fi
-    ((content_count >= 2)) && continue
-    kept="$(jq -c --argjson b "${blk}" '. + [$b]' <<< "${kept}")"
-    content_count=$((content_count + 1))
-  done
-  local kn; kn="$(jq 'length' <<< "${kept}")"
-  while ((kn > 0)) && [[ "$(jq -r ".[$((kn - 1))].type" <<< "${kept}")" == "heading" ]]; do
-    kept="$(jq -c '.[:-1]' <<< "${kept}")"
-    kn=$((kn - 1))
-  done
+  # left trailing with nothing kept after it is dropped. One declarative jq
+  # call regardless of block count, rather than up to three jq calls per
+  # block in a bash loop (024, contracts/spawn-budget.md C1.2/C1.3) — jq's
+  # own `reduce`/`until` express exactly the same fold-then-trim the bash
+  # loop did, so the result is identical by construction, not by re-testing.
+  local kept
+  kept="$(jq -c '
+    def trim_trailing_headings: until((length == 0) or (.[-1].type != "heading"); .[:-1]);
+    (reduce .[] as $b ({kept: [], cc: 0};
+        if ($b.type == "heading") then .kept += [$b]
+        elif (.cc < 2) then (.kept += [$b] | .cc += 1)
+        else . end)
+     | .kept) | trim_trailing_headings
+  ' <<< "${all_blocks}")"
 
   # Never empty: fall back to the H1 text, then a fixed sentence.
   if [[ "$(jq 'length' <<< "${kept}")" -eq 0 ]]; then
@@ -220,15 +229,34 @@ parse_acceptance_criteria() {
   local doc line
   doc="$(cat)"
 
-  local blocks="[]"
-  local given="[]" when="[]" then="[]" have_then=0 last=""
+  local -a scenario_json=()
+  local -a given_items=() when_items=() then_items=()
+  local last=""
 
+  # _parse_ac_join <value...> — zero or more already-JSON clause values,
+  # joined into a compact JSON array by plain string concatenation, never a
+  # jq call (024, T027, contracts/spawn-budget.md C1.2/C1.3). Each value is
+  # itself markdown_tokenize_inline's own compact-JSON output — already
+  # valid JSON — so no re-parse is needed to wrap it, only a `,` join.
+  _parse_ac_join() {
+    (($# == 0)) && { printf '[]'; return 0; }
+    local IFS=,
+    printf '[%s]' "$*"
+  }
+
+  # Accumulates one already-JSON scenario object per flush into a bash
+  # array, joined ONCE at the very end (below) — never a `. + [$v]` jq
+  # re-parse-and-append per scenario, the same O(n) spawns / O(n²) data
+  # pattern T026/T030 fixed elsewhere.
   _parse_ac_flush() {
-    if [[ "$(jq 'length' <<< "${then}")" -gt 0 ]]; then
-      blocks="$(jq -c --argjson g "${given}" --argjson w "${when}" --argjson t "${then}" \
-        '. + [{given:$g, when:$w, then:$t}]' <<< "${blocks}")"
+    if ((${#then_items[@]} > 0)); then
+      local g w t
+      g="$(_parse_ac_join "${given_items[@]}")"
+      w="$(_parse_ac_join "${when_items[@]}")"
+      t="$(_parse_ac_join "${then_items[@]}")"
+      scenario_json+=("{\"given\":${g},\"when\":${w},\"then\":${t}}")
     fi
-    given="[]"; when="[]"; then="[]"; have_then=0; last=""
+    given_items=(); when_items=(); then_items=(); last=""
   }
 
   while IFS= read -r line || [[ -n "${line}" ]]; do
@@ -261,9 +289,9 @@ parse_acceptance_criteria() {
         wv="${rest%%[Tt]hen *}"
         tv="${rest#*[Tt]hen }"
       fi
-      given="$(jq -cn --argjson v "$(markdown_tokenize_inline "$(_parse_trim "${gv}")")" '[$v]')"
-      when="$(jq -cn --argjson v "$(markdown_tokenize_inline "$(_parse_trim "${wv}")")" '[$v]')"
-      then="$(jq -cn --argjson v "$(markdown_tokenize_inline "$(_parse_trim "${tv}")")" '[$v]')"
+      given_items=("$(markdown_tokenize_inline "$(_parse_trim "${gv}")")")
+      when_items=("$(markdown_tokenize_inline "$(_parse_trim "${wv}")")")
+      then_items=("$(markdown_tokenize_inline "$(_parse_trim "${tv}")")")
       _parse_ac_flush
       continue
     fi
@@ -275,23 +303,28 @@ parse_acceptance_criteria() {
     # with its markdown intact.
     local kw_wrap='(\*\*|__|\*|_)?'
     if [[ "${t}" =~ ^${kw_wrap}[Gg]iven${kw_wrap}[[:space:]]+(.+)$ ]]; then
-      ((have_then)) && _parse_ac_flush
-      given="$(jq -c --argjson v "$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")" '. + [$v]' <<< "${given}")"; last="g"
+      ((${#then_items[@]} > 0)) && _parse_ac_flush
+      given_items+=("$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")"); last="g"
     elif [[ "${t}" =~ ^${kw_wrap}[Ww]hen${kw_wrap}[[:space:]]+(.+)$ ]]; then
-      when="$(jq -c --argjson v "$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")" '. + [$v]' <<< "${when}")"; last="w"
+      when_items+=("$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")"); last="w"
     elif [[ "${t}" =~ ^${kw_wrap}[Tt]hen${kw_wrap}[[:space:]]+(.+)$ ]]; then
-      then="$(jq -c --argjson v "$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")" '. + [$v]' <<< "${then}")"; have_then=1; last="t"
+      then_items+=("$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")"); last="t"
     elif [[ "${t}" =~ ^${kw_wrap}([Aa]nd|[Bb]ut)${kw_wrap}[[:space:]]+(.+)$ ]]; then
       local v; v="$(_parse_trim "${BASH_REMATCH[4]}")"
       case "${last}" in
-        g) given="$(jq -c --argjson v "$(markdown_tokenize_inline "${v}")" '. + [$v]' <<< "${given}")" ;;
-        w) when="$(jq -c --argjson v "$(markdown_tokenize_inline "${v}")" '. + [$v]' <<< "${when}")" ;;
-        t) then="$(jq -c --argjson v "$(markdown_tokenize_inline "${v}")" '. + [$v]' <<< "${then}")" ;;
+        g) given_items+=("$(markdown_tokenize_inline "${v}")") ;;
+        w) when_items+=("$(markdown_tokenize_inline "${v}")") ;;
+        t) then_items+=("$(markdown_tokenize_inline "${v}")") ;;
       esac
     fi
   done <<< "${doc}"
   _parse_ac_flush
 
+  local blocks="[]"
+  if ((${#scenario_json[@]} > 0)); then
+    local IFS=,
+    blocks="[${scenario_json[*]}]"
+  fi
   json_canonical <<< "${blocks}"
 }
 
@@ -302,7 +335,12 @@ parse_design() {
   local doc line
   doc="$(cat)"
 
-  local items="[]"
+  # Each item's JSON text is built natively (`_md_json_escape`, the exact
+  # jq-equivalent escaper markdown.sh already uses internally — 024,
+  # contracts/spawn-budget.md C1.2/C1.3), collected in a bash array, and
+  # wrapped with ONE jq call at the very end rather than one `. + [$v]`
+  # jq call per item.
+  local -a item_json=()
 
   # Figma links anywhere in the document (markdown [label](url) or bare url).
   # The regexes live in variables (the reliable way to feed ERE to bash =~).
@@ -311,10 +349,9 @@ parse_design() {
   while IFS= read -r line || [[ -n "${line}" ]]; do
     line="${line%$'\r'}"
     if [[ "${line}" =~ ${md_re} ]] && [[ "${BASH_REMATCH[2]}" == *figma.com* ]]; then
-      items="$(jq -c --arg v "${BASH_REMATCH[2]}" --arg l "${BASH_REMATCH[1]}" \
-        '. + [{kind:"figma_link", label:$l, value:$v}]' <<< "${items}")"
+      item_json+=("{\"kind\":\"figma_link\",\"label\":\"$(_md_json_escape "${BASH_REMATCH[1]}")\",\"value\":\"$(_md_json_escape "${BASH_REMATCH[2]}")\"}")
     elif [[ "${line}" =~ ${bare_re} ]]; then
-      items="$(jq -c --arg v "${BASH_REMATCH[1]}" '. + [{kind:"figma_link", value:$v}]' <<< "${items}")"
+      item_json+=("{\"kind\":\"figma_link\",\"value\":\"$(_md_json_escape "${BASH_REMATCH[1]}")\"}")
     fi
   done <<< "${doc}"
 
@@ -338,11 +375,15 @@ parse_design() {
       [[ "${t}" =~ figma\.com ]] && continue
       t="$(_parse_trim "$(_parse_strip_marker "${t}")")"
       [[ -z "${t}" ]] && continue
-      items="$(jq -c --argjson v "$(markdown_tokenize_inline "${t}")" '. + [{kind:"guidance", value:$v}]' <<< "${items}")"
+      item_json+=("{\"kind\":\"guidance\",\"value\":$(markdown_tokenize_inline "${t}")}")
     fi
   done <<< "${doc}"
 
-  json_canonical <<< "${items}"
+  if ((${#item_json[@]} == 0)); then
+    printf '[]'
+    return 0
+  fi
+  printf '%s\n' "${item_json[@]}" | jq -cSs '.'
 }
 
 # parse_priority — the spec's P1/P2/P3 priority (FR 017); defaults to P2 when
@@ -436,16 +477,20 @@ _parse_strip_sc_label() {
 # under `## Out of Scope`.
 _parse_epic_extra_blocks() {
   local doc="$1" line
-  local sc_items="[]" oos_items="[]" mode="" cur="" section=""
+  local -a sc_items=() oos_items=()
+  local mode="" cur="" section=""
 
+  # Native accumulation, one join at the end (below) — never a `. + [$v]` jq
+  # re-parse-and-append per bullet item (024, T027, the same pattern
+  # T026/T030 already fixed elsewhere).
   _parse_epic_flush() {
     [[ -z "${cur}" ]] && return 0
     local trimmed; trimmed="$(_parse_trim "${cur}")"
     if [[ "${mode}" == "sc" ]]; then
       trimmed="$(_parse_strip_sc_label "${trimmed}")"
-      sc_items="$(jq -c --argjson v "$(markdown_tokenize_inline "${trimmed}")" '. + [$v]' <<< "${sc_items}")"
+      sc_items+=("$(markdown_tokenize_inline "${trimmed}")")
     elif [[ "${mode}" == "oos" ]]; then
-      oos_items="$(jq -c --argjson v "$(markdown_tokenize_inline "${trimmed}")" '. + [$v]' <<< "${oos_items}")"
+      oos_items+=("$(markdown_tokenize_inline "${trimmed}")")
     fi
     cur=""
   }
@@ -483,16 +528,23 @@ _parse_epic_extra_blocks() {
   done <<< "${doc}"
   _parse_epic_flush
 
-  local blocks="[]"
-  if [[ "$(jq 'length' <<< "${sc_items}")" -gt 0 ]]; then
-    blocks="$(jq -c --argjson items "${sc_items}" --argjson h "$(markdown_inline_plain "Success Criteria")" \
-      '. + [{type:"heading", level:3, spans:$h}, {type:"bullet_list", items:$items}]' <<< "${blocks}")"
+  local -a blocks=()
+  if ((${#sc_items[@]} > 0)); then
+    local sc_joined; local IFS=,; sc_joined="[${sc_items[*]}]"; unset IFS
+    blocks+=("{\"type\":\"heading\",\"level\":3,\"spans\":$(markdown_inline_plain "Success Criteria")}")
+    blocks+=("{\"type\":\"bullet_list\",\"items\":${sc_joined}}")
   fi
-  if [[ "$(jq 'length' <<< "${oos_items}")" -gt 0 ]]; then
-    blocks="$(jq -c --argjson items "${oos_items}" --argjson h "$(markdown_inline_plain "Out of Scope")" \
-      '. + [{type:"heading", level:3, spans:$h}, {type:"bullet_list", items:$items}]' <<< "${blocks}")"
+  if ((${#oos_items[@]} > 0)); then
+    local oos_joined; local IFS=,; oos_joined="[${oos_items[*]}]"; unset IFS
+    blocks+=("{\"type\":\"heading\",\"level\":3,\"spans\":$(markdown_inline_plain "Out of Scope")}")
+    blocks+=("{\"type\":\"bullet_list\",\"items\":${oos_joined}}")
   fi
-  printf '%s' "${blocks}"
+  if ((${#blocks[@]} == 0)); then
+    printf '[]'
+  else
+    local IFS=,
+    printf '[%s]' "${blocks[*]}"
+  fi
 }
 
 # parse_plan_summary — the feature folder's plan.md (stdin), as neutral

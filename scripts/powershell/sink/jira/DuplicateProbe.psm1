@@ -16,7 +16,7 @@
 
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path $PSScriptRoot 'Client.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Client.psm1')    # No -Force — see project memory: powershell-import-force-clobbers-caller-scope
 Import-Module (Join-Path $PSScriptRoot '../../lib/Output.psm1') -Force
 
 function Get-JiraDuplicateProbeResult {

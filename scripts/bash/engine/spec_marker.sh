@@ -41,7 +41,7 @@ spec_marker_format() {
 spec_marker_parse_line() {
   local raw="$1" line t
   line="${raw%$'\r'}"
-  t="$(printf '%s' "${line}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+  t="$(_smk_trim "${line}")"
 
   local generic_re='^<!--[[:space:]]+speckit-jira[[:space:]]+(.*)-->[[:space:]]*$'
   if [[ ! "${t}" =~ ${generic_re} ]]; then
@@ -49,7 +49,7 @@ spec_marker_parse_line() {
     return 0
   fi
   local body="${BASH_REMATCH[1]}"
-  body="$(printf '%s' "${body}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+  body="$(_smk_trim "${body}")"
 
   local spec_re='^spec=([^[:space:]]+)([[:space:]]+(.*))?$'
   if [[ ! "${body}" =~ ${spec_re} ]]; then
@@ -63,7 +63,7 @@ spec_marker_parse_line() {
     return 0
   fi
 
-  tail="$(printf '%s' "${tail}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+  tail="$(_smk_trim "${tail}")"
   if [[ -z "${tail}" ]]; then
     jq -cn --arg id "${idval}" '{kind:"valid", id:$id, state:"assigned"}' | json_canonical
     return 0
@@ -110,9 +110,12 @@ spec_marker_document_info() {
   while IFS= read -r line || [[ -n "${line}" ]]; do
     lineno=$((lineno + 1))
     info="$(spec_marker_parse_line "${line}")"
-    kind="$(jq -r '.kind' <<< "${info}")"
-    [[ "${kind}" == "none" ]] && continue
+    # Same literal-comparison technique as _parse_strip_marker_lines (024,
+    # contracts/spawn-budget.md C1.2): every "none" result is this exact
+    # string, so the common case costs no `jq -r '.kind'` fork per line.
+    [[ "${info}" == '{"kind":"none"}' ]] && continue
     found_lines+=("${lineno}")
+    kind="$(jq -r '.kind' <<< "${info}")"
     if [[ "${kind}" == "valid" ]]; then
       found_ids+=("$(jq -r '.id' <<< "${info}")")
       found_states+=("$(jq -r '.state' <<< "${info}")")

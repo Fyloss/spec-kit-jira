@@ -131,6 +131,18 @@ restricted YAML reader. The Bash port ships no `yq` (runtime dependencies are
 `curl`, `jq`, `git` only), so it parses exactly the dialect the config command
 writes and the self-documenting template teaches.
 
+**A `reconcile` run reads each source at most once.** Every caller of the
+reader that asks for the same path again in the same run — `config_load`'s
+own team/local merge, the gate phase's persisted-binding read, and the
+apply phase's hook-health check all separately need `config.local.yml` — is
+served the first parse's result rather than re-opening the file. The
+consequence: the resolved configuration is a **per-process snapshot**. If
+something else edits `config.local.yml` (or any of the other three surfaces)
+partway through a `reconcile` run, that edit is not observed until the
+*next* run — the same way an already-resolved environment variable
+wouldn't be. A malformed source is never cached, so a still-broken file
+keeps failing (and reporting) on every read that reaches it.
+
 ```mermaid
 flowchart TD
     Line["Next line"] --> Kind{"What is it?"}

@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-12
+
+### Fixed
+
+- `SPEC_KIT_JIRA_TIMING=1` no longer crashes on a comma-decimal locale
+  (`fr_FR`, `de_DE`, and most of continental Europe and Latin America) —
+  under the previous locale-dependent clock read, the failure mode was
+  silent on 9 readings in 10 and a hard crash on the tenth. A malformed
+  clock reading now degrades the instrument rather than the run.
+- The timing report's per-phase request counts, previously always `0` on
+  both ports regardless of how many requests a run actually issued, are now
+  real: a 61-item reference run correctly attributes all 123 of its
+  requests across the phases that issued them. On the PowerShell port this
+  was a separate defect from the Bash port's (seven sink modules each
+  independently `-Force`-reimporting the module holding the counter, tearing
+  it out from under whichever caller had it), not a shared root cause.
+- `reconcile` no longer opens and parses `config.local.yml` more than once
+  per run; on the machine that motivated this work, the parse of a real,
+  large (proportional to portfolio size) `config.local.yml` was measured at
+  ~31s, so removing every redundant read and per-line fork it forced
+  measurably tightened the run.
+
+### Changed
+
+- Local processing (parsing, gating, planning) no longer forks one external
+  process per story, task, or configuration line — reconciling the
+  reference specification a second time with double the stories and tasks
+  spawns the same number of processes, not twice as many. On unmanaged
+  hardware the reference scenario's total time fell from 91.5s to ~58s;
+  the phases now dominated by irreducible per-request work (one Jira ticket
+  per story) still scale with item count, as expected — only the local,
+  spawn-bound cost was the target. On the machine this work was motivated
+  by, a real `reconcile` run fell from 154.9s to 17.1s (-89%), with every
+  phase but `parse` now under 3.6s.
+
 ## [0.14.0] - 2026-08-10
 
 ### Added
@@ -813,7 +848,12 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.13.0...v0.14.0
+[0.13.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.12.1...v0.13.0
+[0.12.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.12.0...v0.12.1
+[0.12.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.2...v0.12.0
 [0.11.2]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.2...v0.11.0
