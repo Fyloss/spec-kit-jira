@@ -31,9 +31,16 @@ setup() {
   helper_argv_size_setup "${SHIM_DIR}" "${REPORT_FILE}"
 }
 
+# Builtins only, by doubling: no spawn, and no word-splitting of ~131 000
+# positional parameters the way `printf 'a%.0s' $(seq 1 n)` needed. Measured
+# on this fixture's largest value (131 073 bytes, four builds): doubling
+# 0.016 s, the `seq` form it replaces 0.178 s, and `${s// /a}` over a
+# space-padded string — the obvious builtin-only alternative — 20.564 s, which
+# is why it is not used here.
 _arg_of() {
-  local n="$1"
-  printf 'a%.0s' $(seq 1 "${n}")
+  local n="$1" s='a'
+  while ((${#s} < n)); do s+="${s}"; done
+  printf '%s' "${s:0:n}"
 }
 
 # Measure <n> bytes against the real limit without going through an execve:
@@ -129,6 +136,27 @@ _measured_in_process() {
 @test "the shim delegates stderr transparently" {
   run env PATH="${SHIM_DIR}:${PATH}" jq -n 'error("boom-marker")'
   [[ "${output}" == *"boom-marker"* ]]
+}
+
+# The other half of "loud, not silently empty": if a tool cannot be resolved,
+# the generated shim would carry `exec "" "$@"` — it would fire, record
+# nothing useful, and never run the tool, while every assertion downstream
+# reads an empty report as success. PATH is curated down to the externals the
+# helper itself needs (`bash`, `mkdir`, `cat`, `chmod`) plus three of the four
+# shimmed tools, so `jq` is the only thing missing.
+@test "the helper refuses to build a shim for a tool it cannot resolve" {
+  local fake="${BATS_TEST_TMPDIR}/fakepath" t
+  mkdir -p "${fake}"
+  for t in bash mkdir cat chmod sed awk curl; do
+    ln -s "$(command -v "${t}")" "${fake}/${t}"
+  done
+  run env -i PATH="${fake}" bash -c '
+    source "'"${HELPERS}"'/argv_size.bash"
+    helper_argv_size_setup "'"${BATS_TEST_TMPDIR}"'/absent_shims" "'"${BATS_TEST_TMPDIR}"'/absent.log"
+  '
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"jq"* ]]
+  [ ! -e "${BATS_TEST_TMPDIR}/absent_shims/sed" ]
 }
 
 # A misconfigured shim must be loud, not silently empty: an unset report path

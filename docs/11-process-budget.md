@@ -32,16 +32,19 @@ consolidation work reintroduced it at three more.
 **No loop on the reconcile path may spawn an external process (`jq`, `sed`,
 `awk`, `curl`, …) once per item.** A loop over stories, tasks, or
 configuration lines that shells out per iteration must be replaced by a
-bounded number of calls for the whole set — batched, not iterated. This holds per phase (`gate`, `plan`, `apply`, `parse`, …). Feature 025
-specified the whole-run corollary — doubling the item count must leave the
-total process count unchanged — but measured (T004b, `research.md` R5) that
-it does **not hold today**, on two independent, non-constant sources:
-`plan_writes`' per-story UPDATE-branch payload construction (accepted debt,
-024 T030) and `tasks_parse_document`'s per-task line parsing (~6 spawns per
-task, found by this feature's own measurement, not previously documented).
-The whole-run assertion that would enforce this is therefore **specified but
-not built** — see "Where the assertions live" below and `research.md` R5/D7
-for the full measurement and what would unblock it.
+bounded number of calls for the whole set — batched, not iterated. This holds
+per phase (`gate`, `plan`, `apply`, `parse`, …). Feature 025 specified the
+whole-run corollary — doubling the item count must leave the total process
+count unchanged — but measured (T004b,
+`specs/025-spawn-budget-guardrails/research.md` R5) that it does **not hold
+today**, on two independent, non-constant sources: `plan_writes`' per-story
+UPDATE-branch payload construction (accepted debt, 024 T030) and
+`tasks_parse_document`'s per-task line parsing (~6 spawns per task, found by
+this feature's own measurement, not previously documented). The whole-run
+assertion that would enforce this is therefore **specified but not built** —
+see "Where the assertions live" below and
+`specs/025-spawn-budget-guardrails/research.md` R5/D7 for the full
+measurement and what would unblock it.
 
 **The whole-run corollary is `≤`, not `=`, at the zero-item floor.** Per
 phase this is exact — a phase given zero items does exactly the fixed amount
@@ -131,7 +134,7 @@ structural argument instead.
   requests, zero writes — holds, but the budget it would assert does not (see
   above). Building it against known-non-constant code would ship either
   permanently red or with a hardcoded tolerance FR-012 forbids. See
-  `research.md` R5/D7.
+  `specs/025-spawn-budget-guardrails/research.md` R5/D7.
 - Argument size (feature 025): `tests/bash/sink/test_argv_size.bats` measures
   every argument any call site produces during a whole run against the
   128 KiB threshold, on every host, regardless of that host's own limit.

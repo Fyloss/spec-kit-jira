@@ -507,3 +507,28 @@ The measurements cited were taken this session against the working tree.
   with no report path fails loudly instead of silently empty. `helper_argv_size_setup` takes the
   limit as an optional third argument for that purpose only; assertions about the code under test
   leave it at `HELPER_ARGV_SIZE_LIMIT`. No `scripts/` file touched.
+- [X] T040 Address the PR review on T039 (Copilot, 3 comments). Two accepted as stated, one accepted
+  in diagnosis and rejected in remedy:
+  1. **Accepted, and widened to the sibling helper.** `helper_argv_size_setup` ignored a failing
+     `command -v`, baking `exec "" "$@"` into the shim — it fires, records nothing, never runs the
+     tool, and the empty report reads as success. Now fails fast, before writing the shim, naming
+     the tool. `tests/bash/helpers/spawn_count.bash` had the identical gap and it bites harder there:
+     an empty count file reads as "0 spawns", i.e. a budget assertion passing on an instrument that
+     never worked. Both fixed, each with a failing test first (curated `PATH` carrying the helper's
+     own externals plus three of the four tools, so `jq` alone is missing).
+  2. **Accepted.** `docs/11-process-budget.md` named a bare `research.md` three times; now
+     repo-relative (`specs/025-spawn-budget-guardrails/research.md`), which the document's own path
+     guard (T037) validates.
+  3. **Diagnosis accepted, remedy rejected on measurement.** `_arg_of` did spawn `seq` and word-split
+     ~131 000 positional parameters. The suggested `printf -v s '%*s'` + `${s// /a}` removes that and
+     is **115× slower**: measured over four builds of the fixture's largest value (131 073 bytes),
+     `${s// /a}` 20.564 s versus the `seq` form's 0.178 s (it turned the guard file from 3.4 s into
+     18.8 s). Replaced with a doubling loop instead — builtins only, no word-splitting, **0.016 s**,
+     11× faster than the form it replaces. The three numbers are recorded in the helper's comment so
+     the rejected alternative is not re-proposed.
+  Verified: `bats -r tests/bash/ci` 164/164 exit 0; `test_spawn_count_helper.bats` 7/7;
+  `test_argv_size.bats` + `test_plan_apply_spawn_budget.bats` 7/7; `shellcheck -x` clean on all three
+  helpers. CI on the preceding commit `27a0d32` confirmed the original defect fixed on Linux: job
+  *Static checks* → step *Bash port* (`bats -r tests/bash/ci`) → **success**. The `Gates` /
+  "Bash coverage >= 80%" failure on that run is **red on `main` (996ccdc) and on 7485c37 too** —
+  pre-existing, out of scope here.

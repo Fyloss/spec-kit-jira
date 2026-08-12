@@ -20,7 +20,14 @@ helper_spawn_count_setup() {
   mkdir -p "${shim_dir}"
   : > "${count_file}"
   for tool in jq sed awk curl; do
-    real="$(command -v "${tool}")"
+    # An unresolvable tool would bake `exec "" "$@"` into the shim: the count
+    # file would stay empty, and an empty count file reads as "0 spawns" —
+    # a budget assertion passing on an instrument that never worked. Fail
+    # before writing it.
+    real="$(command -v "${tool}")" || {
+      printf 'spawn_count: %s not found on PATH — cannot shim it\n' "${tool}" >&2
+      return 1
+    }
     cat > "${shim_dir}/${tool}" << SHIM_EOF
 #!/bin/sh
 printf '%s\n' "${tool}" >> "${count_file}"

@@ -58,7 +58,13 @@ helper_argv_size_setup() {
   mkdir -p "${shim_dir}"
   : > "${report_file}"
   for tool in jq sed awk curl; do
-    real="$(command -v "${tool}")"
+    # An unresolvable tool would bake `exec "" "$@"` into the shim: it fires,
+    # records nothing, never runs the tool, and every downstream assertion
+    # reads the resulting empty report as success. Fail before writing it.
+    real="$(command -v "${tool}")" || {
+      printf 'argv_size: %s not found on PATH — cannot shim it\n' "${tool}" >&2
+      return 1
+    }
     cat > "${shim_dir}/${tool}" << SHIM_EOF
 #!/bin/sh
 ARGV_SIZE_LIMIT=${limit}
