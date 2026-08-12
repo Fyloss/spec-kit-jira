@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-12
+
 ### Fixed
 
 - `SPEC_KIT_JIRA_TIMING=1` no longer crashes on a comma-decimal locale
@@ -36,7 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hardware the reference scenario's total time fell from 91.5s to ~58s;
   the phases now dominated by irreducible per-request work (one Jira ticket
   per story) still scale with item count, as expected — only the local,
-  spawn-bound cost was the target.
+  spawn-bound cost was the target. On the machine this work was motivated
+  by, a real `reconcile` run fell from 154.9s to 17.1s (-89%), with every
+  phase but `parse` now under 3.6s.
 
 ## [0.14.0] - 2026-08-10
 
@@ -844,7 +848,12 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.13.0...v0.14.0
+[0.13.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.12.1...v0.13.0
+[0.12.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.12.0...v0.12.1
+[0.12.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.2...v0.12.0
 [0.11.2]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.2...v0.11.0
