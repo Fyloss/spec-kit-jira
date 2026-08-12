@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The process budget (feature 024's per-item spawn discipline and its argument-routing companion)
+  now has a durable, contributor-facing home: `docs/11-process-budget.md`, pointed to from
+  `AGENTS.md`. An oversized-argument regression is now caught on every host — including macOS,
+  where the equivalent Linux-only symptom previously gave the maintainer's own machine no signal
+  at all — via a portable byte-length check (`tests/bash/sink/test_argv_size.bats`).
+
 ## [0.15.0] - 2026-08-12
 
 ### Fixed
