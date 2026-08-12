@@ -40,13 +40,24 @@ failure into a full run abort.
 
 ### 1a. Locale prerequisite (T001)
 
-The locale matrix (§4 V1-V3) needs `fr_FR.UTF-8` and `de_DE.UTF-8` generated on whatever host runs it.
-Confirmed present on the development host and the Linux CI runner via `locale -a`. A bats test in this
-matrix MUST NOT silently pass when a locale is absent from the host it runs on: check with
-`locale -a | grep -qi '^fr_FR.utf8$'` (respectively `de_DE`) in `setup()` and, if absent, `skip "fr_FR.UTF-8
-not generated on this host"` — an explicit, visible skip, never a no-op that reports green. A test that
-degrades to a silent pass on a runner missing the locale is the exact failure mode this task exists to
-prevent (research A-4b, contracts/clock-reading.md §4).
+The locale matrix (§4 V1-V3) needs `fr_FR.UTF-8` and `de_DE.UTF-8` generated on whatever host runs it. A bats
+test in this matrix MUST NOT silently pass when a locale is absent from the host it runs on: check per-test
+(not in `setup()`, which runs for every test in the file, locale-dependent or not) with a small helper —
+`locale -a | grep -qi` against the locale's name, tolerating both spellings (`fr_FR.utf8`, `fr_FR.UTF-8`) —
+and, if absent, `skip "fr_FR.UTF-8 not generated on this host"`: an explicit, visible skip, never a no-op
+that reports green. A test that degrades to a silent pass on a runner missing the locale is the exact failure
+mode this task exists to prevent (research A-4b, contracts/clock-reading.md §4).
+
+**Corrected 2026-08-12**: this section previously claimed the locale was "confirmed present on the
+development host and the Linux CI runner via `locale -a`", and that the skip check above was already wired
+into `setup()`. Neither was true — the check was never implemented in `tests/bash/lib/test_timing.bats` at
+all, and a GitHub Actions `ubuntu-latest` run surfaced the consequence directly: `fr_FR.UTF-8`/`de_DE.UTF-8`
+are not generated on that runner, so `LC_ALL=fr_FR.UTF-8` silently fell back to `C`, `setlocale` printed a
+warning bats' `run` folds into `$output`, and the duration assertion failed on that polluted string with
+`integer expression expected` — a confusing, misattributed failure instead of a named skip. Fixed by adding
+`_skip_unless_locale` to `test_timing.bats` and calling it at the top of the three tests that need it, then
+re-verified: still passes cleanly (no skip) on a host where both locales ARE generated, and the skip path's
+own match logic was exercised directly against a locale guaranteed absent.
 
 ## 2. Validate the fix
 

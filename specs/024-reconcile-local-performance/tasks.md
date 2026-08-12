@@ -928,8 +928,50 @@ conformance corpus pass unmodified and the module maps still correspond one-to-o
 - [ ] T053 Push to `ci/windows-probe` and confirm the conformance corpus on the real Windows runner (~11 min;
   results arrive as check-run annotations). **Take the pre-change baseline first** — `main` is not green on
   `windows-latest`, so diff against that baseline before attributing a failure to this branch. At most one
-  retry, then hand the result back. **Not done this session** — a push to a dedicated CI-triggering branch is a
-  distinct, shared-visibility action from local implementation work; needs explicit direction before use.
+  retry, then hand the result back. **In progress 2026-08-12.** First probe (this branch's HEAD before the
+  E2BIG/locale fixes below): failure, near-universal `EXIT_CONFIG` (4) across the whole conformance corpus —
+  investigating whether this is this branch's regression or a pre-existing Windows baseline; a `ci/windows-probe`
+  run of `main` itself is in flight to decide which, per this task's own stated procedure.
+
+> **Two real regressions found from the SAME real-machine measurement discipline this feature is built on,
+> 2026-08-12 — reported by the maintainer from an actual Ubuntu `ubuntu-latest` CI run, not inferred.**
+>
+> **E2BIG on Linux, reintroduced.** `tests/bash/commands/test_reconcile_large_spec.bats` — the regression guard
+> for #31's original fix (Linux caps a SINGLE `jq` argument at `MAX_ARG_STRLEN`, 128 KiB, independently of the
+> much larger total `ARG_MAX`; macOS has no per-argument cap, so this class of defect is invisible locally) —
+> failed on CI. Reproduced directly (Docker, `ubuntu:24.04`, the same method #31 used, not emulated) and
+> root-caused to `plan_apply.sh`'s `plan_lifecycle` (line ~1042): `--argjson acts "${actions}"` passes the
+> WHOLE actions array via argv, for a 100-story specification. This function was NOT one of #31's five original
+> sites — it was added by a LATER consolidation pass THIS feature's own Phase 5/T042-follow-up work introduced
+> (spawn-count reduction, before this session), and never re-checked against the argv-size hazard #31 had
+> already found and fixed elsewhere. **Same audit found two more sites with the identical shape**, both also
+> introduced by this feature's own consolidation passes and neither exercised by the existing E2BIG test at
+> 100 items (preventive fixes, not independently Docker-reproduced at this scale): `recognition.sh`'s
+> `recognition_run` (the final `bound`/`new`/`blocked`/`rerouted` assembly) and `tasks_parse.sh`'s
+> `tasks_parse_document` (the final `tasks`/`skipped` assembly). All three fixed the same way #31's own five
+> sites were: route the large value through `lib/output.sh`'s `json_build` (a temp file plus `--slurpfile`
+> instead of `--argjson`) rather than argv. `plan_lifecycle`'s call shape (`-r` output over a real `<<<` input,
+> not `json_build`'s `-cn`-only shape) needed the mechanism inlined rather than forced through `json_build`
+> itself. Re-verified in a clean (non-worktree) Docker Ubuntu container matching the real CI environment: green.
+> **The general lesson, not just the three fixes**: a jq-call consolidation that removes N small argv-safe
+> calls in favour of one big batched call can reintroduce this EXACT defect by concentrating what was
+> previously many small arguments into one large one — spawn-count reduction and argv-size safety are
+> different axes, and a fix for one is not automatically safe on the other. This should be a standing check for
+> any future `--argjson`-shaped consolidation in this codebase, not just something to remember for these three.
+>
+> **The locale test's own skip-guard was never implemented.** `quickstart.md` §1a (T001) documented — since
+> Phase 2, before this session — that `fr_FR.UTF-8`/`de_DE.UTF-8` were "confirmed present on the development
+> host and the Linux CI runner" and that `tests/bash/lib/test_timing.bats` already skipped gracefully when a
+> locale was absent. Neither was true: `tests/bash/lib/test_timing.bats`'s `setup()` had no locale check at
+> all, and the same CI run showed `ubuntu-latest` does not have either locale generated —
+> `LC_ALL=fr_FR.UTF-8` silently fell back to `C`, `setlocale`'s warning landed in bats' merged `$output`, and
+> the duration assertion failed on that polluted string (`integer expression expected`) instead of the test
+> skipping with a named reason. This is exactly the failure mode T001 exists to prevent (research A-4b),
+> just never actually wired up. Fixed: a `_skip_unless_locale` helper, called at the top of the three
+> locale-dependent tests (not in shared `setup()`, which runs for every test in the file, locale-dependent or
+> not). Verified both ways: still green with no skip on a host where both locales ARE generated (macOS,
+> local), and skips explicitly and correctly (`# skip fr_FR.UTF-8 not generated on this host`) in a minimal
+> Ubuntu container matching the CI environment exactly. `quickstart.md`'s false claims corrected alongside it.
 - [X] T054 **Done 2026-08-11.** `CHANGELOG.md`'s `[Unreleased]` section: the locale fix, the request-counter
   fix (both ports, two different root causes), the `config.local.yml` read-once fix, and the spawn/local-time
   reduction, each with its measured figure.

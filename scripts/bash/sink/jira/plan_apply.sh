@@ -1033,13 +1033,35 @@ plan_lifecycle() {
   local -a _lc_sid=() _lc_action=() _lc_method=() _lc_tk=() _lc_status=() _lc_target=() \
     _lc_category=() _lc_flagged=() _lc_transition_id=() _lc_key=() _lc_blockers=()
   local _lc_i=0 _f1 _f2 _f3 _f4 _f5 _f6 _f7 _f8 _f9 _f10 _f11
+  # 024, T053 real-machine finding: `actions` and `doc` both grow with story
+  # count, and Linux caps a SINGLE jq argument at MAX_ARG_STRLEN (128 KiB)
+  # independently of the much larger total ARG_MAX (research/#31's original
+  # fix for the same class of defect, at different call sites — see
+  # lib/output.sh's `json_build`). A hundred-story specification's `actions`
+  # crossed that cap here and failed with E2BIG on Linux only (never on
+  # macOS, which has no per-argument limit) — reproduced in a Ubuntu
+  # container, not inferred. `json_build` itself is `-cn`-shaped (null input,
+  # builds a JSON value) and this call is `-r` over a real `<<<` input, so
+  # its exact mechanism — a temp file plus `--slurpfile` instead of
+  # `--argjson` — is inlined here rather than forcing this call into
+  # `json_build`'s shape.
+  local _lc_acts_f _lc_lc_f _lc_acts_arg _lc_lc_arg
+  _lc_acts_f="$(mktemp)"; printf '%s' "${actions}" > "${_lc_acts_f}"
+  _lc_lc_f="$(mktemp)"; printf '%s' "${lc}" > "${_lc_lc_f}"
+  _lc_acts_arg="${_lc_acts_f}"
+  _lc_lc_arg="${_lc_lc_f}"
+  if [[ "${JIRA_PATH_STYLE}" == "native" ]] && command -v cygpath > /dev/null 2>&1; then
+    _lc_acts_arg="$(cygpath -m "${_lc_acts_f}")"
+    _lc_lc_arg="$(cygpath -m "${_lc_lc_f}")"
+  fi
   while IFS="${_lc_sep}" read -r _f1 _f2 _f3 _f4 _f5 _f6 _f7 _f8 _f9 _f10 _f11; do
     _lc_sid[_lc_i]="${_f1}"; _lc_action[_lc_i]="${_f2}"; _lc_method[_lc_i]="${_f3}"
     _lc_tk[_lc_i]="${_f4}"; _lc_status[_lc_i]="${_f5}"; _lc_target[_lc_i]="${_f6}"
     _lc_category[_lc_i]="${_f7}"; _lc_flagged[_lc_i]="${_f8}"; _lc_transition_id[_lc_i]="${_f9}"
     _lc_key[_lc_i]="${_f10}"; _lc_blockers[_lc_i]="${_f11}"
     _lc_i=$((_lc_i + 1))
-  done < <(jq -r --arg sep "${_lc_sep}" --argjson acts "${actions}" --argjson lc "${lc}" '
+  done < <(jq -r --arg sep "${_lc_sep}" --slurpfile acts_f "${_lc_acts_arg}" --slurpfile lc_f "${_lc_lc_arg}" '
+    ($acts_f[0]) as $acts | ($lc_f[0]) as $lc |
     .stories | to_entries[] | (.value.local_id) as $sid | (($acts[.key]) // null) as $act |
     (($lc.tickets[$sid]) // {}) as $tk | [
       $sid,
@@ -1051,6 +1073,7 @@ plan_lifecycle() {
       ($tk.blockers // [] | tostring)
     ] | join($sep)
   ' <<< "${doc}")
+  rm -f "${_lc_acts_f}" "${_lc_lc_f}"
   n="${_lc_i}"
 
   local kept="[]" warns="[]" notes="[]"

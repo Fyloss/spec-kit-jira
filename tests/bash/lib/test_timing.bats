@@ -15,6 +15,23 @@ setup() {
   export SPEC_KIT_JIRA_TIMING=1
 }
 
+# _skip_unless_locale <locale> — quickstart.md §1a (T001): a comma-decimal
+# locale test MUST NOT silently pass when the locale is absent from the host
+# it runs on — an explicit, visible skip, never a no-op that reports green.
+# `locale -a`'s own spelling varies by host (`fr_FR.utf8`, `fr_FR.UTF-8`), so
+# match case-insensitively and tolerate either. This check was documented in
+# quickstart.md as already wired into every test that needs it, but was never
+# actually implemented until 2026-08-12, when a CI run on a runner missing
+# both locales turned the arithmetic failure this task exists to prevent into
+# exactly that failure: `[: bash: warning: setlocale ...: integer expression
+# expected` — the locale-unavailable case surfacing as a bogus assertion
+# failure instead of a named skip.
+_skip_unless_locale() {
+  local loc="$1"
+  locale -a 2> /dev/null | grep -qi "^${loc%%.*}\.utf-\{0,1\}8\$" \
+    || skip "${loc} not generated on this host"
+}
+
 teardown() {
   unset SPEC_KIT_JIRA_TIMING _TIMING_FAKE_CLOCK _TIMING_FORCE_CLOCK_TIER JIRA_REQUEST_COUNT
 }
@@ -188,6 +205,7 @@ teardown() {
 # many orders of magnitude outside the tolerance.
 
 @test "T004: tier 1 clock reports a correct duration under fr_FR.UTF-8 (comma decimal)" {
+  _skip_unless_locale fr_FR.UTF-8
   run env LC_ALL=fr_FR.UTF-8 bash -c '
     source "'"${LIB_DIR}"'/timing.sh"
     _TIMING_FORCE_CLOCK_TIER=1
@@ -202,6 +220,7 @@ teardown() {
 }
 
 @test "T005: tier 1 clock reports a correct duration under de_DE.UTF-8 (comma decimal)" {
+  _skip_unless_locale de_DE.UTF-8
   run env LC_ALL=de_DE.UTF-8 bash -c '
     source "'"${LIB_DIR}"'/timing.sh"
     _TIMING_FORCE_CLOCK_TIER=1
@@ -230,6 +249,8 @@ teardown() {
 }
 
 @test "T005: the injected-clock report is byte-identical across C, fr_FR.UTF-8, and de_DE.UTF-8" {
+  _skip_unless_locale fr_FR.UTF-8
+  _skip_unless_locale de_DE.UTF-8
   local report_c report_fr report_de
   report_c="$(env LC_ALL=C bash -c '
     source "'"${LIB_DIR}"'/timing.sh"

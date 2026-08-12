@@ -261,5 +261,15 @@ tasks_parse_document() {
   local tasks="[]" skipped="[]"
   ((${#tasks_arr[@]} > 0)) && tasks="$(printf '%s\n' "${tasks_arr[@]}" | jq -cs '.')"
   ((${#skipped_arr[@]} > 0)) && skipped="$(printf '%s\n' "${skipped_arr[@]}" | jq -cs '.')"
-  jq -cn --argjson tasks "${tasks}" --argjson skipped "${skipped}" '{skipped:$skipped, tasks:$tasks}' | json_canonical
+  # 024, T053 real-machine finding: `tasks` grows with task count, and Linux
+  # caps a SINGLE jq argument at MAX_ARG_STRLEN (128 KiB) independently of
+  # the much larger total ARG_MAX (the same class of defect research/#31
+  # first fixed, at different call sites — see lib/output.sh's `json_build`,
+  # which routes each value through a temp file instead of argv). Captured,
+  # not piped straight into json_canonical: on an empty input jq writes
+  # nothing and exits 0, so a json_build failure would be swallowed.
+  local _result
+  # shellcheck disable=SC2016  # a jq filter: $tasks/$skipped are jq variables
+  _result="$(json_build '{skipped:$skipped, tasks:$tasks}' tasks "${tasks}" skipped "${skipped}")" || return $?
+  json_canonical <<< "${_result}"
 }

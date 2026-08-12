@@ -466,6 +466,17 @@ recognition_run() {
   ((${#blocked_items[@]} > 0)) && blocked="$(printf '%s\n' "${blocked_items[@]}" | jq -cs '.')"
   ((${#rerouted_frags[@]} > 0)) && rerouted="$(printf '%s\n' "${rerouted_frags[@]}" | jq -cs 'add')"
 
-  jq -cn --argjson b "${bound}" --argjson nw "${new}" --argjson bl "${blocked}" --argjson rr "${rerouted}" \
-    '{bound:$b, new:$nw, blocked:$bl, rerouted:$rr}' | json_canonical
+  # 024, T053 real-machine finding: each of these four grows with story
+  # count, and Linux caps a SINGLE jq argument at MAX_ARG_STRLEN (128 KiB)
+  # independently of the much larger total ARG_MAX (the same class of
+  # defect research/#31 first fixed, at different call sites — see
+  # lib/output.sh's `json_build`, which routes each value through a temp
+  # file instead of argv). Captured, not piped straight into json_canonical:
+  # on an empty input jq writes nothing and exits 0, so a json_build failure
+  # would be swallowed (matches plan_apply.sh's own call sites).
+  local _result
+  # shellcheck disable=SC2016  # a jq filter: $b/$nw/$bl/$rr are jq variables
+  _result="$(json_build '{bound:$b, new:$nw, blocked:$bl, rerouted:$rr}' \
+    b "${bound}" nw "${new}" bl "${blocked}" rr "${rerouted}")" || return $?
+  json_canonical <<< "${_result}"
 }
