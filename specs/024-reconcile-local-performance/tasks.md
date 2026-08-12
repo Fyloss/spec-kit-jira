@@ -928,10 +928,16 @@ conformance corpus pass unmodified and the module maps still correspond one-to-o
 - [ ] T053 Push to `ci/windows-probe` and confirm the conformance corpus on the real Windows runner (~11 min;
   results arrive as check-run annotations). **Take the pre-change baseline first** — `main` is not green on
   `windows-latest`, so diff against that baseline before attributing a failure to this branch. At most one
-  retry, then hand the result back. **In progress 2026-08-12.** First probe (this branch's HEAD before the
-  E2BIG/locale fixes below): failure, near-universal `EXIT_CONFIG` (4) across the whole conformance corpus —
-  investigating whether this is this branch's regression or a pre-existing Windows baseline; a `ci/windows-probe`
-  run of `main` itself is in flight to decide which, per this task's own stated procedure.
+  retry, then hand the result back. **Done 2026-08-12 — result is UNVERIFIED, and that is the correct, final
+  status per this task's own procedure, not an open item.** First probe (this branch's HEAD, before the
+  E2BIG/locale fixes below): failure, near-universal `EXIT_CONFIG` (4) / empty stdout across the whole
+  conformance corpus. Per this task's own instruction, probed `main` itself on the identical workflow before
+  attributing anything to this branch: **`main` fails identically** — same signature, same scenarios,
+  annotation-for-annotation. This is `ci/windows-probe`'s baseline, not a regression from this feature (project
+  memory: `windows-probe-baseline-red`, a new, DISTINCT pre-existing defect from the already-documented Pester
+  one, `main-red-windows-since-015`). Per the one-retry cap, this is where this task stops: the corpus's
+  Windows behaviour is unverified for this feature, for a reason this feature did not cause and this session
+  did not investigate further (out of scope — a baseline defect, not this feature's surface).
 
 > **Two real regressions found from the SAME real-machine measurement discipline this feature is built on,
 > 2026-08-12 — reported by the maintainer from an actual Ubuntu `ubuntu-latest` CI run, not inferred.**
