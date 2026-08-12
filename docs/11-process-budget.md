@@ -65,10 +65,24 @@ the defect reads as "the arguments aren't that big" during review: the total
 looks fine; the one oversized element does not stand out unless you are
 looking for it specifically.
 
+The limit is **inclusive**: 131 072 bytes exactly already fails. Linux bounds
+the search for the argument's terminating NUL by `MAX_ARG_STRLEN`, so a string
+that fills the limit leaves no room for it. The largest single argument that
+can be delivered is 131 071 bytes — measured on the Ubuntu CI runner, where
+131 072 and 131 073 both come back as "Argument list too long".
+
 macOS enforces **no** per-argument cap, so the identical run succeeds there.
 The failure is a Linux-only `E2BIG`, invisible to a maintainer developing on
 macOS by simply running the code — which is the entire reason it was caught
 late, by CI, three times.
+
+One consequence bites anyone writing a check for this defect: a value at or
+above the limit **cannot be handed to a process on Linux at all**. A check
+that receives the oversized value as an argument in order to measure it can
+therefore only ever pass on macOS — it reproduces the very blindness it was
+written to remove. Measure a boundary value in-process instead; see
+`tests/bash/helpers/argv_size_measure.sh`, which is sourced rather than
+executed for exactly this reason.
 
 ## Why the two halves cannot be separated
 

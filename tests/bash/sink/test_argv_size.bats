@@ -10,7 +10,8 @@
 #
 # This test measures the CAUSE instead — the byte length of every argument
 # any call site produces during a whole run, against Linux's MAX_ARG_STRLEN
-# (128 KiB) — so the verdict is the same on macOS, Linux and Windows. It is
+# (128 KiB, inclusive — 131072 bytes exactly already fails, see A2.4) — so the
+# verdict is the same on macOS, Linux and Windows. It is
 # the portable complement to the existing end-to-end proof, not a
 # replacement: that test remains the proof reconcile succeeds on Linux;
 # this one is the proof nothing oversized was ever routed through argv, on
@@ -38,7 +39,7 @@ teardown() {
   mock_stop 2> /dev/null || true
 }
 
-@test "a 100-story specification reconciles with no single argument exceeding 128 KiB, on this host" {
+@test "a 100-story specification reconciles with no single argument reaching 128 KiB, on this host" {
   mock_start "${MOCK}/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   export SPEC_KIT_JIRA_SPEC_SLUG="001-widget"
@@ -70,7 +71,7 @@ teardown() {
 # Covered directly, unit-style (matching test_plan_apply_spawn_budget.bats'
 # existing shape), rather than through a whole reconcile: no mock, no
 # project binding, no story content is relevant to what this call site does.
-@test "a large tasks.md parses with no single argument exceeding 128 KiB" {
+@test "a large tasks.md parses with no single argument reaching 128 KiB" {
   local shim_dir="${BATS_TEST_TMPDIR}/argv_shim2" report="${BATS_TEST_TMPDIR}/argv_report2.log"
   helper_argv_size_setup "${shim_dir}" "${report}"
 

@@ -236,6 +236,10 @@ the one already covered, and observe the suite fail **on macOS**.
   non-executable shim all produce an empty file. T021 is a *temporary* defect that gets reverted;
   after merge, nothing else keeps this instrument alive. An assertion whose only proof-of-life was
   reverted is the exact failure mode this feature exists to close.
+  **Two clauses of this task were wrong and are superseded by T039**: the boundary value 131072 IS
+  fatal and must be recorded ("the limit is 32 pages inclusive" was the right words attached to the
+  wrong comparison, A2.4), and no boundary case can be asserted through `PATH` at all, because Linux
+  refuses to deliver such an argument to any process (A2.5).
 - [X] T019 [US3] Add `tests/bash/sink/test_argv_size.bats` running a whole reconcile over a large
   **unbound** specification (`helper_make_spec … unbound` at 100 stories, the size that assembles a
   ~140 KB plan) under T018's shim, asserting the report file is empty. The threshold is applied on
@@ -382,7 +386,11 @@ the counting shim distorts wall clock by ~61%, so **never read a duration from a
 | T015 | RED: counts at 10 vs 20 stories with a deliberate fork | *(pending)* |
 | T016 | `plan_apply.sh` byte-identical to `main` after revert | *(pending)* |
 | T017 | verdict under CPU load | *(pending)* |
-| T018b | shim self-test: 131071 / 131072 / 131073-byte boundary cases | 7/7 green: 131073B recorded, 131071B and the 131072B boundary not recorded (limit is 32 pages inclusive), stdout/stderr/exit code pass through untouched, unfired shim leaves report empty |
+| T018b | shim self-test: 131071 / 131072 / 131073-byte boundary cases | 7/7 green: 131073B recorded, 131071B and the 131072B boundary not recorded (limit is 32 pages inclusive), stdout/stderr/exit code pass through untouched, unfired shim leaves report empty. **Two of those results were wrong — superseded by T039**: 131072B must be recorded, and the boundary cases were measured through `PATH`, which only macOS permits. |
+| T039 | Linux's real boundary, on the Ubuntu runner | 131071B execs; 131072B and 131073B both fail `execve` with "Argument list too long" (exit 126). The limit is inclusive → threshold corrected from `> 131072` to `>= 131072` (A2.4), and a boundary case can only be measured in-process (A2.5). |
+| T039 | RED on macOS before the fix | boundary assertion inverted to "131072B IS recorded" failed against the shipped `-gt` comparison with all 11 other assertions in the file green — defect isolated to the comparison alone. |
+| T039 | guard after the fix | `bats tests/bash/ci/test_argv_size_helper.bats` 12/12, exit 0, no bats warnings. `bats -r tests/bash/ci` (the failing CI step) 162/162, exit 0. `bats tests/bash/sink/test_argv_size.bats` 2/2 green under the stricter threshold — no live call site sits on the boundary. `shellcheck -x` clean on both helper files. |
+| T039 | `test_fixtures_are_tracked.bats` — the failure T001/T024/T038 all logged as pre-existing | not a repository defect: the port writes a self-ignoring `state/.gitignore` (`*`) plus one state file per local sink run inside the fixture tree, and the guard walks every file under `tests/conformance/fixtures` demanding it be tracked. Both artefacts trashed → guard green, `bats -r tests/bash/ci` 162/162. It returns after any local run of `tests/bash/sink/test_argv_size.bats`; CI never sees it (fresh checkout). |
 | T024 | full suite post-change vs T001 baseline | run-bash.sh: 204 files, 1918 tests, 1 file failed — +4 files (the four this feature adds) and +19 tests against T001's 200/1899; same single pre-existing failure (`test_fixtures_are_tracked.bats`), unrelated to this feature |
 | T021 | RED on macOS: offending argument length | 427485 bytes (tasks_parse.sh's `tasks` array, 700 tasks, --argjson reverted) — shim reported it, test 2 failed, test 1 (untouched call site) stayed green |
 | T022 | `scripts/` byte-identical to `main` after revert (engine/tasks_parse.sh, not plan_apply.sh — see T021's site choice) | `git diff main -- scripts/` empty |
@@ -476,3 +484,26 @@ The measurements cited were taken this session against the working tree.
   1918 tests, 1 file failed** — +4 files and +19 tests against T001's 200/1899 baseline, same single
   pre-existing failure (`test_fixtures_are_tracked.bats`, unrelated to this feature). T018b and T024
   rows completed in the Verification Log.
+- [X] T039 **Ubuntu CI red on `tests/bash/ci/test_argv_size_helper.bats`** — two defects, one root
+  cause, both found by the runner rather than by the development host, which is the same platform
+  blindness this contract is about (A2.3, A2.5).
+  1. **The threshold was off by one, under-detecting.** `> 131072` waves through an argument of
+     exactly 131072 bytes, which Linux already refuses: `MAX_ARG_STRLEN` bounds the search for the
+     terminating NUL, so a string that fills the limit has no room for it. Recorded as A2.4 with the
+     runner's measurement (131071 execs, 131072 and 131073 do not) and corrected to `>= 131072`.
+     Observed **red on macOS** first — the boundary assertion inverted to "IS recorded" failed
+     against the shipped comparison, with every other assertion in the file green, isolating the
+     defect to the comparison alone.
+  2. **The guard asserted its boundary cases through `PATH`**, i.e. by exec'ing the shim with the
+     oversized value. On Linux the kernel kills that `execve` before any of our code runs (exit 126,
+     "Argument list too long") — so those two assertions could only ever pass on macOS. Recorded as
+     A2.5. The measurement now lives in `tests/bash/helpers/argv_size_measure.sh`, which the shim
+     **sources** rather than execs, so the same file and the same comparison can be exercised
+     in-process by the guard with no `execve` carrying the value.
+  Proof-of-life for the interposition itself is kept, and strengthened, by a separate half of the
+  guard that fires the shim through `PATH` at a lowered limit — proving PATH order, the exec bit and
+  the report path with an argument every host can deliver — plus a new case covering all four shimmed
+  tools (T035 widened the tool set; nothing asserted the other three fired) and one proving a shim
+  with no report path fails loudly instead of silently empty. `helper_argv_size_setup` takes the
+  limit as an optional third argument for that purpose only; assertions about the code under test
+  leave it at `HELPER_ARGV_SIZE_LIMIT`. No `scripts/` file touched.

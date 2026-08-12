@@ -30,6 +30,19 @@ defect reads as "the arguments aren't that big" during review.
 **A2.3** — macOS enforces **no** per-argument cap. The identical run succeeds there. The failure is
 therefore not reproducible on the maintainer's development machine by execution.
 
+**A2.4** — The limit is **inclusive**: an argument of exactly 131 072 bytes already fails. Linux
+bounds the search for the argument's terminating NUL by `MAX_ARG_STRLEN`, so a string that fills the
+limit exactly leaves no room for it and `execve` returns `E2BIG`. The largest single argument that
+can be delivered is 131 071 bytes. Detection therefore records a length that **reaches** the limit,
+not one that exceeds it. Measured on the Ubuntu CI runner (T039): 131 071 bytes exec successfully,
+131 072 and 131 073 both come back as "Argument list too long".
+
+**A2.5** — A consequence of A2.4 that detection design must respect: a value at or above the limit
+**cannot be handed to any process on Linux**. A check that has to receive the oversized value as an
+argument in order to measure it can therefore never run on the platform whose limit it measures — it
+can only pass on macOS. Measurement of a boundary value MUST happen in-process, in the shell that
+holds the value.
+
 ## §3 Detection — the cause, not the symptom
 
 **A3.1** — Detection MUST measure the **length of each argument**, not whether `exec` failed.
