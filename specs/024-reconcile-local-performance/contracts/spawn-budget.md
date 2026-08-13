@@ -1,5 +1,9 @@
 # Contract: Per-Phase External-Process Budget
 
+> **`docs/11-process-budget.md` is the current authority for this rule.** This
+> file is the historical record of how the budget was derived and measured —
+> its figures below are left intact (feature 025, FR-005).
+
 **Feature**: 024 | **Satisfies**: FR-016, FR-017, FR-018, FR-019, FR-020, FR-021, FR-026
 
 Governs how many external processes a reconcile may create, and how that is measured. Applies to the Bash port;

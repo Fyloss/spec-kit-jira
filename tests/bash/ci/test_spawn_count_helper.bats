@@ -57,3 +57,24 @@ teardown() {
 @test "an uncounted invocation leaves the count file at zero" {
   [ "$(helper_spawn_count_total "${COUNT_FILE}")" = "0" ]
 }
+
+# The same gap `tests/bash/helpers/argv_size.bash` closes, and it bites harder
+# here: an unresolvable tool bakes `exec "" "$@"` into the shim, so the count
+# file stays empty and an empty count file reads as "0 spawns" — the budget
+# looks respected by an instrument that never worked. PATH is curated down to
+# the externals the helper itself needs plus three of the four shimmed tools,
+# so `jq` is the only thing missing.
+@test "the helper refuses to build a shim for a tool it cannot resolve" {
+  local fake="${BATS_TEST_TMPDIR}/fakepath" t
+  mkdir -p "${fake}"
+  for t in bash mkdir cat chmod sed awk curl; do
+    ln -s "$(command -v "${t}")" "${fake}/${t}"
+  done
+  run env -i PATH="${fake}" bash -c '
+    source "'"${HELPERS}"'/spawn_count.bash"
+    helper_spawn_count_setup "'"${BATS_TEST_TMPDIR}"'/absent_shims" "'"${BATS_TEST_TMPDIR}"'/absent.log"
+  '
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"jq"* ]]
+  [ ! -e "${BATS_TEST_TMPDIR}/absent_shims/sed" ]
+}

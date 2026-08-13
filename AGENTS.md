@@ -27,6 +27,20 @@ version:
   there. Failing test first: for Windows-only defects the conformance corpus on
   the probe is that failing test.
 
+## Process budget — non-negotiable
+
+Read `docs/11-process-budget.md` before adding a loop to the reconcile path.
+The short version — one inseparable rule, not two:
+
+- **No loop on the reconcile path spawns an external process per item.**
+  Batch it into a bounded number of calls for the whole set instead.
+- **In the same breath**: the batched payload that produces must not travel
+  through a single command-line argument that can grow with input — route it
+  through a temp file. Linux caps a single argument at 128 KiB
+  (`MAX_ARG_STRLEN`), independent of the much larger `ARG_MAX`; macOS has no
+  such cap, so the defect is invisible on the maintainer's own machine and
+  has been reintroduced twice by applying the first half without the second.
+
 ## Running the suites
 
 - `tests/run-bash.sh` — full bash suite (~190s / 3m10s, `bats`+`jq` only, no
