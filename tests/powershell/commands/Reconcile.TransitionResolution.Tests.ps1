@@ -180,4 +180,34 @@ Describe 'Invoke-JiraReconcile — a declared step actually moves a ticket' {
         # availability read itself -- are not writes, and are expected).
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notmatch 'bulkfetch' -and $_ -notmatch 'transitions\?expand' }).Count | Should -Be 0
     }
+
+    It 'T116 -- a rejected move (write rejected after a healthy read) is reported naming the ticket, no retry, no re-ask, no substitute' {
+        # A human moves COMP-2 between reconcile's own read of its available
+        # moves and the transition POST that read decided on: the read stays
+        # healthy (COMP-2's declared move is genuinely available), but the
+        # WRITE itself is rejected (409 -- the ticket has since moved).
+        # Method-keyed fault (T116's own mock enhancement to Get-Fault): the
+        # GET on /issue/COMP-2/transitions must stay healthy while the POST
+        # to the same path is rejected.
+        Stop-JiraMock -Mock $script:M
+        $work2 = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse $Fixture $work2
+        $spec2 = Join-Path $work2 'specs/001-billing-invoices/spec.md'
+        Copy-Item -Path (Join-Path $script:Work '.specify/jira/config.yml') -Destination (Join-Path $work2 '.specify/jira/config.yml') -Force
+        $env:JIRA_CONFIG_DIR = Join-Path $work2 '.specify/jira'
+
+        $cfgPath = Write-JiraMockConfig -Json '{"projects":{"COMP":"company"},"transitions":{"COMP-2":[{"id":"101","name":"Start","to":{"name":"In Progress"},"fields":{}}]},"faults":{"issue/COMP-2/transitions":{"status":409,"method":"POST","body":{"errorMessages":["The transition is not valid."]}}}}'
+        $script:M = Start-JiraMock -ConfigPath $cfgPath
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $null = Invoke-Captured @('reconcile', $spec2, '--json')
+
+        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+        $out = ''
+        try { $out = Invoke-Captured @('reconcile', $spec2, '--json') } finally { Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue }
+        [int]$script:code | Should -BeGreaterOrEqual 2
+        $out | Should -Match 'Story ticket COMP-2 was not moved to "In Progress"'
+        $out | Should -Match 'rejected the transition'
+        # No retry: exactly one POST to COMP-2's own transitions endpoint this run.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^POST /rest/api/3/issue/COMP-2/transitions' }).Count | Should -Be 1
+    }
 }

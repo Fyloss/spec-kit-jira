@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (148)" {
+@test "the conformance corpus has exactly the recorded scenario count (151)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -73,8 +73,15 @@ setup() {
   # 023 adds three: us023-two-role-workflows, us023-checklist-mode-inert,
   # us023-legacy-mapping-story-only (Phase 6, US4, T102/T103/T104)
   # (145 -> 148).
+  # 023 adds two: us023-parent-halted, us023-parent-flagged (Phase 7, US5,
+  # T117) — the parent's synthetic lifecycle entry gets the SAME
+  # halt/Flagged treatment a story already does (U8), exercised end to end
+  # rather than only at the pure plan_lifecycle level (148 -> 150).
+  # 023 adds one: us023-move-rejected (Phase 7, US5, T118) — the mock's new
+  # method-keyed fault injection lets a POST to .../transitions be rejected
+  # while the GET on the same path stays healthy (150 -> 151).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 148 ]
+  [ "${count}" -eq 151 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

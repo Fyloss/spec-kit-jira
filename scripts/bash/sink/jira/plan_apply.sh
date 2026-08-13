@@ -974,15 +974,25 @@ plan_writes_tasks() {
 }
 
 # _plan_transition_action <base_url> <key> <transition_id> <blockers-json> <label>
+#   [role] [declared-step]
 #   The single transition-POST emission site (012, T091), shared by
 #   plan_lifecycle (story tier) and plan_lifecycle_tasks (task tier) rather
 #   than each building its own. Returns {action, note} — note is empty when
-#   the ticket carries no open blocking link.
+#   the ticket carries no open blocking link. `role`/`declared-step` (023,
+#   T115) ride along on the action itself — never sent to Jira,
+#   `_plan_apply_write` only reads method/url/body off it — so a write-time
+#   rejection can be reported naming the ticket, its role, and the step it
+#   was headed for (FR-038) without a second lookup. Passed only by the
+#   transition-resolution.md call sites (contract §2); the task tier's own
+#   done/not-done completion pass predates 023 and is out of this
+#   requirement's scope, so its calls leave both empty.
 _plan_transition_action() {
-  local base="$1" key="$2" transition_id="$3" blockers="$4" label="$5"
+  local base="$1" key="$2" transition_id="$3" blockers="$4" label="$5" role="${6:-}" declared_step="${7:-}"
   local taction
   taction="$(jq -cn --arg u "${base}/rest/api/3/issue/${key}/transitions" --arg tid "${transition_id}" \
-    '{method:"POST", url:$u, body:{transition:{id:$tid}}}')"
+    --arg role "${role}" --arg step "${declared_step}" \
+    '{method:"POST", url:$u, body:{transition:{id:$tid}}}
+     + (if $role != "" then {role:$role, declared_step:$step} else {} end)')"
   local note=""
   local bcount; bcount="$(jq 'length' <<< "${blockers}")"
   if [[ "${bcount}" -gt 0 ]]; then
@@ -1180,7 +1190,7 @@ plan_lifecycle() {
     n=$((n + 1))
   fi
 
-  local kept="[]" warns="[]" notes="[]"
+  local kept="[]" warns="[]" notes="[]" parent_content_dropped="false"
   local -a due_idx=()
   for ((i = 0; i < n; i++)); do
     local sid action method tk
@@ -1257,7 +1267,16 @@ plan_lifecycle() {
       fi
     fi
 
-    if [[ "${drop_content}" == "false" && "${_lc_is_parent[i]:-false}" != "true" ]]; then
+    if [[ "${_lc_is_parent[i]:-false}" == "true" ]]; then
+      # 023, U8: the parent's own halt decision (drop_content, set only by
+      # drift_evaluate's "halted" branch) is never routed through `kept` —
+      # the parent's content write is a SEPARATE code path in the caller
+      # (reconcile.sh's own parent-first write, never this array) — so it
+      # must ride back out as its own field or the caller has no way to
+      # learn a halted parent's content must stay unwritten too, exactly
+      # like a halted story's.
+      parent_content_dropped="${drop_content}"
+    elif [[ "${drop_content}" == "false" ]]; then
       kept="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${kept}")"
     fi
   done
@@ -1289,7 +1308,7 @@ plan_lifecycle() {
       if [[ "${kind}" == "move" ]]; then
         local tid tres note
         tid="$(jq -r '.transition_id' <<< "${outcome}")"
-        tres="$(_plan_transition_action "${base}" "${rkey}" "${tid}" "${_lc_blockers[di]}" "${rsid}")"
+        tres="$(_plan_transition_action "${base}" "${rkey}" "${tid}" "${_lc_blockers[di]}" "${rsid}" "${rrole}" "${rtarget}")"
         kept="$(jq -c --argjson a "$(jq -c '.action' <<< "${tres}")" '. + [$a]' <<< "${kept}")"
         note="$(jq -r '.note // empty' <<< "${tres}")"
         [[ -n "${note}" ]] && notes="$(jq -c --arg n "${note}" '. + [$n]' <<< "${notes}")"
@@ -1301,9 +1320,9 @@ plan_lifecycle() {
   fi
 
   local _out
-  # shellcheck disable=SC2016  # a jq filter: $a/$w/$no are jq variables
-  _out="$(json_build '{actions:$a, warnings:$w, notes:$no}' \
-    a "${kept}" w "${warns}" no "${notes}")" || return $?
+  # shellcheck disable=SC2016  # a jq filter: $a/$w/$no/$pcd are jq variables
+  _out="$(json_build '{actions:$a, warnings:$w, notes:$no, parent_content_dropped:$pcd}' \
+    a "${kept}" w "${warns}" no "${notes}" pcd "${parent_content_dropped}")" || return $?
   printf '%s' "${_out}" | json_canonical
 }
 
@@ -1421,10 +1440,42 @@ _apply_known_coords() {
 # nothing is printed here for it.
 _plan_apply_report_rejection() {
   local method="$1" url="$2" action="$3" defaultable_by_type="${4:-{\}}"
+  if [[ "${method}" == "POST" && "${url}" == */transitions ]]; then
+    _plan_apply_report_transition_rejection "${url}" "${action}"
+    return 0
+  fi
   [[ "${method}" == "POST" && "${url}" == */issue && "${JIRA_LAST_STATUS:-}" == "400" ]] || return 0
   local msg
   msg="$(ticket_field_rejection_message "${defaultable_by_type}" "${action}" "${JIRA_LAST_ERROR_BODY:-{\}}")"
   [[ -n "${msg}" ]] && printf '%s\n' "${msg}" >&2
+}
+
+# _plan_apply_report_transition_rejection <url> <action-json> — 023, T115,
+# FR-035/FR-038: the tracker rejected a move `_plan_transition_action`
+# already decided was available (a human moved the ticket between the read
+# and this write, or the tracker's own workflow changed underneath it). A
+# no-op unless `action` carries the `role`/`declared_step` pair only the
+# transition-resolution.md call sites attach (see `_plan_transition_action`)
+# — the task tier's own done/not-done completion pass predates 023 and stays
+# silent here, exactly as before this feature. No retry, no re-ask of
+# available moves, no substitute move within this run: the caller already
+# returns immediately after calling this (contract §2 U6).
+_plan_apply_report_transition_rejection() {
+  local url="$1" action="$2"
+  local role; role="$(jq -r '.role // empty' <<< "${action}")"
+  [[ -z "${role}" ]] && return 0
+  local declared key role_label errbody reason
+  declared="$(jq -r '.declared_step // empty' <<< "${action}")"
+  key="$(sed -E 's#.*/issue/##; s#/transitions$##' <<< "${url}")"
+  role_label="$(tr '[:lower:]' '[:upper:]' <<< "${role:0:1}")${role:1}"
+  errbody="${JIRA_LAST_ERROR_BODY:-{\}}"
+  jq -e . > /dev/null 2>&1 <<< "${errbody}" || errbody='{}'
+  reason="$(jq -r '
+    [ (.errorMessages // [])[], ((.errors // {}) | to_entries[] | "\(.key): \(.value)") ] | join("; ")
+  ' <<< "${errbody}")"
+  [[ -z "${reason}" ]] && reason="the tracker gave no reason"
+  printf 'reconcile: %s ticket %s was not moved to "%s": the tracker rejected the transition — %s. It was not retried, and no other move was attempted for it, within this run; reconcile will read its available moves again next run.\n' \
+    "${role_label}" "${key}" "${declared}" "${reason}" >&2
 }
 
 # _plan_apply_write <method> <url> <body-json-or-empty> <resp-file> — the

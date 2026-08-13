@@ -1559,7 +1559,7 @@ _reconcile_run() {
         if [[ "${tkind}" == "move" ]]; then
           local ttid tres tnote
           ttid="$(jq -r '.transition_id' <<< "${toutcome}")"
-          tres="$(_plan_transition_action "${base}" "${tkey}" "${ttid}" "${tblockers}" "${tdue_id}")"
+          tres="$(_plan_transition_action "${base}" "${tkey}" "${ttid}" "${tblockers}" "${tdue_id}" "task" "${ttarget}")"
           tasks_actions="$(jq -c --argjson a "$(jq -c '.action' <<< "${tres}")" '. + [$a]' <<< "${tasks_actions}")"
           tnote="$(jq -r '.note // empty' <<< "${tres}")"
           [[ -n "${tnote}" ]] && task_notes="$(jq -c --arg n "${tnote}" '. + [$n]' <<< "${task_notes}")"
@@ -1666,6 +1666,17 @@ _reconcile_run() {
   actions="$(jq -c '.actions' <<< "${lresult}")"
   warns="$(jq -c '.warnings' <<< "${lresult}")"
   notes="$(jq -c '.notes' <<< "${lresult}")"
+  # 023, U8: the parent's content write is a SEPARATE code path from `kept`
+  # (reconcile.sh's own parent-first write, plan_apply.sh's per-ticket
+  # `kept` loop unconditionally excludes it) — so a halted parent's
+  # content_writes:false decision, computed inside plan_lifecycle but with
+  # nowhere else to surface, must be applied here or the parent silently
+  # keeps writing content a halted STORY would have withheld. Every
+  # downstream consumer of parent_action (counts, apply_plan, the run
+  # summary's own display) reads it AFTER this point.
+  if [[ "$(jq -r '.parent_content_dropped // false' <<< "${lresult}")" == "true" ]]; then
+    parent_action="null"
+  fi
 
   # Every blocked story produces exactly one warning from the diagnostics
   # catalogue (FR-011, FR-016, FR-021) — folded into the same channel the

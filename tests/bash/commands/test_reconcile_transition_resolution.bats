@@ -162,3 +162,33 @@ teardown() {
   # not writes, and are expected).
   [ "$(grep -vc 'bulkfetch\|transitions?expand' "${MOCK_CALLLOG}")" -eq 0 ]
 }
+
+@test "T115 -- a rejected move (write rejected after a healthy read) is reported naming the ticket, no retry, no re-ask, no substitute" {
+  # A human moves COMP-2 between reconcile's own read of its available moves
+  # and the transition POST that read decided on: the read stays healthy
+  # (COMP-2's declared move is genuinely available), but the WRITE itself is
+  # rejected (409 -- the ticket has since moved). Method-keyed fault (T115's
+  # own mock enhancement to curl-shim.sh's _shim_get_fault): the GET on
+  # /issue/COMP-2/transitions must stay healthy while the POST to the same
+  # path is rejected -- the path-only fault injection this suite's T111 note
+  # already flagged as the blocker is what this fault's "method" key fixes.
+  mock_stop
+  local work2="${BATS_TEST_TMPDIR}/repo-rejected"
+  cp -R "${FIXTURE}" "${work2}"
+  local spec2="${work2}/specs/001-billing-invoices/spec.md"
+  cp "${WORK}/.specify/jira/config.yml" "${work2}/.specify/jira/config.yml"
+  export JIRA_CONFIG_DIR="${work2}/.specify/jira"
+
+  local cfg; cfg="$(mock_write_config '{"projects":{"COMP":"company"},"transitions":{"COMP-2":[{"id":"101","name":"Start","to":{"name":"In Progress"},"fields":{}}]},"faults":{"issue/COMP-2/transitions":{"status":409,"method":"POST","body":{"errorMessages":["The transition is not valid."]}}}}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${spec2}" --json > /dev/null
+
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile "${spec2}" --json
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  [ "$status" -ge 2 ]
+  [[ "$output" == *'Story ticket COMP-2 was not moved to "In Progress"'*'rejected the transition'* ]]
+  # No retry: exactly one POST to COMP-2's own transitions endpoint this run.
+  [ "$(grep -c '^POST /rest/api/3/issue/COMP-2/transitions' "${MOCK_CALLLOG}")" -eq 1 ]
+}

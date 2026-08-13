@@ -220,9 +220,18 @@ _shim_get_createmeta_fields_name() {
 }
 
 _shim_get_fault() {
-  jq -c --arg p "$1" '
+  # A fault entry may declare "method" to fire only for that HTTP method
+  # (023, T115: lets a POST /transitions rejection be injected while a GET
+  # on the same path stays healthy). Omitting "method" matches any method,
+  # unchanged from every fault declared before this parameter existed.
+  local m="${2:-}"
+  jq -c --arg p "$1" --arg m "${m}" '
     (.faults // {}) as $f
-    | ( ($f | to_entries | map(select(("/" + .key + "(/|-|$)") as $pat | $p | test($pat))) | .[0].value) // (.fault // null) )
+    | ( ($f | to_entries
+          | map(select(("/" + .key + "(/|-|$)") as $pat | $p | test($pat)))
+          | map(select((.value.method // $m) == $m))
+          | .[0].value)
+        // (.fault // null) )
   ' "${MOCK_CONFIG_PATH}"
 }
 
@@ -331,7 +340,7 @@ _shim_issue_bulkfetch() {
       '.issues | keys[] | select(ascii_downcase == ($rk | ascii_downcase))' \
       "${MOCK_STATE_PATH}" | head -n1)"
     [[ -z "${matchkey}" ]] && continue
-    fault="$(_shim_get_fault "/rest/api/3/issue/${matchkey}")"
+    fault="$(_shim_get_fault "/rest/api/3/issue/${matchkey}" "GET")"
     [[ "${fault}" != "null" ]] && continue
 
     local entry
@@ -488,7 +497,7 @@ if [[ "${method}" == "POST" && "${path}" == "/rest/api/3/issue" ]]; then
   _pk="$(jq -r '.fields.project.key // empty' 2> /dev/null <<< "${body}")"
   [[ -n "${_pk}" ]] && fault_path="/${_pk}"
 fi
-fault_json="$(_shim_get_fault "${fault_path}")"
+fault_json="$(_shim_get_fault "${fault_path}" "${method}")"
 
 # `ifFieldPresent` (018, T068, FR-011): a fault that only fires while the
 # request body's `.fields` still carries the named key — lets a test

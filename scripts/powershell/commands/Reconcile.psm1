@@ -1755,7 +1755,7 @@ function Invoke-JiraReconcileRun {
                 if ($null -eq $trecord) { continue }
                 $toutcome = Resolve-JiraTransition -RecordJson $trecord -DeclaredStep ([string]$tmeta.target) | ConvertFrom-Json -Depth 100
                 if ([string]$toutcome.outcome -eq 'move') {
-                    $tres = Get-JiraTransitionAction -BaseUrl $base -Key ([string]$tmeta.key) -TransitionId ([string]$toutcome.transition_id) -Blockers $tmeta.blockers -Label $tdueId
+                    $tres = Get-JiraTransitionAction -BaseUrl $base -Key ([string]$tmeta.key) -TransitionId ([string]$toutcome.transition_id) -Blockers $tmeta.blockers -Label $tdueId -Role 'task' -DeclaredStep ([string]$tmeta.target)
                     $tasksActionsJson = ConvertTo-JiraJsonValue (@(($tasksActionsJson | ConvertFrom-Json -Depth 100)) + $tres.Action)
                     if ($tres.Note) { $taskNotes.Add($tres.Note) }
                 }
@@ -1923,6 +1923,18 @@ function Invoke-JiraReconcileRun {
     $actionsJson = ConvertTo-JiraJsonValue $lresult.actions
     $warnsJson = ConvertTo-JiraJsonValue $lresult.warnings
     $notesJson = ConvertTo-JiraJsonValue $lresult.notes
+    # 023, U8: the parent's content write is a SEPARATE code path from
+    # $kept (Reconcile.psm1's own parent-first write, PlanApply.psm1's
+    # per-ticket loop unconditionally excludes it) — so a halted parent's
+    # content_writes:false decision, computed inside Get-JiraLifecyclePlan
+    # but with nowhere else to surface, must be applied here or the parent
+    # silently keeps writing content a halted STORY would have withheld.
+    # Every downstream consumer of $parentAction (counts, the apply plan,
+    # the run summary's own display) reads it AFTER this point.
+    $parentContentDroppedVal = Get-JiraPlanPropSafe $lresult 'parent_content_dropped'
+    if ($null -ne $parentContentDroppedVal -and [bool]$parentContentDroppedVal) {
+        $parentAction = $null
+    }
 
     # Every blocked story produces exactly one warning from the diagnostics
     # catalogue (FR-011, FR-016, FR-021) — folded into the same channel the

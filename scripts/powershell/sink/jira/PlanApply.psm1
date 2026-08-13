@@ -1051,15 +1051,27 @@ function Get-JiraTransitionAction {
       Get-JiraLifecyclePlan (story tier) and Get-JiraTaskLifecyclePlan (task
       tier) rather than each building its own. Mirror of
       _plan_transition_action. Returns [ordered]@{ Action; Note } — Note is
-      $null when the ticket carries no open blocking link.
+      $null when the ticket carries no open blocking link. Role/DeclaredStep
+      (023, T116) ride along on the action itself — never sent to Jira,
+      Invoke-JiraApplyWrite only reads method/url/body off it — so a
+      write-time rejection can be reported naming the ticket, its role, and
+      the step it was headed for (FR-038) without a second lookup. Passed
+      only by the transition-resolution.md call sites (contract §2); the
+      task tier's own done/not-done completion pass predates 023 and is out
+      of this requirement's scope, so its calls leave both empty.
     #>
     param(
         [string] $BaseUrl, [string] $Key, [string] $TransitionId,
-        [object[]] $Blockers, [string] $Label
+        [object[]] $Blockers, [string] $Label,
+        [string] $Role = '', [string] $DeclaredStep = ''
     )
     $action = [ordered]@{
         method = 'POST'; url = "$BaseUrl/rest/api/3/issue/$Key/transitions"
         body   = [ordered]@{ transition = [ordered]@{ id = $TransitionId } }
+    }
+    if ($Role) {
+        $action.role = $Role
+        $action.declared_step = $DeclaredStep
     }
     $note = $null
     if ($Blockers -and $Blockers.Count -gt 0) {
@@ -1214,6 +1226,7 @@ function Get-JiraLifecyclePlan {
     $warns = [System.Collections.Generic.List[string]]::new()
     $notes = [System.Collections.Generic.List[string]]::new()
     $due = [System.Collections.Generic.List[object]]::new()
+    $parentContentDropped = $false
 
     foreach ($entry in $entries) {
         $sid = $entry.Sid
@@ -1284,7 +1297,17 @@ function Get-JiraLifecyclePlan {
             }
         }
 
-        if (-not $dropContent -and -not $entry.IsParent) { $kept.Add($action) }
+        if ($entry.IsParent) {
+            # 023, U8: the parent's own halt decision (dropContent, set only
+            # by drift_evaluate's "halted" branch) is never routed through
+            # $kept — the parent's content write is a SEPARATE code path in
+            # the caller (Reconcile.psm1's own parent-first write, never
+            # this list) — so it must ride back out as its own field or the
+            # caller has no way to learn a halted parent's content must
+            # stay unwritten too, exactly like a halted story's.
+            $parentContentDropped = $dropContent
+        }
+        elseif (-not $dropContent) { $kept.Add($action) }
     }
 
     # Resolution (023, contract transition-resolution.md §1/§2): the read is
@@ -1303,7 +1326,7 @@ function Get-JiraLifecyclePlan {
             if ($null -eq $record) { continue }
             $outcome = Resolve-JiraTransition -RecordJson $record -DeclaredStep $d.Target | ConvertFrom-Json -Depth 100
             if ([string]$outcome.outcome -eq 'move') {
-                $tres = Get-JiraTransitionAction -BaseUrl $base -Key $d.Key -TransitionId ([string]$outcome.transition_id) -Blockers $d.Blockers -Label $d.Sid
+                $tres = Get-JiraTransitionAction -BaseUrl $base -Key $d.Key -TransitionId ([string]$outcome.transition_id) -Blockers $d.Blockers -Label $d.Sid -Role $d.Role -DeclaredStep $d.Target
                 $kept.Add($tres.Action)
                 if ($tres.Note) { $notes.Add($tres.Note) }
             }
@@ -1313,7 +1336,7 @@ function Get-JiraLifecyclePlan {
         }
     }
 
-    $out = [ordered]@{ actions = $kept; warnings = $warns; notes = $notes }
+    $out = [ordered]@{ actions = $kept; warnings = $warns; notes = $notes; parent_content_dropped = $parentContentDropped }
     return (ConvertTo-JiraJsonValue $out)
 }
 
@@ -1499,11 +1522,54 @@ function Write-JiraApplyRejectionReport {
         [string] $DefaultableFieldsByTypeJson,
         $Result
     )
+    if ($Method -eq 'POST' -and $Url.EndsWith('/transitions')) {
+        Write-JiraApplyTransitionRejectionReport -Url $Url -Action $Action -Result $Result
+        return
+    }
     if ($Method -ne 'POST' -or -not $Url.EndsWith('/issue') -or [int]$Result.Status -ne 400) { return }
     $actionJson = ConvertTo-JiraJsonValue $Action
     $errBody = if ($Result.ErrorBody) { $Result.ErrorBody } else { '{}' }
     $msg = Get-JiraTicketFieldRejectionMessage -DefaultableFieldsByTypeJson $DefaultableFieldsByTypeJson -ActionJson $actionJson -ErrorBodyJson $errBody
     if ($msg) { [Console]::Error.WriteLine($msg) }
+}
+
+function Write-JiraApplyTransitionRejectionReport {
+    <#
+    .SYNOPSIS
+      023, T116, FR-035/FR-038: the tracker rejected a move
+      Get-JiraTransitionAction already decided was available (a human moved
+      the ticket between the read and this write, or the tracker's own
+      workflow changed underneath it). A no-op unless Action carries the
+      role/declared_step pair only the transition-resolution.md call sites
+      attach (see Get-JiraTransitionAction) — the task tier's own
+      done/not-done completion pass predates 023 and stays silent here,
+      exactly as before this feature. No retry, no re-ask of available
+      moves, no substitute move within this run: the caller already returns
+      immediately after calling this (contract §2 U6). Mirror of
+      _plan_apply_report_transition_rejection.
+    #>
+    param([string] $Url, $Action, $Result)
+    $roleVal = Get-JiraPlanProp $Action 'role'
+    if ($null -eq $roleVal -or [string]$roleVal -eq '') { return }
+    $role = [string]$roleVal
+    $declared = [string](Get-JiraPlanProp $Action 'declared_step')
+    $key = ($Url -replace '.*/issue/', '') -replace '/transitions$', ''
+    $roleLabel = $role.Substring(0, 1).ToUpperInvariant() + $role.Substring(1)
+    $errBodyText = if ($Result.ErrorBody) { [string]$Result.ErrorBody } else { '{}' }
+    $reasons = New-Object System.Collections.Generic.List[string]
+    $errObj = $errBodyText | ConvertFrom-Json -Depth 100 -ErrorAction SilentlyContinue
+    if ($null -ne $errObj) {
+        if ($errObj.PSObject.Properties['errorMessages']) {
+            foreach ($m in @($errObj.errorMessages)) { $reasons.Add([string]$m) }
+        }
+        if ($errObj.PSObject.Properties['errors']) {
+            foreach ($prop in $errObj.errors.PSObject.Properties) {
+                $reasons.Add("$($prop.Name): $($prop.Value)")
+            }
+        }
+    }
+    $reason = if ($reasons.Count -gt 0) { ($reasons -join '; ') } else { 'the tracker gave no reason' }
+    [Console]::Error.WriteLine("reconcile: $roleLabel ticket $key was not moved to `"$declared`": the tracker rejected the transition — $reason. It was not retried, and no other move was attempted for it, within this run; reconcile will read its available moves again next run.")
 }
 
 function Invoke-JiraApplyWrite {

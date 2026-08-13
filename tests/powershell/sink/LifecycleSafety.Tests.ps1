@@ -66,4 +66,24 @@ Describe 'Get-JiraLifecyclePlan' {
         $storyOut.warnings[0] | Should -Be $parentOut.warnings[0]
         $storyOut.warnings[0] | Should -BeLike '*halted*'
     }
+
+    It "a halted parent's content write is dropped exactly like a halted story's (U8, contract section 5)" {
+        # A story's halted content is dropped by exclusion from .actions
+        # (kept unconditionally excludes the parent, since the parent's
+        # write is a SEPARATE code path in the caller) — the parent instead
+        # needs its own explicit signal, parent_content_dropped, or the
+        # caller has no way to learn a halted parent's content must stay
+        # unwritten too.
+        $parentAction2 = '{"method":"PUT","url":"http://h/rest/api/3/issue/K-1","body":{"fields":{"summary":"New"}}}'
+        $lcParent = '{"order":{"specification":["To Do","In Progress","Done"]},"base_url":"http://h","parent_local_id":"s1","tickets":{"s1":{"key":"K-1","status":"Blocked","category":"halted","target":"In Progress","transition_id":"21","role":"specification"}}}'
+        $r = Get-JiraLifecyclePlan -ContentActionsJson '[]' -NeutralDocJson '{"stories":[]}' -LifecycleContextJson $lcParent -ParentActionJson $parentAction2 | ConvertFrom-Json
+        $r.parent_content_dropped | Should -Be $true
+    }
+
+    It 'an UNhalted parent''s content write is kept (parent_content_dropped stays false)' {
+        $parentAction2 = '{"method":"PUT","url":"http://h/rest/api/3/issue/K-1","body":{"fields":{"summary":"New"}}}'
+        $lcParent = '{"order":{"specification":["To Do","In Progress","Done"]},"base_url":"http://h","parent_local_id":"s1","tickets":{"s1":{"key":"K-1","status":"To Do","category":"mapped","target":"In Progress","transition_id":"21","role":"specification"}}}'
+        $r = Get-JiraLifecyclePlan -ContentActionsJson '[]' -NeutralDocJson '{"stories":[]}' -LifecycleContextJson $lcParent -ParentActionJson $parentAction2 | ConvertFrom-Json
+        $r.parent_content_dropped | Should -Be $false
+    }
 }

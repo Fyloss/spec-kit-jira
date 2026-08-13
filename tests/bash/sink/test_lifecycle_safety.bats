@@ -103,6 +103,33 @@ setup() {
   [[ "${story_warn}" == *"halted"* ]]
 }
 
+@test "a halted parent's content write is dropped exactly like a halted story's (U8, contract §5)" {
+  # A story's halted content is dropped by exclusion from .actions (kept
+  # unconditionally excludes the parent, since the parent's write is a
+  # SEPARATE code path in the caller) — the parent instead needs its own
+  # explicit signal, parent_content_dropped, or the caller has no way to
+  # learn a halted parent's content must stay unwritten too.
+  local parent_action2
+  parent_action2='{"method":"PUT","url":"http://h/rest/api/3/issue/K-1","body":{"fields":{"summary":"New"}}}'
+  local lc_parent
+  lc_parent="$(jq -cn '{order:{specification:["To Do","In Progress","Done"]}, base_url:"http://h", parent_local_id:"s1",
+    tickets:{s1:{key:"K-1", status:"Blocked", category:"halted", target:"In Progress", transition_id:"21", role:"specification"}}}')"
+  run plan_lifecycle '[]' '{"stories":[]}' "${lc_parent}" "${parent_action2}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.parent_content_dropped' <<< "$output")" = "true" ]
+}
+
+@test "an UNhalted parent's content write is kept (parent_content_dropped stays false)" {
+  local parent_action2
+  parent_action2='{"method":"PUT","url":"http://h/rest/api/3/issue/K-1","body":{"fields":{"summary":"New"}}}'
+  local lc_parent
+  lc_parent="$(jq -cn '{order:{specification:["To Do","In Progress","Done"]}, base_url:"http://h", parent_local_id:"s1",
+    tickets:{s1:{key:"K-1", status:"To Do", category:"mapped", target:"In Progress", transition_id:"21", role:"specification"}}}')"
+  run plan_lifecycle '[]' '{"stories":[]}' "${lc_parent}" "${parent_action2}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.parent_content_dropped' <<< "$output")" = "false" ]
+}
+
 @test "the PowerShell port folds the lifecycle rules byte-identically (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local ps_abs; ps_abs="$(cd "${ROOT}/scripts/powershell/sink/jira" && pwd)"

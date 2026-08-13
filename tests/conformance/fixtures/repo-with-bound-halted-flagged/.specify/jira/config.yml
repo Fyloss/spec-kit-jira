@@ -1,0 +1,23 @@
+# Team config — 023 US5 conformance fixture (committable, credential-free):
+# declares a PER-ROLE phase_status_map (specification role only needed) plus
+# an operator halted_statuses list, so the parent's own lifecycle entry can
+# be driven into "halted" or checked for the Flagged withholding, matching
+# the per-ticket safety body a story already shares (U8). A role-blind map
+# would route wholesale to "story" and never reach the parent's own entry.
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    phase_status_map:
+      specification:
+        after_specify: "In Progress"
+    halted_statuses:
+      - "Blocked"
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP
