@@ -75,7 +75,15 @@ function Import-JiraTransitions {
                 if (-not $logicalName) { $logicalName = $requiredEntry.Name }
                 $gatedField = [ordered]@{ logical_name = $logicalName; field_id = $requiredEntry.Name }
             }
-            $moves += [ordered]@{ id = $t.id; name = $t.name; to = $t.to.name; gated_field = $gatedField }
+            # $t.to.name accessed via .PSObject.Properties, never dot access:
+            # a candidate classified only by statusCategory (no name) is a
+            # real shape (023, task-role due set sharing a mock config with
+            # 012's category-only completion pass) and StrictMode throws on
+            # a missing property via dot access.
+            $toName = $null
+            $toMember = $t.to.PSObject.Properties['name']
+            if ($null -ne $toMember) { $toName = $toMember.Value }
+            $moves += [ordered]@{ id = $t.id; name = $t.name; to = $toName; gated_field = $gatedField }
         }
         $entry = [ordered]@{ key = $k; moves = $moves }
         $script:JiraTransitionsMap[$k.ToLowerInvariant()] = (ConvertTo-JiraJsonValue $entry)

@@ -25,6 +25,16 @@ Import-Module (Join-Path $PSScriptRoot '../sink/jira/Recognition.psm1') -Force #
 # Recognition.psm1's scope and reattach them to this one instead.
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Prefetch.psm1')        # 021 US4 — the recognition prefetch
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/PlanApply.psm1') -Force
+# No -Force on either of the next two: PlanApply.psm1 (imported above)
+# already loads both internally — a second -Force reimport here would tear
+# their exports out of PlanApply.psm1's own scope and reattach them to this
+# one instead (the same hazard the Prefetch.psm1 comment above documents).
+# 023, US4: the task-role mapping's own due set (Get-JiraDriftDecision,
+# Import-JiraTransitions/Get-JiraTransitionRecord/Resolve-JiraTransition)
+# is resolved directly in this module now, mirroring reconcile.sh, which
+# gets both transitively for free from bash's lack of real module scoping.
+Import-Module (Join-Path $PSScriptRoot '../engine/Drift.psm1')
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/Transitions.psm1')
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force # Phase 8, US5 — the completion pass's transitions read
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/DuplicateProbe.psm1') -Force # US4, droppable — the second, best-effort guard
 Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force # hook health — READ ONLY (003 FR-022)
@@ -1623,6 +1633,19 @@ function Invoke-JiraReconcileRun {
     # resolved here, never inside the PURE Get-JiraTaskLifecyclePlan: only the
     # command layer knows --on-drift. Mirror of reconcile.sh.
     if ($taskRoleActive -and $taskTierMode -eq 'subtask') {
+        # 023, US4, I4/I7: the `task` role's own declared mapping, resolved
+        # once up front. Mirror of reconcile.sh.
+        $phaseStatusMapObj = $phaseStatusMap | ConvertFrom-Json -Depth 100
+        $taskRoleMapObj = Get-JiraPlanPropSafe $phaseStatusMapObj 'task'
+        # Get-JiraPlanPropSafe indexes .PSObject.Properties[$Name] directly,
+        # which throws under StrictMode for an EMPTY string name — the
+        # ubiquitous "no event" case ($hookEvent = ''). Guard here rather
+        # than widen the shared helper's contract for every other caller.
+        $taskLcTarget = if ($hookEvent) { [string](Get-JiraPlanPropSafe $taskRoleMapObj $hookEvent) } else { '' }
+        $taskLcMapped = if ($taskRoleMapObj) { @($taskRoleMapObj.PSObject.Properties | ForEach-Object { [string]$_.Value }) } else { @() }
+        $taskLcOrder = @((Get-JiraReconcilePhaseOrder -PhaseStatusMapJson $phaseStatusMap | ConvertFrom-Json -Depth 100).task)
+        $taskDueMeta = [ordered]@{}
+
         $tasksRecogForCompletion = $tasksRecogJson | ConvertFrom-Json -Depth 100
         $tasksRecogBoundForCompletion = Get-JiraPlanPropSafe $tasksRecogForCompletion 'bound'
         $completionTasks = [ordered]@{}
@@ -1665,6 +1688,29 @@ function Invoke-JiraReconcileRun {
                     }
                     $cEntry = [ordered]@{ key = $cKey; blockers = $cBlockers; already_done_diverged = $true; backward = $cBwd }
                 }
+                elseif ((-not $cDone) -and $taskLcTarget) {
+                    # 023, US4: a genuinely unchecked sub-task (not diverged
+                    # into a done status — that case is handled above), with
+                    # the task role declaring a step for this event. Same
+                    # drift/Flagged safety a story or the parent already
+                    # runs through (research R6). Mirror of reconcile.sh.
+                    $cStatus = [string](Get-JiraPlanPropSafe $cBound 'status')
+                    $cFlagged = [bool](Get-JiraPlanPropSafe $cBound 'flagged')
+                    if ($cStatus -and $cStatus -ne $taskLcTarget) {
+                        if ($cFlagged) {
+                            $taskWarns.Add("sub-task $cKey carries the Flagged (impediment) marker; its transition is withheld and the flag is left untouched")
+                        }
+                        else {
+                            $tCategory = if ($taskLcMapped -contains $cStatus) { 'mapped' } else { 'unknown' }
+                            $tDi = ConvertTo-JiraJsonValue ([ordered]@{ current_status = $cStatus; current_category = $tCategory; target_status = $taskLcTarget; order = $taskLcOrder; on_drift = $onDrift })
+                            $tDec = Get-JiraDriftDecision -InputJson $tDi | ConvertFrom-Json -Depth 100
+                            foreach ($dw in @($tDec.warnings)) { $taskWarns.Add([string]$dw) }
+                            if ([string]$tDec.decision -eq 'transition') {
+                                $taskDueMeta[$cId] = [ordered]@{ key = $cKey; target = $taskLcTarget; status = $cStatus; blockers = $cBlockers }
+                            }
+                        }
+                    }
+                }
 
                 if ($null -ne $cEntry) { $completionTasks[$cId] = $cEntry }
             }
@@ -1677,6 +1723,31 @@ function Invoke-JiraReconcileRun {
             $tasksActionsJson = ConvertTo-JiraJsonValue @(Get-JiraPlanPropSafe $completionResult 'actions')
             foreach ($w in @(Get-JiraPlanPropSafe $completionResult 'warnings')) { $taskWarns.Add([string]$w) }
             foreach ($n in @(Get-JiraPlanPropSafe $completionResult 'notes')) { $taskNotes.Add([string]$n) }
+        }
+
+        # 023, US4: the task-role due set resolved by DESTINATION NAME
+        # (contract transition-resolution.md §1-§4) — the SAME resolution
+        # engine the story tier uses, one read for the whole due set.
+        if ($taskDueMeta.Count -gt 0) {
+            $taskDueKeys = @($taskDueMeta.Values | ForEach-Object { [string]$_.key })
+            $rcTtl = Import-JiraTransitions -Key $taskDueKeys
+            if ($rcTtl -ne 0) {
+                return (Get-JiraReconcileFaultCode -Code $rcTtl -Message 'reconcile: sub-task transitions could not be read (zero writes)')
+            }
+            foreach ($tdueId in $taskDueMeta.Keys) {
+                $tmeta = $taskDueMeta[$tdueId]
+                $trecord = Get-JiraTransitionRecord -Key ([string]$tmeta.key)
+                if ($null -eq $trecord) { continue }
+                $toutcome = Resolve-JiraTransition -RecordJson $trecord -DeclaredStep ([string]$tmeta.target) | ConvertFrom-Json -Depth 100
+                if ([string]$toutcome.outcome -eq 'move') {
+                    $tres = Get-JiraTransitionAction -BaseUrl $base -Key ([string]$tmeta.key) -TransitionId ([string]$toutcome.transition_id) -Blockers $tmeta.blockers -Label $tdueId
+                    $tasksActionsJson = ConvertTo-JiraJsonValue (@(($tasksActionsJson | ConvertFrom-Json -Depth 100)) + $tres.Action)
+                    if ($tres.Note) { $taskNotes.Add($tres.Note) }
+                }
+                else {
+                    $taskWarns.Add((Get-JiraTransitionWarning -Outcome $toutcome -Role 'task' -Key ([string]$tmeta.key) -Declared ([string]$tmeta.target) -Current ([string]$tmeta.status)))
+                }
+            }
         }
     }
 

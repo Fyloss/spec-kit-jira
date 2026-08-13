@@ -1845,4 +1845,5 @@ function Invoke-JiraApplyWriteSetWithRecognition {
 
 Export-ModuleMember -Function Get-JiraApplyKnownCoordinate, Invoke-JiraApplyWriteSet, Get-JiraPlanWriteSet, Get-JiraLifecyclePlan, `
     Get-JiraManagedDescriptionStatus, Invoke-JiraApplyWriteSetWithRecognition, Get-JiraPlanResolveFieldDefault, `
-    Get-JiraPlanConfirmationField, Get-JiraPlanTaskWriteSet, Get-JiraTaskLifecyclePlan, Get-JiraPlanSummaryDriftStatus
+    Get-JiraPlanConfirmationField, Get-JiraPlanTaskWriteSet, Get-JiraTaskLifecyclePlan, Get-JiraPlanSummaryDriftStatus, `
+    Get-JiraTransitionAction, Get-JiraTransitionWarning

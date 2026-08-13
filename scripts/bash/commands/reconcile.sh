@@ -1416,6 +1416,20 @@ _reconcile_run() {
   # §6): a checklist entry's completion is decided by the drift table
   # (Phase 4), not by a sub-task's status category.
   if [[ "${task_role_active}" == "true" && "${task_tier_mode}" == "subtask" ]]; then
+    # 023, US4, I4/I7: the `task` role's own declared mapping, resolved
+    # once up front. I4 — inert (empty target) under `checklist` (excluded
+    # by the outer `task_tier_mode == "subtask"` guard already) or when the
+    # project declares no `task` role at all (an empty phase_status_map.task
+    # resolves every event's target to ""). I7 — a CHECKED task always
+    # outranks the mapping: the due-set built below is scoped to
+    # `c_done == "false"` only, so a checked task is never double-evaluated
+    # here regardless of what the mapping declares.
+    local task_lc_target task_lc_mapped task_lc_order
+    task_lc_target="$(jq -r --arg e "${hook_event}" '(.task // {})[$e] // ""' <<< "${phase_status_map}")"
+    task_lc_mapped="$(jq -c '(.task // {}) | [.[]]' <<< "${phase_status_map}")"
+    task_lc_order="$(jq -c '.task // []' <<< "$(_reconcile_phase_order "${phase_status_map}")")"
+    local task_due_meta='{}'
+
     local completion_tasks='{}' completion_ids completion_id
     completion_ids="$(jq -r '[.stories[] | (.tasks // [])[] | .local_id] | .[]' <<< "${doc_for_write}")"
     while IFS= read -r completion_id; do
@@ -1458,6 +1472,35 @@ _reconcile_run() {
         fi
         c_entry="$(jq -cn --arg k "${c_key}" --argjson b "${c_blockers}" --argjson bw "${c_bwd}" \
           '{key:$k, blockers:$b, already_done_diverged:true, backward:$bw}')"
+      elif [[ "${c_done}" == "false" && -n "${task_lc_target}" ]]; then
+        # 023, US4: a genuinely unchecked sub-task (not diverged into a done
+        # status — that case is handled above), with the task role
+        # declaring a step for this event. Same drift/Flagged safety a
+        # story or the parent already runs through (research R6).
+        local c_status c_flagged
+        c_status="$(jq -r '.status // ""' <<< "${c_bound}")"
+        c_flagged="$(jq -r '(.flagged // false) | tostring' <<< "${c_bound}")"
+        if [[ -n "${c_status}" && "${c_status}" != "${task_lc_target}" ]]; then
+          if [[ "${c_flagged}" == "true" ]]; then
+            task_warns="$(jq -c --arg w "sub-task ${c_key} carries the Flagged (impediment) marker; its transition is withheld and the flag is left untouched" '. + [$w]' <<< "${task_warns}")"
+          else
+            local t_category t_di t_dec t_d t_dwarns
+            t_category="$(jq -rn --arg s "${c_status}" --argjson mt "${task_lc_mapped}" \
+              'if ($s | IN($mt[])) then "mapped" else "unknown" end')"
+            t_di="$(jq -cn --arg cs "${c_status}" --arg cc "${t_category}" --arg ts "${task_lc_target}" \
+              --argjson o "${task_lc_order}" --arg od "${on_drift}" \
+              '{current_status:$cs, current_category:$cc, target_status:$ts, order:$o, on_drift:$od}')"
+            t_dec="$(drift_evaluate "${t_di}")"
+            t_d="$(jq -r '.decision' <<< "${t_dec}")"
+            t_dwarns="$(jq -c '.warnings' <<< "${t_dec}")"
+            task_warns="$(jq -c --argjson dw "${t_dwarns}" '. + $dw' <<< "${task_warns}")"
+            if [[ "${t_d}" == "transition" ]]; then
+              task_due_meta="$(jq -c --arg id "${completion_id}" --arg k "${c_key}" --arg tgt "${task_lc_target}" \
+                --arg st "${c_status}" --argjson bl "${c_blockers}" \
+                '. + {($id): {key:$k, target:$tgt, status:$st, blockers:$bl}}' <<< "${task_due_meta}")"
+            fi
+          fi
+        fi
       fi
 
       if [[ "${c_entry}" != "null" ]]; then
@@ -1472,6 +1515,45 @@ _reconcile_run() {
       tasks_actions="$(jq -c '.actions' <<< "${completion_result}")"
       task_warns="$(jq -c --argjson w "$(jq -c '.warnings' <<< "${completion_result}")" '. + $w' <<< "${task_warns}")"
       task_notes="$(jq -c --argjson n "$(jq -c '.notes' <<< "${completion_result}")" '. + $n' <<< "${task_notes}")"
+    fi
+
+    # 023, US4: the task-role due set resolved by DESTINATION NAME (contract
+    # transition-resolution.md §1-§4) — the SAME resolution engine the story
+    # tier uses, one read for the whole due set (T047's rule applies here
+    # too).
+    if [[ "$(jq 'length' <<< "${task_due_meta}")" -gt 0 ]]; then
+      local -a task_due_keys=()
+      mapfile -t task_due_keys < <(jq -r '.[].key' <<< "${task_due_meta}")
+      local rc_ttl=0
+      transitions_load "${task_due_keys[@]}" || rc_ttl=$?
+      if ((rc_ttl != 0)); then
+        _reconcile_fault "${rc_ttl}" "reconcile: sub-task transitions could not be read (zero writes)"
+        return $?
+      fi
+      local tdue_id
+      while IFS= read -r tdue_id; do
+        [[ -z "${tdue_id}" ]] && continue
+        local tmeta tkey ttarget tstatus tblockers tavail toutcome tkind
+        tmeta="$(jq -c --arg id "${tdue_id}" '.[$id]' <<< "${task_due_meta}")"
+        tkey="$(jq -r '.key' <<< "${tmeta}")"
+        ttarget="$(jq -r '.target' <<< "${tmeta}")"
+        tstatus="$(jq -r '.status' <<< "${tmeta}")"
+        tblockers="$(jq -c '.blockers' <<< "${tmeta}")"
+        tavail="$(transitions_get "${tkey}")" || continue
+        toutcome="$(transitions_resolve "${tavail}" "${ttarget}")"
+        tkind="$(jq -r '.outcome' <<< "${toutcome}")"
+        if [[ "${tkind}" == "move" ]]; then
+          local ttid tres tnote
+          ttid="$(jq -r '.transition_id' <<< "${toutcome}")"
+          tres="$(_plan_transition_action "${base}" "${tkey}" "${ttid}" "${tblockers}" "${tdue_id}")"
+          tasks_actions="$(jq -c --argjson a "$(jq -c '.action' <<< "${tres}")" '. + [$a]' <<< "${tasks_actions}")"
+          tnote="$(jq -r '.note // empty' <<< "${tres}")"
+          [[ -n "${tnote}" ]] && task_notes="$(jq -c --arg n "${tnote}" '. + [$n]' <<< "${task_notes}")"
+        else
+          local tw; tw="$(_plan_transition_warning "${toutcome}" "task" "${tkey}" "${ttarget}" "${tstatus}")"
+          task_warns="$(jq -c --arg w "${tw}" '. + [$w]' <<< "${task_warns}")"
+        fi
+      done < <(jq -r 'keys[]' <<< "${task_due_meta}")
     fi
   fi
 
