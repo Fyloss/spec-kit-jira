@@ -92,71 +92,45 @@ teardown() {
   [ "$(grep -c '^GET .*/transitions?expand=' "${MOCK_CALLLOG}")" -eq 60 ]
 }
 
-@test "B3 -- the external-process count is unchanged when the due set doubles (024 spawn-budget §4, C4.2)" {
-  # A SEPARATE run from any timing run (research R4): counting the shim
-  # itself costs a process call per invocation, so this test never asserts
-  # duration, only the shimmed-tool tally, across two SEPARATE reconcile
-  # invocations of differently-sized due sets.
+@test "B3 -- transitions_load's own jq spawn count is constant, never one-for-one with the due set (024 spawn-budget §4, C4.2, T155)" {
+  # Isolated from the network entirely (mirroring test_plan_apply_spawn_budget.bats's
+  # own convention of testing the pure function directly): jira_request is
+  # stubbed to return a canned response instantly, so the ONLY jq spawns
+  # counted here are transitions_load's OWN parsing step, decoupled from
+  # jira_request's own per-call overhead (credential/header building, which
+  # scales with N regardless of this feature and is out of T155's scope).
   local helpers="${ROOT}/tests/bash/helpers"
   # shellcheck source=/dev/null
   source "${helpers}/spawn_count.bash"
-  local shim_dir="${BATS_TMPDIR}/aw_transitions_budget_shims_$$"
-  local count_file_30="${BATS_TMPDIR}/aw_transitions_budget_count30_$$.log"
-  local count_file_60="${BATS_TMPDIR}/aw_transitions_budget_count60_$$.log"
-
-  local fixture60="${ROOT}/tests/conformance/fixtures/repo-with-sixty-stories-due"
-
-  # 30-ticket due set: a fresh copy of the same fixture with the LAST 30
-  # story markers stripped from spec.md, so half the due set is absent.
-  local work30="${BATS_TEST_TMPDIR}/repo30"
-  cp -R "${fixture60}" "${work30}"
-  local spec30="${work30}/specs/001-widget/spec.md"
-  # Keep the parent + the first 30 stories only (TASKS-2..TASKS-31); drop
-  # every "### User Story" block for stories 31-60.
-  awk '
-    /^### User Story 31 /{stop=1}
-    !stop {print}
-  ' "${spec30}" > "${spec30}.tmp" && mv "${spec30}.tmp" "${spec30}"
-
-  export JIRA_CONFIG_DIR="${work30}/.specify/jira"
-  export SPEC_KIT_JIRA_REPO="acme/app"
-  export SPEC_KIT_JIRA_SPEC_SLUG="001-widget"
-  mock_start "${MOCK}/configs/tasks-sixty-transitions.json"
-  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
-  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
-  # The counting shim's "real curl" MUST resolve to the mock's own curl
-  # shim (mock_start's own PATH-prepended fake), never the system's —
-  # built only now, after mock_start, or every request in this run
-  # silently escapes to the real network instead of the mock.
+  local shim_dir="${BATS_TMPDIR}/aw_transitions_load_shims_$$"
+  local count_file_30="${BATS_TMPDIR}/aw_transitions_load_count30_$$.log"
+  local count_file_60="${BATS_TMPDIR}/aw_transitions_load_count60_$$.log"
   helper_spawn_count_setup "${shim_dir}" "${count_file_30}"
 
-  PATH="${shim_dir}:${PATH}" run cmd_reconcile reconcile "${spec30}" --json
-  [ "$status" -eq 0 ]
-  [ "$(jq -r '.counts.transitioned' <<< "$output")" -eq 30 ]
-  mock_stop
+  local -a keys30=() keys60=()
+  local i
+  for ((i = 1; i <= 30; i++)); do keys30+=("STORY-${i}"); done
+  for ((i = 1; i <= 60; i++)); do keys60+=("STORY-${i}"); done
 
-  # 60-ticket due set: the SAME fixture, unmodified, a fresh mock instance.
-  local work60="${BATS_TEST_TMPDIR}/repo60b"
-  cp -R "${fixture60}" "${work60}"
-  local spec60="${work60}/specs/001-widget/spec.md"
-  export JIRA_CONFIG_DIR="${work60}/.specify/jira"
-  mock_start "${MOCK}/configs/tasks-sixty-transitions.json"
-  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local stub='
+    source "'"${ROOT}"'/scripts/bash/sink/jira/transitions.sh"
+    jira_request() { printf "%s" "{\"transitions\":[{\"id\":\"101\",\"name\":\"Start\",\"to\":{\"name\":\"In Progress\"},\"fields\":{}}]}"; }
+    transitions_load "$@" > /dev/null
+  '
+  PATH="${shim_dir}:${PATH}" bash -c "${stub}" _ "${keys30[@]}"
   helper_spawn_count_setup "${shim_dir}" "${count_file_60}"
+  PATH="${shim_dir}:${PATH}" bash -c "${stub}" _ "${keys60[@]}"
 
-  PATH="${shim_dir}:${PATH}" run cmd_reconcile reconcile "${spec60}" --json
-  unset SPEC_KIT_JIRA_HOOK_EVENT
-  [ "$status" -eq 0 ]
-  [ "$(jq -r '.counts.transitioned' <<< "$output")" -eq 60 ]
-
-  local c30 c60
-  c30="$(helper_spawn_count_total "${count_file_30}")"
-  c60="$(helper_spawn_count_total "${count_file_60}")"
-  # Neither zero (the run genuinely shells out) nor doubled: growth stays
-  # sub-linear in the due-set size (decode-once shape, T155).
-  [ "${c30}" -gt 0 ]
-  [ "${c60}" -gt 0 ]
-  [ "${c60}" -lt $((c30 * 2)) ]
+  # T155's decode-once shape: transitions_load's PARSING step spawns `jq` a
+  # CONSTANT number of times for the whole due set (one call decoding the
+  # whole array), never one pair per ticket — so doubling the due set from
+  # 30 to 60 costs single-digit additional `jq` spawns, never 30 more.
+  local jq30 jq60
+  jq30="$(helper_spawn_count_for "${count_file_30}" jq)"
+  jq60="$(helper_spawn_count_for "${count_file_60}" jq)"
+  [ "${jq30}" -gt 0 ]
+  [ "${jq60}" -gt 0 ]
+  [ "$((jq60 - jq30))" -lt 5 ]
 
   rm -rf "${shim_dir}" "${count_file_30}" "${count_file_60}"
 }

@@ -51,23 +51,48 @@ transitions_load() {
   local base="${SPEC_KIT_JIRA_BASE_URL:-}"
   local api="${base}/rest/api/3"
   local key resp
+  # 023, T155 (024 spawn-budget's own decode-once shape, plan_apply.sh
+  # `_apply_writes_decode_rows`): the N reads themselves stay one GET per
+  # key (branch C has no bulk form — F1 is vacuous), but every response's
+  # PARSE used to cost its own `jq` call (plus a second for
+  # `json_canonical`) inside this loop — 2N spawns for an N-ticket due set.
+  # Raw response bodies are concatenated into ONE JSON array here (bash
+  # string interpolation, never a jq call): each is already syntactically
+  # complete compact JSON from Jira, and `key` is a Jira issue key
+  # (`[A-Z][A-Z0-9]*-[0-9]+`, never attacker-controlled — the same trust
+  # boundary `_plan_transition_action`'s own URL interpolation already
+  # relies on), so no escaping is needed. The single jq call below then
+  # decodes the WHOLE array at once.
+  local combined="[" first=true
   for key in "$@"; do
     resp="$(jira_request GET "${api}/issue/${key}/transitions?expand=transitions.fields")" || return $?
-    local entry lower
-    # kcov-excl-start — jq literal (string lines are not statements)
-    entry="$(jq -cn --argjson r "${resp}" --arg k "${key}" '
-      { key: $k,
-        moves: [ ($r.transitions // [])[] | {
-          id, name, to: .to.name,
-          gated_field: ( (.fields // {}) | to_entries | map(select(.value.required == true)) | first
-                          as $req
-                        | if $req == null then null
-                          else {logical_name: ($req.value.name // $req.key), field_id: $req.key} end)
-        } ] }' | json_canonical)"
-    # kcov-excl-stop
-    lower="$(printf '%s' "${key}" | tr '[:upper:]' '[:lower:]')"
-    _TRANSITIONS_MAP["${lower}"]="${entry}"
+    if ${first}; then first=false; else combined+=","; fi
+    combined+="{\"key\":\"${key}\",\"response\":${resp}}"
   done
+  combined+="]"
+
+  local decoded sep=$'\x1f'
+  # kcov-excl-start — jq literal (string lines are not statements)
+  decoded="$(jq -r --arg sep "${sep}" '
+    def sortkeys: walk(if type == "object" then to_entries | sort_by(.key) | from_entries else . end);
+    .[] | [
+      (.key | ascii_downcase),
+      ( { key, moves: [ (.response.transitions // [])[] | {
+            id, name, to: .to.name,
+            gated_field: ( (.fields // {}) | to_entries | map(select(.value.required == true)) | first
+                            as $req
+                          | if $req == null then null
+                            else {logical_name: ($req.value.name // $req.key), field_id: $req.key} end)
+          } ] } | sortkeys | tojson )
+    ] | join($sep)
+  ' <<< "${combined}")"
+  # kcov-excl-stop
+
+  local lower entry
+  while IFS="${sep}" read -r lower entry; do
+    [[ -z "${lower}" ]] && continue
+    _TRANSITIONS_MAP["${lower}"]="${entry}"
+  done <<< "${decoded}"
   return 0
 }
 
