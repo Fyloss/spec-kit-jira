@@ -14,7 +14,7 @@ BeforeAll {
 
 Describe 'Get-JiraLifecyclePlan' {
     It 'withholds a post-scope regression by default, content still reconciles (FR-035)' {
-        $lc = '{"order":["To Do","In Progress","Done"],"base_url":"http://h","tickets":{"s1":{"key":"K-1","status":"Done","category":"post-scope","target":"To Do","transition_id":"11"}}}'
+        $lc = '{"order":{"story":["To Do","In Progress","Done"]},"base_url":"http://h","tickets":{"s1":{"key":"K-1","status":"Done","category":"post-scope","target":"To Do","transition_id":"11"}}}'
         $r = Invoke-Lifecycle $lc
         (@($r.actions | Where-Object { $_.method -eq 'PUT' }).Count) | Should -Be 1
         (@($r.actions | Where-Object { ([string]$_.url).EndsWith('/transitions') }).Count) | Should -Be 0
@@ -22,13 +22,13 @@ Describe 'Get-JiraLifecyclePlan' {
     }
 
     It 'pulls a regressed post-scope ticket backward with --on-drift=proceed (FR-035)' {
-        $lc = '{"order":["To Do","In Progress","Done"],"base_url":"http://h","on_drift":"proceed","tickets":{"s1":{"key":"K-1","status":"Done","category":"post-scope","target":"To Do","transition_id":"11"}}}'
+        $lc = '{"order":{"story":["To Do","In Progress","Done"]},"base_url":"http://h","on_drift":"proceed","tickets":{"s1":{"key":"K-1","status":"Done","category":"post-scope","target":"To Do","transition_id":"11"}}}'
         $r = Invoke-Lifecycle $lc
         (@($r.actions | Where-Object { ([string]$_.url).EndsWith('/transitions') }).Count) | Should -Be 1
     }
 
     It 'withholds a Flagged ticket transition, surfaces the flag, never mutates it (FR-036)' {
-        $lc = '{"order":["To Do","In Progress","Done"],"base_url":"http://h","tickets":{"s1":{"key":"K-1","status":"In Progress","category":"mapped","target":"Done","transition_id":"31","flagged":true}}}'
+        $lc = '{"order":{"story":["To Do","In Progress","Done"]},"base_url":"http://h","tickets":{"s1":{"key":"K-1","status":"In Progress","category":"mapped","target":"Done","transition_id":"31","flagged":true}}}'
         $r = Invoke-Lifecycle $lc
         (@($r.actions | Where-Object { ([string]$_.url).EndsWith('/transitions') }).Count) | Should -Be 0
         $r.warnings[0] | Should -BeLike '*Flagged*'
@@ -36,7 +36,7 @@ Describe 'Get-JiraLifecyclePlan' {
     }
 
     It 'never mutates human links; a transition past open blockers adds an info note (FR-037)' {
-        $lc = '{"order":["To Do","In Progress","Done"],"base_url":"http://h","tickets":{"s1":{"key":"K-1","status":"To Do","category":"mapped","target":"In Progress","transition_id":"21","blockers":["K-9","K-10"]}}}'
+        $lc = '{"order":{"story":["To Do","In Progress","Done"]},"base_url":"http://h","tickets":{"s1":{"key":"K-1","status":"To Do","category":"mapped","target":"In Progress","transition_id":"21","blockers":["K-9","K-10"]}}}'
         $r = Invoke-Lifecycle $lc
         (@($r.actions | Where-Object { ([string]$_.url).EndsWith('/transitions') }).Count) | Should -Be 1
         (@($r.actions | Where-Object { $_.method -eq 'DELETE' -or ([string]$_.url) -match 'issueLink' }).Count) | Should -Be 0

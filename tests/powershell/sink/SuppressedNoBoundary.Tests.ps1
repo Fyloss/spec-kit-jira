@@ -32,21 +32,21 @@ BeforeAll {
 
 Describe 'T071 (FR-023) — suppressed tickets and the boundary' {
     It 'a halted ticket acquires no boundary on this run' {
-        $lc = "{`"order`":[`"To Do`",`"In Progress`",`"Done`"],`"base_url`":`"http://h`",`"tickets`":{`"s1`":{`"key`":`"K-1`",`"status`":`"Blocked`",`"category`":`"halted`",`"target`":`"In Progress`",`"transition_id`":`"11`",`"current`":{`"summary`":`"Story One`",`"description`":$script:CurrentDesc}}}}"
+        $lc = "{`"order`":{`"story`":[`"To Do`",`"In Progress`",`"Done`"]},`"base_url`":`"http://h`",`"tickets`":{`"s1`":{`"key`":`"K-1`",`"status`":`"Blocked`",`"category`":`"halted`",`"target`":`"In Progress`",`"transition_id`":`"11`",`"current`":{`"summary`":`"Story One`",`"description`":$script:CurrentDesc}}}}"
         $r = Invoke-Lifecycle $lc
         @($r.actions).Count | Should -Be 0
         $r.warnings[0] | Should -BeLike '*halted*'
     }
 
     It 'the SAME ticket acquires the boundary on the first run it is allowed to write' {
-        $lc = "{`"order`":[`"To Do`",`"In Progress`",`"Done`"],`"base_url`":`"http://h`",`"tickets`":{`"s1`":{`"key`":`"K-1`",`"status`":`"In Progress`",`"category`":`"mapped`",`"target`":`"In Progress`",`"current`":{`"summary`":`"Story One`",`"description`":$script:CurrentDesc}}}}"
+        $lc = "{`"order`":{`"story`":[`"To Do`",`"In Progress`",`"Done`"]},`"base_url`":`"http://h`",`"tickets`":{`"s1`":{`"key`":`"K-1`",`"status`":`"In Progress`",`"category`":`"mapped`",`"target`":`"In Progress`",`"current`":{`"summary`":`"Story One`",`"description`":$script:CurrentDesc}}}}"
         $r = Invoke-Lifecycle $lc
         @($r.actions).Count | Should -Be 1
         (ConvertTo-Json -InputObject $r.actions[0].body.fields.description -Depth 100 -Compress) | Should -BeLike "*$script:Marker*"
     }
 
     It "a flagged ticket's boundary still reconciles; only its transition is withheld (FR-036 unaffected)" {
-        $lc = "{`"order`":[`"To Do`",`"In Progress`",`"Done`"],`"base_url`":`"http://h`",`"tickets`":{`"s1`":{`"key`":`"K-1`",`"status`":`"In Progress`",`"category`":`"mapped`",`"target`":`"Done`",`"transition_id`":`"31`",`"flagged`":true,`"current`":{`"summary`":`"Story One`",`"description`":$script:CurrentDesc}}}}"
+        $lc = "{`"order`":{`"story`":[`"To Do`",`"In Progress`",`"Done`"]},`"base_url`":`"http://h`",`"tickets`":{`"s1`":{`"key`":`"K-1`",`"status`":`"In Progress`",`"category`":`"mapped`",`"target`":`"Done`",`"transition_id`":`"31`",`"flagged`":true,`"current`":{`"summary`":`"Story One`",`"description`":$script:CurrentDesc}}}}"
         $r = Invoke-Lifecycle $lc
         (@($r.actions | Where-Object { $_.method -eq 'PUT' }).Count) | Should -Be 1
         (ConvertTo-Json -InputObject $r.actions[0].body.fields.description -Depth 100 -Compress) | Should -BeLike "*$script:Marker*"
@@ -54,7 +54,7 @@ Describe 'T071 (FR-023) — suppressed tickets and the boundary' {
     }
 
     It "an unresolved-drift ticket's boundary still reconciles; only its transition is withheld (FR-035 unaffected)" {
-        $lc = "{`"order`":[`"To Do`",`"In Progress`",`"Done`"],`"base_url`":`"http://h`",`"tickets`":{`"s1`":{`"key`":`"K-1`",`"status`":`"Done`",`"category`":`"post-scope`",`"target`":`"To Do`",`"transition_id`":`"11`",`"current`":{`"summary`":`"Story One`",`"description`":$script:CurrentDesc}}}}"
+        $lc = "{`"order`":{`"story`":[`"To Do`",`"In Progress`",`"Done`"]},`"base_url`":`"http://h`",`"tickets`":{`"s1`":{`"key`":`"K-1`",`"status`":`"Done`",`"category`":`"post-scope`",`"target`":`"To Do`",`"transition_id`":`"11`",`"current`":{`"summary`":`"Story One`",`"description`":$script:CurrentDesc}}}}"
         $r = Invoke-Lifecycle $lc
         (@($r.actions | Where-Object { $_.method -eq 'PUT' }).Count) | Should -Be 1
         (ConvertTo-Json -InputObject $r.actions[0].body.fields.description -Depth 100 -Compress) | Should -BeLike "*$script:Marker*"

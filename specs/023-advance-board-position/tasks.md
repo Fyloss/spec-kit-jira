@@ -149,11 +149,11 @@ run under the matching event, and observe the ticket at the declared step.
 - [X] T032 [P] [US1] Add to `tests/bash/commands/test_reconcile_lifecycle.bats` the red test: a declared step for the dispatched event, a recognised story at "To Do", exactly one available move landing on "In Progress" — assert a transition request was issued and `counts.transitioned` is 1. **This is the failing test the whole feature turns green** (quickstart §1) — landed as `tests/bash/commands/test_reconcile_transition_resolution.bats`, its own file rather than appended to the existing one (the existing file's every other test is a NON-move scenario; this one needed its own fixture, `configs/comp-transitions.json`)
 - [ ] T033 [P] [US1] Add the same red test to `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1`
 - [X] T034 [P] [US1] Add `tests/bash/sink/test_transitions.bats` asserting `transitions_load` / `transitions_get` / `transitions_reset` produce the availability record of data-model.md §3, with keys matched case-insensitively and never by position (contract transition-resolution §2, F3)
-- [ ] T035 [P] [US1] Add the Pester mirror `tests/powershell/sink/Transitions.Tests.ps1` with identical assertions
+- [X] T035 [P] [US1] Add the Pester mirror `tests/powershell/sink/Transitions.Tests.ps1` with identical assertions
 - [X] T036 [US1] Add to `tests/bash/sink/test_transitions.bats` the `move` branch of the resolution rule: exactly one candidate matched by destination name, ungated, yields `{"outcome":"move","transition_id":…}` (contract transition-resolution §3)
-- [ ] T037 [US1] Add the same `move` branch to `tests/powershell/sink/Transitions.Tests.ps1`
+- [X] T037 [US1] Add the same `move` branch to `tests/powershell/sink/Transitions.Tests.ps1`
 - [X] T038 [US1] Add to `tests/bash/sink/test_transitions.bats` rules M1 and M2: a candidate is identified only by the name of the step it lands on — never by the move's own name, its position, or any built-in list — and comparison is exact, so a difference in case or spacing is a different step
-- [ ] T039 [US1] Add the same M1/M2 assertions to `tests/powershell/sink/Transitions.Tests.ps1`
+- [X] T039 [US1] Add the same M1/M2 assertions to `tests/powershell/sink/Transitions.Tests.ps1`
 - [X] T040 [US1] Add to `tests/bash/commands/test_reconcile_lifecycle.bats`: a ticket already standing at the declared step attempts no move, asks the tracker **nothing** about available moves, and raises no warning (FR-008, contract §7 Z1)
 - [ ] T040a [US1] Add the same already-at-target assertions to `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1` — T040 is the only bats test in this phase with no port twin
 - [X] T040b [US1] ~~Add to `tests/bash/sink/test_transitions.bats` the F1 fall-through~~ — **SKIPPED, branch A only; under branch C the module has no bulk form and F1 is vacuous** (depends on T002)
@@ -162,15 +162,15 @@ run under the matching event, and observe the ticket at the declared step.
 ### Implementation for User Story 1
 
 - [X] T041 [US1] Create `scripts/bash/sink/jira/transitions.sh` with the three-function interface of contract transition-resolution §2, implementing the branch T002 selected, chunked at 100 keys under branch A (depends on T001, T002)
-- [ ] T042 [US1] Create the PowerShell twin `scripts/powershell/sink/jira/Transitions.psm1` with byte-identical output and an identical call sequence (depends on T002)
+- [X] T042 [US1] Create the PowerShell twin `scripts/powershell/sink/jira/Transitions.psm1` with byte-identical output and an identical call sequence (depends on T002)
 - [X] T043 [US1] ~~Implement the fall-through of contract §2 F1 in `scripts/bash/sink/jira/transitions.sh`~~ — **SKIPPED, branch A only; T002 selected branch C** (depends on T040b, T041)
 - [X] T044 [US1] ~~Mirror the fall-through in `scripts/powershell/sink/jira/Transitions.psm1`~~ — **SKIPPED, branch A only** (depends on T040c, T042)
 - [X] T045 [US1] Implement the `move` branch of the resolution rule in `scripts/bash/sink/jira/transitions.sh`, selecting by destination name only (depends on T041)
-- [ ] T046 [US1] Mirror the `move` branch in `scripts/powershell/sink/jira/Transitions.psm1` (depends on T042)
+- [X] T046 [US1] Mirror the `move` branch in `scripts/powershell/sink/jira/Transitions.psm1` (depends on T042)
 - [X] T047 [US1] Assemble the due set in `scripts/bash/sink/jira/plan_apply.sh`'s `plan_lifecycle` per contract §1 D1–D5 — after `drift_evaluate` returns `transition` and after the already-at-target check — and call `transitions_load` once for the whole set (depends on T045)
-- [ ] T048 [US1] Mirror the due-set assembly and single load call in `scripts/powershell/sink/jira/PlanApply.psm1` (depends on T046)
+- [X] T048 [US1] Mirror the due-set assembly and single load call in `scripts/powershell/sink/jira/PlanApply.psm1` (depends on T046)
 - [X] T049 [US1] Fill `transition_id` from a `move` outcome in `scripts/bash/sink/jira/plan_apply.sh`, so the existing `_plan_transition_action` emission site at l. 979 fires on the real path for the first time (depends on T047)
-- [ ] T050 [US1] Mirror the `transition_id` fill in `scripts/powershell/sink/jira/PlanApply.psm1` (depends on T048)
+- [X] T050 [US1] Mirror the `transition_id` fill in `scripts/powershell/sink/jira/PlanApply.psm1` (depends on T048)
 - [X] T051 [P] [US1] Add `counts.transitioned` to the run summary in `scripts/bash/commands/reconcile.sh`, present **only** when the run carries an event and at least one role declares a step for it, never folded into `created` or `updated` (data-model.md §5, FR-011)
 - [ ] T052 [P] [US1] Mirror the conditional `counts.transitioned` in `scripts/powershell/commands/Reconcile.psm1`
 - [X] T053 [P] [US1] Add the optional `counts.transitioned` key to `specs/001-jira-reconcile-engine/contracts/run-summary.schema.json`, the schema `--json` output is validated against, marking it optional so a run with no event still validates
@@ -208,9 +208,9 @@ assert the second run reached the board and moved the ticket to the second event
 ### Implementation for User Story 3
 
 - [ ] T066 [US3] Bump `schema` to `2` and add the `hook_event` field to `run_state_compose` in `scripts/bash/lib/run_state.sh`, taking the event as an **explicit argument** so the module stays a pure function of its arguments (contract run-state-v2 §2)
-- [ ] T067 [US3] Mirror the schema bump and `hook_event` argument in `scripts/powershell/lib/RunState.psm1`
+- [X] T067 [US3] Mirror the schema bump and `hook_event` argument in `scripts/powershell/lib/RunState.psm1`
 - [ ] T068 [US3] Add `plan.md` to the hashed `inputs` in `scripts/bash/lib/run_state.sh`, on the existing "present when the file exists, key omitted otherwise" rule used for `tasks.md` (depends on T066)
-- [ ] T069 [US3] Mirror the `plan.md` input in `scripts/powershell/lib/RunState.psm1` (depends on T067)
+- [X] T069 [US3] Mirror the `plan.md` input in `scripts/powershell/lib/RunState.psm1` (depends on T067)
 - [ ] T070 [US3] Thread the resolved event through the three `run_state_*` call sites in `scripts/bash/commands/reconcile.sh` (depends on T066)
 - [ ] T071 [US3] Thread the event through the same call sites in `scripts/powershell/commands/Reconcile.psm1` (depends on T067)
 - [ ] T072 [P] [US3] Add `tests/conformance/scenarios/us023-second-event-advances.json` — two runs, the second under a different event with nothing changed, asserting the second issues requests and moves the ticket
@@ -252,9 +252,9 @@ assert each tier's ticket landed on its own declared step and neither was offere
 - [ ] T087 [US4] Mirror the schema acceptance and the seven messages in `scripts/powershell/lib/Config.psm1`
 - [ ] T088 [US4] Extend the normalisation in `_reconcile_phase_status_map` in `scripts/bash/commands/reconcile.sh` to route the per-role shape into the resolved form (depends on T086, and on T015)
 - [ ] T089 [US4] Mirror the extended normalisation in `Get-JiraReconcilePhaseStatusMap` in `scripts/powershell/commands/Reconcile.psm1` (depends on T087, and on T016)
-- [ ] T090 [US4] Widen `_recognition_read_parent`'s field projection in `scripts/bash/sink/jira/recognition.sh` to include `status`, `Flagged` and `issuelinks`; the prefetch union at `scripts/bash/sink/jira/prefetch.sh:26` already carries all three, so the bulk request is unchanged
-- [ ] T091 [US4] Mirror the parent projection widening in `scripts/powershell/sink/jira/Recognition.psm1`
-- [ ] T092 [US4] Add the parent's lifecycle context entry in `scripts/bash/commands/reconcile.sh`, keyed by its durable local identifier, carrying `role: "specification"` (depends on T090)
+- [X] T090 [US4] Widen `_recognition_read_parent`'s field projection in `scripts/bash/sink/jira/recognition.sh` to include `status`, `Flagged` and `issuelinks`; the prefetch union at `scripts/bash/sink/jira/prefetch.sh:26` already carries all three, so the bulk request is unchanged — done in an earlier pass of this session
+- [X] T091 [US4] Mirror the parent projection widening in `scripts/powershell/sink/jira/Recognition.psm1` — closes the test_recognition_parent.bats NFR-1 gap
+- [X] T092 [US4] Add the parent's lifecycle context entry in `scripts/bash/commands/reconcile.sh`, keyed by its durable local identifier, carrying `role: "specification"` (depends on T090) — done in an earlier pass of this session
 - [ ] T093 [US4] Mirror the parent context entry in `scripts/powershell/commands/Reconcile.psm1` (depends on T091)
 - [ ] T094 [US4] Extend `plan_lifecycle` in `scripts/bash/sink/jira/plan_apply.sh` to walk the parent alongside its stories — the same per-ticket body: zero-churn drop, flagged check, `drift_evaluate`, transition (depends on T092)
 - [ ] T095 [US4] Mirror the parent walk in `scripts/powershell/sink/jira/PlanApply.psm1` (depends on T093)

@@ -38,14 +38,21 @@ Describe 'RunState' {
         It 'carries exactly the documented top-level fields, and no project_key' {
             $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
             $keys = ($doc | ConvertFrom-Json).PSObject.Properties.Name | Sort-Object
-            ($keys -join ',') | Should -Be 'base_url,email,extension_version,field_values,inputs,on_drift,schema'
+            ($keys -join ',') | Should -Be 'base_url,email,extension_version,field_values,hook_event,inputs,on_drift,schema'
         }
 
-        It 'schema is the integer 1 at introduction' {
+        It 'schema is the integer 2 since 023''s hook_event/plan.md inputs (contracts/run-state-v2.md C1)' {
             $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
             $parsed = $doc | ConvertFrom-Json
-            [int]$parsed.schema | Should -Be 1
-            $doc | Should -Match '"schema":1[,}]'
+            [int]$parsed.schema | Should -Be 2
+            $doc | Should -Match '"schema":2[,}]'
+        }
+
+        It 'hook_event is carried verbatim, empty string when a run has none' {
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan'
+            ($doc | ConvertFrom-Json).hook_event | Should -Be 'after_plan'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            ($doc | ConvertFrom-Json).hook_event | Should -Be ''
         }
 
         It 'carries base_url, email, on_drift, and field_values verbatim' {
@@ -84,6 +91,19 @@ Describe 'RunState' {
             $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
             $want = (& git hash-object --no-filters $tasksPath)
             $got = ($doc | ConvertFrom-Json).inputs.'tasks.md'
+            $got | Should -Be $want
+        }
+
+        It 'plan.md is omitted when absent, present with its hash when it exists (contracts/run-state-v2.md C3)' {
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $inputs = ($doc | ConvertFrom-Json).inputs
+            ($inputs.PSObject.Properties.Name -contains 'plan.md') | Should -BeFalse
+
+            $planPath = Join-Path (Split-Path -Parent $script:Spec) 'plan.md'
+            [System.IO.File]::WriteAllText($planPath, "## Summary`n")
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $want = (& git hash-object --no-filters $planPath)
+            $got = ($doc | ConvertFrom-Json).inputs.'plan.md'
             $got | Should -Be $want
         }
 
@@ -139,6 +159,16 @@ Describe 'RunState' {
         It 'is $false once field_values differs' {
             Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
             Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues 'KEY=Story=Label=New' | Should -BeFalse
+        }
+
+        It 'is $false once hook_event differs — an unhonoured lifecycle event is never skipped (S1, S9)' {
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan' | Should -BeFalse
+        }
+
+        It 'is $true after Save-JiraRunState with the identical hook_event' {
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan'
+            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan' | Should -BeTrue
         }
 
         It 'is $false when the recorded file is corrupt JSON' {
