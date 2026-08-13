@@ -120,6 +120,60 @@ Describe 'Invoke-JiraReconcile — a declared step actually moves a ticket' {
         $comp3Warns2[0] | Should -Be $comp3Warns[0]
     }
 
+    It 'T131 -- a recorded field_defaults value of the same name is never substituted for the gated field, warning unchanged (rule M4, FR-006)' {
+        # A FRESH mock instance too (Stop-JiraMock/Start-JiraMock, not
+        # BeforeEach's own instance which already advanced past COMP-1..4):
+        # field_defaults must never even be CONSULTED for a transition
+        # resolution (the POST body is always {transition:{id}} with no
+        # fields key), so this proves isolation, not a shared-state
+        # interaction with the other tests in this file. Reusing
+        # BeforeEach's own mock instance would create COMP-5..8 instead,
+        # breaking the hardcoded "COMP-4" fault key below.
+        Stop-JiraMock -Mock $script:M
+        $work2 = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse $Fixture $work2
+        $spec2 = Join-Path $work2 'specs/001-billing-invoices/spec.md'
+        $configYaml2 = @'
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    phase_status_map:
+      after_specify: "To Do"
+      after_plan: "In Progress"
+field_defaults:
+  COMP:
+    ask: false
+    Story:
+      Resolution: "Done"
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP
+'@
+        Set-Content -NoNewline -Path (Join-Path $work2 '.specify/jira/config.yml') -Value $configYaml2
+        $env:JIRA_CONFIG_DIR = Join-Path $work2 '.specify/jira'
+
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/comp-transitions.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $null = Invoke-Captured @('reconcile', $spec2, '--json')
+
+        Clear-Content -LiteralPath $script:M.CallLog
+        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+        try {
+            $r = Invoke-Captured @('reconcile', $spec2, '--json') | ConvertFrom-Json
+        }
+        finally { Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue }
+        # The gated warning is byte-identical to the no-field_defaults case
+        # — naming the demanded field, never a substituted value.
+        $comp4Warn = @($r.warnings | Where-Object { $_ -like '*COMP-4*' })[0]
+        $comp4Warn | Should -Be 'Story ticket COMP-4 was not moved to "In Progress": completing that transition requires "Resolution", which the bridge does not hold and never guesses. Set it by hand, then reconcile.'
+    }
+
     It 'a gated declared step moves nothing and names the withheld field' {
         Clear-Content -LiteralPath $script:M.CallLog
         $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'

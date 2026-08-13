@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (152)" {
+@test "the conformance corpus has exactly the recorded scenario count (154)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -83,8 +83,12 @@ setup() {
   # 023 adds one: us023-ambiguous-candidates (Phase 8, US6, T127) — two
   # candidate transitions land on the same declared step name; the mirror
   # invents no preference and names both verbatim (151 -> 152).
+  # 023 adds two: us023-gated-move, us023-gated-move-with-field-default
+  # (Phase 9, US7, T136) — a gated move is refused and the demanded field
+  # named; a recorded field_defaults value of the same name is never
+  # substituted for it (rule M4) (152 -> 154).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 152 ]
+  [ "${count}" -eq 154 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

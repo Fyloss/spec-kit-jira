@@ -109,6 +109,58 @@ teardown() {
   [ "$(jq -r '.[0]' <<< "${comp3_warns}")" = "${w}" ]
 }
 
+@test "T130 -- a recorded field_defaults value of the same name is never substituted for the gated field, warning unchanged (rule M4, FR-006)" {
+  # A FRESH mock instance too (mock_stop/mock_start, not the shared one
+  # setup() already advanced past COMP-1..4): field_defaults must never
+  # even be CONSULTED for a transition resolution (the POST body is always
+  # {transition:{id}} with no fields key), so this proves isolation, not a
+  # shared-state interaction with the other tests in this file. Reusing
+  # setup()'s own mock instance would create COMP-5..8 instead, breaking
+  # the hardcoded "COMP-4" fault key below.
+  mock_stop
+  local work2="${BATS_TEST_TMPDIR}/repo-field-default"
+  cp -R "${FIXTURE}" "${work2}"
+  local spec2="${work2}/specs/001-billing-invoices/spec.md"
+  cat > "${work2}/.specify/jira/config.yml" << 'YAML'
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    phase_status_map:
+      after_specify: "To Do"
+      after_plan: "In Progress"
+field_defaults:
+  COMP:
+    ask: false
+    Story:
+      Resolution: "Done"
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP
+YAML
+  export JIRA_CONFIG_DIR="${work2}/.specify/jira"
+  mock_start "${MOCK}/configs/comp-transitions.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${spec2}" --json > /dev/null
+
+  : > "${MOCK_CALLLOG}"
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile "${spec2}" --json
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  [ "$status" -eq 0 ]
+  # The gated warning is byte-identical to the no-field_defaults case —
+  # naming the demanded field, never a substituted value.
+  [ "$(jq -r '.warnings[] | select(contains("COMP-4"))' <<< "$output")" = 'Story ticket COMP-4 was not moved to "In Progress": completing that transition requires "Resolution", which the bridge does not hold and never guesses. Set it by hand, then reconcile.' ]
+  # No transition POST is ever attempted, gated or otherwise -- the write
+  # primitive that WOULD carry a fields payload is simply never reached.
+  [ "$(grep -c '^POST /rest/api/3/issue/COMP-4/transitions' "${MOCK_CALLLOG}")" -eq 0 ]
+}
+
 @test "a gated declared step moves nothing and names the withheld field" {
   : > "${MOCK_CALLLOG}"
   export SPEC_KIT_JIRA_HOOK_EVENT=after_plan

@@ -337,18 +337,15 @@ warning naming the demanded value.
 
 ### Tests for User Story 7 (write first, observe failing)
 
-- [ ] T128 [P] [US7] Add to `tests/bash/sink/test_transitions.bats` the `gated` branch: exactly one candidate whose screen marks a field required yields `{"outcome":"gated","gated_field":{…}}` (contract §3)
-- [ ] T129 [P] [US7] Add the same `gated` branch to `tests/powershell/sink/Transitions.Tests.ps1`
-- [ ] T130 [US7] Add to `tests/bash/commands/test_reconcile_lifecycle.bats` rule M4: with a creation-time default recorded in `field_defaults` for a field of the same name, that value is **not** sent and the gated warning is unchanged (FR-006)
-- [ ] T131 [US7] Add the same no-substitution assertion to `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1`
-
-### Implementation for User Story 7
-
-- [ ] T132 [US7] Implement the `gated` branch in `scripts/bash/sink/jira/transitions.sh`, reading the required-field detail the branch selected in T002 provides (depends on T045)
-- [ ] T133 [US7] Mirror the `gated` branch in `scripts/powershell/sink/jira/Transitions.psm1` (depends on T046)
-- [ ] T134 [US7] Emit the gated warning verbatim from contract §4 in `scripts/bash/sink/jira/plan_apply.sh` (depends on T132)
-- [ ] T135 [US7] Mirror the gated warning in `scripts/powershell/sink/jira/PlanApply.psm1` (depends on T133)
-- [ ] T136 [P] [US7] Add `tests/conformance/scenarios/us023-gated-move.json` and `us023-gated-move-with-field-default.json`
+- [X] T128 [P] [US7] Add to `tests/bash/sink/test_transitions.bats` the `gated` branch: exactly one candidate whose screen marks a field required yields `{"outcome":"gated","gated_field":{…}}` (contract §3) — already held from Phase 4's own implementation of all four outcomes together ("the sole candidate gated by a required field resolves to gated, field named")
+- [X] T129 [P] [US7] Add the same `gated` branch to `tests/powershell/sink/Transitions.Tests.ps1` — already held, same test name
+- [X] T130 [US7] Add to `tests/bash/commands/test_reconcile_lifecycle.bats` rule M4: with a creation-time default recorded in `field_defaults` for a field of the same name, that value is **not** sent and the gated warning is unchanged (FR-006) — landed in `test_reconcile_transition_resolution.bats` instead (T111's own precedent). True by construction (`_plan_transition_action`'s POST body is always `{transition:{id}}`, no `fields` key exists to substitute into) — the new test proves it concretely: the gated warning is byte-identical with and without a matching-named recorded default
+- [X] T131 [US7] Add the same no-substitution assertion to `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1` — landed in `Reconcile.TransitionResolution.Tests.ps1`, mirroring T130
+- [X] T132 [US7] Implement the `gated` branch in `scripts/bash/sink/jira/transitions.sh`, reading the required-field detail the branch selected in T002 provides (depends on T045) — already held (`transitions_resolve`'s `$n == 1` + `gated_field != null` branch, built in Phase 4)
+- [X] T133 [US7] Mirror the `gated` branch in `scripts/powershell/sink/jira/Transitions.psm1` (depends on T046) — already held (`Resolve-JiraTransition`'s matching branch)
+- [X] T134 [US7] Emit the gated warning verbatim from contract §4 in `scripts/bash/sink/jira/plan_apply.sh` (depends on T132) — already held (`_plan_transition_warning`'s `gated` case)
+- [X] T135 [US7] Mirror the gated warning in `scripts/powershell/sink/jira/PlanApply.psm1` (depends on T133) — already held (`Get-JiraTransitionWarning`'s `gated` case)
+- [X] T136 [P] [US7] Add `tests/conformance/scenarios/us023-gated-move.json` and `us023-gated-move-with-field-default.json` — new fixture `repo-with-bound-story-due-field-default` for the latter; both diff byte-identical bash vs PowerShell
 
 ---
 
