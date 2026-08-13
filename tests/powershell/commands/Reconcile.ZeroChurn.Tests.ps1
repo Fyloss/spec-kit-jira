@@ -16,7 +16,12 @@ BeforeAll {
     $env:JIRA_EMAIL = 'user@example.com'
     $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
     $env:JIRA_NO_SLEEP = '1'
-    $env:SPEC_KIT_JIRA_ID_SOURCE = '1111111111111111 2222222222222222 3333333333333333'
+    # 023: the parent shares the SAME lifecycle-context tickets map as
+    # stories now (role "specification", keyed by local_id) — a 3-item
+    # source wraps and hands the epic the same local_id as the first story,
+    # silently overwriting its zero-churn/lifecycle snapshot. A 4th distinct
+    # id keeps every local_id unique.
+    $env:SPEC_KIT_JIRA_ID_SOURCE = '1111111111111111 2222222222222222 3333333333333333 4444444444444444'
     Remove-Item Env:\SPEC_KIT_JIRA_PLAN_CONTEXT -ErrorAction SilentlyContinue
     Remove-Item Env:\SPEC_KIT_JIRA_LIFECYCLE -ErrorAction SilentlyContinue
     # This suite relies on config.yml-based routing (folder prefix "001-" ->
@@ -167,7 +172,7 @@ Describe 'Invoke-JiraReconcile — zero churn on an unchanged re-run' {
         $spec = Join-Path $work 'specs/001-consumer-onboarding/spec.md'
         $env:JIRA_CONFIG_DIR = Join-Path $work '.specify/jira'
         $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-consumer-onboarding'
-        $env:SPEC_KIT_JIRA_ID_SOURCE = 'aaaaaaaaaaaaaaaa 1111111111111111 2222222222222222'
+        $env:SPEC_KIT_JIRA_ID_SOURCE = 'aaaaaaaaaaaaaaaa 1111111111111111 2222222222222222 3333333333333333'
         $m = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/consumer-hierarchy.json')
         $env:SPEC_KIT_JIRA_BASE_URL = $m.BaseUrl
         try {
