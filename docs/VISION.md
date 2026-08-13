@@ -100,10 +100,10 @@ flowchart LR
     Spec ==> Label
     Extra -.-> Comment
     Spec -.-> Est
-    Disk -.-> Status
+    Disk ==> Status
 
     classDef planned stroke-dasharray: 5 5
-    class Comment,Est,Status planned
+    class Comment,Est planned
 ```
 
 Solid arrows are shipped. Dashed arrows and dashed boxes are the road ahead.
@@ -130,14 +130,16 @@ Shipped, and described in detail in the [system documentation](README.md):
   rides the story's own description as a checklist — 6 issues instead of 106
   for a feature of 5 stories and 100 tasks, and no sub-task issue type
   required. See [the reconcile flow](05-reconcile-flow.md).
-- **Refuses to overwrite Jira-side progress.** The drift engine compares the
-  ticket's real status against the phase inferred from disk and withholds,
-  halts, or classifies accordingly. `phase_status_map`, declared per project in
-  `config.yml`, maps a lifecycle event (`after_specify`, `after_plan`, …) to one
-  of your project's status names; `halted_statuses` names the states where the
-  bridge must stop writing. Omit both and the machinery stays inert. **What the
-  drift engine decides, it does not yet act on** at the specification and story
-  tiers — see Part 2, item 3. See [the safety model](08-safety-model.md).
+- **Refuses to overwrite Jira-side progress, and advances the board when it is
+  safe to.** The drift engine compares the ticket's real status against the
+  phase inferred from disk and withholds, halts, or classifies accordingly;
+  when the disk-inferred phase names a step and exactly one of the ticket's
+  real available transitions lands on it, the bridge issues that move.
+  `phase_status_map`, declared per project in `config.yml` — per hierarchy
+  role since 023 — maps a lifecycle event (`after_specify`, `after_plan`, …)
+  to one of your project's status names; `halted_statuses` names the states
+  where the bridge must stop writing. Omit both and the machinery stays
+  inert. See [the safety model](08-safety-model.md).
 - **Skips a run that has nothing to do, and says where the time went.** A
   reconcile whose `spec.md`, `tasks.md` and configuration are unchanged since
   the last fully successful run exits in under a second having issued zero
@@ -211,35 +213,34 @@ decision on either side.
 
 ### 3. Board advancement per lifecycle step
 
-*Specified, not shipped* — `specs/023-advance-board-position/`.
+*Shipped* — `specs/023-advance-board-position/`.
 
-`phase_status_map` and `halted_statuses` already give each project its own
-mapping from spec-kit lifecycle event to status name, and drift classification
-already decides, per recognised ticket, whether the mirror should advance,
-withhold, or halt. **No ticket at the specification or story tier is ever moved
-on the board**, in any circumstance: the decision is reached and the machinery
-stops there. The sub-task tier is the exception — checking a task off does
-transition its sub-task — and it is the shape the specified work generalises.
+`phase_status_map` and `halted_statuses` give each project its own mapping
+from spec-kit lifecycle event to status name — declarable once per project
+(back-compatible), or once per hierarchy role, since an Epic and a Story
+rarely share a workflow. `SPEC_KIT_JIRA_HOOK_EVENT`, set by each of the six
+`after_*` hooks, tells the bridge which event fired; drift classification
+decides, per recognised ticket, whether the mirror should advance, withhold,
+or halt, and an advance decision now moves the ticket — resolved against its
+real available transitions by destination name, never guessed. The sub-task
+tier was the exception before this spec — checking a task off already
+transitioned its sub-task — and this is that same shape, generalised to the
+specification and story tiers.
 
-Two further gaps the spec records, both invisible on a green run:
+Four outcomes, one of them a move and three of them a named withholding: an
+ungated move onto the declared step; two or more candidates landing on it
+(ambiguous — no preference invented); a move gated on a field the bridge does
+not hold and never guesses; and a declared step no available transition
+reaches (unreachable — never an inferred intermediate move). Every
+non-move outcome carries exactly one warning naming the ticket.
 
-- **The mapping has no notion of tier.** It is declared once per project and
-  evaluated only against story-tier tickets. An Epic and a Story rarely share a
-  workflow, so one mapping cannot describe both; the spec makes the mapping
-  declarable per hierarchy role.
-- **The lifecycle event does not reach the bridge.** The mapping is keyed by
-  event, and nothing in the extension manifest or the agent-facing reconcile
-  procedure tells the bridge which event fired — so on the real path the
-  declared status is always empty and drift evaluation is never reached at all.
-  Every scenario that exercises it does so through a test-only override.
-
-Still *envisioned* beyond that spec: the config ceremony does not **discover**
+Still *envisioned* beyond this spec: the config ceremony does not **discover**
 this mapping. Both keys are hand-edited today, which means a team only benefits
 from them if someone reads the reconcile command's documentation. Proposing a
 mapping at config time — "your project's statuses are To Do, In Progress, In
 Review, Done; shall I map the lifecycle onto them?" — would turn a documented
-feature into a default one, and it becomes more valuable, not less, once there
-is one mapping per role.
+feature into a default one, and it becomes more valuable, not less, now that
+there is one mapping per role.
 
 ### 4. Labels carrying the spec-kit identity
 

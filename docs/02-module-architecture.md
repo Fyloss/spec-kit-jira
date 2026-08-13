@@ -43,6 +43,7 @@ flowchart TB
         S8["plan_apply"]
         S9["duplicate_probe (017, US4, droppable)"]
         S10["prefetch (021) — one bulkfetch ahead of recognition's per-key reads"]
+        S11["transitions (023) — read a ticket's available moves, resolve by destination NAME"]
     end
 
     subgraph LibLayer["lib/ — port infrastructure, no Jira knowledge"]
@@ -157,6 +158,9 @@ mindmap
       prefetch (021)
         one POST bulkfetch, up to 100 keys, key -> issue map
         can only remove individual reads, never change an outcome
+      transitions (023)
+        one GET per due ticket, available moves by destination NAME
+        resolve: move, ambiguous, gated, or unreachable — never invented
       ticket
         validate and guarded create
       adf
