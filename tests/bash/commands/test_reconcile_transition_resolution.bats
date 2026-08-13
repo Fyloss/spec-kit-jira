@@ -161,6 +161,51 @@ YAML
   [ "$(grep -c '^POST /rest/api/3/issue/COMP-4/transitions' "${MOCK_CALLLOG}")" -eq 0 ]
 }
 
+@test "T139 -- an unreachable declared step names the reachable set, the empty set, or a near-miss verbatim, never forcing an intermediate move" {
+  # A FRESH mock instance (mock_stop/mock_start): three distinct
+  # unreachable shapes on the SAME due set, one read (contract §2 T047).
+  mock_stop
+  local work2="${BATS_TEST_TMPDIR}/repo-unreachable"
+  cp -R "${FIXTURE}" "${work2}"
+  local spec2="${work2}/specs/001-billing-invoices/spec.md"
+  cp "${WORK}/.specify/jira/config.yml" "${work2}/.specify/jira/config.yml"
+  export JIRA_CONFIG_DIR="${work2}/.specify/jira"
+
+  local cfg
+  cfg="$(mock_write_config '{
+    "projects":{"COMP":"company"},
+    "transitions":{
+      "COMP-2":[{"id":"201","name":"Review","to":{"name":"Under Review"},"fields":{}}],
+      "COMP-3":[],
+      "COMP-4":[{"id":"203","name":"Start","to":{"name":"in progress"},"fields":{}}]
+    }
+  }')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${spec2}" --json > /dev/null
+
+  : > "${MOCK_CALLLOG}"
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile "${spec2}" --json
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  [ "$status" -eq 0 ]
+
+  # Reachable-set form: COMP-2 has a move, just not onto the declared step.
+  [ "$(jq -r '.warnings[] | select(contains("COMP-2"))' <<< "$output")" = 'Story ticket COMP-2 was not moved to "In Progress": no transition from "To Do" lands on it. Reachable from here: Under Review. Move it by hand, or map this event to one of those.' ]
+
+  # Empty-set form: COMP-3 has no transition available at all.
+  [ "$(jq -r '.warnings[] | select(contains("COMP-3"))' <<< "$output")" = 'Story ticket COMP-3 was not moved to "In Progress": no transition from "To Do" is available at all. Move it by hand, or map this event to a reachable step.' ]
+
+  # Near-miss: COMP-4's only candidate lands on "in progress" (lower-case),
+  # not "In Progress" (M2, exact string equality) -- unreachable, and the
+  # reachable set names the candidate's ACTUAL name verbatim, proving no
+  # case-insensitive or whitespace-normalising match ever happened.
+  [ "$(jq -r '.warnings[] | select(contains("COMP-4"))' <<< "$output")" = 'Story ticket COMP-4 was not moved to "In Progress": no transition from "To Do" lands on it. Reachable from here: in progress. Move it by hand, or map this event to one of those.' ]
+
+  # Never an inferred intermediate move: zero transition POSTs this run.
+  [ "$(grep -c '^POST .*/transitions$' "${MOCK_CALLLOG}")" -eq 0 ]
+}
+
 @test "a gated declared step moves nothing and names the withheld field" {
   : > "${MOCK_CALLLOG}"
   export SPEC_KIT_JIRA_HOOK_EVENT=after_plan

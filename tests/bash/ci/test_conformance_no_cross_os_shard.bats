@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (154)" {
+@test "the conformance corpus has exactly the recorded scenario count (156)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -87,8 +87,12 @@ setup() {
   # (Phase 9, US7, T136) — a gated move is refused and the demanded field
   # named; a recorded field_defaults value of the same name is never
   # substituted for it (rule M4) (152 -> 154).
+  # 023 adds two: us023-unreachable-step, us023-unreachable-empty-set
+  # (Phase 10, US8, T145) — the declared step is unreachable from the
+  # current status; the mirror never forces an intermediate move and names
+  # the reachable set (or the empty set) instead (154 -> 156).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 154 ]
+  [ "${count}" -eq 156 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

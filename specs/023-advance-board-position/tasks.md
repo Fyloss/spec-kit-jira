@@ -359,18 +359,15 @@ step, run, and assert zero moves plus one warning naming the reachable set.
 
 ### Tests for User Story 8 (write first, observe failing)
 
-- [ ] T137 [P] [US8] Add to `tests/bash/sink/test_transitions.bats` the `unreachable` branch and rule M5: zero candidates yields `{"outcome":"unreachable","reachable":[…]}` and no intermediate move is ever performed
-- [ ] T138 [P] [US8] Add the same `unreachable` branch to `tests/powershell/sink/Transitions.Tests.ps1`
-- [ ] T139 [US8] Add to `tests/bash/commands/test_reconcile_lifecycle.bats` both wordings of contract §4 — the reachable-set form and the empty-set form — plus the near-miss case where the declared step differs only in case or spacing
-- [ ] T140 [US8] Add the same three cases to `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1`
-
-### Implementation for User Story 8
-
-- [ ] T141 [US8] Implement the `unreachable` branch in `scripts/bash/sink/jira/transitions.sh` (depends on T045)
-- [ ] T142 [US8] Mirror the `unreachable` branch in `scripts/powershell/sink/jira/Transitions.psm1` (depends on T046)
-- [ ] T143 [US8] Emit both unreachable wordings verbatim from contract §4 in `scripts/bash/sink/jira/plan_apply.sh` (depends on T141)
-- [ ] T144 [US8] Mirror both wordings in `scripts/powershell/sink/jira/PlanApply.psm1` (depends on T142)
-- [ ] T145 [P] [US8] Add `tests/conformance/scenarios/us023-unreachable-step.json` and `us023-unreachable-empty-set.json`
+- [X] T137 [P] [US8] Add to `tests/bash/sink/test_transitions.bats` the `unreachable` branch and rule M5: zero candidates yields `{"outcome":"unreachable","reachable":[…]}` and no intermediate move is ever performed — already held from Phase 4's own implementation of all four outcomes together ("no candidate onto the declared step resolves to unreachable, reachable set named")
+- [X] T138 [P] [US8] Add the same `unreachable` branch to `tests/powershell/sink/Transitions.Tests.ps1` — already held, same test name
+- [X] T139 [US8] Add to `tests/bash/commands/test_reconcile_lifecycle.bats` both wordings of contract §4 — the reachable-set form and the empty-set form — plus the near-miss case where the declared step differs only in case or spacing — landed in `test_reconcile_transition_resolution.bats` instead (T111's own precedent). New end-to-end test proves all three shapes on one due set: a reachable-set ticket, an empty-set ticket, and a near-miss (candidate lands on "in progress" lower-case, declared step is "In Progress" — M2 rejects it, and the reachable set names the near-miss candidate's actual name verbatim, proving no case-folding)
+- [X] T140 [US8] Add the same three cases to `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1` — landed in `Reconcile.TransitionResolution.Tests.ps1`, mirroring T139
+- [X] T141 [US8] Implement the `unreachable` branch in `scripts/bash/sink/jira/transitions.sh` (depends on T045) — already held (`transitions_resolve`'s `else` branch, built in Phase 4)
+- [X] T142 [US8] Mirror the `unreachable` branch in `scripts/powershell/sink/jira/Transitions.psm1` (depends on T046) — already held (`Resolve-JiraTransition`'s matching branch)
+- [X] T143 [US8] Emit both unreachable wordings verbatim from contract §4 in `scripts/bash/sink/jira/plan_apply.sh` (depends on T141) — already held (`_plan_transition_warning`'s `unreachable` case, both `rn > 0`/`rn == 0` forms)
+- [X] T144 [US8] Mirror both wordings in `scripts/powershell/sink/jira/PlanApply.psm1` (depends on T142) — already held (`Get-JiraTransitionWarning`'s matching case)
+- [X] T145 [P] [US8] Add `tests/conformance/scenarios/us023-unreachable-step.json` and `us023-unreachable-empty-set.json` — both diff byte-identical bash vs PowerShell
 
 **Checkpoint**: all four resolution outcomes are implemented; no silent drop remains anywhere on the path.
 

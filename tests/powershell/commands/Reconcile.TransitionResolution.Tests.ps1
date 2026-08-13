@@ -174,6 +174,48 @@ routing_default: COMP
         $comp4Warn | Should -Be 'Story ticket COMP-4 was not moved to "In Progress": completing that transition requires "Resolution", which the bridge does not hold and never guesses. Set it by hand, then reconcile.'
     }
 
+    It 'T140 -- an unreachable declared step names the reachable set, the empty set, or a near-miss verbatim, never forcing an intermediate move' {
+        # A FRESH mock instance too: three distinct unreachable shapes on
+        # the SAME due set, one read (contract §2 T047).
+        Stop-JiraMock -Mock $script:M
+        $work2 = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse $Fixture $work2
+        $spec2 = Join-Path $work2 'specs/001-billing-invoices/spec.md'
+        Copy-Item -Path (Join-Path $script:Work '.specify/jira/config.yml') -Destination (Join-Path $work2 '.specify/jira/config.yml') -Force
+        $env:JIRA_CONFIG_DIR = Join-Path $work2 '.specify/jira'
+
+        $cfgPath = Write-JiraMockConfig -Json '{"projects":{"COMP":"company"},"transitions":{"COMP-2":[{"id":"201","name":"Review","to":{"name":"Under Review"},"fields":{}}],"COMP-3":[],"COMP-4":[{"id":"203","name":"Start","to":{"name":"in progress"},"fields":{}}]}}'
+        $script:M = Start-JiraMock -ConfigPath $cfgPath
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $null = Invoke-Captured @('reconcile', $spec2, '--json')
+
+        Clear-Content -LiteralPath $script:M.CallLog
+        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+        try {
+            $r = Invoke-Captured @('reconcile', $spec2, '--json') | ConvertFrom-Json
+        }
+        finally { Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue }
+
+        # Reachable-set form: COMP-2 has a move, just not onto the declared step.
+        $comp2Warn = @($r.warnings | Where-Object { $_ -like '*COMP-2*' })[0]
+        $comp2Warn | Should -Be 'Story ticket COMP-2 was not moved to "In Progress": no transition from "To Do" lands on it. Reachable from here: Under Review. Move it by hand, or map this event to one of those.'
+
+        # Empty-set form: COMP-3 has no transition available at all.
+        $comp3Warn = @($r.warnings | Where-Object { $_ -like '*COMP-3*' })[0]
+        $comp3Warn | Should -Be 'Story ticket COMP-3 was not moved to "In Progress": no transition from "To Do" is available at all. Move it by hand, or map this event to a reachable step.'
+
+        # Near-miss: COMP-4's only candidate lands on "in progress"
+        # (lower-case), not "In Progress" (M2, exact string equality) --
+        # unreachable, and the reachable set names the candidate's ACTUAL
+        # name verbatim, proving no case-insensitive or whitespace-
+        # normalising match ever happened.
+        $comp4WarnUnreach = @($r.warnings | Where-Object { $_ -like '*COMP-4*' })[0]
+        $comp4WarnUnreach | Should -Be 'Story ticket COMP-4 was not moved to "In Progress": no transition from "To Do" lands on it. Reachable from here: in progress. Move it by hand, or map this event to one of those.'
+
+        # Never an inferred intermediate move: zero transition POSTs this run.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^POST .*/transitions$' }).Count | Should -Be 0
+    }
+
     It 'a gated declared step moves nothing and names the withheld field' {
         Clear-Content -LiteralPath $script:M.CallLog
         $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
