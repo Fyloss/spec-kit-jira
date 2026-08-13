@@ -231,8 +231,8 @@ assert each tier's ticket landed on its own declared step and neither was offere
 
 ### Tests for User Story 4 (write first, observe failing)
 
-- [ ] T074 [P] [US4] Add `tests/bash/lib/test_config_phase_status_map.bats` asserting the discrimination rule of contract role-lifecycle-config §2 — all-event keys, all-role keys, empty mapping — and the seven validation messages of §3, each with `EXIT_CONFIG` (4), zero requests, and the exact message text
-- [ ] T075 [P] [US4] Add the Pester mirror `tests/powershell/lib/Config.PhaseStatusMap.Tests.ps1` with identical messages
+- [X] T074 [P] [US4] Add `tests/bash/lib/test_config_phase_status_map.bats` asserting the discrimination rule of contract role-lifecycle-config §2 — all-event keys, all-role keys, empty mapping — and the seven validation messages of §3, each with `EXIT_CONFIG` (4), zero requests, and the exact message text
+- [X] T075 [P] [US4] Add the Pester mirror `tests/powershell/lib/Config.PhaseStatusMap.Tests.ps1` with identical messages
 - [ ] T076 [US4] Add to `tests/bash/lib/test_config_phase_status_map.bats` guarantees B1–B3: a committed role-blind mapping keeps byte-identical diagnostics, classification and warnings, and upgrading never starts moving a parent or a sub-task
 - [ ] T077 [US4] Add the same back-compatibility assertions to `tests/powershell/lib/Config.PhaseStatusMap.Tests.ps1`
 - [ ] T078 [US4] Add to `tests/bash/commands/test_reconcile_lifecycle.bats` isolation rule I1 against the two-role fixture: the parent lands on "Building", each story on "In Progress", and **zero** tickets are evaluated against the other role's step name
@@ -248,8 +248,8 @@ assert each tier's ticket landed on its own declared step and neither was offere
 
 ### Implementation for User Story 4
 
-- [ ] T086 [US4] Accept the per-role shape in `_cfg_schema_errors` in `scripts/bash/lib/config.sh`, discriminating on the two closed disjoint key sets and emitting the seven messages of contract §3, preserving the existing role-blind message verbatim where it still applies
-- [ ] T087 [US4] Mirror the schema acceptance and the seven messages in `scripts/powershell/lib/Config.psm1`
+- [X] T086 [US4] Accept the per-role shape in `_cfg_schema_errors` in `scripts/bash/lib/config.sh`, discriminating on the two closed disjoint key sets and emitting the seven messages of contract §3, preserving the existing role-blind message verbatim where it still applies — done in an earlier pass of this session
+- [X] T087 [US4] Mirror the schema acceptance and the seven messages in `scripts/powershell/lib/Config.psm1`
 - [ ] T088 [US4] Extend the normalisation in `_reconcile_phase_status_map` in `scripts/bash/commands/reconcile.sh` to route the per-role shape into the resolved form (depends on T086, and on T015)
 - [ ] T089 [US4] Mirror the extended normalisation in `Get-JiraReconcilePhaseStatusMap` in `scripts/powershell/commands/Reconcile.psm1` (depends on T087, and on T016)
 - [X] T090 [US4] Widen `_recognition_read_parent`'s field projection in `scripts/bash/sink/jira/recognition.sh` to include `status`, `Flagged` and `issuelinks`; the prefetch union at `scripts/bash/sink/jira/prefetch.sh:26` already carries all three, so the bulk request is unchanged — done in an earlier pass of this session

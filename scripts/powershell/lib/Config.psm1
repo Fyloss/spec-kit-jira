@@ -870,10 +870,61 @@ function Test-JiraTeamConfig {
                 }
             }
             if (($p -is [System.Collections.IDictionary]) -and $p.Contains('phase_status_map')) {
+                # 023, contract role-lifecycle-config.md §3: two accepted shapes —
+                # every key a lifecycle event (role-blind, routes to `story`), or
+                # every key a hierarchy role (specification/story/task). Mirror of
+                # config.sh's rewritten phase_status_map block in _cfg_schema_errors.
                 $psm = Get-CfgProp $p 'phase_status_map'
-                $psmValid = $psm -is [System.Collections.IDictionary]
-                if ($psmValid) { foreach ($v in $psm.Values) { if ($v -isnot [string]) { $psmValid = $false } } }
-                if (-not $psmValid) { $errs.Add("projects[$i].phase_status_map must be a mapping of lifecycle-event name to status name") }
+                if ($psm -isnot [System.Collections.IDictionary]) {
+                    $errs.Add("projects[$i].phase_status_map must be a mapping of lifecycle-event name to status name, or of hierarchy role to that role's own mapping")
+                }
+                else {
+                    $ks = @($psm.Keys)
+                    $roleNames = Get-JiraRoleNameList
+                    $eventNames = Get-JiraAfterEventNameList
+                    $allEvents = ($ks.Count -gt 0) -and (@($ks | Where-Object { $eventNames -notcontains $_ })).Count -eq 0
+                    $allRoles = ($ks.Count -gt 0) -and (@($ks | Where-Object { $roleNames -notcontains $_ })).Count -eq 0
+                    if ($ks.Count -eq 0) {
+                        # Empty is valid under either shape — nothing to flag.
+                    }
+                    elseif ($allEvents) {
+                        foreach ($k in $ks) {
+                            $v = $psm[$k]
+                            if (($v -isnot [string]) -or ($v -eq '')) {
+                                $errs.Add("projects[$i].phase_status_map.$k must be a non-empty status name")
+                            }
+                        }
+                    }
+                    elseif ($allRoles) {
+                        foreach ($role in $ks) {
+                            $rv = $psm[$role]
+                            if ($rv -isnot [System.Collections.IDictionary]) {
+                                $errs.Add("projects[$i].phase_status_map.$role must be a mapping of lifecycle-event name to status name")
+                            }
+                            else {
+                                foreach ($ek in $rv.Keys) {
+                                    if ($eventNames -notcontains $ek) {
+                                        $errs.Add("projects[$i].phase_status_map.$role declares unknown lifecycle event ``$ek``")
+                                    }
+                                }
+                                foreach ($ek in $rv.Keys) {
+                                    $ev = $rv[$ek]
+                                    if (($ev -isnot [string]) -or ($ev -eq '')) {
+                                        $errs.Add("projects[$i].phase_status_map.$role.$ek must be a non-empty status name")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    elseif ((@($ks | Where-Object { ($eventNames -contains $_) -or ($roleNames -contains $_) })).Count -gt 0) {
+                        $errs.Add("projects[$i].phase_status_map mixes lifecycle events and hierarchy roles; declare either one mapping for the story role, or one mapping per role (specification, story, task)")
+                    }
+                    else {
+                        foreach ($k in $ks) {
+                            $errs.Add("projects[$i].phase_status_map declares unknown key ``$k``; the lifecycle events are after_specify, after_clarify, after_plan, after_tasks, after_implement, after_analyze and the roles are specification, story, task")
+                        }
+                    }
+                }
             }
             # halted_statuses is normally an array, but the team-config YAML
             # reader does not parse an inline flow-style list ("[Blocked]") —
@@ -1295,6 +1346,16 @@ function Get-JiraHookEventNameList {
     return $script:JiraHookEventNames
 }
 
+function Get-JiraAfterEventNameList {
+    # 023, contracts/lifecycle-event.md §1, contracts/role-lifecycle-config.md
+    # §2: the six after-events only (JiraHookEventNames minus before_specify)
+    # — the closed key set a role's lifecycle mapping accepts. Mirror of
+    # _cfg_after_event_names_json. `return ,$list`, never bare: a 1-element
+    # (or empty) collection returned bare auto-unrolls in the pipeline.
+    $list = @($script:JiraHookEventNames | Select-Object -Skip 1)
+    return , $list
+}
+
 function Get-JiraRoleNameList {
     return $script:JiraRoleNames
 }
@@ -1518,6 +1579,6 @@ Export-ModuleMember -Function Get-JiraExtensionVersion, Assert-JiraSingleVersion
     Import-JiraPersonalConfig, `
     Get-JiraStatusClassification, Get-JiraPhaseStatusTargetSet, `
     Test-JiraPlaceholderKey, Get-JiraPlaceholderKey, `
-    Get-JiraHookEventNameList, Get-JiraHooksDisabled, Add-JiraHooksDisabled, Remove-JiraHooksDisabled, `
+    Get-JiraHookEventNameList, Get-JiraAfterEventNameList, Get-JiraHooksDisabled, Add-JiraHooksDisabled, Remove-JiraHooksDisabled, `
     Get-CfgLocalPath, Get-CfgLocalObject, Get-JiraRoleNameList, Get-JiraFieldDefaultsFor, `
     Get-JiraFieldDefaultsYaml, Get-JiraTaskMirrorFor, Get-JiraTaskMirrorYaml
