@@ -46,7 +46,12 @@ YAML
   export JIRA_EMAIL="user@example.com"
   export JIRA_API_TOKEN="RAWSECRETXYZ"
   export JIRA_NO_SLEEP=1
-  export SPEC_KIT_JIRA_ID_SOURCE="1111111111111111 2222222222222222 3333333333333333"
+  # 023: the parent now gets its own entry in the SAME lifecycle-context
+  # `tickets` map stories key into (role "specification", by local_id) — a
+  # 3-item source wraps (index 3 % 3 == 0) and hands the epic the SAME
+  # local_id as the first story, so its entry silently overwrites COMP-2's.
+  # A 4th distinct id keeps every local_id unique.
+  export SPEC_KIT_JIRA_ID_SOURCE="1111111111111111 2222222222222222 3333333333333333 4444444444444444"
   unset SPEC_KIT_JIRA_PLAN_CONTEXT SPEC_KIT_JIRA_LIFECYCLE
 }
 
@@ -120,7 +125,28 @@ teardown() {
   unset SPEC_KIT_JIRA_HOOK_EVENT
 }
 
-@test "zero transition requests in every scenario — this release evaluates the rules but never moves a ticket's status" {
+# T054: this pin predates 023, which now DOES move a ticket's status for a
+# project that declares a mapping (superseded by the "headline" scenario
+# covered elsewhere). What stays true is the FR-026 bound this test now
+# asserts: a project declaring NO phase_status_map issues zero transition
+# reads — `due_idx` is never populated absent a declared target (research
+# §R9's original no-op default, still exercised for the undeclared case).
+@test "a project declaring no phase_status_map issues zero transition requests" {
+  cat > "${WORK}/.specify/jira/config.yml" << 'YAML'
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP
+YAML
+
   mock_start "${MOCK}/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
@@ -130,7 +156,7 @@ teardown() {
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
   unset SPEC_KIT_JIRA_HOOK_EVENT
   run mock_calls
-  [ "$(grep -c '/transitions$' <<< "$output")" -eq 0 ]
+  [ "$(grep -c 'transitions' <<< "$output")" -eq 0 ]
 }
 
 @test "under SPEC_KIT_JIRA_HOOK_CONTEXT every recognition failure exits 0 with exactly one WARNING" {

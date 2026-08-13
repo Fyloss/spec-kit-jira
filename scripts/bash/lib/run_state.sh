@@ -21,7 +21,8 @@ source "${_RUN_STATE_LIB_DIR}/output.sh"   # json_canonical, output_warn
 
 # Shape version of the run-state document (data-model.md §1). A change to the
 # *set* of recorded inputs bumps it, invalidating every existing file.
-_RUN_STATE_SCHEMA=1
+# 023, contracts/run-state-v2.md C1: 1 -> 2 for `hook_event` and `plan.md`.
+_RUN_STATE_SCHEMA=2
 
 # run_state_path <spec-path> — the recorded document's path for the feature
 # directory holding this spec.
@@ -47,11 +48,15 @@ _run_state_add_input() {
   jq -c --arg k "${key}" --arg h "${hash}" '. + {($k): $h}' <<< "${inputs}"
 }
 
-# run_state_compose <spec-path> <base-url> <email> <on-drift> <field-values>
-# Prints the canonical JSON document for the current inputs. Returns 1,
-# printing nothing, if any required input cannot be hashed.
+# run_state_compose <spec-path> <base-url> <email> <on-drift> <hook-event>
+# <field-values> — 023, contracts/run-state-v2.md §2: `hook_event` is an
+# explicit argument, never read from SPEC_KIT_JIRA_HOOK_EVENT itself, so this
+# module stays a pure function of its arguments (the same discipline
+# base_url/email/on_drift/field_values already have). Prints the canonical
+# JSON document for the current inputs. Returns 1, printing nothing, if any
+# required input cannot be hashed.
 run_state_compose() {
-  local spec_path="$1" base_url="$2" email="$3" on_drift="$4" field_values="$5"
+  local spec_path="$1" base_url="$2" email="$3" on_drift="$4" hook_event="$5" field_values="$6"
   [[ -f "${spec_path}" ]] || return 1
 
   local ext_version
@@ -64,9 +69,15 @@ run_state_compose() {
   local inputs
   inputs="$(jq -cn --arg h "${spec_hash}" '{"spec.md": $h}')"
 
-  local tasks_path
+  local tasks_path plan_path
   tasks_path="$(dirname "${spec_path}")/tasks.md"
   inputs="$(_run_state_add_input "${inputs}" "tasks.md" "${tasks_path}")" || return 1
+  # C3 (contracts/run-state-v2.md §1): plan.md is read on every run and
+  # spliced onto the parent's description (commands/reconcile.sh:861), so a
+  # change to it must invalidate — the "present when the file exists, key
+  # omitted otherwise" rule tasks.md already has.
+  plan_path="$(dirname "${spec_path}")/plan.md"
+  inputs="$(_run_state_add_input "${inputs}" "plan.md" "${plan_path}")" || return 1
 
   local f
   for f in config.yml config.local.yml personal.yml; do
@@ -79,19 +90,22 @@ run_state_compose() {
     --arg base "${base_url}" \
     --arg email "${email}" \
     --arg drift "${on_drift}" \
+    --arg he "${hook_event}" \
     --arg fv "${field_values}" \
     --argjson inputs "${inputs}" \
     '{schema: $schema, extension_version: $ext, base_url: $base, email: $email,
-      on_drift: $drift, field_values: $fv, inputs: $inputs}' \
+      on_drift: $drift, hook_event: $he, field_values: $fv, inputs: $inputs}' \
     | json_canonical
 }
 
-# run_state_matches <spec-path> <base-url> <email> <on-drift> <field-values>
-# Returns 0 only when a recorded document exists, is readable, is valid JSON,
-# and is byte-equal to a fresh compose of the same five arguments. Returns 1
-# in every other case, including every error — every doubt fails open.
+# run_state_matches <spec-path> <base-url> <email> <on-drift> <hook-event>
+# <field-values> — returns 0 only when a recorded document exists, is
+# readable, is valid JSON, and is byte-equal to a fresh compose of the same
+# six arguments. Returns 1 in every other case, including every error —
+# every doubt fails open (S1, S9: an unhonoured lifecycle event can never be
+# skipped, since `hook_event` is now part of the byte comparison).
 run_state_matches() {
-  local spec_path="$1" base_url="$2" email="$3" on_drift="$4" field_values="$5"
+  local spec_path="$1" base_url="$2" email="$3" on_drift="$4" hook_event="$5" field_values="$6"
   local recorded_path
   recorded_path="$(run_state_path "${spec_path}")"
   [[ -f "${recorded_path}" ]] || return 1
@@ -101,18 +115,18 @@ run_state_matches() {
   jq -e . > /dev/null 2>&1 <<< "${recorded}" || return 1
 
   local fresh
-  fresh="$(run_state_compose "${spec_path}" "${base_url}" "${email}" "${on_drift}" "${field_values}")" || return 1
+  fresh="$(run_state_compose "${spec_path}" "${base_url}" "${email}" "${on_drift}" "${hook_event}" "${field_values}")" || return 1
 
   [[ "${recorded}" == "${fresh}" ]]
 }
 
-# run_state_record <spec-path> <base-url> <email> <on-drift> <field-values>
-# Composes and writes atomically to a sibling temp file, then renames onto
-# the final name. Creates the state directory and its self-ignoring
-# .gitignore if absent. Never fails the run: a write error is a warning, not
-# an exit code.
+# run_state_record <spec-path> <base-url> <email> <on-drift> <hook-event>
+# <field-values> — composes and writes atomically to a sibling temp file,
+# then renames onto the final name. Creates the state directory and its
+# self-ignoring .gitignore if absent. Never fails the run: a write error is a
+# warning, not an exit code.
 run_state_record() {
-  local spec_path="$1" base_url="$2" email="$3" on_drift="$4" field_values="$5"
+  local spec_path="$1" base_url="$2" email="$3" on_drift="$4" hook_event="$5" field_values="$6"
   local recorded_path state_dir
   recorded_path="$(run_state_path "${spec_path}")"
   state_dir="$(dirname "${recorded_path}")"
@@ -126,7 +140,7 @@ run_state_record() {
   [[ -f "${gitignore}" ]] || printf '*\n' > "${gitignore}" 2> /dev/null
 
   local doc
-  doc="$(run_state_compose "${spec_path}" "${base_url}" "${email}" "${on_drift}" "${field_values}")"
+  doc="$(run_state_compose "${spec_path}" "${base_url}" "${email}" "${on_drift}" "${hook_event}" "${field_values}")"
   if [[ -z "${doc}" ]]; then
     output_warn "run-state: could not compose the state document; state not recorded"
     return 0

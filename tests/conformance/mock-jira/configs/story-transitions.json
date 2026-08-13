@@ -1,0 +1,19 @@
+{
+  "projects": {"STORY": "company"},
+  "transitions": {
+    "STORY-1": [
+      {"id": "11", "name": "Start", "to": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}}, "fields": {}},
+      {"id": "12", "name": "Close", "to": {"name": "Done", "statusCategory": {"key": "done"}}, "fields": {}}
+    ],
+    "STORY-2": [
+      {"id": "21", "name": "Start", "to": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}}, "fields": {}},
+      {"id": "22", "name": "Start (dup)", "to": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}}, "fields": {}}
+    ],
+    "STORY-3": [
+      {"id": "31", "name": "Start", "to": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}}, "fields": {"resolution": {"required": true, "name": "Resolution"}}}
+    ],
+    "STORY-4": [
+      {"id": "41", "name": "Close", "to": {"name": "Done", "statusCategory": {"key": "done"}}, "fields": {}}
+    ]
+  }
+}

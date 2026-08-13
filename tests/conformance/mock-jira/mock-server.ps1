@@ -408,7 +408,26 @@ function Resolve-Route {
             if ($Method -eq 'POST') { return (Get-IssueBulkfetch -Body $Body) }
         }
         '^/rest/api/3/issue/[^/]+/transitions$' {
-            if ($Method -eq 'POST') { return @{ status = 204; body = '' } }
+            if ($Method -eq 'POST') {
+                $ikey = ($Path -split '/')[-2]
+                # 023, contract transition-resolution.md §7 Z2: apply the
+                # move's destination status to the issue's recorded state —
+                # mirrors curl-shim.sh's `_shim_apply_transition` so a second
+                # read (recognition, or this same request replayed) observes
+                # the ticket already at its declared step on BOTH ports.
+                try {
+                    $bodyObj = $Body | ConvertFrom-Json -AsHashtable
+                    $tid = $bodyObj.transition.id
+                }
+                catch { $tid = $null }
+                if ($tid -and $Transitions.ContainsKey($ikey)) {
+                    $matched = @($Transitions[$ikey]) | Where-Object { "$($_.id)" -eq "$tid" } | Select-Object -First 1
+                    if ($matched -and $script:Issues.ContainsKey($ikey)) {
+                        $script:Issues[$ikey].fields['status'] = $matched.to
+                    }
+                }
+                return @{ status = 204; body = '' }
+            }
             if ($Method -eq 'GET') {
                 $ikey = ($Path -split '/')[-2]
                 # `$list = if (...) {...} else {@()}` unrolls a one-element

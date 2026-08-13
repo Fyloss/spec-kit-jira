@@ -433,6 +433,24 @@ _shim_get_transitions() {
   jq -c --arg k "$1" '(.transitions // {})[$k] // []' "${MOCK_CONFIG_PATH}"
 }
 
+# _shim_apply_transition <key> <transition-id> — mutates the issue's recorded
+# `fields.status` to the moved-to transition's `.to` object (023, contract
+# transition-resolution.md §7 Z2). A no-op when the key has no recorded
+# state, the transition id is empty, or no configured transition matches —
+# mirrors real Jira only for what this mock already knows about.
+_shim_apply_transition() {
+  local key="$1" tid="$2" tmp
+  [[ -z "${tid}" ]] && return 0
+  local to; to="$(jq -c --arg k "${key}" --arg t "${tid}" \
+    '((.transitions // {})[$k] // [])[] | select(.id == $t) | .to' "${MOCK_CONFIG_PATH}" 2> /dev/null)"
+  [[ -z "${to}" || "${to}" == "null" ]] && return 0
+  tmp="$(mktemp)"
+  jq -c --arg k "${key}" --argjson to "${to}" '
+    if (.issues | has($k)) then .issues[$k].fields.status = $to else . end
+  ' "${MOCK_STATE_PATH}" > "${tmp}"
+  mv "${tmp}" "${MOCK_STATE_PATH}"
+}
+
 _shim_get_identity_marker() {
   jq -c --arg p "$1" '
     (.identity // {}) as $id
@@ -540,6 +558,12 @@ else
     if [[ "${method}" == "POST" ]]; then
       RESP_STATUS=204
       RESP_BODY=""
+      # 023, contract transition-resolution.md §7 Z2: apply the move's
+      # destination status to the issue's recorded state, so a SECOND read
+      # (recognition, or this same request replayed) observes the ticket
+      # already at its declared step — without this, idempotency can never
+      # be measured against the mock, only asserted by fiat.
+      _shim_apply_transition "${ikey}" "$(jq -r '.transition.id // empty' <<< "${body}" 2> /dev/null)"
     elif [[ "${method}" == "GET" ]]; then
       RESP_STATUS=200
       RESP_BODY="$(jq -cn --argjson t "$(_shim_get_transitions "${ikey}")" '{expand:"transitions", transitions:$t}')"

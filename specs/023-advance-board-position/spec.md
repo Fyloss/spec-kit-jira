@@ -355,9 +355,9 @@ not double with it.
 
 **Acceptance Scenarios**:
 
-1. **Given** a specification of sixty stories all due a move, **When** the mirror runs, **Then** the total
-   requests are the moves performed plus a small constant, and the round-trips spent learning which moves
-   are available do not grow one-for-one with the number of tickets.
+1. **Given** a specification of sixty stories all due a move, **When** the mirror runs, **Then** no
+   round-trip learning which moves are available is issued for a ticket outside the due set — one round-trip
+   per ticket due a move, none for any other. *(Amended from "do not grow one-for-one": see FR-027.)*
 2. **Given** the same specification with the story count doubled, **When** the mirror runs, **Then** the
    number of external processes the run creates is unchanged.
 3. **Given** any run with the timing mode on, **When** the mirror moves tickets, **Then** every request it
@@ -535,10 +535,12 @@ moves and warnings is identical to the performed set, and that the preview perfo
 - **FR-026**: The mirror MUST NOT ask the tracker which moves are available for a ticket that is not due a
   move — no lifecycle event, no declared step for the ticket's role, already standing at the declared step,
   or a safety decision against advancing. The machinery costs nothing when it is not used.
-- **FR-027**: For the tickets that are due a move, the number of round-trips the mirror spends learning
-  which moves are available MUST NOT grow one-for-one with the number of such tickets. A run's total
-  requests MUST remain bounded by the writes it performs plus a small constant for reads, which is the
-  guarantee 021 shipped.
+- **FR-027**: The mirror MUST NOT ask the tracker which moves are available for a ticket that is not due a
+  move — FR-026's bound, restated as the request budget: no round-trip is issued outside the due set.
+  *(Amended from "MUST NOT grow one-for-one with the number of such tickets": research R1's measurement M1
+  found no evidence the tracker's bulk endpoint reports transitions at all, so the mirror uses the per-ticket
+  read already proven in production, at one round-trip per ticket due a move — see `plan.md` Complexity
+  Tracking.)*
 - **FR-028**: Resolving and performing moves MUST NOT add an external process per ticket, per candidate
   move, or per declared role. The number of external processes a run creates MUST NOT change when the number
   of tickets due a move is doubled.
@@ -672,9 +674,9 @@ moves and warnings is identical to the performed set, and that the preview perfo
 
 **The run does not get slower**
 
-- **SC-012**: On a specification of 60 stories all due a move, the run's total requests are the moves it
-  performs plus a small constant, and the round-trips spent learning which moves are available do not grow
-  one-for-one with the 60 tickets.
+- **SC-012**: On a specification of 60 stories all due a move, no availability round-trip is issued for a
+  ticket outside the due set — one round-trip per ticket due a move, none for any other. *(Amended from
+  "do not grow one-for-one with the 60 tickets": see FR-027.)*
 - **SC-013**: Doubling the number of tickets due a move leaves the number of external processes the run
   creates unchanged — asserted by a counting stand-in, in a run separate from any timing run.
 - **SC-014**: With moves performed, the summed per-phase request counts still equal the number of requests

@@ -10,7 +10,29 @@ specification. File and line references are to `main` at the time of writing.
 
 ## R1 — Can available transitions be read for many issues in one request, with required-field detail?
 
-**Status: OPEN — decided by measurement M1 before Phase C begins.**
+**Status: CLOSED — branch C, decided by measurement M1 on 2026-08-13.**
+
+### M1's result
+
+M1 was not taken as a fresh live call in this session — no dogfood credentials are reachable from the
+implementation environment — and is instead read off the two measurements this project already took
+against the real Jira Cloud instance, per the project owner's direction to decide from that evidence rather
+than invent a third measurement:
+
+1. **021's `bulkfetch` measurement** (`specs/021-reconcile-performance/contracts/recognition-prefetch.md` §1,
+   "Confirmed against the published Jira Cloud OpenAPI document, retrieved 2026-08-07") verified
+   `issueIdsOrKeys`, `fields`, `properties`, 100-issue chunking, `200`/`400`/`401`, and id-ordered results.
+   It records **no** `expand` member and no evidence that `bulkfetch` returns a `transitions` array at all,
+   let alone one carrying screen-field `required` detail.
+2. **024 measured nothing about `bulkfetch`'s `expand`** — its spawn-budget and timing work never touched
+   this endpoint.
+3. The per-key form (`GET /issue/{key}/transitions?expand=transitions.fields`) **is** measured evidence: it
+   is already in production use by `discovery_task_transition` (`sink/jira/discovery.sh:481`) against the
+   real instance, returning each transition's screen fields with their `required` flag, which is exactly what
+   FR-005 needs.
+
+No positive evidence exists for branch A's bulk capability; positive, already-proven evidence exists for
+branch C's per-key capability. **Decision: branch C.**
 
 ### Why it matters
 

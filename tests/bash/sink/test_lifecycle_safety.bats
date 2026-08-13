@@ -22,7 +22,7 @@ setup() {
 
 @test "a post-scope regression withholds the transition by default, content still reconciles (FR-035)" {
   local lc
-  lc="$(jq -cn '{order:["To Do","In Progress","Done"], base_url:"http://h",
+  lc="$(jq -cn '{order:{story:["To Do","In Progress","Done"]}, base_url:"http://h",
     tickets:{s1:{key:"K-1", status:"Done", category:"post-scope", target:"To Do", transition_id:"11"}}}')"
   run plan_lifecycle "${ACTIONS}" "${DOC}" "${lc}"
   [ "$status" -eq 0 ]
@@ -34,7 +34,7 @@ setup() {
 
 @test "--on-drift=proceed pulls a regressed post-scope ticket backward (FR-035)" {
   local lc
-  lc="$(jq -cn '{order:["To Do","In Progress","Done"], base_url:"http://h", on_drift:"proceed",
+  lc="$(jq -cn '{order:{story:["To Do","In Progress","Done"]}, base_url:"http://h", on_drift:"proceed",
     tickets:{s1:{key:"K-1", status:"Done", category:"post-scope", target:"To Do", transition_id:"11"}}}')"
   run plan_lifecycle "${ACTIONS}" "${DOC}" "${lc}"
   [ "$(jq '[.actions[] | select(.url|endswith("/transitions"))] | length' <<< "$output")" -eq 1 ]
@@ -42,7 +42,7 @@ setup() {
 
 @test "a Flagged ticket withholds its transition, surfaces the flag, and never sets or removes it (FR-036)" {
   local lc
-  lc="$(jq -cn '{order:["To Do","In Progress","Done"], base_url:"http://h",
+  lc="$(jq -cn '{order:{story:["To Do","In Progress","Done"]}, base_url:"http://h",
     tickets:{s1:{key:"K-1", status:"In Progress", category:"mapped", target:"Done", transition_id:"31", flagged:true}}}')"
   run plan_lifecycle "${ACTIONS}" "${DOC}" "${lc}"
   # No transition emitted; the flag is surfaced in a warning.
@@ -54,7 +54,7 @@ setup() {
 
 @test "human links are never mutated; a transition past open blockers adds an info note (FR-037)" {
   local lc
-  lc="$(jq -cn '{order:["To Do","In Progress","Done"], base_url:"http://h",
+  lc="$(jq -cn '{order:{story:["To Do","In Progress","Done"]}, base_url:"http://h",
     tickets:{s1:{key:"K-1", status:"To Do", category:"mapped", target:"In Progress", transition_id:"21", blockers:["K-9","K-10"]}}}')"
   run plan_lifecycle "${ACTIONS}" "${DOC}" "${lc}"
   # The transition proceeds (forward move) …
@@ -70,7 +70,7 @@ setup() {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local ps_abs; ps_abs="$(cd "${ROOT}/scripts/powershell/sink/jira" && pwd)"
   local lc
-  lc="$(jq -cn '{order:["To Do","In Progress","Done"], base_url:"http://h",
+  lc="$(jq -cn '{order:{story:["To Do","In Progress","Done"]}, base_url:"http://h",
     tickets:{s1:{key:"K-1", status:"To Do", category:"mapped", target:"In Progress", transition_id:"21", blockers:["K-9"]}}}')"
   local bash_out ps_out
   bash_out="$(plan_lifecycle "${ACTIONS}" "${DOC}" "${lc}")"

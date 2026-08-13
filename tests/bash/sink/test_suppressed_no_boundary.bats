@@ -36,7 +36,7 @@ setup() {
 
 @test "T070 (FR-023) — a halted ticket acquires no boundary on this run" {
   local lc
-  lc="$(jq -cn --argjson cur "${CURRENT_DESC}" '{order:["To Do","In Progress","Done"], base_url:"http://h",
+  lc="$(jq -cn --argjson cur "${CURRENT_DESC}" '{order:{story:["To Do","In Progress","Done"]}, base_url:"http://h",
     tickets:{s1:{key:"K-1", status:"Blocked", category:"halted", target:"In Progress", transition_id:"11",
               current:{summary:"Story One", description:$cur}}}}')"
   run plan_lifecycle "${ACTIONS}" "${DOC}" "${lc}"
@@ -47,7 +47,7 @@ setup() {
 
 @test "T070 (FR-023) — the SAME ticket acquires the boundary on the first run it is allowed to write" {
   local lc
-  lc="$(jq -cn --argjson cur "${CURRENT_DESC}" '{order:["To Do","In Progress","Done"], base_url:"http://h",
+  lc="$(jq -cn --argjson cur "${CURRENT_DESC}" '{order:{story:["To Do","In Progress","Done"]}, base_url:"http://h",
     tickets:{s1:{key:"K-1", status:"In Progress", category:"mapped", target:"In Progress",
               current:{summary:"Story One", description:$cur}}}}')"
   run plan_lifecycle "${ACTIONS}" "${DOC}" "${lc}"
@@ -58,7 +58,7 @@ setup() {
 
 @test "T070 (FR-023) — a flagged ticket's boundary still reconciles; only its transition is withheld (FR-036 unaffected)" {
   local lc
-  lc="$(jq -cn --argjson cur "${CURRENT_DESC}" '{order:["To Do","In Progress","Done"], base_url:"http://h",
+  lc="$(jq -cn --argjson cur "${CURRENT_DESC}" '{order:{story:["To Do","In Progress","Done"]}, base_url:"http://h",
     tickets:{s1:{key:"K-1", status:"In Progress", category:"mapped", target:"Done", transition_id:"31", flagged:true,
               current:{summary:"Story One", description:$cur}}}}')"
   run plan_lifecycle "${ACTIONS}" "${DOC}" "${lc}"
@@ -70,7 +70,7 @@ setup() {
 
 @test "T070 (FR-023) — an unresolved-drift ticket's boundary still reconciles; only its transition is withheld (FR-035 unaffected)" {
   local lc
-  lc="$(jq -cn --argjson cur "${CURRENT_DESC}" '{order:["To Do","In Progress","Done"], base_url:"http://h",
+  lc="$(jq -cn --argjson cur "${CURRENT_DESC}" '{order:{story:["To Do","In Progress","Done"]}, base_url:"http://h",
     tickets:{s1:{key:"K-1", status:"Done", category:"post-scope", target:"To Do", transition_id:"11",
               current:{summary:"Story One", description:$cur}}}}')"
   run plan_lifecycle "${ACTIONS}" "${DOC}" "${lc}"
@@ -85,7 +85,7 @@ setup() {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local ps_abs; ps_abs="$(cd "${ROOT}/scripts/powershell/sink/jira" && pwd)"
   local lc
-  lc="$(jq -cn --argjson cur "${CURRENT_DESC}" '{order:["To Do","In Progress","Done"], base_url:"http://h",
+  lc="$(jq -cn --argjson cur "${CURRENT_DESC}" '{order:{story:["To Do","In Progress","Done"]}, base_url:"http://h",
     tickets:{s1:{key:"K-1", status:"Blocked", category:"halted", target:"In Progress", transition_id:"11",
               current:{summary:"Story One", description:$cur}}}}')"
   local bash_out ps_out

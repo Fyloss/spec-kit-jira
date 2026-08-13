@@ -128,16 +128,28 @@ _reconcile_resolve_routing() {
   routing_resolve "$(basename "${folder}")" '[]' "${cfg}" 2>/dev/null
 }
 
-# _reconcile_phase_status_map <project-key> <cfg-json> — the resolved
-# project's declared phase->status map (Phase 6, US4, research R9), or {}
-# when the project declares none — the same inert default the phase-status
-# machinery has always had (config_classify_statuses/config_phase_status_
-# targets already default gracefully to an empty map).
+# _reconcile_phase_status_map <project-key> <cfg-json> — the resolved,
+# PER-ROLE phase->status map (023, contracts/role-lifecycle-config.md §2/§4):
+# all three role keys always present, an empty object where the project
+# declares nothing for that role. Both accepted shapes normalise to this one
+# — a project's committed role-blind mapping (every key a lifecycle event)
+# routes wholesale to the `story` role (FR-020, back-compatible by
+# construction); a per-role mapping (every key a hierarchy role) is used
+# as-is. config.sh's schema validator has already refused anything mixed or
+# unknown before this ever runs, so only the two valid shapes and the empty
+# map reach here.
 _reconcile_phase_status_map() {
-  local key="$1" cfg="$2" v
+  local key="$1" cfg="$2" v roles_json
   v="$(jq -c --arg k "${key}" '(.projects // [])[] | select(.key==$k) | .phase_status_map // {}' <<< "${cfg}")"
   [[ -z "${v}" ]] && v='{}'
-  printf '%s' "${v}"
+  roles_json="$(_cfg_role_names_json)"
+  jq -cn --argjson v "${v}" --argjson roles "${roles_json}" '
+    ($v | keys) as $ks
+    | (if ($ks | length) == 0 then {}
+       elif ($ks | all(. as $k | $roles | index($k) != null)) then $v
+       else {story: $v} end) as $per_role
+    | reduce ($roles[]) as $r ({}; . + {($r): ($per_role[$r] // {})})
+  ' | json_canonical
 }
 
 # _reconcile_halted_statuses <project-key> <cfg-json> — the resolved
@@ -162,23 +174,32 @@ _reconcile_halted_statuses() {
   printf '%s' "${v}"
 }
 
-# _reconcile_phase_order <phase-status-map-json> — the DISTINCT statuses a
-# phase->status map resolves to, IN THE FIXED CANONICAL LIFECYCLE-EVENT ORDER
-# (extension.yml's own hook list) — deliberately NOT config_phase_status_
-# targets, whose own tested contract accepts arbitrary phase names and
-# therefore returns them SORTED, not chronologically (config_load's merge
-# also sorts the map's own keys, so declaration order can never be recovered
-# from the map alone). Reconcile's phase names ARE the fixed lifecycle
-# events, so this local helper can use that closed vocabulary to restore the
-# true chronological order drift's ahead/behind comparison depends on
-# (Phase 6, US4, research R9).
+# _reconcile_phase_order <resolved-per-role-phase-status-map-json> — the
+# DISTINCT statuses each role's own map resolves to, IN THE FIXED CANONICAL
+# LIFECYCLE-EVENT ORDER (extension.yml's own hook list) — deliberately NOT
+# config_phase_status_targets, whose own tested contract accepts arbitrary
+# phase names and therefore returns them SORTED, not chronologically
+# (config_load's merge also sorts the map's own keys, so declaration order
+# can never be recovered from the map alone). Reconcile's phase names ARE the
+# fixed lifecycle events, so this local helper can use that closed vocabulary
+# to restore the true chronological order drift's ahead/behind comparison
+# depends on (Phase 6, US4, research R9).
+#
+# 023, data-model.md §1: `order` is now derived PER ROLE — a specification
+# and a story on different workflows are never compared against each
+# other's step order (contract role-lifecycle-config.md §5 I1). Prints
+# {specification:[...], story:[...], task:[...]}.
 _reconcile_phase_order() {
-  local psmap="${1:-}"
-  [[ -z "${psmap}" ]] && psmap='{}'
-  jq -cn --argjson pm "${psmap}" '
-    ["before_specify","after_specify","after_clarify","after_plan","after_tasks","after_implement","after_analyze"]
-    | map($pm[.] // empty)
-    | reduce .[] as $s ([]; if (index($s) != null) then . else . + [$s] end)
+  local resolved="${1:-}"
+  [[ -z "${resolved}" ]] && resolved='{}'
+  jq -cn --argjson pm "${resolved}" '
+    def order_for($m):
+      ["before_specify","after_specify","after_clarify","after_plan","after_tasks","after_implement","after_analyze"]
+      | map($m[.] // empty)
+      | reduce .[] as $s ([]; if (index($s) != null) then . else . + [$s] end);
+    { specification: order_for($pm.specification // {}),
+      story: order_for($pm.story // {}),
+      task: order_for($pm.task // {}) }
   ' | json_canonical
 }
 
@@ -592,7 +613,7 @@ _reconcile_run() {
   local short_circuited="false"
   local email="${JIRA_EMAIL:-}"
   if [[ "${force}" != "true" && "${dry_run}" != "true" ]]; then
-    if run_state_matches "${spec_file}" "${base}" "${email}" "${on_drift}" "${field_values}"; then
+    if run_state_matches "${spec_file}" "${base}" "${email}" "${on_drift}" "${hook_event}" "${field_values}"; then
       short_circuited="true"
     fi
   fi
@@ -1476,21 +1497,25 @@ _reconcile_run() {
     # the plan context's ticket_origins above — the managed-panel comparison
     # is origin-independent (contract §3), so there is no longer a "bridge"
     # value that would route a ticket incorrectly.
-    # target (Phase 6, US4, research R9): the status the CURRENT lifecycle
-    # event maps to, via the routed project's phase_status_map — empty when
-    # this run has no hook event (a direct invocation) or the event has no
-    # declared mapping, which leaves drift evaluation inert exactly as it is
-    # today (R9's stated fallback). category classifies each recognised
-    # ticket's OWN status the same way config_classify_statuses seeds it:
+    # target (Phase 6, US4, research R9; 023 role-lifecycle-config.md §4):
+    # the status the CURRENT lifecycle event maps to, via the routed
+    # project's phase_status_map — resolved PER ROLE now, empty when this
+    # run has no hook event (a direct invocation) or that role's map has no
+    # declared step for it, which leaves drift evaluation inert exactly as
+    # it is today (R9's stated fallback). category classifies each
+    # recognised ticket's OWN status against ITS OWN ROLE's mapped targets
+    # (contract §5 I1) the same way config_classify_statuses seeds it:
     # mapped (a declared phase target) overrides an operator-designated
     # halted state, which overrides Jira's own "done" statusCategory
-    # (post-scope), else unknown.
-    local order target
-    order="$(_reconcile_phase_order "${phase_status_map}")"
-    target="$(jq -r --arg e "${hook_event}" '.[$e] // ""' <<< "${phase_status_map}")"
-    lifecycle="$(jq -c --arg b "${base}" --arg od "${on_drift}" --argjson ord "${order}" \
-      --argjson pm "${phase_status_map}" --argjson hd "${halted_statuses}" --arg tgt "${target}" \
-      '($pm | [.[]]) as $mapped_targets
+    # (post-scope), else unknown. role: "story" for every entry here — the
+    # ticket tier `.bound` always names (parent/task have their own entries).
+    local order_by_role
+    order_by_role="$(_reconcile_phase_order "${phase_status_map}")"
+    lifecycle="$(jq -c --arg b "${base}" --arg od "${on_drift}" --argjson ord "${order_by_role}" \
+      --argjson pm "${phase_status_map}" --argjson hd "${halted_statuses}" --arg e "${hook_event}" \
+      '($pm.story // {}) as $rolemap
+       | ($rolemap[$e] // "") as $tgt
+       | ($rolemap | [.[]]) as $mapped_targets
        | {base_url:$b, on_drift:$od, order:$ord,
           tickets: ((.bound // {}) | with_entries(.value |= (
             { key: .key, current: .current, blockers: .blockers,
@@ -1500,14 +1525,46 @@ _reconcile_run() {
                 elif (.status | IN($hd[])) then "halted"
                 elif .status_category == "done" then "post-scope"
                 else "unknown" end),
-              target: $tgt,
+              target: $tgt, role: "story",
               flagged: .flagged, origin: .origin }
           )))}' \
       <<< "${recog}")"
+
+    # US4/R6: the parent's own lifecycle context entry, keyed by its durable
+    # local identifier (epic.local_id — the same key `_plan_writes_parent`
+    # already uses), role "specification". Only for a RECOGNISED parent — a
+    # not-yet-created one has no status to evaluate drift against (D3).
+    local parent_local_id_ctx; parent_local_id_ctx="$(jq -r '.epic.local_id // ""' <<< "${doc_for_write}")"
+    if [[ "${parent_state}" == "bound" && -n "${parent_local_id_ctx}" ]]; then
+      local p_tgt p_mapped
+      p_tgt="$(jq -r --arg e "${hook_event}" '(.specification // {})[$e] // ""' <<< "${phase_status_map}")"
+      p_mapped="$(jq -c '(.specification // {}) | [.[]]' <<< "${phase_status_map}")"
+      lifecycle="$(jq -c --arg id "${parent_local_id_ctx}" --arg tgt "${p_tgt}" --argjson mt "${p_mapped}" --argjson hd "${halted_statuses}" \
+        --arg key "$(jq -r '.key' <<< "${recog_parent}")" --argjson cur "$(jq -c '.current' <<< "${recog_parent}")" \
+        --arg status "$(jq -r '.status // ""' <<< "${recog_parent}")" \
+        --arg status_category "$(jq -r '.status_category // ""' <<< "${recog_parent}")" \
+        --argjson flagged "$(jq -c '.flagged // false' <<< "${recog_parent}")" \
+        --argjson blockers "$(jq -c '.blockers // []' <<< "${recog_parent}")" \
+        '.parent_local_id = $id
+         | .tickets[$id] = {
+             key: $key, current: null, blockers: $blockers, status: $status,
+             category: (if ($status | IN($mt[])) then "mapped"
+                        elif ($status | IN($hd[])) then "halted"
+                        elif $status_category == "done" then "post-scope"
+                        else "unknown" end),
+             target: $tgt, role: "specification", flagged: $flagged, origin: "bridge"
+           }' <<< "${lifecycle}")"
+    fi
   fi
-  local lresult
-  if ! lresult="$(plan_lifecycle "${actions}" "${doc_for_write}" "${lifecycle}")"; then
-    _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the lifecycle plan could not be assembled (zero writes)'
+  local lresult lc_rc=0
+  lresult="$(plan_lifecycle "${actions}" "${doc_for_write}" "${lifecycle}" "${parent_action}")" || lc_rc=$?
+  if ((lc_rc != 0)); then
+    local lc_fail_key; lc_fail_key="$(jq -r '.fail_closed_key // ""' <<< "${lresult}" 2> /dev/null)"
+    if [[ -n "${lc_fail_key}" ]]; then
+      _reconcile_fault "${lc_rc}" "reconcile: ${lc_fail_key}'s available moves could not be read (zero writes)"
+    else
+      _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the lifecycle plan could not be assembled (zero writes)'
+    fi
     return $?
   fi
   actions="$(jq -c '.actions' <<< "${lresult}")"
@@ -1896,6 +1953,23 @@ _reconcile_run() {
       '{created:$cr, updated:$up, transitioned:$tr, unchanged:$un, skipped:$sk, withheld:$wh}')"
   fi
 
+  # counts.transitioned (023, data-model.md §5, FR-011): present ONLY when
+  # the run carries a lifecycle event AND at least one role declares a step
+  # for it — absence, not a zeroed count, is the off switch that keeps a
+  # run with no event byte-identical to before this feature. Never folded
+  # into created/updated: a move is a position change, not a content one.
+  # Computed from `actions` (parent's transition, if any, already rides in
+  # this same array — plan_lifecycle appends it there, never to a second
+  # slot) before the base-url stripping below.
+  local counts_transitioned="null"
+  if [[ -n "${hook_event}" ]]; then
+    local any_role_declares_step
+    any_role_declares_step="$(jq -r --arg e "${hook_event}" '[.[] | (.[$e] // "")] | any(. != "")' <<< "${phase_status_map}")"
+    if [[ "${any_role_declares_step}" == "true" ]]; then
+      counts_transitioned="$(jq '[.[] | select(.method=="POST" and (.url|endswith("/transitions")))] | length' <<< "${actions}")"
+    fi
+  fi
+
   # The warnings/notes keys appear when the lifecycle facts were supplied OR
   # a story was blocked, so the content-only reconcile (US3) summary with
   # neither is byte-for-byte unchanged.
@@ -1909,11 +1983,12 @@ _reconcile_run() {
     --argjson wc "${warn_count}" --argjson w "${warns}" --argjson no "${notes}" \
     --argjson hl "${has_lifecycle}" --argjson hooks "${hooks_health}" \
     --argjson rec "${recognised_count}" --argjson asg "${assigned_count}" --argjson sk "${skipped_count}" \
-    --argjson tc "${task_counts}" --argjson cc "${checklist_counts}" '
+    --argjson tc "${task_counts}" --argjson cc "${checklist_counts}" --argjson tr "${counts_transitioned}" '
     ($actions_f[0]) as $actions |
     {schema_version:"1.0", command:"reconcile", dry_run:$dry,
      counts:({created:$c, updated:$u, skipped:$sk, warnings:$wc, errors:0,
               recognised:$rec, assigned:$asg}
+             + (if $tr == null then {} else {transitioned:$tr} end)
              + (if $tc == null then {} else {tasks:$tc} end)
              + (if $cc == null then {} else {
                   checklists:{created:$cc.created, updated:$cc.updated, unchanged:$cc.unchanged},
@@ -1932,7 +2007,7 @@ _reconcile_run() {
   # outstanding (a pending-confirmation run already returned above, long
   # before this point, so reaching here already proves that condition).
   if [[ "${dry_run}" != "true" && "${rc_before_hook_downgrade}" == "0" && "${warn_count}" -eq 0 ]]; then
-    run_state_record "${spec_file}" "${base}" "${email}" "${on_drift}" "${field_values}"
+    run_state_record "${spec_file}" "${base}" "${email}" "${on_drift}" "${hook_event}" "${field_values}"
   fi
 
   if [[ "${json}" == "true" ]]; then

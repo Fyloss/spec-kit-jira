@@ -43,11 +43,14 @@ the bulk-versus-per-key decision belongs to one module and must be invisible to 
 
 | Branch | Request | Chunking | Status |
 | --- | --- | --- | --- |
-| **A** | one bulk read carrying transitions **with** required-field detail | 100 keys per request, as `prefetch.sh` | selected if measurement M1 (research R1) is positive on all three of its checks |
-| **C** | `GET /rest/api/3/issue/{key}/transitions?expand=transitions.fields` — the spelling `discovery_task_transition` already uses | one per due ticket | selected otherwise; spec FR-027 is then amended per `plan.md`'s Complexity Tracking |
+| A | one bulk read carrying transitions **with** required-field detail | 100 keys per request, as `prefetch.sh` | **not selected** — no measured evidence `bulkfetch` returns `transitions` at all, let alone with required-field detail (research R1) |
+| **C** | `GET /rest/api/3/issue/{key}/transitions?expand=transitions.fields` — the spelling `discovery_task_transition` already uses | one per due ticket | **selected** — this is the endpoint already proven in production; spec FR-027 is amended per `plan.md`'s Complexity Tracking |
 
-**M1 is taken against the dogfood instance before the first line of `transitions.sh` is written.** Its
-result is recorded in research R1 and in this section.
+**M1's outcome (research R1): branch C.** Decided from 021's dogfood-verified `bulkfetch` shape (no `expand`
+member, no `transitions` array documented) and the per-key endpoint's existing production use, rather than
+from a fresh live call — no dogfood credentials are reachable from the implementation environment. Every
+task gated on branch A (T008, T040b, T040c, T043, T044, T057a, T148) is skipped; `transitions.sh` implements
+only the per-key form below.
 
 Failure handling, in both branches:
 

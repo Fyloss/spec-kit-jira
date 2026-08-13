@@ -19,7 +19,12 @@
         "updated": { "type": "integer", "minimum": 0 },
         "skipped": { "type": "integer", "minimum": 0 },
         "warnings": { "type": "integer", "minimum": 0 },
-        "errors": { "type": "integer", "minimum": 0 }
+        "errors": { "type": "integer", "minimum": 0 },
+        "transitioned": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "023, data-model.md §5, FR-011: the number of tickets actually moved by a declared step. Present ONLY when the run carries a lifecycle event AND at least one role declares a step for it — a run with no event, or an event no role maps, carries no such key (byte-identical to a pre-023 summary)."
+        }
       }
     },
     "actions": {
