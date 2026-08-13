@@ -317,3 +317,70 @@ YAML
   # read against the other role's declared step.
   [ "$(grep -c '/transitions?expand=' "${MOCK_CALLLOG}")" -eq 4 ]
 }
+
+# =============================================================================
+# T080 [Phase 6, US4] — isolation rule I2: with `story` declared alone,
+# stories advance, the parent is not moved, and no warning is raised about
+# the parent (contract role-lifecycle-config.md §5 I2).
+# =============================================================================
+
+@test "T080 -- with story declared alone, stories advance and the parent is untouched, no warning about it" {
+  local twork="${BATS_TEST_TMPDIR}/story-only"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-two-role-workflows" "${twork}"
+  local tspec="${twork}/specs/001-two-role-example/spec.md"
+
+  # Per-role, but ONLY `story` declared -- no `specification` key at all
+  # (distinct from T076/B2's role-blind case, and from T078's both-roles
+  # case).
+  cat > "${twork}/.specify/jira/config.yml" << 'YAML'
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    phase_status_map:
+      story:
+        after_specify: "To Do"
+        after_plan: "In Progress"
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP
+YAML
+
+  export JIRA_CONFIG_DIR="${twork}/.specify/jira"
+  export JIRA_EMAIL="user@example.com"
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  export JIRA_NO_SLEEP=1
+  export SPEC_KIT_JIRA_ID_SOURCE="1111111111111111 2222222222222222 3333333333333333 4444444444444444"
+  unset SPEC_KIT_JIRA_PLAN_CONTEXT SPEC_KIT_JIRA_LIFECYCLE
+  mock_start "${MOCK}/configs/comp-two-role-transitions.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${tspec}" --json > /dev/null
+
+  # Put the parent somewhere a specification-role mapping WOULD treat as
+  # advanced-beyond-target, if it were ever evaluated at all.
+  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-1" \
+    -H 'Content-Type: application/json' \
+    -d '{"fields":{"status":{"name":"Building","statusCategory":{"key":"indeterminate"}}}}' > /dev/null
+
+  : > "${MOCK_CALLLOG}"
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile "${tspec}" --json
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  [ "$status" -eq 0 ]
+
+  # Stories advance normally.
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-2/transitions")) | .body.transition.id' <<< "$output")" = '"202"' ]
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-3/transitions")) | .body.transition.id' <<< "$output")" = '"203"' ]
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-4/transitions")) | .body.transition.id' <<< "$output")" = '"204"' ]
+
+  # The parent is never read for transitions, never moved, and no warning
+  # ever names it.
+  [ "$(grep -c 'COMP-1/transitions' "${MOCK_CALLLOG}")" -eq 0 ]
+  [ "$(jq -e '[.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-1/transitions"))] | length' <<< "$output")" -eq 0 ]
+  [[ "$(jq -r '.warnings | join(" ")' <<< "$output")" != *"COMP-1"* ]]
+}

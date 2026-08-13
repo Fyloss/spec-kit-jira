@@ -219,4 +219,70 @@ routing_default: COMP
         $out | Should -Match 'is not above story'
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -notlike 'GET *' }).Count | Should -Be 0
     }
+
+    It 'T081 -- with story declared alone, stories advance and the parent is untouched, no warning about it' {
+        $twoRoleFixture = Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-two-role-workflows'
+        $twork = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse $twoRoleFixture $twork
+        $tspec = Join-Path $twork 'specs/001-two-role-example/spec.md'
+
+        # Per-role, but ONLY `story` declared -- no `specification` key at
+        # all (distinct from T077/B2's role-blind case, and from T079's
+        # both-roles case).
+        $storyOnlyConfig = @'
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    phase_status_map:
+      story:
+        after_specify: "To Do"
+        after_plan: "In Progress"
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP
+'@
+        Set-Content -NoNewline -Path (Join-Path $twork '.specify/jira/config.yml') -Value $storyOnlyConfig
+        $env:JIRA_CONFIG_DIR = Join-Path $twork '.specify/jira'
+
+        $m = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/comp-two-role-transitions.json')
+        try {
+            $env:SPEC_KIT_JIRA_BASE_URL = $m.BaseUrl
+            $null = Invoke-Captured @('reconcile', $tspec, '--json')
+
+            # Put the parent somewhere a specification-role mapping WOULD
+            # treat as advanced-beyond-target, if it were ever evaluated
+            # at all.
+            Invoke-RestMethod -Method Put -Uri "$($m.BaseUrl)/rest/api/3/issue/COMP-1" `
+                -ContentType 'application/json' `
+                -Body '{"fields":{"status":{"name":"Building","statusCategory":{"key":"indeterminate"}}}}' | Out-Null
+
+            Clear-Content -LiteralPath $m.CallLog
+            $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+            try {
+                $r = Invoke-Captured @('reconcile', $tspec, '--json') | ConvertFrom-Json
+            }
+            finally { Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue }
+
+            # Stories advance normally.
+            $expected = @{ 'COMP-2' = '202'; 'COMP-3' = '203'; 'COMP-4' = '204' }
+            foreach ($key in $expected.Keys) {
+                $t = @($r.actions | Where-Object { ([string]$_.url).EndsWith("/rest/api/3/issue/$key/transitions") })
+                $t.Count | Should -Be 1
+                [string]$t[0].body.transition.id | Should -Be $expected[$key]
+            }
+
+            # The parent is never read for transitions, never moved, and
+            # no warning ever names it.
+            @(Get-JiraMockCallLog -Mock $m | Where-Object { $_ -match 'COMP-1/transitions' }).Count | Should -Be 0
+            @($r.actions | Where-Object { ([string]$_.url).EndsWith('/rest/api/3/issue/COMP-1/transitions') }).Count | Should -Be 0
+            (@($r.warnings) -join ' ') | Should -Not -Match 'COMP-1'
+        }
+        finally { Stop-JiraMock -Mock $m }
+    }
 }

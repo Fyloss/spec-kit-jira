@@ -194,16 +194,16 @@ assert the second run reached the board and moved the ticket to the second event
 
 ### Tests for User Story 3 (write first, observe failing)
 
-- [ ] T058 [P] [US3] Add to `tests/bash/lib/test_run_state.bats`: reconcile under `after_specify`, then under `after_plan` with `spec.md` and `tasks.md` byte-identical — the second run is **not** short-circuited and the ticket stands at the plan event's step. Fails against pre-change code, which short-circuits with an empty call log (contract run-state-v2 §6)
-- [ ] T059 [P] [US3] Add the same two-event assertion to `tests/powershell/lib/RunState.Tests.ps1`
-- [ ] T060 [US3] Add to `tests/bash/lib/test_run_state.bats`: touching only `plan.md` produces a full reconcile, and the parent's Implementation Plan section reaches Jira. Fails against pre-change code — this is the live content defect research §R4 documents
-- [ ] T061 [US3] Add the same `plan.md` assertions to `tests/powershell/lib/RunState.Tests.ps1`
-- [ ] T062 [US3] Add to `tests/bash/lib/test_run_state.bats`: deleting `plan.md` invalidates in the other direction, a schema-1 document produces a full reconcile, and the same event twice over unchanged inputs still short-circuits with an empty call log
-- [ ] T063 [US3] Add the same three assertions to `tests/powershell/lib/RunState.Tests.ps1`
-- [ ] T063a [US3] Add to `tests/bash/lib/test_run_state.bats` the narrowed FR-016 cost: a run under `after_analyze` — the one event of the six that changes no hashed input — performs a **full reconcile** the first time it fires against a given input state, and short-circuits on an immediate repeat of that same event with an empty call log (contract run-state-v2 §4). This pins the narrowing so a later change cannot widen it silently
-- [ ] T063b [US3] Add the same `after_analyze` cost assertions to `tests/powershell/lib/RunState.Tests.ps1`
-- [ ] T064 [US3] Add to `tests/bash/lib/test_run_state.bats` invariant S10: a run raising any warning records no state, so an unresolvable move is reconsidered by the next run
-- [ ] T065 [US3] Add the same S10 assertion to `tests/powershell/lib/RunState.Tests.ps1`
+- [X] T058 [P] [US3] Add to `tests/bash/lib/test_run_state.bats`: reconcile under `after_specify`, then under `after_plan` with `spec.md` and `tasks.md` byte-identical — the second run is **not** short-circuited and the ticket stands at the plan event's step. Fails against pre-change code, which short-circuits with an empty call log (contract run-state-v2 §6) — landed as `tests/bash/commands/test_reconcile_second_event.bats`, a command-level file with its own mock and a clean inline fixture (`test_run_state.bats` is module-level only, and `repo-with-mirrored-spec` always raises a warning, which S10 would make short-circuiting unobservable against)
+- [X] T059 [P] [US3] Add the same two-event assertion to `tests/powershell/lib/RunState.Tests.ps1` — landed as `tests/powershell/commands/Reconcile.SecondEvent.Tests.ps1`, matching T058's file split
+- [X] T060 [US3] Add to `tests/bash/lib/test_run_state.bats`: touching only `plan.md` produces a full reconcile, and the parent's Implementation Plan section reaches Jira. Fails against pre-change code — this is the live content defect research §R4 documents — landed in `test_reconcile_second_event.bats`
+- [X] T061 [US3] Add the same `plan.md` assertions to `tests/powershell/lib/RunState.Tests.ps1` — landed in `Reconcile.SecondEvent.Tests.ps1`
+- [X] T062 [US3] Add to `tests/bash/lib/test_run_state.bats`: deleting `plan.md` invalidates in the other direction, a schema-1 document produces a full reconcile, and the same event twice over unchanged inputs still short-circuits with an empty call log — landed in `test_reconcile_second_event.bats`
+- [X] T063 [US3] Add the same three assertions to `tests/powershell/lib/RunState.Tests.ps1` — landed in `Reconcile.SecondEvent.Tests.ps1`
+- [X] T063a [US3] Add to `tests/bash/lib/test_run_state.bats` the narrowed FR-016 cost: a run under `after_analyze` — the one event of the six that changes no hashed input — performs a **full reconcile** the first time it fires against a given input state, and short-circuits on an immediate repeat of that same event with an empty call log (contract run-state-v2 §4). This pins the narrowing so a later change cannot widen it silently — landed in `test_reconcile_second_event.bats`
+- [X] T063b [US3] Add the same `after_analyze` cost assertions to `tests/powershell/lib/RunState.Tests.ps1` — landed in `Reconcile.SecondEvent.Tests.ps1`
+- [X] T064 [US3] Add to `tests/bash/lib/test_run_state.bats` invariant S10: a run raising any warning records no state, so an unresolvable move is reconsidered by the next run — landed in `test_reconcile_second_event.bats`
+- [X] T065 [US3] Add the same S10 assertion to `tests/powershell/lib/RunState.Tests.ps1` — landed in `Reconcile.SecondEvent.Tests.ps1`
 
 ### Implementation for User Story 3
 
@@ -213,8 +213,8 @@ assert the second run reached the board and moved the ticket to the second event
 - [X] T069 [US3] Mirror the `plan.md` input in `scripts/powershell/lib/RunState.psm1` (depends on T067)
 - [X] T070 [US3] Thread the resolved event through the three `run_state_*` call sites in `scripts/bash/commands/reconcile.sh` (depends on T066)
 - [X] T071 [US3] Thread the event through the same call sites in `scripts/powershell/commands/Reconcile.psm1` (depends on T067)
-- [ ] T072 [P] [US3] Add `tests/conformance/scenarios/us023-second-event-advances.json` — two runs, the second under a different event with nothing changed, asserting the second issues requests and moves the ticket
-- [ ] T073 [P] [US3] Add `tests/conformance/scenarios/us023-plan-md-invalidates.json` — a `plan.md`-only edit producing a full reconcile and a parent update
+- [X] T072 [P] [US3] Add `tests/conformance/scenarios/us023-second-event-advances.json` — two runs, the second under a different event with nothing changed, asserting the second issues requests and moves the ticket — the harness's `env` is scenario-wide (not per-run), so "a different event" is realised as run 1 moving the ticket under `after_plan`, then a `before.jq` patch of the recorded document's `hook_event` to `after_specify` before run 2 (still under `after_plan`) — the same observable property run_state_matches gates on — proving run 2 re-reads recognition (non-empty call log) rather than trusting a stale document
+- [X] T073 [P] [US3] Add `tests/conformance/scenarios/us023-plan-md-invalidates.json` — a `plan.md`-only edit producing a full reconcile and a parent update
 
 **Checkpoint**: the board follows the lifecycle, not the file system's edit pattern. The `plan.md` content
 defect on `main` is closed.
@@ -233,16 +233,16 @@ assert each tier's ticket landed on its own declared step and neither was offere
 
 - [X] T074 [P] [US4] Add `tests/bash/lib/test_config_phase_status_map.bats` asserting the discrimination rule of contract role-lifecycle-config §2 — all-event keys, all-role keys, empty mapping — and the seven validation messages of §3, each with `EXIT_CONFIG` (4), zero requests, and the exact message text
 - [X] T075 [P] [US4] Add the Pester mirror `tests/powershell/lib/Config.PhaseStatusMap.Tests.ps1` with identical messages
-- [ ] T076 [US4] Add to `tests/bash/lib/test_config_phase_status_map.bats` guarantees B1–B3: a committed role-blind mapping keeps byte-identical diagnostics, classification and warnings, and upgrading never starts moving a parent or a sub-task
-- [ ] T077 [US4] Add the same back-compatibility assertions to `tests/powershell/lib/Config.PhaseStatusMap.Tests.ps1`
+- [X] T076 [US4] Add to `tests/bash/lib/test_config_phase_status_map.bats` guarantees B1–B3: a committed role-blind mapping keeps byte-identical diagnostics, classification and warnings, and upgrading never starts moving a parent or a sub-task — landed as `tests/bash/commands/test_reconcile_role_blind_compat.bats`, a command-level file (the target file is config.sh-only, no mock, no cmd_reconcile); B3 is the existing "a project declaring no phase_status_map issues zero transition requests" pin (T054)
+- [X] T077 [US4] Add the same back-compatibility assertions to `tests/powershell/lib/Config.PhaseStatusMap.Tests.ps1` — landed as `tests/powershell/commands/Reconcile.RoleBlindCompat.Tests.ps1`, matching T076's file split
 - [X] T078 [US4] Add to `tests/bash/commands/test_reconcile_lifecycle.bats` isolation rule I1 against the two-role fixture: the parent lands on "Building", each story on "In Progress", and **zero** tickets are evaluated against the other role's step name
 - [X] T079 [US4] Add the same isolation assertions to `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1` — landed as `Reconcile.TwoRoleIsolation.Tests.ps1`, matching T078's bash file split
-- [ ] T080 [P] [US4] Add to `tests/bash/commands/test_reconcile_lifecycle.bats` rule I2: with `story` declared alone, stories advance, the parent is not moved, and no warning is raised about the parent
-- [ ] T081 [P] [US4] Add the same `story`-only assertion to `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1`
-- [ ] T082 [P] [US4] Add to `tests/bash/sink/test_recognition_parent.bats` that the parent read carries `status`, `Flagged` and `issuelinks` alongside `summary`, `description`, `labels`, and that the projected bytes are identical on a prefetch hit and a prefetch miss (research §R6)
-- [ ] T083 [P] [US4] Add the same parent-projection assertions to `tests/powershell/sink/Recognition.Parent.Tests.ps1`
-- [ ] T083a [P] [US4] Extend `tests/bash/sink/test_prefetch_field_union.bats` so the union guard covers the parent reader's widened list: a field the union omits breaks its reader **only on a prefetch hit**, which is the healthy path and the one a narrow test misses
-- [ ] T083b [P] [US4] Add the same union-guard extension to `tests/powershell/sink/Prefetch.FieldUnion.Tests.ps1`
+- [X] T080 [P] [US4] Add to `tests/bash/commands/test_reconcile_lifecycle.bats` rule I2: with `story` declared alone, stories advance, the parent is not moved, and no warning is raised about the parent
+- [X] T081 [P] [US4] Add the same `story`-only assertion to `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1`
+- [X] T082 [P] [US4] Add to `tests/bash/sink/test_recognition_parent.bats` that the parent read carries `status`, `Flagged` and `issuelinks` alongside `summary`, `description`, `labels`, and that the projected bytes are identical on a prefetch hit and a prefetch miss (research §R6)
+- [X] T083 [P] [US4] Add the same parent-projection assertions to `tests/powershell/sink/Recognition.Parent.Tests.ps1`
+- [X] T083a [P] [US4] Extend `tests/bash/sink/test_prefetch_field_union.bats` so the union guard covers the parent reader's widened list: a field the union omits breaks its reader **only on a prefetch hit**, which is the healthy path and the one a narrow test misses — already covers it: the guard parses the parent reader's field list live out of `recognition.sh`'s own source rather than a hardcoded copy, so it picked up the widened list with zero changes; confirmed green
+- [X] T083b [P] [US4] Add the same union-guard extension to `tests/powershell/sink/Prefetch.FieldUnion.Tests.ps1` — same note as T083a: already covers it, confirmed green
 - [ ] T084 [P] [US4] Add to `tests/bash/commands/test_reconcile_task_completion.bats` rules I4–I7: a `task` mapping advances unchecked sub-tasks in `subtask` mode; in `checklist` mode it moves nothing and produces exactly **one** note per run; an abandoned sub-task marker never enters the move set; a checked task still outranks the mapping
 - [ ] T085 [P] [US4] Add the same task-tier assertions to `tests/powershell/commands/Reconcile.TaskCompletion.Tests.ps1`
 
