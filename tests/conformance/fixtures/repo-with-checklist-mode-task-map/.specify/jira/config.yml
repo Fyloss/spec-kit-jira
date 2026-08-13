@@ -1,0 +1,20 @@
+# 023, T005 (contract role-lifecycle-config.md §5, I6): a project in
+# `checklist` mode whose phase_status_map still declares a `task` role —
+# the mapping is recorded, never consumed (022, FR-007), and inert (I4/I5).
+# tasks.md carries a bound sub-task marker abandoned by the mode switch —
+# its ticket still in the tracker, but never entering the mapping's move
+# set (I6).
+projects:
+  - key: TASKP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    phase_status_map:
+      task:
+        after_specify: "To Do"
+        after_plan: "In Progress"
+routing_default: TASKP
+task_mirror:
+  TASKP: checklist

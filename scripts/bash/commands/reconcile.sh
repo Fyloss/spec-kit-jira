@@ -1189,6 +1189,20 @@ _reconcile_run() {
   # one mechanism for that in checklist mode, built from tasks.md markers
   # alone, no extra Jira read.
   local task_notes="[]"
+  # 023, US4, I4/I5: a DECLARED `task` mapping that currently has no effect
+  # produces exactly ONE note per run — never a warning, never per ticket.
+  # Two inert cases: `checklist` mode (the mapping's target vocabulary does
+  # not apply to a checklist's binary entries), and no task role resolved
+  # at all (`task_tier_mode` is empty — neither `checklist` nor `subtask`).
+  # An EMPTY mapping is silent instead (I2's general rule): declaring
+  # nothing for a role is not the same as declaring something inert.
+  if [[ "$(jq -r '(.task // {}) | length' <<< "${phase_status_map}")" -gt 0 && "${task_tier_mode}" != "subtask" ]]; then
+    if [[ "${task_tier_mode}" == "checklist" ]]; then
+      task_notes="$(jq -c --arg n "the task-role lifecycle mapping for ${project_key} has no effect while its tasks are mirrored as a checklist" '. + [$n]' <<< "${task_notes}")"
+    else
+      task_notes="$(jq -c --arg n "the task-role lifecycle mapping for ${project_key} has no effect: the project declares no task role" '. + [$n]' <<< "${task_notes}")"
+    fi
+  fi
   if [[ "${task_tier_mode}" == "subtask" ]]; then
     local orphan_notes
     orphan_notes="$(jq -cn --argjson recog "${recog}" --argjson doc "${doc_for_write}" --argjson trecog "${tasks_recog}" \

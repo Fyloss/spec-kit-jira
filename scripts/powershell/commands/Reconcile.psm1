@@ -1400,6 +1400,21 @@ function Invoke-JiraReconcileRun {
     # both pure notes, never a write. Mirror of reconcile.sh's own block; see
     # there for the full rationale.
     $taskNotes = [System.Collections.Generic.List[string]]::new()
+    # 023, US4, I4/I5: a DECLARED `task` mapping that currently has no
+    # effect produces exactly ONE note per run — never a warning, never
+    # per ticket. Two inert cases: `checklist` mode, and no task role
+    # resolved at all ($taskTierMode is empty). An EMPTY mapping stays
+    # silent instead (I2's general rule). Mirror of reconcile.sh.
+    $taskRoleMapForNote = Get-JiraPlanPropSafe ($phaseStatusMap | ConvertFrom-Json -Depth 100) 'task'
+    $taskRoleMapForNoteCount = if ($taskRoleMapForNote) { @($taskRoleMapForNote.PSObject.Properties).Count } else { 0 }
+    if ($taskRoleMapForNoteCount -gt 0 -and $taskTierMode -ne 'subtask') {
+        if ($taskTierMode -eq 'checklist') {
+            $taskNotes.Add("the task-role lifecycle mapping for $projectKey has no effect while its tasks are mirrored as a checklist")
+        }
+        else {
+            $taskNotes.Add("the task-role lifecycle mapping for $projectKey has no effect: the project declares no task role")
+        }
+    }
     if ($taskTierMode -eq 'subtask') {
         $tasksRecogForNotes = $tasksRecogJson | ConvertFrom-Json -Depth 100
         $tasksRecogBoundForNotes = Get-JiraPlanPropSafe $tasksRecogForNotes 'bound'

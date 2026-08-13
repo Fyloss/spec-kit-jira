@@ -1,0 +1,36 @@
+resolved_ids:
+  COMP:
+    style: company_managed
+    issue_types:
+      - logical_name: "Epic"
+        id: "10001"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "10004"
+        hierarchy_level: "0"
+        subtask: false
+    child_type:
+      logical_name: "Story"
+      id: "10004"
+      source: derived
+    parent_type:
+      logical_name: "Epic"
+      id: "10001"
+      source: derived
+    required_fields:
+      "10001":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "10004":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "10004": true
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"
+    estimation_field_id: "customfield_20011"

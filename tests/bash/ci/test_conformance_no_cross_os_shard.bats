@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (145)" {
+@test "the conformance corpus has exactly the recorded scenario count (148)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -70,8 +70,11 @@ setup() {
   # (Phase 3, US2, T030/T031) (139 -> 143).
   # 023 adds two: us023-second-event-advances, us023-plan-md-invalidates
   # (Phase 5, US3, T072/T073) (143 -> 145).
+  # 023 adds three: us023-two-role-workflows, us023-checklist-mode-inert,
+  # us023-legacy-mapping-story-only (Phase 6, US4, T102/T103/T104)
+  # (145 -> 148).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 145 ]
+  [ "${count}" -eq 148 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {
