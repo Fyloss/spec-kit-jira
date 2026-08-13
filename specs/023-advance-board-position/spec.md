@@ -258,8 +258,10 @@ moves and warnings is identical to the performed set, and that the preview perfo
   mirror reports the rejection naming the ticket, and does not retry, does not re-ask, and does not attempt
   a different move — the next run reconsiders from the ticket's new position.
 - **The move succeeds but lands somewhere unexpected.** A workflow rule attached to the move sends the
-  ticket to a different step than the one advertised. The mirror reports where the ticket actually stands
-  after the move; the next run sees that position as the ticket's truth and classifies it normally.
+  ticket to a different step than the one advertised. The mirror does not notice, and does not check: the
+  tracker confirms the move without saying where the ticket came to rest. The next run reads the ticket's
+  real position, treats it as the truth, and reports the divergence like any other — so the situation
+  surfaces one run later rather than immediately, at no cost to the run that caused it.
 - **A sub-task's task is checked and the task role also maps the current event.** The task's completion
   governs that sub-task; the declared mapping does not also act on it in the same run.
 - **The same step name appears in two roles' workflows and means different things.** Each role is resolved
@@ -497,5 +499,11 @@ moves and warnings is identical to the performed set, and that the preview perfo
   repository and belongs to the controlled exceptions, not here.
 - **Setting, clearing, or reacting to the impediment marker beyond the existing withholding**, and creating,
   changing, or removing any link.
+- **Verifying where a move actually landed.** The tracker confirms a successful move without returning a
+  position, so checking that the ticket reached the declared step would cost a second read on every moved
+  ticket — paying today for information the next run reads for nothing and reports as ordinary drift. The
+  task tier has never verified its own moves either; adopting a different answer here for the same question
+  would be the harder thing to justify. If real workflows turn out to divert moves often enough to matter,
+  that deserves its own specification with its own request budget.
 - **Repairing boards already behind because the mapping never acted.** The next run advances what it can and
   names what it cannot; no migration or catch-up mode is built.
