@@ -1,271 +1,365 @@
-# Phase 0 — Research: Each Tier Advances Along Its Own Declared Workflow
+# Research — Each Tier Advances Along Its Own Declared Workflow
 
-**Feature**: `specs/023-advance-board-position` | **Date**: 2026-08-10
+Nine questions. Eight are closed against the repository as it stands on `main` at `bdf04a0`. R1 is closed by
+a measurement against a live instance, specified here and scheduled before the first line of Phase C.
 
-Every unknown in the Technical Context is resolved below. Each entry records what was decided, why, and
-what was rejected. Nothing here authorises work the specification does not require.
-
----
-
-## R1 — Where the write half is missing, measured rather than assumed
-
-**Question**: the specification asserts that no specification- or story-tier ticket is ever moved. Where
-exactly does the chain break, and is the break a defect or a deliberate scope boundary?
-
-**Finding**. The chain breaks at one guard. `plan_lifecycle` (`scripts/bash/sink/jira/plan_apply.sh:1081`)
-emits the transition action only under `do_transition == "true" && -n "${transition_id}"`. The decision half
-is complete — `drift_evaluate` returns `transition` correctly — but nothing populates `transition_id` for a
-story. The wired lifecycle context (`scripts/bash/commands/reconcile.sh:1450-1465`) builds each ticket entry
-with `key`, `current`, `blockers`, `status`, `category`, `target`, `flagged` and `origin`, and no transition
-id. The only other source is the `SPEC_KIT_JIRA_LIFECYCLE` environment override, which
-`reconcile.sh:1419` documents as a test override.
-
-The one real producer is `discovery_task_transition` (`scripts/bash/sink/jira/discovery.sh:472`), added by
-feature 012 for the sub-task tier. It selects candidates by `statusCategory` (done / not done), never by a
-status name.
-
-**It is a deliberate boundary, not a defect.** `tests/bash/commands/test_reconcile_lifecycle.bats:123` pins
-it by name: *"zero transition requests in every scenario — this release evaluates the rules but never moves
-a ticket's status"*, and the file header cites "research R9" of the original feature as the authority.
-
-**Decision**: treat this as completing a deliberately deferred half, not as fixing a bug. Consequence for
-the task ordering: the pinning test is **rewritten in the same change that makes it false**, with its
-intent preserved as a narrower assertion (zero moves where no mapping is declared), never deleted quietly.
-
-**Alternatives considered**: leaving the pinning test and adding transitions behind a flag — rejected, it
-contradicts FR-017 (no new flag) and would leave the documentation still lying.
+Every claim below that describes current behaviour was read out of the code, not inferred from a
+specification. File and line references are to `main` at the time of writing.
 
 ---
 
-## R2 — How a move is found on a workflow the bridge may not assume
+## R1 — Can available transitions be read for many issues in one request, with required-field detail?
 
-**Question**: given a declared step *name*, which of the tracker's offered transitions is the right one, on
-a workflow discovered at run time?
+**Status: OPEN — decided by measurement M1 before Phase C begins.**
 
-**Decision**: a sibling of `discovery_task_transition` that selects by the **destination status name**
-instead of the destination's category, returning the same shape plus the reachable set:
+### Why it matters
 
-```text
-{ candidates: [{id, name, to}], transition_id, withheld_field, reachable: [status_name, ...] }
+Spec FR-027 forbids the availability read from growing one-for-one with the number of tickets due a move,
+because 021 spent a whole feature removing exactly that shape from recognition (`prefetch.sh`, one
+`POST /rest/api/3/issue/bulkfetch` per hundred keys in place of one `GET` per key) and committed to a
+request count "bounded by the number of writes plus a small constant for reads" (021 SC-003).
+
+The task tier reads availability one issue at a time:
+
+```
+sink/jira/discovery.sh:481
+  jira_request GET "${api}/issue/${key}/transitions?expand=transitions.fields"
 ```
 
-The four outcomes are taken verbatim from the task tier's contract, because the question is identical:
+`expand=transitions.fields` is load-bearing and is the reason this question has two halves. It is what
+returns each transition's own screen fields with their `required` flag, which
+`discovery_task_transition` uses to detect a gated move (`discovery.sh:488`). Spec FR-005 (User Story 7,
+P1) requires the mirror to *stand down and name the demanded value* rather than attempt the move and be
+rejected. A bulk read that returns transitions **without** field detail cannot satisfy FR-005, so it is not
+a usable branch: it would only relocate the per-issue read rather than remove it.
 
-| Situation | Outcome |
-|---|---|
-| No candidate lands on the declared step | `transition_id: null`, `reachable` names what is | 
-| Exactly one, ungated | `transition_id` set | 
-| Exactly one, but its transition screen has a required field | `transition_id: null`, `withheld_field` names it |
-| Two or more | `transition_id: null`, `candidates` lists them, no preference invented |
+### The two branches
 
-**Rationale**: the tracker's `GET /issue/{key}/transitions?expand=transitions.fields` already returns
-`to.name`, `to.statusCategory` and the per-transition required fields in one response — the same response
-the task tier reads. Selecting on `to.name` rather than `to.statusCategory.key` is a one-predicate change to
-a proven reader, and it keeps Principle VII intact: no status name is ever built into the product, only
-compared against what the operator declared.
+| Branch | Condition | Consequence |
+| --- | --- | --- |
+| **A** | A bulk read reports transitions *and* their required-field detail for up to ~100 issues per request. | One request per hundred tickets due a move. FR-027 met as written. `transitions.sh` chunks exactly like `prefetch.sh`. |
+| **C** | It does not — either no bulk transitions at all, or transitions without field detail. | One request per ticket **due a move** (never per recorded ticket). FR-027 is amended to FR-026's bound; the Complexity Tracking entry in `plan.md` is filled in. |
 
-**Alternatives considered**:
-- *Reuse `discovery_task_transition` with a mode parameter.* Rejected: the two selectors differ in what they
-  return (`reachable` is meaningless for the category selector) and the task tier's contract is shipped and
-  tested. Two small readers beat one reader with a mode switch (Principle XIV).
-- *Resolve the target status to an id first, then match transitions by `to.id`.* Rejected: it requires a
-  second discovery read per project for no gain — the transitions response already carries the name, and
-  the operator declared a name.
+Branch B — bulk candidates plus a per-issue gate check — was considered and collapses into C: in the common
+case a ticket has exactly one candidate, so the gate check runs for every ticket anyway.
+
+### Why this is not resolved from the repository
+
+The conformance mock implements `POST /rest/api/3/issue/bulkfetch` and
+`GET /rest/api/3/issue/{key}/transitions` as separate handlers (`tests/conformance/mock-jira/mock-server.ps1`,
+routes at l. 407 and l. 410), and the bulk handler composes only fields and properties — it says nothing
+about what the real endpoint accepts. 021's own prefetch contract records the bulkfetch request shape it
+verified (`issueIdsOrKeys`, `fields`, `properties`, 100-issue chunking, `200`/`400`/`401`, id-ordered
+results) and does **not** record anything about an `expand` member, so the repository holds no evidence
+either way. Writing a design on an unverified capability is how a feature discovers in Phase C that its
+budget requirement was never achievable.
+
+### Measurement M1 — the deciding task
+
+Against the dogfood instance the project already uses for Principle XII, on one issue whose workflow has a
+gated transition:
+
+1. `POST /rest/api/3/issue/bulkfetch` with `{"issueIdsOrKeys":[…], "fields":["status"], "expand":["transitions"]}`.
+2. Record: the status code; whether each returned issue carries a `transitions` array; and whether each
+   transition carries its screen fields with a `required` flag.
+3. Repeat with the sub-expansion spelling the per-issue endpoint uses (`transitions.fields`).
+
+**Decision rule**: all three of (2)'s answers positive → branch A. Anything else → branch C. The result is
+recorded back into this file and into `contracts/transition-resolution.md` §2 before Phase C's first task.
+
+**Cost of being wrong in either direction is bounded** because every caller of `transitions.sh` is identical
+under both branches — see `contracts/transition-resolution.md` §2, which specifies one function signature
+and two implementations of its request.
+
+### What is decided regardless of the branch
+
+- The read is issued **only for tickets a safety decision already said should advance and that are not
+  already standing at the declared step** (FR-008, FR-026). This is decided *after* `drift_evaluate`, so
+  the set is as small as it can be, and it is zero on a run with no event or no declared step.
+- A failure of the *bulk* form falls through to the per-key form at today's cost and today's outcome —
+  identical to 021 prefetch invariant P2 (`contracts/recognition-prefetch.md` §4). A failed optimisation is
+  never a classification (FR-031).
+- A failure of the read itself (both forms exhausted) is fail-closed for the whole specification, matching
+  `discovery_task_transition`'s existing treatment (FR-034).
 
 ---
 
-## R3 — The configuration shape for a workflow per hierarchy role
+## R2 — Where in the pipeline does resolution belong?
 
-**Question**: how does a team declare three workflows without breaking the one mapping that ships today?
+**Decision: inside the `plan` phase, in `plan_lifecycle`'s decision loop, before it returns.**
 
-**Decision**: the mapping accepts **two shapes at the same key**, discriminated structurally.
+The seam already exists and is exact. `plan_lifecycle` (`sink/jira/plan_apply.sh:1019`) takes a lifecycle
+context whose per-ticket entry is documented at l. 1003–1005 as
 
-```yaml
-# Shape A — what ships today. Unchanged meaning: the story role.
-phase_status_map:
-  after_specify: "To Do"
-  after_plan: "In Progress"
-
-# Shape B — a workflow per role. Roles are the three the project already names.
-phase_status_map:
-  specification:
-    after_specify: "Funnel"
-    after_plan: "Building"
-  story:
-    after_specify: "To Do"
-    after_plan: "In Progress"
-  task:
-    after_implement: "In Progress"
+```
+{ key, current:{fields…}, status, category, target, transition_id, flagged, blockers:[…] }
 ```
 
-Discrimination is by the type of the values: every value a string means shape A; every value an object whose
-own values are strings, keyed by a known role name, means shape B. A mixture is a validation error naming
-both the project and the offending key.
+and at l. 1140 it emits the transition action if and only if `transition_id` and `key` are both non-empty:
 
-**Rationale**:
-- FR-013 requires an existing role-blind mapping to keep meaning exactly the story role. Reading shape A as
-  `{story: {...}}` satisfies that with no migration, no second key, and no deprecation cycle.
-- The role names are the ones the project already uses for the hierarchy (`specification` / `story` /
-  `task`), so a tech lead meets no new vocabulary (Principle XVI, FR-026).
-- A second key (`phase_status_map_by_role`) was rejected: two keys governing one concept is precisely the
-  configuration surface Principle XV tells us not to grow, and it would leave every reader asking which wins.
+```
+if [[ "${do_transition}" == "true" && -n "${transition_id}" && -n "${key}" ]]; then
+```
 
-**Validation** (both ports, same messages): unknown role name; a role mapped to a non-object in shape B; a
-non-string step name; a mixture of the two shapes. Each names the project index and the key, matching the
-existing message style at `scripts/bash/lib/config.sh:753` and `scripts/powershell/lib/Config.psm1:872`.
+So the drift decision *already* reaches a `do_transition=true` on the real path; the action is silently
+dropped for want of an id. That silent drop is the whole of "this release evaluates the rules but never
+moves a ticket's status", and it is also the bug to be careful about: after this feature, an unresolvable
+step must produce a **warning**, never a silent drop (FR-004, FR-005, FR-007).
 
-**Alternatives considered**: nesting under the existing hierarchy-role configuration block instead of under
-the mapping key — rejected, it would scatter one team decision across two places in the file.
+**Why this phase and not another**:
 
----
+- It is the same computation `--dry-run` performs, so the preview predicts the move exactly (FR-036,
+  Principle XI) with no second, divergent code path.
+- It is after the safety decision, so no read is issued for a ticket that will not move (FR-026).
+- It is inside the timing marks: `timing_phase_end "recognition"` is at `commands/reconcile.sh:1233` and
+  `timing_phase_end "plan"` at l. 1624, with `plan_lifecycle` called at l. 1509. Requests issued there are
+  attributed to `plan`, which today reports zero, so the per-phase counts keep summing to the run's total
+  (FR-030, and 024 SC-014). No new phase is introduced — 024's report has eight and its shape is asserted.
 
-## R4 — Per-role classification and ordering
-
-**Question**: `config_classify_statuses` and `config_phase_status_targets` derive the drift category and the
-phase order from *the* mapping. With three mappings, which one applies?
-
-**Decision**: the ticket's own role's mapping, and only that one. Both helpers already take the map as an
-argument (`scripts/bash/lib/config.sh:639` and `:659`), so this is a **caller** change: resolve the map for
-the role, then call the existing helper. No signature changes, no engine changes.
-
-Consequence for `drift_evaluate`: its `order` input becomes the role's own order. The engine stays pure and
-unaware of roles — it receives an order and a target, exactly as today.
-
-**The halted designation stays project-wide.** A status name only matches a ticket that actually stands at
-it, so one list covering all three workflows classifies correctly. Splitting it per role would add a
-configuration surface no requirement asks for (Principle XV); it is recorded in the spec's Assumptions and
-its Out of Scope.
+**Rejected**: resolving during recognition (step 6). It would fold the availability read into the prefetch at
+zero extra round-trips, which is attractive, but at that moment the run does not yet know any ticket's
+current status, so it would ask about every recognised ticket on every run that carries an event — including
+the tickets already standing at the declared step, which FR-008 explicitly exempts.
 
 ---
 
-## R5 — Extending the safety evaluation to the specification tier
+## R3 — How is a per-role mapping told apart from today's?
 
-**Question**: FR-014 requires the parent to be evaluated exactly as a story. What does that cost?
+**Decision: two closed, disjoint key sets. A mapping whose keys are all events is the story role's; a
+mapping whose keys are all roles is per-role; anything mixed is a config refusal.**
 
-**Finding**. `plan_lifecycle` iterates `doc.stories` and keys its context by each story's `local_id`. The
-parent is planned on a separate path and carries its own `local_id` with `role:"parent"` on the emitted
-action (`scripts/bash/sink/jira/plan_apply.sh:619`). The recognition result's `bound` map already contains
-the parent's entry — the same `key`, `current`, `status`, `flagged`, `origin` fields a story's entry has.
+Both sets are closed and neither can grow without a spec:
 
-**Decision**: give `plan_lifecycle` an explicit, ordered list of the tickets it must evaluate — each entry
-naming its `local_id` and its `role` — rather than deriving that list from `doc.stories`. The parent is one
-more entry in that list. Every rule inside the loop is unchanged.
+- Lifecycle events — `after_specify`, `after_clarify`, `after_plan`, `after_tasks`, `after_implement`,
+  `after_analyze` (`extension.yml`'s `hooks:` block, and `commands/speckit.jira.reconcile.md` l. 10–11;
+  the manifest comment states "These seven events are the complete set… adding an eighth requires a spec").
+- Hierarchy roles — `specification`, `story`, `task`, held in one place as `JIRA_ROLE_NAMES`
+  (`lib/config.sh:1015`, whose comment says the set has exactly one source and both `for role_key in` loops
+  consume it).
 
-**Rationale**: this is the smallest change that satisfies FR-014 and FR-011 together — the loop needs the
-role anyway, to pick the right mapping, so passing the role is not extra machinery. It also removes the
-loop's hidden assumption that the ticket list and the story list are the same thing, which is the assumption
-that made the parent unreachable in the first place.
+The two sets share no member, so the discrimination is total and needs no version marker, no nesting hint,
+and no new key. Today's validator already asserts the values are strings
+(`lib/config.sh:928–930`: "phase_status_map must be a mapping of lifecycle-event name to status name"), so
+the change is to accept a second shape beside it rather than to loosen the first.
 
-**Alternatives considered**: a second function `plan_lifecycle_parent` mirroring the story one — rejected,
-it would duplicate every safety rule and guarantee the two copies drift (the exact failure Principle XIV
-exists to prevent).
+**Why the role names and not new ones**: the same project entry already spells them in its `hierarchy:`
+block (`lib/config.sh:933–940`), which is what makes the file readable without documentation (FR-039,
+Principle XVI) — a tech lead reads `phase_status_map.specification` next to `hierarchy.specification` and
+needs no explanation.
 
----
-
-## R6 — Precedence between task completion and a declared task-role mapping
-
-**Question**: once the task role is mappable, two authorities can move one sub-task — the checked box in
-`tasks.md` (feature 012's completion pass) and the lifecycle mapping.
-
-**Decision**: FR-016 — the task's own completion wins on its own sub-task. Concretely, the declared mapping
-is evaluated for a sub-task **only when that sub-task has no completion outcome in the same run**; a checked
-task's sub-task is left to `plan_lifecycle_tasks` exactly as today.
-
-**Rationale**: the checkbox is the more specific statement — it is about *that* task — while the mapping is
-a statement about every ticket of the role. It also preserves Principle I: the checkbox is the filesystem
-speaking about one unit of work, and the filesystem is the source of truth. `plan_lifecycle_tasks` is
-untouched, so feature 012's shipped behaviour carries no regression risk.
-
-**This is the one interaction decided rather than inherited**, and the specification says so in its
-Assumptions. If it is revisited, the change is confined to which sub-tasks the new evaluation is offered.
-
-**Alternatives considered**: letting the mapping win — rejected, it would let a project-wide statement
-override a per-task fact from disk. Letting both act — rejected, two moves on one ticket in one run is
-indefensible under zero-churn.
+**Back-compatibility (FR-020)** falls out for free: the legacy shape is recognised by its own key set and is
+routed to the story role, which is the tier it is evaluated against today. Nothing a project already
+committed changes meaning, and neither a parent nor a sub-task starts moving because of it.
 
 ---
 
-## R7 — Where the move count belongs in the run summary
+## R4 — What does the run-state document need, and what does the change cost?
 
-**Finding**. The top-level summary counts are `{created, updated, skipped, warnings, errors, recognised,
-assigned}` plus an optional nested `tasks` object and an optional `checklists` object
-(`scripts/bash/commands/reconcile.sh:1875`). The nested `tasks` object already carries `transitioned`
-(computed at `:1848` by counting POSTs whose URL ends in `/transitions`). **There is no top-level
-transitioned count.**
+**Decision: schema 1 → 2, adding `hook_event` and `plan.md`. Byte-equality stays the matching rule.**
 
-**Decision**: add `transitioned` to the top-level counts, computed the same way the task tier computes its
-own — by counting the emitted transition actions, not by a separate tally that could disagree with the
-actions list. The nested `tasks.transitioned` keeps its current meaning, so a reader can tell a sub-task
-completion from a lifecycle move.
+### What is wrong today
 
-**Constitution note**: Principle II names `0 transitioned` in its list of write kinds, and the live
-double-run assertion must be extended in the same change that makes the count non-zero — the principle says
-so explicitly. That extension is a task, not an option.
+`run_state_compose` (`lib/run_state.sh:64–85`) hashes `spec.md`, then folds in `tasks.md`, `config.yml`,
+`config.local.yml` and `personal.yml` when they exist, and records `base_url`, `email`, `on_drift`,
+`field_values`. It records **no lifecycle event**, and it does not hash `plan.md`.
 
----
+Both omissions bite:
 
-## R8 — Cost when the machinery is inert
+- `plan.md` is read on **every** run and its `## Summary` is spliced onto the parent's description
+  (`commands/reconcile.sh:861–869`). A `/speckit.plan` that touches only `plan.md` therefore leaves every
+  hashed input identical, and the run short-circuits: the plan summary does not reach Jira until some other
+  file changes. **This is a live defect on `main`, independent of this feature** — it costs a consumer
+  mirrored content, not just a board position.
+- The event is absent, so `after_analyze` (which writes nothing at all) and any repeat of a lifecycle
+  sequence collapse into a state the previous run already recorded.
 
-**Question**: FR-022 and SC-003 require zero additional requests when nothing is mapped. Feature 021 spent
-real effort on request count; this feature must not undo it.
+### Why byte-equality is kept
 
-**Decision**: the availability read is issued **per ticket, lazily**, and only when every condition of
-`contracts/lifecycle-transition.md` §1 holds — the four request-cost conditions this section reasons about
-(a lifecycle event, a declared step for the role, a current step that differs, a `transition` decision) plus
-the two safety conditions the contract adds (no impediment marker, and no completion outcome on a sub-task).
-The contract is the authority; this list is not a second one. A batched up-front read for every recognised
-ticket was rejected — the tracker offers no bulk transitions endpoint, so a batch would be N requests issued
-eagerly instead of N requests issued only where a move is actually due.
+021's contract makes matching a byte comparison of a freshly composed document against the recorded one
+(`contracts/run-state.md` §3 and `data-model.md` §1: "A match requires byte equality… There is no partial or
+per-field match"). That single rule is why the short-circuit is auditable and identical between ports. Both
+new members are plain document fields, so the rule survives untouched: `hook_event` is recorded verbatim in
+exactly the way `on_drift` and `field_values` already are, and `plan.md` is one more `inputs` member on the
+existing "present when the file exists, key omitted otherwise" rule.
 
-**Ordering constraint from Principle III**: the availability read must precede the ticket's write, so that a
-failed read leaves the ticket untouched (FR-020). This places the read inside the planning pass, before any
-action is applied — the same position `discovery_task_transition` occupies for the task tier.
+### The cost, measured against the six events
 
----
+The state phase runs **before** the config phase, deliberately (021 `contracts/run-state.md` §2), so the
+composer cannot know whether any role declares a step for this event — only the raw event name is available
+to it. A differing event therefore forces a full reconcile even where nothing is declared. Enumerated:
 
-## R9 — Refusing a multi-step path, and what to say instead
+| Event | Changes a hashed input? | Effect of adding `hook_event` |
+| --- | --- | --- |
+| `after_specify` | `spec.md` | none — already invalidated |
+| `after_clarify` | `spec.md` | none — already invalidated |
+| `after_plan` | `plan.md` (**newly hashed**) | none — now invalidated by hash |
+| `after_tasks` | `tasks.md` | none — already invalidated |
+| `after_implement` | `tasks.md` (checkboxes) | none — already invalidated |
+| `after_analyze` | nothing | **one full reconcile**, once per input state |
 
-**Decision**: FR-007 — when no offered transition lands on the declared step, perform nothing and name the
-current step, the declared step, and the reachable set. The reachable set comes free from the same response
-(`[.transitions[].to.name]`), so the useful message costs no extra request.
+So the whole cost of the narrowing is `after_analyze`, and a repeat of the same event over unchanged inputs
+still short-circuits, because the recorded `hook_event` matches. This is the entry in `plan.md`'s Complexity
+Tracking, with the two rejected alternatives.
 
-**Rationale for refusing rather than walking**: a path would mean performing transitions the team never
-declared, each carrying workflow post-functions the mirror cannot see, in an order the mirror inferred. That
-is a different promise from "perform the move the team declared". Recorded in the spec's Out of Scope, and
-explicitly not ruled out for a future feature.
-
----
-
-## R10 — Conformance and the two doubles
-
-**Finding**. Both doubles already serve the transitions endpoint, because the task tier uses it: the Bash
-port's scripted `curl` replacement (`tests/conformance/mock-jira/curl-shim.sh`) and the PowerShell port's
-mock server (`tests/conformance/mock-jira/mock-server.ps1`). No new double is needed.
-
-**Decision**: extend the mock's project configuration with per-role workflows so one scenario can express
-"the Epic offers Funnel→Building while the Story offers To Do→In Progress", plus the three unresolvable
-shapes (two candidates, a gated screen, an unreachable target). Scenarios assert the **request sequence**,
-which is where a port divergence would surface first, since this feature adds one read and one write per
-moved ticket.
-
-**Portability watch-items carried from `docs/10-windows-portability.md`**: the new warnings are multi-line
-prose assembled from tracker data, so they must be built through `scripts/bash/lib/output.sh` rather than a
-direct `jq` call (the Windows `jq` build emits CRLF on multi-line output), and no glob pattern in the new
-code may contain `$'\r\n'`.
+**Schema bump**: `schema: 2` invalidates every recorded document, which 021 already treats as the correct
+behaviour for a change to the *set* of recorded inputs (`data-model.md` §1) and which invariant S7 makes a
+guarantee for upgrades. The first run after upgrade is a full reconcile — the fail-open direction.
 
 ---
 
-## Resolved unknowns
+## R5 — How does the lifecycle event reach the bridge?
 
-| Unknown | Resolution |
-|---|---|
-| Where the write half is missing | R1 — one guard in `plan_lifecycle`; a deliberate boundary with a pinning test |
-| How to find a move by step name | R2 — a sibling reader selecting on the destination name, four outcomes reused |
-| Config shape for three workflows | R3 — two shapes at one key, discriminated structurally, shape A means the story role |
-| Which mapping classifies a ticket | R4 — its own role's; both helpers already take the map as an argument |
-| Cost of evaluating the parent | R5 — an explicit ticket list carrying `local_id` and role; rules unchanged |
-| Completion versus mapping on a sub-task | R6 — completion wins; the mapping governs sub-tasks with no completion outcome |
-| Where the move count lives | R7 — a new top-level `transitioned`; the nested task count keeps its meaning |
-| Request cost when inert | R8 — lazy per-ticket read, gated on every condition of contract §1; zero when unmapped |
-| What to do about a multi-hop target | R9 — refuse and name the reachable set, which the same response already carries |
-| Test doubles | R10 — both already serve the endpoint; extend fixtures with per-role workflows |
+**Decision: the existing `SPEC_KIT_JIRA_HOOK_EVENT` environment seam, made normative in the agent
+procedure. No new flag.**
+
+`_reconcile_hook_event` (`commands/reconcile.sh:63–65`) reads that variable and nothing else; its own
+comment says "The agent sets it from the hook it is performing; it is the only thing that tells the bridge
+WHICH event fired." A tree-wide search finds it set by **no** shipped artefact: not `extension.yml` (whose
+`hooks:` entries carry `command`, `optional` and `description`, with no environment mechanism), and not
+`commands/speckit.jira.reconcile.md`, whose normative invocation at l. 45–56 is
+
+```
+.specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile <spec-file> --json
+```
+
+Every other occurrence is a test (`tests/bash/commands/test_reconcile_lifecycle.bats`,
+`tests/conformance/scenarios/us021b-disabled-event.json`, and their Pester twins). The consequence is
+stated in the spec: the declared step is always empty on the real path and drift evaluation is never
+reached.
+
+**Why not a flag.** Spec FR-025 forbids introducing one ("No other key, flag, or option is introduced").
+021's reason for choosing an environment variable for the timing switch — the hooks are invoked by the host,
+so a flag could never reach them — does not apply here, because the agent composes the command line; but a
+second door into the same fact would be a shape this project's own KISS principle rejects, and the seam both
+ports already read is the one to fill.
+
+**What changes**: `commands/speckit.jira.reconcile.md` gains a host-command → event table and the normative
+instruction to export the variable for the event being performed, in the same register as its existing
+"the target is ALWAYS the active feature's own `spec.md`" rule. The disabled-event dispatch guard
+(`_reconcile_is_held`, l. 78–84) already reads the event first and exits silently, and stays first
+(FR-012).
+
+**A run with no event** keeps today's behaviour exactly (FR-011): empty event → empty target → the
+lifecycle context's `target` is `""` (`commands/reconcile.sh:1490`) → `plan_lifecycle`'s
+`[[ -n "${target}" ]]` guard at l. 1121 is false → no drift rule evaluated, no read, no move.
+
+---
+
+## R6 — What must change for the specification tier?
+
+**Decision: widen the parent recognition read; `plan_lifecycle` gains the parent alongside its stories.**
+
+Two concrete gaps:
+
+1. **The parent's status is not read.** `_recognition_read_parent` requests
+   `summary,description,labels` (021 `contracts/recognition-prefetch.md` §5, "Field projection"), against
+   the story reader's `summary,description,priority,status,issuelinks,parent,labels`. Without `status`,
+   `flagged` and `issuelinks`, none of the safety rules FR-021 requires can be evaluated for a parent.
+   The prefetch's requested union already contains all of them
+   (`sink/jira/prefetch.sh:26` — `…,status,issuelinks,parent,labels,subtasks,Flagged`), so only the
+   parent reader's projection list widens; the bulk request itself is unchanged. This matters because the
+   union and the readers must agree: a field the union omits breaks its reader **only on a prefetch hit**,
+   which is the healthy path and the one least likely to be exercised by a narrow test.
+2. **`plan_lifecycle` walks `.stories` only.** Its decode loop is driven by
+   `.stories | to_entries[]` (`plan_apply.sh:1065`) and the parent's content action is produced separately
+   by `_plan_writes_parent`. The parent gains an entry in the lifecycle context keyed the way the parent's
+   own local id already is, and the same per-ticket body — zero-churn drop, flagged check, `drift_evaluate`,
+   transition — runs over it.
+
+**Identical wording is a requirement, not a nicety** (FR-021): the warnings come from `drift_evaluate`
+(`engine/drift.sh:61–97`), which composes them from the statuses alone and knows nothing of tiers, so a
+parent and a story in the same situation produce the same sentence by construction. That is the argument for
+reusing the function rather than adding a parent-aware variant.
+
+---
+
+## R7 — How does the task tier behave under 022's two modes?
+
+**Decision: a task-role mapping acts only where `config_task_mirror_for` resolves to `subtask`. Elsewhere it
+is inert and produces one note per run.**
+
+`config_task_mirror_for` (`lib/config.sh:1068–1070`) returns `subtask`, `checklist`, or the empty string,
+and `lib/config.sh:901` validates the accepted values. `docs/05-reconcile-flow.md` §"The two task-mirror
+modes (022)" states the split: in `checklist` mode no durable identifiers are assigned into `tasks.md` and
+no sub-task writes are planned — the task list rides the story's managed region. So in that mode there is no
+task-tier ticket for a mapping to move, and the correct outcome is a statement, not a warning per entry
+(Principle XVI, and the spec's Assumptions).
+
+Two further rules fall out of 022:
+
+- **An abandoned sub-task is never moved** (FR-023). 022 detects a mode switch from `tasks.md` alone: a bound
+  sub-task marker still present while the project is in `checklist` mode is precisely the record of a
+  sub-task the mirror has abandoned (022 FR-033/FR-034). Those keys must not enter the move set.
+- **A checked task still outranks the mapping** (FR-024). The completion pass
+  (`plan_lifecycle_tasks`, `plan_apply.sh:1183`) governs a sub-task whose task is checked; the declared
+  mapping governs the ones still in flight. Both emit through the same `_plan_transition_action`
+  (`plan_apply.sh:979`), so a sub-task can never receive two transition actions in one run — the sets are
+  disjoint by construction, which is the property the test asserts.
+
+---
+
+## R8 — How are the request and spawn budgets asserted?
+
+**Decision: 024's `PATH`-interposed counting stand-in, with counting runs separate from timing runs.**
+
+024's `contracts/spawn-budget.md` §4 fixes the method: a shim earlier on `PATH` records one line per
+invocation then `exec`s the real tool, working identically for `jq`, `sed`, `awk` and `curl` with no new
+dependency (C4.1); and counting and timing must be **separate runs**, because the shim itself inflated the
+reference run from 91 515 ms to 147 774 ms — a 61% distortion (C4.2). C4.3 makes the count the assertion
+that belongs in the suite and leaves wall-clock as dogfood evidence, which is right here too: CI runners are
+an order of magnitude slower than a developer laptop.
+
+Applied to this feature:
+
+- **Spawn** (FR-028, SC-013): the resolution loop must not spawn a process per ticket, per candidate move,
+  or per role. The decode-once-then-loop shape already used by `plan_lifecycle`
+  (`plan_apply.sh:1032–1076` — one `jq` call decoding eleven fields for the whole array, replacing ten per
+  story) is the pattern to follow, including its `--slurpfile` temp-file spelling, which exists because a
+  single `jq` argument is capped at 128 KiB on Linux independently of `ARG_MAX` and a hundred-story
+  `actions` array crossed it (l. 1036–1047).
+- **Requests** (FR-027, SC-012): asserted against the harness's own recorded call log, the same source 024
+  SC-014 uses, rather than against the timing instrument's self-report.
+- **Configuration parses** (FR-029, SC-015): the per-role mapping is resolved from the already-parsed
+  configuration object that `_reconcile_phase_status_map` (`commands/reconcile.sh:1474`) is handed, so
+  three declared roles cost no additional open or parse.
+
+---
+
+## R9 — What becomes of the test that pins today's behaviour?
+
+**Decision: rewritten in place, in both ports, with the zero-move case preserved as its own scenario.**
+
+The pin is a real, currently-passing test in both ports:
+
+```
+tests/bash/commands/test_reconcile_lifecycle.bats:123
+  @test "zero transition requests in scenario — this release evaluates the rules but never moves a ticket's status"
+tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1:132
+  It "zero transition requests in scenario — this release evaluates the rules but never moves a ticket's status"
+```
+
+Principle XIII's Red-Green-Refactor means the first thing written is the test that fails today: a declared
+mapping, a recognised ticket one agreed step behind, a run under a genuinely dispatched event, and an
+assertion that a transition request was issued. The pin is then rewritten to assert what remains true — a
+project declaring **no** mapping still issues zero transition requests — rather than deleted, so the
+guarantee it carries for the majority of consumers keeps a test.
+
+`tests/conformance/scenarios/us6-dry-run.json` is worth reading before writing any of this: it already
+drives a transition action end to end by supplying `transition_id` through the `SPEC_KIT_JIRA_LIFECYCLE`
+override, and asserts the dry-run report equals the real action set. It is the shape every new scenario
+follows, minus the override.
+
+---
+
+## Consolidated decisions
+
+| # | Decision | Rationale | Alternatives rejected |
+| --- | --- | --- | --- |
+| D1 | Resolution lives in `plan_lifecycle`'s loop, in the `plan` phase | Same computation `--dry-run` performs; after the safety decision, so no wasted read; inside the existing timing marks | Resolving at recognition — zero extra round-trips but asks about tickets FR-008 exempts |
+| D2 | `sink/jira/transitions.sh` is a new module pair | Confines R1's two branches to one file with one contract | Appending to `discovery.sh` — smaller diff, no boundary for the branch, two resolvers sharing one file |
+| D3 | Selection by destination **name**; `discovery_task_transition` keeps selection by **category** | The two tiers answer different questions; FR-002 forbids a built-in status table | One shared resolver parameterised by predicate — more indirection than two callers justify |
+| D4 | Per-role shape discriminated by two closed disjoint key sets | Total, needs no version marker or new key; reuses names already in `hierarchy:` | A `version:` marker, or a nested `roles:` key — both add surface FR-025 forbids |
+| D5 | Run-state schema 2 with `hook_event` + `plan.md`, byte-equality kept | Preserves the one property that makes the short-circuit auditable and port-identical | Per-field matching, or moving the state phase after config — see Complexity Tracking |
+| D6 | The event travels by the existing environment seam | Both ports already read it; FR-025 forbids a new flag | A `--event` flag — a second door into one fact |
+| D7 | `counts.transitioned` is present only when the run carries an event and a role declares a step | FR-011 requires byte-identical output for a run with no event; 012 FR-011 set this precedent for `counts.tasks` | An always-present count — changes every existing run's JSON |
+| D8 | Budgets asserted by counting stand-ins, in runs separate from timing runs | 024 C4.2 measured a 61% distortion when the two are combined | Wall-clock assertions in CI — runners are an order of magnitude slower than a laptop |

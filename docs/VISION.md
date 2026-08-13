@@ -82,26 +82,28 @@ flowchart LR
     subgraph Jira["Jira Cloud — the derived mirror"]
         Parent["Specification ticket<br/>(Epic / Feature)"]
         Story["Story per user story"]
-        Sub["Sub-task per task"]
-        Comment["Artefact comments"]
+        Sub["Sub-task per task<br/>(subtask mode)"]
+        Check["Task checklist in the story<br/>(checklist mode)"]
         Label["Feature-id labels"]
-        Status["Board position"]
+        Comment["Artefact comments"]
+        Status["Board position<br/>per hierarchy role"]
         Est["Estimation fields<br/>spec-kit build · senior developer"]
     end
 
     Spec ==> Parent
     Spec ==> Story
     Plan ==> Parent
-    Parent -.-> Story
-    Story -.-> Sub
-    Tasks -.-> Sub
+    Parent ==> Story
+    Story ==> Sub
+    Tasks ==> Sub
+    Tasks ==> Check
+    Spec ==> Label
     Extra -.-> Comment
-    Spec -.-> Label
     Spec -.-> Est
-    Disk ==> Status
+    Disk -.-> Status
 
     classDef planned stroke-dasharray: 5 5
-    class Sub,Comment,Label,Est planned
+    class Comment,Est,Status planned
 ```
 
 Solid arrows are shipped. Dashed arrows and dashed boxes are the road ahead.
@@ -120,14 +122,31 @@ Shipped, and described in detail in the [system documentation](README.md):
   logical name, per project, including the three hierarchy roles
   (`specification` / `story` / `task`). See
   [the config ceremony](04-config-ceremony.md).
-- **Advances the ticket on the board as the spec-kit lifecycle progresses.**
-  `phase_status_map`, declared per project in `config.yml`, maps a lifecycle
-  event (`after_specify`, `after_plan`, …) to one of your project's status
-  names; `halted_statuses` names the states where the bridge must stop
-  writing. Omit both and the machinery stays inert.
+- **Mirrors the task list, as sub-tasks or as a checklist.** With `task_mirror`
+  set to `subtask`, every recognisable line of `tasks.md` becomes a Jira
+  sub-task under the story it serves, carrying its own durable identifier, and
+  checking a task off transitions that sub-task to whichever status the
+  project's workflow classifies as done. With `checklist`, the same task list
+  rides the story's own description as a checklist — 6 issues instead of 106
+  for a feature of 5 stories and 100 tasks, and no sub-task issue type
+  required. See [the reconcile flow](05-reconcile-flow.md).
 - **Refuses to overwrite Jira-side progress.** The drift engine compares the
   ticket's real status against the phase inferred from disk and withholds,
-  halts, or transitions accordingly. See [the safety model](08-safety-model.md).
+  halts, or classifies accordingly. `phase_status_map`, declared per project in
+  `config.yml`, maps a lifecycle event (`after_specify`, `after_plan`, …) to one
+  of your project's status names; `halted_statuses` names the states where the
+  bridge must stop writing. Omit both and the machinery stays inert. **What the
+  drift engine decides, it does not yet act on** at the specification and story
+  tiers — see Part 2, item 3. See [the safety model](08-safety-model.md).
+- **Skips a run that has nothing to do, and says where the time went.** A
+  reconcile whose `spec.md`, `tasks.md` and configuration are unchanged since
+  the last fully successful run exits in under a second having issued zero
+  requests; `SPEC_KIT_JIRA_TIMING=1` reports, on stderr only, how long each of
+  the eight pipeline phases took and how many requests it issued. Recognition
+  reads recorded tickets in bulk — one request per hundred keys rather than one
+  per ticket — the token is resolved once per process, and the run's local work
+  is batched rather than spawned per item. See
+  [the reconcile flow](05-reconcile-flow.md).
 - **Preserves human-written description content forever.** On a ticket of human
   origin, generated content is confined to a delimited managed panel; every
   pre-existing line above it is byte-preserved, permanently, including after a
@@ -157,76 +176,91 @@ Shipped, and described in detail in the [system documentation](README.md):
 
 ### 1. Tasks mirrored as sub-tasks
 
-*Envisioned.* Each entry in `tasks.md` becomes a Jira sub-task under the story
-it serves, so a developer sees on the board the same breakdown they see on
-disk, and so time tracking and sprint boards operate at the granularity teams
-actually work at.
+*Shipped* — see Part 1 (`specs/012-jira-task-subtasks/`), with a second
+mirroring mode added by `specs/022-story-task-checklist/`. Each entry in
+`tasks.md` becomes either a Jira sub-task under the story it serves or a
+checklist entry inside that story's own description, chosen per project with
+one line of `config.yml`. The open questions this entry once recorded were all
+answered by those two specs: a task naming no user story mirrors nothing and is
+reported once by its reference; the sub-task tier keeps `files`, `depends_on`,
+`parallel` and the task's durable identifier as metadata bullets, and the
+checklist tier deliberately keeps only the entry's text and completion state;
+and the answer to a very large `tasks.md` is the checklist mode, which costs one
+issue for the whole list.
 
-What already exists to build on: the `task` hierarchy role is part of the
-config schema and is resolved (never derived — it must be declared
-deliberately), and sub-task issue types are already discovered per project.
-What does not exist yet: the engine has **no `tasks.md` reader at all** — it
-parses `spec.md` and summarises `plan.md`, nothing more. A neutral task
-parser, an extension of the interchange document, and sub-task planning in the
-sink are the substance of this work.
-
-Open questions worth a clarification round: whether tasks that name no user
-story get a sub-task at all; how phase markers and parallel-execution
-annotations survive the crossing; and whether a very large `tasks.md` should
-be mirrored in full or summarised, given Jira's practical limits.
+Nothing here is *envisioned* any more, and this entry stays only until the
+system documentation is the single place a reader looks for it.
 
 ### 2. Completion sync between a task and its story
 
-*Envisioned.* When a task is finished, that fact appears in both places: the
-sub-task moves to its done status, and the corresponding checklist entry in
-the user story is ticked.
+*Shipped in the disk-driven direction* — a checked box in `tasks.md` moves its
+sub-task to whichever status the project's workflow classifies as done
+(`specs/012-jira-task-subtasks/`), and in checklist mode the entry inside the
+story's description is ticked (`specs/022-story-task-checklist/`). A task
+reverting from checked to unchecked never pulls its sub-task backward on its
+own: the divergence is reported by key and moves only under
+`--on-drift=proceed`.
 
-There are two defensible readings of "when a task is finished", and the choice
-is a genuine design decision rather than a detail:
-
-- **Disk-driven** — a checked box in `tasks.md` closes the sub-task. This is
-  the reading that Principle I (the filesystem is the source of truth)
-  favours, and it needs no new read path.
-- **Jira-driven** — closing the sub-task in Jira ticks the box in `tasks.md`.
-  This is a *write back to the repository*, which today happens only through
-  the two controlled exceptions the constitution names. It would need a third,
-  and therefore a constitutional amendment or a very carefully scoped
-  exception.
-
-Whichever direction wins, drift protection applies unchanged: the bridge must
-never silently reverse a human's decision on either side.
+What remains, and is *envisioned*, is the other direction: **Jira-driven** —
+closing the sub-task in Jira ticks the box in `tasks.md`. That is a *write back
+to the repository*, which today happens only through the two controlled
+exceptions the constitution names. It would need a third, and therefore a
+constitutional amendment or a very carefully scoped exception. Drift protection
+would apply unchanged: the bridge must never silently reverse a human's
+decision on either side.
 
 ### 3. Board advancement per lifecycle step
 
-*Shipped* — see Part 1. `phase_status_map` and `halted_statuses` already give
-each project its own mapping from spec-kit lifecycle event to status name,
-and drift classification protects the result.
+*Specified, not shipped* — `specs/023-advance-board-position/`.
 
-What remains, and is *envisioned*: the config ceremony does not yet
-**discover** this mapping. Both keys are hand-edited today, which means a team
-only benefits from them if someone reads the reconcile command's
-documentation. Proposing a mapping at config time — "your project's statuses
-are To Do, In Progress, In Review, Done; shall I map the lifecycle onto
-them?" — would turn a documented feature into a default one.
+`phase_status_map` and `halted_statuses` already give each project its own
+mapping from spec-kit lifecycle event to status name, and drift classification
+already decides, per recognised ticket, whether the mirror should advance,
+withhold, or halt. **No ticket at the specification or story tier is ever moved
+on the board**, in any circumstance: the decision is reached and the machinery
+stops there. The sub-task tier is the exception — checking a task off does
+transition its sub-task — and it is the shape the specified work generalises.
+
+Two further gaps the spec records, both invisible on a green run:
+
+- **The mapping has no notion of tier.** It is declared once per project and
+  evaluated only against story-tier tickets. An Epic and a Story rarely share a
+  workflow, so one mapping cannot describe both; the spec makes the mapping
+  declarable per hierarchy role.
+- **The lifecycle event does not reach the bridge.** The mapping is keyed by
+  event, and nothing in the extension manifest or the agent-facing reconcile
+  procedure tells the bridge which event fired — so on the real path the
+  declared status is always empty and drift evaluation is never reached at all.
+  Every scenario that exercises it does so through a test-only override.
+
+Still *envisioned* beyond that spec: the config ceremony does not **discover**
+this mapping. Both keys are hand-edited today, which means a team only benefits
+from them if someone reads the reconcile command's documentation. Proposing a
+mapping at config time — "your project's statuses are To Do, In Progress, In
+Review, Done; shall I map the lifecycle onto them?" — would turn a documented
+feature into a default one, and it becomes more valuable, not less, once there
+is one mapping per role.
 
 ### 4. Labels carrying the spec-kit identity
 
-*Envisioned.* Every mirrored ticket carries a label naming its spec-kit
-feature, so a Jira user can filter a board or write a JQL query — Jira's own
-query language — down to one specification without knowing anything about
-this extension.
+*Shipped* — `specs/017-fix-duplicate-tickets/`. Every ticket the mirror manages
+carries `speckit-<folder>`, so a Jira user filters a board or writes a JQL
+query — Jira's own query language — down to one specification without knowing
+anything about this extension. The label is additive: it is merged with any
+label the project's configuration already sends and with any label an operator
+applied by hand, and the mirror never removes one it did not add. A ticket whose
+write is suppressed is not labelled either — the label follows the write and is
+never an exception to a hold.
 
-What already exists: `ticket_create` accepts a labels argument and routing can
-already match on labels. What does not: nothing in the reconcile path
-populates it, so the parameter is presently unused.
+One of the questions this entry recorded was answered by that spec: the shape is
+the folder-derived slug, namespaced by the `speckit-` prefix. What a
+specification-folder rename should do with the label the previous name produced
+was not decided there and is still open — it touches "the bridge never deletes a
+Jira artefact".
 
-Open questions: the exact label shape (a bare feature slug, or a namespaced
-form that cannot collide with a team's existing labels); whether labels are
-also removed when a spec is renamed, which touches "the bridge never deletes a
-Jira artefact"; and whether label-based *adoption* — recognising a ticket a
-human tagged by hand — arrives with this or stays separate. Adoption by label
-is explicitly the second controlled exception the constitution anticipates,
-and it deserves its own spec.
+Still *envisioned*: label-based **adoption** — recognising a ticket a human
+tagged by hand. That is explicitly the second controlled exception the
+constitution anticipates, and it deserves its own spec.
 
 ### 5. Automatic comments for the complementary artefacts
 

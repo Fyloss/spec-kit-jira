@@ -1,230 +1,192 @@
-# Phase 1 — Data Model: Each Tier Advances Along Its Own Declared Workflow
+# Data model — Each Tier Advances Along Its Own Declared Workflow
 
-**Feature**: `specs/023-advance-board-position` | **Date**: 2026-08-10
-
-All structures below are canonical JSON as produced by `json_canonical` (Bash) and its PowerShell twin, and
-must be byte-identical between the ports. Field order is the canonical order; keys absent rather than null
-where the contract says "omitted".
+Five entities. Two are existing documents that gain members; three are new and live only inside one run.
+Every JSON shape below is canonical (`json_canonical` / the PowerShell twin): sorted keys, compact, raw
+UTF-8, no trailing newline, byte-identical between ports.
 
 ---
 
-## 1. Role-keyed lifecycle mapping (configuration)
+## 1. The per-role lifecycle mapping
 
-Lives in the committable team config, per project, at the existing `phase_status_map` key. Two accepted
-shapes, discriminated structurally (research R3).
+**Where**: `projects[].phase_status_map` in `.specify/jira/config.yml` — the committable team layer, beside
+the mapping it extends. Normative shape and validation: [`contracts/role-lifecycle-config.md`](./contracts/role-lifecycle-config.md).
 
-### Shape A — role-blind (what ships today)
+**Two accepted shapes**, discriminated by the key set (research R3):
 
 ```yaml
+# Legacy — every key is a lifecycle event. Means the STORY role. Unchanged meaning (FR-020).
 phase_status_map:
   after_specify: "To Do"
   after_plan: "In Progress"
-```
 
-**Meaning**: the story role's mapping, and only the story role's. Reading it any other way would move
-parents and sub-tasks a team never asked to move (FR-013).
-
-### Shape B — one workflow per role
-
-```yaml
+# Per role — every key is a hierarchy role.
 phase_status_map:
   specification:
-    after_specify: "Funnel"
     after_plan: "Building"
   story:
     after_specify: "To Do"
     after_plan: "In Progress"
   task:
-    after_implement: "In Progress"
+    after_implement: "Done"
 ```
 
-### Normalised form (internal)
-
-Both shapes normalise to one structure before anything else reads them:
+**Resolved form** — what `_reconcile_phase_status_map` hands downstream after normalisation. Both input
+shapes produce this one shape, so every consumer has a single case to handle:
 
 ```json
-{ "specification": { "<event>": "<step name>" },
-  "story":         { "<event>": "<step name>" },
-  "task":          { "<event>": "<step name>" } }
+{"specification":{"after_plan":"Building"},
+ "story":{"after_specify":"To Do","after_plan":"In Progress"},
+ "task":{}}
 ```
 
-A role absent from the declaration is absent here — never an empty object — so "declared nothing" stays
-distinguishable from "declared an empty workflow" (FR-012).
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `<role>` | object | One of `specification`, `story`, `task`. Always all three keys, empty object where the project declares nothing for that role — so a consumer never distinguishes absent from empty. |
+| `<role>.<event>` | string | The status name this role's tickets should stand at once that lifecycle event has happened. Written in the team's vocabulary; never compared against any built-in list. |
 
-### Validation rules
+**Derived, per role, once per run** (never per ticket — FR-029):
 
-| Rule | Message names |
-|---|---|
-| Shape A: every value is a string | the project index and the offending event key |
-| Shape B: every key is one of `specification`, `story`, `task` | the project index and the unknown role |
-| Shape B: every role's value is an object of string values | the project index, the role, the offending key |
-| The two shapes are never mixed in one declaration | the project index and both an event key and a role key |
+| Derived value | From | Used by |
+| --- | --- | --- |
+| `target` | `<role>[<hook_event>]`, or `""` | The step this run aims for, for tickets of that role |
+| `order` | the distinct values of `<role>`, in lifecycle-event order | `drift_evaluate`'s advance/regress comparison |
+| `mapped_targets` | the set of values of `<role>` | classifying a ticket's own status as `mapped` |
 
-Events are the six the host emits: `after_specify`, `after_clarify`, `after_plan`, `after_tasks`,
-`after_implement`, `after_analyze`. An unrecognised event key is **not** an error — a declaration for an
-event this host does not emit is inert, matching how an unmapped event behaves today.
+`halted_statuses` stays project-wide and is **not** part of this entity (spec Assumptions): a status name
+only matches tickets actually standing at it, so one list covering three workflows behaves correctly.
 
 ---
 
-## 2. Lifecycle ticket entry (planning input)
+## 2. The run-state document, version 2
 
-The per-ticket context `plan_lifecycle` consumes. Existing fields are unchanged; the additions are marked.
+**Where**: `.specify/jira/state/<feature-dir>.json`, gitignored by its own sibling `.gitignore` containing
+`*`. Owner: `lib/run_state.sh` / `RunState.psm1`. Normative decision table:
+[`contracts/run-state-v2.md`](./contracts/run-state-v2.md).
+
+Delta against 021's schema 1 — everything not listed is unchanged:
+
+| Field | Type | Change | Meaning |
+| --- | --- | --- | --- |
+| `schema` | integer | `1` → **`2`** | The set of recorded inputs changed, so every existing document is invalidated. That is 021's own rule for this kind of change, and invariant S7's guarantee for an upgrade. |
+| `hook_event` | string | **new** | The lifecycle event this run was dispatched for; `""` for a direct invocation. Recorded verbatim, exactly as `on_drift` and `field_values` already are — it is a run input, not a file. |
+| `inputs["plan.md"]` | string | **new** | `git hash-object` of the sibling `plan.md`, present only when the file exists. It is already read on every run and spliced onto the parent (`commands/reconcile.sh:861`), so a change to it must invalidate. |
+
+Full field list after the change: `schema`, `extension_version`, `base_url`, `email`, `on_drift`,
+`hook_event`, `field_values`, `inputs`. `inputs` members: `spec.md` (always), `plan.md`, `tasks.md`,
+`.specify/jira/config.yml`, `.specify/jira/config.local.yml`, `.specify/jira/personal.yml` (each present
+only when the file exists, so appearing and disappearing both invalidate).
+
+**Matching stays byte-equality** of a freshly composed document against the recorded one. There is no
+per-field match and no repair — the property that makes the short-circuit auditable and identical between
+ports.
+
+**Never in this document**: a credential, in any field, in any form. `hook_event` is a member of a closed
+set of six lifecycle constants.
+
+---
+
+## 3. The availability record
+
+Produced by `sink/jira/transitions.sh` for one ticket. It is the tracker's answer, normalised — never a
+judgement about it.
 
 ```json
-{
-  "local_id":      "US1",
-  "role":          "story",
-  "key":           "COMP-2",
-  "current":       { "...": "the ticket's current fields" },
-  "status":        "To Do",
-  "category":      "mapped",
-  "target":        "In Progress",
-  "flagged":       false,
-  "origin":        "bridge",
-  "blockers":      [],
-  "move":          { "...": "see §3 — omitted when no move is due" }
-}
+{"key":"PROJ-142",
+ "moves":[{"id":"21","to":"In Progress","gated_field":null},
+          {"id":"31","to":"In Review","gated_field":{"logical_name":"Resolution","field_id":"resolution"}}]}
 ```
 
-| Field | Status | Notes |
-|---|---|---|
-| `local_id` | existing | the parent's own id now appears here too (research R5) |
-| `role` | **new** | `specification` \| `story` \| `task`; selects the mapping, the order, and the warning wording |
-| `target` | existing, re-derived | now from the **role's** mapping for the current event, not the project's |
-| `category` | existing, re-derived | classified against the **role's** own mapping and the project-wide halted list |
-| `move` | **new** | present only when a move is due and the availability read succeeded |
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `key` | string | The ticket the answer belongs to. Matched back to the request case-insensitively, never by position. |
+| `moves[].id` | string | The identifier the tracker will accept to perform this move. Opaque. |
+| `moves[].to` | string | The name of the step this move lands on, spelled as the tracker spells it. The **only** thing compared against a declared step. |
+| `moves[].gated_field` | object or null | The first field this move's own screen marks required. `null` when completing the move demands nothing of the mirror. |
 
-`plan_lifecycle` is given an explicit ordered list of these entries rather than deriving it from the
-document's stories — that derivation is what made the parent unreachable (research R5).
+`moves` is ordered as the tracker returned it and that order is never used for a decision (FR-002) — it is
+preserved only so a warning naming several candidates reads the same on both ports.
+
+**Reachable set** is not stored: it is `[.moves[].to]`, computed where a warning needs it.
 
 ---
 
-## 3. Move resolution (`move`)
+## 4. The resolution outcome
 
-Produced by the availability read, one per ticket, only when a move is due (research R8).
+Pure function of an availability record and one declared step name. Four shapes, one per branch of the rule
+the task tier already settled — see [`contracts/transition-resolution.md`](./contracts/transition-resolution.md) §3.
 
-```json
-{
-  "transition_id":  "31",
-  "candidates":     [ { "id": "31", "name": "Start progress", "to": "In Progress" } ],
-  "withheld_field": null,
-  "reachable":      [ "In Progress", "Done" ]
-}
-```
+| Outcome | Shape | What the run does |
+| --- | --- | --- |
+| `move` | `{"outcome":"move","transition_id":"21"}` | Emits the transition action; counts one moved |
+| `ambiguous` | `{"outcome":"ambiguous","candidates":[{"id","name"},…]}` | No move; one warning naming every candidate |
+| `gated` | `{"outcome":"gated","gated_field":{"logical_name","field_id"}}` | No move; one warning naming the demanded value |
+| `unreachable` | `{"outcome":"unreachable","reachable":["In Review","Done"]}` | No move; one warning naming current step, declared step, and what is reachable |
 
-| Field | Meaning |
-|---|---|
-| `transition_id` | the move to perform; `null` in every unresolvable case |
-| `candidates` | every offered move landing on the declared step; empty when none does |
-| `withheld_field` | `{ logical_name, field_id }` when the single candidate's screen demands a value; else `null` |
-| `reachable` | every step the offered moves land on, in the order the tracker offered them |
+There is deliberately **no** `already_there` outcome: a ticket standing at the declared step never reaches
+resolution, because no availability read is issued for it (FR-008, FR-026).
 
-### The four outcomes, and the fifth
-
-| `candidates` | `withheld_field` | `transition_id` | Outcome | Requirement |
-|---|---|---|---|---|
-| exactly 1 | `null` | set | the move is performed | FR-003 |
-| exactly 1 | set | `null` | withheld; the demanded value is named | FR-005 |
-| 2 or more | `null` | `null` | withheld; every candidate is named | FR-004 |
-| empty | `null` | `null` | withheld; current step, declared step and `reachable` are named | FR-007 |
-| — | — | — | the read failed: no `move` entry, the run fails closed for this specification | FR-020 |
-
-The first four are the task tier's shipped contract, adopted verbatim (research R2). `reachable` is the one
-addition, and it exists so the fourth outcome can say something useful.
+`candidates` carries the move's own `name` — used **only** in the warning text, never in the decision.
 
 ---
 
-## 4. Transition action (planning output)
+## 5. The lifecycle context entry, and the run summary
 
-Unchanged in shape from what `_plan_transition_action` already emits, so both tiers keep producing one
-action kind:
+### Lifecycle context (existing, gains two members)
 
-```json
-{ "method": "POST",
-  "url":    "<base>/rest/api/3/issue/COMP-2/transitions",
-  "body":   { "transition": { "id": "31" } } }
-```
+Consumed by `plan_lifecycle` (`sink/jira/plan_apply.sh:1003–1005`). One entry per recognised ticket, keyed
+by its durable local identifier:
 
-Nothing else is sent. In particular no field values accompany the move (FR-006), which is why a gated
-candidate is refused rather than satisfied.
+| Field | Change | Meaning |
+| --- | --- | --- |
+| `role` | **new** | `specification`, `story`, or `task`. Decides which mapping, order and target apply to this ticket, and appears in every warning. |
+| `target` | existing, now per role | The declared step for this run's event **on this ticket's role**. Empty leaves every rule inert, exactly as today. |
+| `transition_id` | existing, now filled on the real path | Set from a `move` outcome. Empty for the other three, which now also carry a warning rather than a silent drop. |
+| `key`, `current`, `status`, `category`, `flagged`, `blockers` | unchanged | As today. `category` is now classified against **this role's** mapped targets. |
 
----
+The context gains one entry for the **parent** (research R6), which requires
+`_recognition_read_parent`'s field projection to widen from `summary,description,labels` to include
+`status`, `issuelinks` and `Flagged`. The prefetch's requested union already carries all three
+(`sink/jira/prefetch.sh:26`); only the projection changes.
 
-## 5. Run summary counts
+### Run summary counts
 
-```json
-{ "created": 0, "updated": 2, "transitioned": 1, "skipped": 0,
-  "warnings": 0, "errors": 0, "recognised": 3, "assigned": 0,
-  "tasks": { "created": 0, "updated": 0, "transitioned": 0,
-             "unchanged": 4, "skipped": 0, "withheld": 0 } }
-```
+| Field | Presence | Meaning |
+| --- | --- | --- |
+| `counts.transitioned` | **new** — present only when the run carries a lifecycle event **and** at least one role declares a step for it | Tickets moved at the specification and story tiers. Never folded into `created` or `updated`: a move is a position change, not a content change. |
+| `counts.tasks.transitioned` | unchanged | The task tier's own moved count, keeping its current name, place and meaning (012). |
 
-`transitioned` is **new at the top level** and counts lifecycle moves across all three roles, derived by
-counting emitted transition actions so it can never disagree with the action list (research R7).
-`tasks.transitioned` keeps its existing meaning — sub-task completions driven by checked boxes — so a reader
-can tell the two apart.
-
-The human-readable report carries the same count, on its own line, so the two surfaces can never disagree
-(FR-024):
-
-```text
-Created: 0, Updated: 2, Skipped: 0
-Transitioned: 1
-Recognised: 3, Assigned: 0
-Warnings: 0, Errors: 0
-```
-
-The line is emitted **only when `counts.transitioned` is present**, exactly as `Recognised: / Assigned:`
-already is (`scripts/bash/lib/output.sh:229-234`), so no other command's prose summary changes by a byte.
-Appending the count to the existing `Created: … Skipped:` line was rejected: that string is pinned by every
-conformance scenario in the corpus, and editing it would make an unrelated diff of the whole suite. Note
-that `summary_render_prose` renders no transitioned count at all today — not even `tasks.transitioned` —
-so this is a genuine addition to the renderer in both ports, not a re-derivation of an existing line.
+The conditional presence is required, not stylistic: spec FR-011 demands byte-identical output for a run
+with no event, and 012 FR-011 set the same precedent for `counts.tasks` — absence, never a zeroed object,
+is the off switch.
 
 ---
 
-## 6. Warnings introduced
+## Entity relationships
 
-Each is one line, names the ticket and its role, and ends in something a human can act on (FR-025,
-Principle XVI). Wording is pinned by the conformance corpus and identical in both ports.
+```mermaid
+flowchart TD
+    Cfg["config.yml<br/>projects[].phase_status_map"] --> Res["Resolved per-role mapping<br/>role → event → status"]
+    Ev["hook_event<br/>SPEC_KIT_JIRA_HOOK_EVENT"] --> Res
+    Res -->|"target · order · mapped_targets, per role"| Ctx
 
-| Trigger | Shape |
-|---|---|
-| Two or more candidates (FR-004) | *`<key>` (`<role>`) offers more than one move onto "`<step>`": `<names>`; none was performed — declare which one applies or move the ticket by hand* |
-| Gated candidate (FR-005) | *`<key>` (`<role>`) cannot move to "`<step>`" without a value for "`<field>`"; the move was withheld and no value was invented* |
-| Unreachable step (FR-007) | *`<key>` (`<role>`) stands at "`<current>`" and cannot reach "`<step>`" in one move; reachable from here: `<reachable>`* |
-| Rejected move (FR-021) | *`<key>` (`<role>`) was moved toward "`<step>`" but the tracker refused; the ticket was left where it stands and the move was not retried* |
-| Task mapping while the tier is off (FR-015) | *a workflow is declared for the task role but sub-task mirroring is off for this project; the declaration has no effect* |
+    Recog["recognition<br/>parent · stories · sub-tasks"] -->|"key · status · flagged · blockers"| Ctx["Lifecycle context entry<br/>+ role"]
 
-Existing drift, halt, flagged and blocker wording is unchanged (FR-018) — those strings are asserted by the
-current corpus and any edit to them is a regression.
+    Ctx --> Drift{"drift_evaluate<br/>(engine, unchanged)"}
+    Drift -->|"halt / withhold"| Warn["warning · no move"]
+    Drift -->|"transition"| Due["Ticket due a move"]
 
----
+    Due --> Avail["Availability record<br/>sink/jira/transitions.sh"]
+    Avail --> Out{"Resolution outcome"}
+    Out -->|"move"| Act["transition action<br/>_plan_transition_action"]
+    Out -->|"ambiguous · gated · unreachable"| Warn
 
-## 7. State transitions
+    Act --> Counts["counts.transitioned"]
 
-For one ticket in one run:
-
-```text
-recognised
-  └─ run carries a lifecycle event?            no ─→ no move considered            (FR-022)
-       yes
-  └─ role declares a step for that event?      no ─→ no move considered            (FR-012)
-       yes
-  └─ current step == declared step?            yes ─→ no move, no read, no warning (FR-008)
-       no
-  └─ safety decision                halt ─→ every write suppressed                 (FR-018)
-       │                        withhold ─→ move suppressed, content reconciles    (FR-018)
-       └─ transition
-            └─ flagged?                        yes ─→ move withheld, flag surfaced (FR-018)
-                 no
-            └─ task role and its task is checked? yes ─→ completion governs it     (FR-016)
-                 no
-            └─ availability read       failed ─→ fail closed for this spec         (FR-020)
-                 succeeded
-            └─ resolution → one of the four outcomes of §3
-                 └─ performed → tracker refuses? ─→ report, do not retry           (FR-021)
+    Ev --> State["Run-state document v2"]
+    Plan["plan.md"] --> State
 ```
 
-Content writes are decided independently at every branch below `halt`: only `halt` suppresses them
-(FR-019).
+Two directions are load-bearing and worth stating in words. The availability read hangs off **`Due`**, not
+off `Recog` — nothing is asked of the tracker for a ticket the safety rules did not send there. And
+`drift_evaluate` sits above the sink entirely: it decides *whether*, the sink decides *how*, and the engine
+never learns what a transition is.

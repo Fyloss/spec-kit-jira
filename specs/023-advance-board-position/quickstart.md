@@ -1,193 +1,182 @@
-# Quickstart — Validating that each tier advances along its own workflow
+# Quickstart — validating that each tier advances along its own workflow
 
-**Feature**: `specs/023-advance-board-position` | **Date**: 2026-08-10
-
-How to prove this feature works, end to end, without a real Jira instance. Details of behaviour live in
-[`contracts/lifecycle-transition.md`](contracts/lifecycle-transition.md) and
-[`contracts/role-lifecycle-config.md`](contracts/role-lifecycle-config.md); shapes live in
-[`data-model.md`](data-model.md).
-
----
+Runnable checks that prove the feature end to end. Ordered so that each one fails for a single, identifiable
+reason. Every scenario references its contract rather than restating it.
 
 ## Prerequisites
 
-- Bash ≥ 4 (macOS's system Bash 3.2 does not qualify), `jq`, `curl`, `git`
-- `bats` for the Bash suite; PowerShell 7+ and `Pester` for the other port
-- `shellcheck` and `actionlint`
-- No credentials: every scenario below runs against the repository's own test doubles
-
----
-
-## The failing test first
-
-Per Principle XIII, the first thing to run is the assertion that fails today.
+- `bash` ≥ 4, `jq`, `git`, `curl` (Bash port); PowerShell 7+ (Windows port).
+- No live Jira for §1–§6 — the conformance mock and the scripted `curl` replacement serve every case.
+- §7 needs the dogfood instance the project already uses for Principle XII.
 
 ```bash
-bats -r tests/bash/commands/test_reconcile_lifecycle.bats
+tests/run-bash.sh --since main          # change-scoped inner loop, ≤60s on one module
+tests/run-bash.sh                       # full bash suite, ~190s
+bash tests/conformance/ci-conformance.sh   # cross-port byte equivalence
+shellcheck / actionlint                 # must stay clean
 ```
 
-The file currently contains the assertion that pins the gap:
-
-> `zero transition requests in every scenario — this release evaluates the rules but never moves a ticket's status`
-
-That test is **rewritten, not deleted**, in the same change that makes it false (research R1). Its intent
-survives as the narrower assertion that a project declaring no mapping issues zero moves. The new failing
-test to add beside it: a declared mapping, a recognised story one step behind, a run under the matching
-event, and an assertion that exactly one transition POST was issued.
+Conformance success is **silent**: exit 0 and zero "conformance divergence" lines is the pass signal; there
+is no banner.
 
 ---
 
-## Scenario 1 — A story advances (FR-001, FR-003, US1)
+## 1. The red test — this must fail before anything is built
 
-```yaml
-# .specify/jira/config.yml — the routed project
-phase_status_map:
-  after_specify: "To Do"
-  after_plan:    "In Progress"
-```
+The behaviour this feature exists to add, asserted first (Principle XIII):
 
 ```bash
-SPEC_KIT_JIRA_HOOK_EVENT=after_plan \
-  scripts/bash/spec-kit-jira.sh reconcile specs/001-billing-invoices/spec.md --json
+bats tests/bash/commands/test_reconcile_lifecycle.bats \
+  -f "a declared step for the dispatched event moves the ticket"
 ```
 
-**Expected**: the story's ticket stands at "In Progress"; the summary reports `transitioned: 1`; the mock's
-call log shows exactly one `GET …/transitions?expand=transitions.fields` followed by one
-`POST …/transitions`.
+Declare a story-role mapping, bind a recognised story one agreed step behind, dispatch a real lifecycle
+event, and assert a transition request was issued.
 
-**Then run it again, unchanged.** Expected: `transitioned: 0`, and **no** availability read at all — the
-ticket already stands at the declared step (§9 of the transition contract, FR-008).
-
----
-
-## Scenario 2 — Two workflows, one project (FR-010, FR-011, US2)
-
-```yaml
-phase_status_map:
-  specification:
-    after_plan: "Building"
-  story:
-    after_plan: "In Progress"
-```
-
-**Expected**: the parent stands at "Building", every story at "In Progress", and no ticket was ever
-evaluated against the other role's step name. The call log shows one read and one write per moved ticket and
-nothing else.
-
-**Variant — the story role only.** Remove the `specification:` block. Expected: stories advance, the parent
-is not moved, and **no warning is raised about the parent** — an undeclared role is silent, not withheld
-(FR-012).
+**Expected before the change**: fail — zero transition requests. That is what the currently-passing pin
+records (`test_reconcile_lifecycle.bats:123`, and `Reconcile.Lifecycle.Tests.ps1:132`). The pin is rewritten
+in place, never deleted, to keep asserting what stays true: a project declaring **no** mapping still issues
+zero transition requests.
 
 ---
 
-## Scenario 3 — Upgrading a configuration written before roles existed (FR-013, SC-004)
+## 2. The event reaches the run
 
-Use the role-blind shape of Scenario 1 unchanged, on a project that has a parent and sub-tasks.
-
-**Expected**: stories advance; `0` parents moved; `0` sub-tasks moved. This is the regression that protects
-every team already running the extension, and it is worth asserting on the call log rather than only on the
-summary — the summary would look identical if the parent had been moved by a second mapping.
-
----
-
-## Scenario 4 — The three unresolvable workflows (FR-004, FR-005, FR-007, US4/US5/US6)
-
-Configure the mock's project with, in turn:
-
-| Fixture | Expected |
-|---|---|
-| two offered moves both landing on "In Progress" | `transitioned: 0`, exactly one warning naming both candidates |
-| one move onto "In Progress" whose screen requires a field | `transitioned: 0`, one warning naming the field; **assert the recorded creation-time default was not sent** (FR-006) |
-| no move onto "Done" from "To Do", only "In Review" | `transitioned: 0`, one warning naming "To Do", "Done", and the reachable set |
-
-In all three: the content PUT still happens (FR-019). Assert that too — a withheld move suppressing content
-would be the most damaging regression this feature could introduce.
-
----
-
-## Scenario 5 — Every existing protection (FR-018, US3)
-
-Run the existing safety corpus unchanged:
-
-```bash
-tests/run-bash.sh --since HEAD~1
-```
-
-**Expected**: every drift, halt, flagged and blocker scenario produces the same decision and the **same
-warning wording** as before. The only permitted difference is that a decision of `transition` now also emits
-a move. Any change to an existing warning string is a regression, not an improvement.
-
-Then repeat the corpus against a parent ticket (FR-014): same decisions, same wording.
-
----
-
-## Scenario 6 — Sub-task precedence (FR-016, §7)
-
-Enable sub-task mirroring, declare a `task` workflow, and check one task in `tasks.md`.
-
-**Expected**: the checked task's sub-task is moved by the completion pass exactly as it is today — one move,
-its existing wording. The declared mapping does **not** also act on it. Sub-tasks whose tasks are unchecked
-follow the declared mapping.
-
-**Variant — the tier is off.** Declare a `task` workflow with sub-task mirroring disabled. Expected: no
-sub-task created or moved, and one note that the declaration has no effect. Exit code unchanged (FR-015).
-
----
-
-## Scenario 7 — Fail-closed and refusal (FR-020, FR-021)
-
-| Fault injected | Expected |
-|---|---|
-| the availability read returns 401 / 403 / 5xx | no move **and no content write** for that specification; documented non-zero exit; nothing on stdout from the reader |
-| the move POST is refused (the ticket was moved meanwhile) | the refusal is reported naming the ticket; **no retry**, no second availability read, no other candidate attempted |
-
-Assert the call log, not just the exit code: "did not retry" is only provable from the request sequence.
-
----
-
-## Scenario 8 — The preview (FR-023, US7)
+Contract: [`lifecycle-event.md`](./contracts/lifecycle-event.md).
 
 ```bash
 SPEC_KIT_JIRA_HOOK_EVENT=after_plan \
-  scripts/bash/spec-kit-jira.sh reconcile specs/001-billing-invoices/spec.md --dry-run --json
+  .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile specs/NNN-x/spec.md --json
 ```
 
-**Expected**: the predicted moves and warnings are identical to a real run against the same state — same
-tickets, same roles, same step pairs, same wording — and the call log contains the availability reads but
-**zero** `POST …/transitions`.
+| Check | Expected |
+| --- | --- |
+| Each of the six after-events, with a different step declared per event | Each run aims at its own event's step |
+| The variable unset | Byte-identical stdout, exit code, written tree and call log to the pre-change bridge |
+| An event name outside the closed set | Same as unset — zero availability reads, zero warnings |
+| A disabled event | Exit `0` silently, no config read, no state read |
+
+The unset case is the one to run against both the pre-change and post-change bridge and diff. It is the
+whole of FR-011.
 
 ---
 
-## Cross-port equivalence
+## 3. A second event over unchanged files still advances the board
+
+Contract: [`run-state-v2.md`](./contracts/run-state-v2.md). **This is the check that fails against `main`.**
 
 ```bash
-bash tests/conformance/ci-conformance.sh
+SPEC_KIT_JIRA_HOOK_EVENT=after_specify  … reconcile specs/NNN-x/spec.md --json
+# change nothing on disk
+SPEC_KIT_JIRA_HOOK_EVENT=after_plan     … reconcile specs/NNN-x/spec.md --json
 ```
 
-**Expected**: exit 0 and zero lines containing `conformance divergence`. There is no success banner; silence
-is the pass. Every scenario above has a corpus twin asserting byte-identical output **and an identical
-request sequence** between the ports.
+| Check | Expected | Against `main` |
+| --- | --- | --- |
+| Second run reaches the pipeline | not short-circuited | **short-circuits, empty call log** |
+| Ticket position | the plan event's declared step | unchanged |
+| Parent's Implementation Plan section | present and current | **never written** |
+| Same event twice, nothing changed | second run short-circuits, exit 0, empty call log | same |
+| Touch only `plan.md` | full reconcile | **short-circuits** |
+| A schema-1 state document present | full reconcile, schema-2 recorded on success | n/a |
+| A run raising an unreachable-step warning | no state recorded; next run reconsiders | n/a |
+
+The third row is a defect of 021 that this feature closes because FR-013 is unverifiable while it stands —
+it costs a consumer mirrored content, not only a board position.
 
 ---
 
-## Gates before the change is done
+## 4. Each tier follows its own workflow
 
-```bash
-tests/run-bash.sh                              # full Bash suite
-bash tests/conformance/ci-conformance.sh       # cross-port equivalence
-find scripts/bash -name '*.sh' -exec shellcheck -x -P scripts/bash {} +
-actionlint
+Contract: [`role-lifecycle-config.md`](./contracts/role-lifecycle-config.md).
+
+```yaml
+projects:
+  - key: COMP
+    hierarchy: { specification: "Epic", story: "Story", task: "Sub-task" }
+    phase_status_map:
+      specification: { after_plan: "Building" }
+      story:         { after_plan: "In Progress" }
 ```
 
-Plus, on the PowerShell side, the Pester suite, and — because this feature touches line-ending-sensitive
-prose assembly — a green run of the Windows conformance probe (`ci/windows-probe`) before the platform
-behaviour is claimed. Principle VI: a model of Windows is not Windows.
+| Check | Expected |
+| --- | --- |
+| One `after_plan` run | Parent at "Building", every story at "In Progress" |
+| Cross-role evaluation | Zero — no ticket is ever compared against the other role's step name |
+| `story` declared alone | Stories advance; parent not moved; no warning about the parent |
+| Legacy shape 1 (events at the top level) | Stories advance; parent and sub-tasks untouched |
+| `task` role, project in `subtask` mode | Sub-tasks whose task is unchecked advance |
+| `task` role, project in `checklist` mode | Zero tickets moved; exactly **one** note per run, not one per entry |
+| An abandoned sub-task marker left by a mode switch | Never enters the move set |
+| Mixed key sets in one mapping | Exit `4`, zero requests, the §3 message |
+| Three roles declared, counting stand-in on config opens | One open, one parse — same as a one-role project |
 
 ---
 
-## Dogfooding
+## 5. The four resolution outcomes
 
-Principle XII requires a real instance before release. For this feature that means watching a real board
-advance on **more than one tier**: declare two workflows, run the lifecycle, and confirm the Epic and its
-stories each land on their own declared step. A single-tier dogfood would not exercise the change that
-motivated the feature.
+Contract: [`transition-resolution.md`](./contracts/transition-resolution.md) §3, §4.
+
+Drive each through the mock's per-key transitions override
+(`tests/conformance/mock-jira/mock-server.ps1`, the `transitions` config key, keyed by exact issue key).
+
+| Workflow shape | Expected |
+| --- | --- |
+| One ungated move onto the declared step | Ticket moves; `counts.transitioned` is 1 |
+| Two moves landing on the declared step | Zero moves; **one** warning naming both candidates; content still mirrored |
+| One move, gated on a required field | Zero moves; one warning naming the field |
+| …with a creation-time default recorded for a field of that name | The default is **not** sent; the same warning |
+| No move landing on the declared step | Zero moves; one warning naming current step, declared step, reachable set |
+| Declared step absent from the workflow entirely | Same, with the empty-set wording |
+| Declared step differing only in case or spacing | Reported unreachable — never silently accepted |
+| Ticket already at the declared step | **Zero availability requests**, zero moves, zero warnings |
+
+The assertion that matters most: every non-move outcome carries exactly one warning. A silent drop — today's
+behaviour when `transition_id` is empty — is a defect after this change.
+
+---
+
+## 6. Nothing else moved
+
+| Check | Command | Expected |
+| --- | --- | --- |
+| Safety corpus unchanged | full bash + Pester suites | Same decision and same wording everywhere, with the single addition that an advance decision now moves the ticket |
+| Idempotency | run twice, unchanged | 0 created, 0 updated, **0 transitioned**, 0 commented, 0 linked, 0 labeled |
+| Dry run | `--dry-run` then the real run, same state | Identical action sets, moves included; the preview performs none and leaves the state document byte-unchanged |
+| Request budget | 60-story spec, every ticket due a move, recorded call log | Contract §6 B2 |
+| Spawn budget | 024's `PATH` shim, in a run **separate** from any timing run | Count unchanged when the due set doubles |
+| Timing attribution | `SPEC_KIT_JIRA_TIMING=1` | Requests attributed to `plan`; per-phase counts sum to the run's total |
+| No-move run | any run with no event | Requests, external processes and config parses identical to today |
+| Cross-port | `bash tests/conformance/ci-conformance.sh` | Exit 0, zero divergence lines |
+
+---
+
+## 7. Dogfood — Principle XII
+
+Not optional, and not satisfiable by the mock. Against the real instance:
+
+1. A project with **two** roles on genuinely different workflows.
+2. Run `/speckit.specify`, then `/speckit.plan` — the second changes only `plan.md`.
+3. Watch the parent and its stories each land on their own declared step, on the second event.
+4. Re-run with nothing changed: zero writes of every kind.
+5. Record the wall-clock split with `SPEC_KIT_JIRA_TIMING=1` as evidence, **not** as a CI assertion — CI
+   runners are an order of magnitude slower than a developer laptop.
+
+Step 2 is the point: a board advancing on an event that edited no specification file is exactly what this
+feature adds and exactly what `main` cannot do.
+
+---
+
+## 8. Documentation
+
+Contract: spec FR-040. A reader comparing these four against the shipped behaviour must find no claim the
+code does not satisfy, and no accepted flag the procedure does not list:
+
+- `docs/08-safety-model.md` — the decision table's `transition | emitted` row becomes true for the first
+  time at the story and specification tiers.
+- `docs/05-reconcile-flow.md` — the pipeline shows where a move is decided and issued, and states how the
+  event reaches the run.
+- `docs/VISION.md` — Part 2 item 3 moves from *Specified, not shipped* to *Shipped*, and the Part 1 bullet
+  drops its "does not yet act on" clause.
+- `commands/speckit.jira.reconcile.md` — the event conveyance, the host-command → event table, the per-role
+  mapping, and `--force` in the Flags list.
