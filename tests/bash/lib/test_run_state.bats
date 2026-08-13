@@ -238,3 +238,70 @@ teardown() {
   [ "${before}" != "${after}" ]
   [ "${after}" = "$(git hash-object --no-filters "${JIRA_CONFIG_DIR}/config.yml")" ]
 }
+
+# --- T161 [Phase 12, US10]: invariant S6 (021's contracts/run-state-v2.md
+# §5) under a NEW event -- a lifecycle event that resolves an actual
+# transition (023's own addition to what a run can do), proving the
+# --dry-run guard reconcile.sh applies around BOTH run_state_matches (the
+# read) and run_state_record (the write) still holds once a move is in
+# play, not only for a content-only run (021's own original S6 coverage
+# predates hook_event/transitions entirely).
+
+@test "S6 -- --dry-run under a hook event that resolves a transition neither reads nor writes the state document (contracts/run-state-v2.md §5)" {
+  local root="${BATS_TEST_DIRNAME}/../../.."
+  # shellcheck source=/dev/null
+  source "${root}/tests/conformance/mock-jira/lib.sh"
+  # shellcheck source=/dev/null
+  source "${root}/scripts/bash/commands/reconcile.sh"
+
+  # A pre-bound fixture (COMP-1 parent, COMP-2 story), never a freshly
+  # created one: creation carries its own stray-marker note (unrelated to
+  # this invariant) that would keep warn_count above zero on every run,
+  # masking whether the write's absence is --dry-run's own guard or that
+  # unrelated one.
+  local work="${BATS_TEST_TMPDIR}/s6-repo"
+  cp -R "${root}/tests/conformance/fixtures/repo-with-bound-story-due" "${work}"
+  local spec="${work}/specs/001-declared-mapping/spec.md"
+  export JIRA_CONFIG_DIR="${work}/.specify/jira"
+  export JIRA_EMAIL="user@example.com"
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  export JIRA_NO_SLEEP=1
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-declared-mapping"
+
+  mock_start "${root}/tests/conformance/mock-jira/configs/comp-bound-story-due-seed.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${spec}" --json > /dev/null
+
+  # The priming run above (no hook event, zero warnings) already recorded
+  # state -- so "unwritten" is proven by content staying IDENTICAL across
+  # the dry-run, not by the file's absence.
+  local state_file before_dry after_dry
+  state_file="$(run_state_path "${spec}")"
+  [ -f "${state_file}" ]
+  before_dry="$(cat "${state_file}")"
+
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  cmd_reconcile reconcile "${spec}" --json --dry-run > /dev/null
+  # The read: a preview against the recorded (hook-event-less) state would
+  # short-circuit if dry-run ever consulted run_state_matches -- it does
+  # not (reconcile.sh's own `dry_run != true` guard around the read), so
+  # the preview still ran the full resolution (proven separately by
+  # T159/T160). The write: the document on disk is untouched.
+  after_dry="$(cat "${state_file}")"
+  [ "${before_dry}" = "${after_dry}" ]
+
+  cmd_reconcile reconcile "${spec}" --json > /dev/null
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  # The SAME event, for real, DOES record (the hook_event key now present
+  # in the document) -- proving the file's continued lack of change above
+  # was the dry-run guard, not an unrelated reason (a warning outstanding,
+  # a non-zero exit) that would have suppressed the write regardless of
+  # --dry-run.
+  local after_real
+  after_real="$(cat "${state_file}")"
+  [ "${after_real}" != "${before_dry}" ]
+  [ "$(jq -r '.hook_event' <<< "${after_real}")" = "after_plan" ]
+
+  mock_stop
+}

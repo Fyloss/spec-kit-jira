@@ -286,3 +286,69 @@ routing_default: COMP
         finally { Stop-JiraMock -Mock $m }
     }
 }
+
+# --- T160 [Phase 12, US10]: the dry-run twin, four outcomes (contract §7
+# Z4). Mirror of test_reconcile_lifecycle.bats's T159.
+
+Describe 'Invoke-JiraReconcile — the dry-run preview twin (US10, Z4)' {
+    BeforeEach {
+        $script:Work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse $Fixture $script:Work
+        $script:Spec = Join-Path $script:Work 'specs/001-billing-invoices/spec.md'
+        Set-Content -NoNewline -Path (Join-Path $script:Work '.specify/jira/config.yml') -Value $script:ConfigYaml
+        $env:JIRA_CONFIG_DIR = Join-Path $script:Work '.specify/jira'
+    }
+    AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
+
+    It 'the dry-run preview predicts move/ambiguous/gated outcomes identically to the real run, and writes nothing' {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/comp-transitions.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
+
+        Clear-Content -LiteralPath $script:M.CallLog
+        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+        $preview = Invoke-Captured @('reconcile', $script:Spec, '--json', '--dry-run') | ConvertFrom-Json
+        $preview.dry_run | Should -Be $true
+        # Zero transition WRITES in the preview -- the availability READS
+        # the decision needs still fire.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^POST .*/transitions$' }).Count | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^GET .*/transitions\?expand=' }).Count | Should -Be 3
+
+        Clear-Content -LiteralPath $script:M.CallLog
+        $real = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
+        Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
+        $real.dry_run | Should -Be $false
+
+        # Identical predicted vs. performed.
+        [int]$preview.counts.transitioned | Should -Be ([int]$real.counts.transitioned)
+        (ConvertTo-Json $preview.warnings -Compress) | Should -Be (ConvertTo-Json $real.warnings -Compress)
+        $previewMove = @($preview.actions | Where-Object { ([string]$_.url).EndsWith('/rest/api/3/issue/COMP-2/transitions') })[0]
+        $realMove = @($real.actions | Where-Object { ([string]$_.url).EndsWith('/rest/api/3/issue/COMP-2/transitions') })[0]
+        [string]$previewMove.body.transition.id | Should -Be ([string]$realMove.body.transition.id)
+
+        # The real run, unlike the preview, actually issues the one write.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^POST .*/transitions$' }).Count | Should -Be 1
+    }
+
+    It 'the dry-run preview predicts an unreachable outcome identically to the real run (all three wordings), and writes nothing' {
+        $cfgPath = Write-JiraMockConfig -Json '{"projects":{"COMP":"company"},"transitions":{"COMP-2":[{"id":"201","name":"Review","to":{"name":"Under Review"},"fields":{}}],"COMP-3":[],"COMP-4":[{"id":"203","name":"Start","to":{"name":"in progress"},"fields":{}}]}}'
+        $script:M = Start-JiraMock -ConfigPath $cfgPath
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
+
+        Clear-Content -LiteralPath $script:M.CallLog
+        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+        $preview = Invoke-Captured @('reconcile', $script:Spec, '--json', '--dry-run') | ConvertFrom-Json
+        $preview.dry_run | Should -Be $true
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^POST .*/transitions$' }).Count | Should -Be 0
+
+        Clear-Content -LiteralPath $script:M.CallLog
+        $real = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
+        Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
+        $real.dry_run | Should -Be $false
+
+        (ConvertTo-Json $preview.warnings -Compress) | Should -Be (ConvertTo-Json $real.warnings -Compress)
+        # Never forces an intermediate move, in either mode.
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '^POST .*/transitions$' }).Count | Should -Be 0
+    }
+}

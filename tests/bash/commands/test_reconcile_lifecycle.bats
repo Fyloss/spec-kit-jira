@@ -384,3 +384,89 @@ YAML
   [ "$(jq -e '[.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-1/transitions"))] | length' <<< "$output")" -eq 0 ]
   [[ "$(jq -r '.warnings | join(" ")' <<< "$output")" != *"COMP-1"* ]]
 }
+
+# --- T159 [Phase 12, US10]: the dry-run twin, four outcomes (contract §7
+# Z4) -- `--dry-run` and a real run against the SAME state predict the SAME
+# moves and warnings; the preview performs none. Resolution (the read and
+# the decision) runs identically either way -- only the WRITE is guarded
+# (scripts/bash/commands/reconcile.sh's own `if [[ "${dry_run}" != "true" ]]`
+# around apply_writes_with_recognition); `counts.transitioned` and
+# `warnings` are read off the PLANNED action set built during the plan
+# phase, never off the confirmed-write outcome, so they hold identically in
+# both modes.
+
+@test "T159 -- the dry-run preview predicts move/ambiguous/gated outcomes identically to the real run, and writes nothing (US10, Z4)" {
+  mock_start "${MOCK}/configs/comp-transitions.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${SPEC}" --json > /dev/null
+
+  : > "${MOCK_CALLLOG}"
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile "${SPEC}" --json --dry-run
+  [ "$status" -eq 0 ]
+  local preview="$output"
+  [ "$(jq -r '.dry_run' <<< "${preview}")" = "true" ]
+  # Zero transition WRITES in the preview (Z4: "the preview performs
+  # none") -- the availability READS the decision needs still fire.
+  [ "$(grep -c '^POST .*/transitions$' "${MOCK_CALLLOG}")" -eq 0 ]
+  [ "$(grep -c '^GET .*/transitions?expand=' "${MOCK_CALLLOG}")" -eq 3 ]
+
+  : > "${MOCK_CALLLOG}"
+  run cmd_reconcile reconcile "${SPEC}" --json
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  [ "$status" -eq 0 ]
+  local real="$output"
+  [ "$(jq -r '.dry_run' <<< "${real}")" = "false" ]
+
+  # Identical predicted vs. performed: the move count, the move's own
+  # transition id, and every warning's wording (naming the ambiguous and
+  # gated tickets), byte-for-byte between preview and real.
+  [ "$(jq -r '.counts.transitioned' <<< "${preview}")" = "$(jq -r '.counts.transitioned' <<< "${real}")" ]
+  [ "$(jq -c '.warnings' <<< "${preview}")" = "$(jq -c '.warnings' <<< "${real}")" ]
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-2/transitions")) | .body.transition.id' <<< "${preview}")" \
+    = "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-2/transitions")) | .body.transition.id' <<< "${real}")" ]
+
+  # The real run, unlike the preview, actually issues the one write.
+  [ "$(grep -c '^POST .*/transitions$' "${MOCK_CALLLOG}")" -eq 1 ]
+}
+
+@test "T159 -- the dry-run preview predicts an unreachable outcome identically to the real run (all three wordings), and writes nothing (US10, Z4)" {
+  mock_stop
+  local work2="${BATS_TEST_TMPDIR}/dry-run-unreachable"
+  cp -R "${FIXTURE}" "${work2}"
+  local spec2="${work2}/specs/001-billing-invoices/spec.md"
+  cp "${WORK}/.specify/jira/config.yml" "${work2}/.specify/jira/config.yml"
+  export JIRA_CONFIG_DIR="${work2}/.specify/jira"
+
+  local cfg
+  cfg="$(mock_write_config '{
+    "projects":{"COMP":"company"},
+    "transitions":{
+      "COMP-2":[{"id":"201","name":"Review","to":{"name":"Under Review"},"fields":{}}],
+      "COMP-3":[],
+      "COMP-4":[{"id":"203","name":"Start","to":{"name":"in progress"},"fields":{}}]
+    }
+  }')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${spec2}" --json > /dev/null
+
+  : > "${MOCK_CALLLOG}"
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile "${spec2}" --json --dry-run
+  [ "$status" -eq 0 ]
+  local preview="$output"
+  [ "$(jq -r '.dry_run' <<< "${preview}")" = "true" ]
+  [ "$(grep -c '^POST .*/transitions$' "${MOCK_CALLLOG}")" -eq 0 ]
+
+  : > "${MOCK_CALLLOG}"
+  run cmd_reconcile reconcile "${spec2}" --json
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  [ "$status" -eq 0 ]
+  local real="$output"
+  [ "$(jq -r '.dry_run' <<< "${real}")" = "false" ]
+
+  [ "$(jq -c '.warnings' <<< "${preview}")" = "$(jq -c '.warnings' <<< "${real}")" ]
+  # Never forces an intermediate move, in either mode.
+  [ "$(grep -c '^POST .*/transitions$' "${MOCK_CALLLOG}")" -eq 0 ]
+}

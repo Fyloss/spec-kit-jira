@@ -389,10 +389,10 @@ processes; double the story count and assert neither doubles.
 - [X] T148 [US9] Add to `tests/bash/sink/test_transitions_budget.bats` budget B2 for the branch T002 selected — under branch A, round-trips do not grow one-for-one with the 60-ticket due set; under branch C, no request is issued for a ticket outside the due set (depends on T002) — branch C: exactly 60 `GET .../transitions` for a 60-due-ticket run, never 61 (the parent, not due) and never a multiple of 60
 - [X] T149 [US9] Add the same B2 assertion to `tests/powershell/sink/Transitions.Budget.Tests.ps1`
 - [X] T150 [US9] Add to `tests/bash/sink/test_transitions_budget.bats` budget B3 using 024's `PATH`-interposed counting shim, in a run **separate** from any timing run: the external-process count is unchanged when the due set doubles (024 contract spawn-budget §4, C4.2) — asserts sub-linear growth (60-ticket spawn count stays under 2x the 30-ticket count) against the CURRENT implementation, ahead of T155's own decode-once tightening
-- [ ] T151 [P] [US9] Add budget B4 to `tests/bash/lib/test_timing.bats`: every request this feature issues is attributed to the `plan` phase, and the per-phase counts sum to the run's total, asserted against the harness's request log rather than the instrument's self-report
-- [ ] T152 [P] [US9] Add the same timing-attribution assertion to `tests/powershell/lib/Timing.Tests.ps1`
-- [ ] T153 [P] [US9] Add budget B5 to `tests/bash/lib/test_config_phase_status_map.bats`: three declared roles cost one configuration open and one parse, identical to a one-role project, asserted by a counting stand-in
-- [ ] T154 [P] [US9] Add the same config-parse assertion to `tests/powershell/lib/Config.PhaseStatusMap.Tests.ps1`
+- [X] T151 [P] [US9] Add budget B4 to `tests/bash/lib/test_timing.bats`: every request this feature issues is attributed to the `plan` phase, and the per-phase counts sum to the run's total, asserted against the harness's request log rather than the instrument's self-report — new B4 test runs `us023-sixty-stories-due.json` under `SPEC_KIT_JIRA_TIMING=1`, asserts `timing: total` equals `calls.log`'s own count, `timing: plan` equals the GET-transitions count exactly, and `timing: apply` covers the POST-transitions count
+- [X] T152 [P] [US9] Add the same timing-attribution assertion to `tests/powershell/lib/Timing.Tests.ps1` — mirrored via an in-process `Invoke-JiraReconcile` run against the same 60-story fixture, asserted against `Get-JiraMockCallLog`
+- [X] T153 [P] [US9] Add budget B5 to `tests/bash/lib/test_config_phase_status_map.bats`: three declared roles cost one configuration open and one parse, identical to a one-role project, asserted by a counting stand-in — the PATH-interposed `jq` spawn count for `config_load` is identical for a one-role and a three-role `phase_status_map` (the whole map is validated inside `_cfg_schema_errors`'s one jq program over the whole document, never a per-role spawn)
+- [X] T154 [P] [US9] Add the same config-parse assertion to `tests/powershell/lib/Config.PhaseStatusMap.Tests.ps1` — no external process to shim on this port (T156's own reasoning), so the stand-in is a Pester call-counter on `Read-JiraConfigYamlObject`: exactly one invocation per config file, unchanged by role count
 
 ### Implementation for User Story 9
 
@@ -413,16 +413,16 @@ of moves and warnings is identical to the performed set, and that the preview pe
 
 ### Tests for User Story 10 (write first, observe failing)
 
-- [ ] T159 [P] [US10] Add to `tests/bash/commands/test_reconcile_lifecycle.bats` the dry-run twin for each of the four resolution outcomes: predicted moves and warnings identical to the real run against the same state, and zero transition requests recorded in the preview (contract §7 Z4)
-- [ ] T160 [P] [US10] Add the same four dry-run twins to `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1`
-- [ ] T161 [US10] Add to `tests/bash/lib/test_run_state.bats` invariant S6 under a new event: `--dry-run` neither reads nor writes the state document, so the preview cannot change what the following real run does
-- [ ] T162 [US10] Add the same S6 assertion to `tests/powershell/lib/RunState.Tests.ps1`
+- [X] T159 [P] [US10] Add to `tests/bash/commands/test_reconcile_lifecycle.bats` the dry-run twin for each of the four resolution outcomes: predicted moves and warnings identical to the real run against the same state, and zero transition requests recorded in the preview (contract §7 Z4) — two new tests: move/ambiguous/gated combined (`comp-transitions.json`) and unreachable (all three wordings); dry-run vs real compared for `counts.transitioned`, `warnings`, and the move's own transition id; dry-run's calls.log has the GET reads but zero POST /transitions
+- [X] T160 [P] [US10] Add the same four dry-run twins to `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1`
+- [X] T161 [US10] Add to `tests/bash/lib/test_run_state.bats` invariant S6 under a new event: `--dry-run` neither reads nor writes the state document, so the preview cannot change what the following real run does — end-to-end test against `repo-with-bound-story-due`: the recorded document's content is byte-identical before and after a `--dry-run` run under `after_plan` (proving no write), then changes (`hook_event` becomes `after_plan`) once the same event runs for real
+- [X] T162 [US10] Add the same S6 assertion to `tests/powershell/lib/RunState.Tests.ps1`
 
 ### Implementation for User Story 10
 
-- [ ] T163 [US10] Confirm resolution runs inside the planning pass in `scripts/bash/sink/jira/plan_apply.sh` so preview and real run share one computation, and add the guard that suppresses only the write — never the read or the decision (depends on T049)
-- [ ] T164 [US10] Mirror the preview guard in `scripts/powershell/sink/jira/PlanApply.psm1` (depends on T050)
-- [ ] T165 [P] [US10] Add `tests/conformance/scenarios/us023-dry-run-twin.json` — the preview report and the real action set, asserted equal and byte-identical between ports
+- [X] T163 [US10] Confirm resolution runs inside the planning pass in `scripts/bash/sink/jira/plan_apply.sh` so preview and real run share one computation, and add the guard that suppresses only the write — never the read or the decision (depends on T049) — already held: `plan_lifecycle`/`plan_lifecycle_tasks` (and, inside them, `transitions_load`/`transitions_resolve`/`_plan_transition_action`) run unconditionally regardless of `--dry-run`; the guard itself lives one layer up, in `scripts/bash/commands/reconcile.sh` (`if [[ "${dry_run}" != "true" ]]` around `apply_writes_with_recognition`, line ~1791, and around `run_state_record`, line ~2116) — `counts.transitioned`/`warnings` are read off the planned `actions` array plan_apply.sh already built, never off the write outcome, so preview and real share one computation by construction
+- [X] T164 [US10] Mirror the preview guard in `scripts/powershell/sink/jira/PlanApply.psm1` (depends on T050) — already held, same shape: `Reconcile.psm1`'s `if (-not $dryRun)` around `Invoke-JiraApplyWriteSetWithRecognition` and around `Save-JiraRunState`
+- [X] T165 [P] [US10] Add `tests/conformance/scenarios/us023-dry-run-twin.json` — the preview report and the real action set, asserted equal and byte-identical between ports — a `repo-with-bound-story-due`-seeded COMP-2 move under `--dry-run`/`after_plan`; verified byte-identical stdout and calls.log bash vs PowerShell (corpus count 157 -> 158)
 
 ---
 

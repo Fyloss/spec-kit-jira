@@ -107,3 +107,72 @@ Describe 'phase_status_map schema' {
         Remove-Item -Recurse -Force $d
     }
 }
+
+# --- B5 (023, T154, spawn-budget.md §4): three declared roles cost one
+# configuration open and one parse, identical to a one-role project. Mirror
+# of test_config_phase_status_map.bats's B5 (T153) — on this port there is
+# no external process to shim (Read-JiraConfigYamlObject and
+# Test-JiraTeamConfig both run in-process, .NET only, T156's own reasoning
+# for B3 applies here too), so the counting stand-in is Pester's own call
+# counter on Read-JiraConfigYamlObject: Import-JiraConfig's source calls it
+# exactly once per config FILE, unconditionally — never once per role — so
+# the count for a team file alone cannot vary with how many roles that
+# file's phase_status_map declares. The mock below counts invocations
+# without re-implementing the real parse; correctness of parsing a per-role
+# map is already covered by the "is valid when per-role" test above.
+
+Describe 'phase_status_map schema — B5, parse cost is role-count-independent' {
+    It 'Read-JiraConfigYamlObject is invoked exactly once per config file, whether phase_status_map declares one role or three' {
+        $d1 = New-TempConfigDir
+        Set-Content -Path (Join-Path $d1 'config.yml') -Value @'
+projects:
+  - key: PROJ
+    style: company_managed
+    phase_status_map:
+      story:
+        after_specify: "To Do"
+        after_plan: "In Progress"
+routing_default: PROJ
+'@ -NoNewline
+
+        $d3 = New-TempConfigDir
+        Set-Content -Path (Join-Path $d3 'config.yml') -Value @'
+projects:
+  - key: PROJ
+    style: company_managed
+    phase_status_map:
+      specification:
+        after_specify: "To Do"
+        after_plan: "Building"
+      story:
+        after_specify: "To Do"
+        after_plan: "In Progress"
+      task:
+        after_plan: "In Progress"
+routing_default: PROJ
+'@ -NoNewline
+
+        # A full-suite run accumulates other files' own `Import-Module
+        # Config.psm1 -Force` calls, which can leave more than one distinct
+        # module instance named "Config" loaded — `Mock ... -ModuleName
+        # Config` then refuses with "Multiple script or manifest modules
+        # named 'Config' are currently loaded" (a full-suite-only failure;
+        # this file in isolation never hits it). Collapsing to exactly one
+        # loaded copy right before mocking is what makes the mock target
+        # unambiguous regardless of run order.
+        Get-Module -Name Config -All | Remove-Module -Force -ErrorAction SilentlyContinue
+        Import-Module $ModulePath -Force
+
+        Mock Read-JiraConfigYamlObject -ModuleName Config -MockWith {
+            @{ projects = @(); routing_default = 'PROJ' }
+        }
+
+        Import-JiraConfig -ConfigDir $d1 | Out-Null
+        Should -Invoke Read-JiraConfigYamlObject -ModuleName Config -Times 1 -Exactly
+
+        Import-JiraConfig -ConfigDir $d3 | Out-Null
+        Should -Invoke Read-JiraConfigYamlObject -ModuleName Config -Times 2 -Exactly
+
+        Remove-Item -Recurse -Force $d1, $d3
+    }
+}

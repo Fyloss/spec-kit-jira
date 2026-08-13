@@ -234,3 +234,78 @@ Describe 'RunState' {
         }
     }
 }
+
+# --- T162 [Phase 12, US10]: invariant S6 under a NEW event -- a lifecycle
+# event that resolves an actual transition. Mirror of test_run_state.bats's
+# S6 (T161).
+
+Describe 'Invoke-JiraReconcile — S6, --dry-run under a resolved transition (contracts/run-state-v2.md §5)' {
+    BeforeAll {
+        $CmdDir = Join-Path $PSScriptRoot '../../../scripts/powershell/commands'
+        $MockDir = Join-Path $PSScriptRoot '../../conformance/mock-jira'
+        $Fixture = Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-bound-story-due'
+        Import-Module (Join-Path $MockDir 'Mock.psm1') -Force
+        Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
+        # Re-imported LAST and forced: Reconcile.psm1's own (unforced) import
+        # of RunState.psm1 as its dependency can otherwise leave
+        # Get-JiraRunStatePath unresolved in this scope (the same defect
+        # class as project memory powershell-import-force-clobbers-caller-scope).
+        Import-Module $ModulePath -Force
+
+        $env:JIRA_EMAIL = 'user@example.com'
+        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+        $env:JIRA_NO_SLEEP = '1'
+        Remove-Item Env:\SPEC_KIT_JIRA_PLAN_CONTEXT -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_LIFECYCLE -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_PROJECT_KEY -ErrorAction SilentlyContinue
+
+        function Invoke-Captured {
+            param([string[]] $ArgList)
+            $sw = [System.IO.StringWriter]::new()
+            $se = [System.IO.StringWriter]::new()
+            $oo = [Console]::Out
+            $oe = [Console]::Error
+            [Console]::SetOut($sw)
+            [Console]::SetError($se)
+            try { $script:code = Invoke-JiraReconcile -Arguments $ArgList } finally { [Console]::SetOut($oo); [Console]::SetError($oe) }
+            return $sw.ToString() + $se.ToString()
+        }
+    }
+
+    It '--dry-run under a hook event that resolves a transition neither reads nor writes the state document' {
+        $work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse $Fixture $work
+        $spec = Join-Path $work 'specs/001-declared-mapping/spec.md'
+        $env:JIRA_CONFIG_DIR = Join-Path $work '.specify/jira'
+        $env:SPEC_KIT_JIRA_REPO = 'acme/app'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-declared-mapping'
+
+        $m = Start-JiraMock -ConfigPath (Join-Path $MockDir 'configs/comp-bound-story-due-seed.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $m.BaseUrl
+        try {
+            $null = Invoke-Captured @('reconcile', $spec, '--json')
+
+            # The priming run above (no hook event, zero warnings) already
+            # recorded state -- so "unwritten" is proven by content staying
+            # IDENTICAL across the dry-run, not by the file's absence.
+            $stateFile = Get-JiraRunStatePath -SpecPath $spec
+            Test-Path -LiteralPath $stateFile | Should -Be $true
+            $beforeDry = Get-Content -Raw -LiteralPath $stateFile
+
+            $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+            $null = Invoke-Captured @('reconcile', $spec, '--json', '--dry-run')
+            $afterDry = Get-Content -Raw -LiteralPath $stateFile
+            $afterDry | Should -Be $beforeDry
+
+            $null = Invoke-Captured @('reconcile', $spec, '--json')
+            Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
+            $afterReal = Get-Content -Raw -LiteralPath $stateFile
+            $afterReal | Should -Not -Be $beforeDry
+            (ConvertFrom-Json $afterReal).hook_event | Should -Be 'after_plan'
+        }
+        finally {
+            Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
+            Stop-JiraMock -Mock $m
+        }
+    }
+}

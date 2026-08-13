@@ -181,3 +181,65 @@ YAML
   [ "$status" -eq 4 ]
   [[ "$output" == *'projects[0].phase_status_map declares unknown key `before_specify`'* ]]
 }
+
+# --- B5 (023, T153, spawn-budget.md §4): declaring more roles costs no more
+# process spawns — the whole phase_status_map, however many roles it names,
+# is validated inside the ONE jq program config_load already runs over the
+# whole document (_cfg_schema_errors), never a per-role bash-level spawn. ---
+
+@test "B5 -- config_load's own process-spawn count is unchanged by declaring three roles instead of one" {
+  local helpers="${ROOT}/tests/bash/helpers"
+  # shellcheck source=/dev/null
+  source "${helpers}/spawn_count.bash"
+  local shim_dir="${BATS_TMPDIR}/aw_config_psm_shims_$$"
+  local count_file_1="${BATS_TMPDIR}/aw_config_psm_count1_$$.log"
+  local count_file_3="${BATS_TMPDIR}/aw_config_psm_count3_$$.log"
+
+  local dir1="${DIR}/one-role"
+  local dir3="${DIR}/three-roles"
+  mkdir -p "${dir1}" "${dir3}"
+
+  cat > "${dir1}/config.yml" << 'YAML'
+projects:
+  - key: PROJ
+    style: company_managed
+    phase_status_map:
+      story:
+        after_specify: "To Do"
+        after_plan: "In Progress"
+routing_default: PROJ
+YAML
+
+  cat > "${dir3}/config.yml" << 'YAML'
+projects:
+  - key: PROJ
+    style: company_managed
+    phase_status_map:
+      specification:
+        after_specify: "To Do"
+        after_plan: "Building"
+      story:
+        after_specify: "To Do"
+        after_plan: "In Progress"
+      task:
+        after_plan: "In Progress"
+routing_default: PROJ
+YAML
+
+  local stub='
+    source "'"${LIB_DIR}"'/config.sh"
+    JIRA_CONFIG_DIR="$1" config_load > /dev/null
+  '
+  helper_spawn_count_setup "${shim_dir}" "${count_file_1}"
+  PATH="${shim_dir}:${PATH}" bash -c "${stub}" _ "${dir1}"
+  helper_spawn_count_setup "${shim_dir}" "${count_file_3}"
+  PATH="${shim_dir}:${PATH}" bash -c "${stub}" _ "${dir3}"
+
+  local jq1 jq3
+  jq1="$(helper_spawn_count_for "${count_file_1}" jq)"
+  jq3="$(helper_spawn_count_for "${count_file_3}" jq)"
+  [ "${jq1}" -gt 0 ]
+  [ "${jq3}" = "${jq1}" ]
+
+  rm -rf "${shim_dir}" "${count_file_1}" "${count_file_3}"
+}

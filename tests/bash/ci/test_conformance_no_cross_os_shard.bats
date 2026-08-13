@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (157)" {
+@test "the conformance corpus has exactly the recorded scenario count (158)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -94,8 +94,11 @@ setup() {
   # 023 adds one: us023-sixty-stories-due (Phase 11, US9, T158) — a
   # 60-story specification with every story due a move, byte-identical
   # recorded call sequence on both ports at scale (156 -> 157).
+  # 023 adds one: us023-dry-run-twin (Phase 12, US10, T165) — a --dry-run
+  # run under a hook event that resolves a real transition, predicting the
+  # move and writing nothing, byte-identical on both ports (157 -> 158).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 157 ]
+  [ "${count}" -eq 158 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {
