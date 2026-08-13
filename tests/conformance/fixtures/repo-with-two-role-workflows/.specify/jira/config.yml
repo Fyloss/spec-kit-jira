@@ -1,0 +1,25 @@
+# Team config (committable, credential-free). Declares TWO independent
+# workflows (023, contracts/role-lifecycle-config.md §5 I1): specification
+# on a delivery workflow (Funnel/Analysing/Building/Released), story on a
+# development workflow (To Do/In Progress/In Review/Done). A run against
+# after_plan lands the parent on "Building" and every story on "In
+# Progress" — neither role is ever evaluated against the other's step name.
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    phase_status_map:
+      specification:
+        after_specify: "Funnel"
+        after_plan: "Building"
+      story:
+        after_specify: "To Do"
+        after_plan: "In Progress"
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP

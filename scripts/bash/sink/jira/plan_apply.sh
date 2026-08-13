@@ -1151,11 +1151,22 @@ plan_lifecycle() {
   # the decode-once shape (built for the STORY count) exists to avoid.
   local -a _lc_is_parent=()
   local parent_lid; parent_lid="$(jq -r '.parent_local_id // ""' <<< "${lc}")"
-  if [[ -n "${parent_lid}" && "${parent_action}" != "null" ]]; then
-    local ptk; ptk="$(jq -c --arg id "${parent_lid}" '.tickets[$id] // {}' <<< "${lc}")"
+  if [[ -n "${parent_lid}" ]]; then
+    local ptk parent_entry_action; ptk="$(jq -c --arg id "${parent_lid}" '.tickets[$id] // {}' <<< "${lc}")"
+    # 023 fix: the parent has no pending CONTENT write on a run where its
+    # content is unchanged (parent_action is the literal string "null"
+    # then) — that must never suppress its own lifecycle-safety
+    # evaluation, exactly as a story with no content change still reaches
+    # drift_evaluate. A story always has a real action to decode-once
+    # here; the parent, gated separately in reconcile.sh, does not — so an
+    # empty placeholder stands in only when there is no real one, never
+    # treated as a content write (_lc_is_parent[n] below already excludes
+    # the parent from `kept` unconditionally).
+    parent_entry_action="${parent_action}"
+    [[ "${parent_entry_action}" == "null" ]] && parent_entry_action='{}'
     _lc_sid[n]="${parent_lid}"
-    _lc_action[n]="${parent_action}"
-    _lc_method[n]="$(jq -r '.method // ""' <<< "${parent_action}")"
+    _lc_action[n]="${parent_entry_action}"
+    _lc_method[n]="$(jq -r '.method // ""' <<< "${parent_entry_action}")"
     _lc_tk[n]="${ptk}"
     _lc_status[n]="$(jq -r '.status // ""' <<< "${ptk}")"
     _lc_target[n]="$(jq -r '.target // ""' <<< "${ptk}")"

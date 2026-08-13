@@ -79,7 +79,12 @@ Describe 'Invoke-JiraReconcile -- provenance label on a mirrored corpus (017, co
         $env:JIRA_EMAIL = 'user@example.com'
         $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
         $env:JIRA_NO_SLEEP = '1'
-        $env:SPEC_KIT_JIRA_ID_SOURCE = '1111111111111111 2222222222222222 3333333333333333'
+        # 023: the parent shares the SAME lifecycle-context tickets map as
+        # stories now (role "specification", keyed by local_id) — a 3-item
+        # source wraps and hands the epic the same local_id as the first
+        # story, silently overwriting its zero-churn/lifecycle snapshot. A
+        # 4th distinct id keeps every local_id unique.
+        $env:SPEC_KIT_JIRA_ID_SOURCE = '1111111111111111 2222222222222222 3333333333333333 4444444444444444'
         Remove-Item Env:\SPEC_KIT_JIRA_PLAN_CONTEXT, Env:\SPEC_KIT_JIRA_LIFECYCLE, Env:\SPEC_KIT_JIRA_HOOK_CONTEXT, `
             Env:\SPEC_KIT_JIRA_PROJECT_KEY, Env:\SPEC_KIT_JIRA_SPEC_SLUG, Env:\SPEC_KIT_JIRA_REPO -ErrorAction SilentlyContinue
 

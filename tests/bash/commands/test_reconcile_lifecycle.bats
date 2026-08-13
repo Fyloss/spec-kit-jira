@@ -265,3 +265,55 @@ YAML
   [[ "$(jq -r '.warnings[0]' <<< "${out}")" == *"halted"* ]]
   [ "$(grep -c '^PUT /rest/api/3/issue/COMP-2$' "${MOCK_CALLLOG}")" -eq 0 ]
 }
+
+
+# =============================================================================
+# T078 [Phase 6, US4] — isolation rule I1: two independent per-role
+# workflows never cross-evaluate each other's step name (contract
+# role-lifecycle-config.md §5 I1).
+# =============================================================================
+
+@test "T078 -- the parent and every story advance on independent workflows, zero cross-role evaluations" {
+  local twork="${BATS_TEST_TMPDIR}/two-role"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-two-role-workflows" "${twork}"
+  local tspec="${twork}/specs/001-two-role-example/spec.md"
+
+  export JIRA_CONFIG_DIR="${twork}/.specify/jira"
+  export JIRA_EMAIL="user@example.com"
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  export JIRA_NO_SLEEP=1
+  export SPEC_KIT_JIRA_ID_SOURCE="1111111111111111 2222222222222222 3333333333333333 4444444444444444"
+  unset SPEC_KIT_JIRA_PLAN_CONTEXT SPEC_KIT_JIRA_LIFECYCLE
+
+  mock_start "${MOCK}/configs/comp-two-role-transitions.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${tspec}" --json > /dev/null
+
+  # The mock always creates a fresh issue at "To Do" regardless of
+  # project/role -- a status the specification role's OWN delivery
+  # workflow never declares. Move the parent to "Funnel" (its
+  # after_specify step) directly, exactly as an operator's own board
+  # would show it after the team's first triage -- so drift_evaluate has
+  # a classifiable starting point for the specification role.
+  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-1" \
+    -H 'Content-Type: application/json' \
+    -d '{"fields":{"status":{"name":"Funnel","statusCategory":{"key":"new"}}}}' > /dev/null
+
+  : > "${MOCK_CALLLOG}"
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile "${tspec}" --json
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  [ "$status" -eq 0 ]
+
+  # The parent lands on "Building" (its own delivery workflow) ...
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-1/transitions")) | .body.transition.id' <<< "$output")" = '"201"' ]
+  # ... each story lands on "In Progress" (its own development workflow) ...
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-2/transitions")) | .body.transition.id' <<< "$output")" = '"202"' ]
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-3/transitions")) | .body.transition.id' <<< "$output")" = '"203"' ]
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-4/transitions")) | .body.transition.id' <<< "$output")" = '"204"' ]
+  # ... zero warnings (no ambiguous/gated/unreachable outcome for any ticket) ...
+  [ "$(jq '.warnings | length' <<< "$output")" -eq 0 ]
+  # ... and exactly one availability read per ticket -- never more, never a
+  # read against the other role's declared step.
+  [ "$(grep -c '/transitions?expand=' "${MOCK_CALLLOG}")" -eq 4 ]
+}

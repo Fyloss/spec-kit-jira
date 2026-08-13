@@ -1191,12 +1191,23 @@ function Get-JiraLifecyclePlan {
     }
 
     # 023, research R6: the parent gets one more entry in the SAME list, so the
-    # per-ticket body below runs over it unchanged (contract §5 U8).
+    # per-ticket body below runs over it unchanged (contract §5 U8). Fix: the
+    # parent has no pending CONTENT write on a run where its content is
+    # unchanged ($parentAction is $null then) — that must never suppress its
+    # own lifecycle-safety evaluation, exactly as a story with no content
+    # change still reaches Get-JiraDriftDecision. A placeholder stands in
+    # only when there is no real action, never treated as a content write
+    # (IsParent below already excludes the parent from $kept
+    # unconditionally).
     $parentLid = [string](Get-JiraPlanProp $lc 'parent_local_id')
-    if ($parentLid -ne '' -and $null -ne $parentAction) {
+    if ($parentLid -ne '') {
         $ptk = Get-JiraPlanProp $tickets $parentLid
         if ($null -eq $ptk) { $ptk = [pscustomobject]@{} }
-        $entries.Add([pscustomobject]@{ Sid = $parentLid; Action = $parentAction; Method = [string]$parentAction.method; Tk = $ptk; IsParent = $true })
+        $parentEntryAction = if ($null -ne $parentAction) { $parentAction } else { [pscustomobject]@{} }
+        # Get-JiraPlanProp, never a direct .method: an empty PSCustomObject
+        # placeholder has no `method` property, and StrictMode throws on a
+        # direct access to a property that does not exist.
+        $entries.Add([pscustomobject]@{ Sid = $parentLid; Action = $parentEntryAction; Method = [string](Get-JiraPlanProp $parentEntryAction 'method'); Tk = $ptk; IsParent = $true })
     }
 
     $kept = [System.Collections.Generic.List[object]]::new()

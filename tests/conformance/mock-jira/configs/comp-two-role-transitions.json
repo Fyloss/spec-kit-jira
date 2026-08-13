@@ -1,0 +1,17 @@
+{
+  "projects": {"COMP": "company"},
+  "transitions": {
+    "COMP-1": [
+      {"id": "201", "name": "Start delivery", "to": {"name": "Building"}, "fields": {}}
+    ],
+    "COMP-2": [
+      {"id": "202", "name": "Start", "to": {"name": "In Progress"}, "fields": {}}
+    ],
+    "COMP-3": [
+      {"id": "203", "name": "Start", "to": {"name": "In Progress"}, "fields": {}}
+    ],
+    "COMP-4": [
+      {"id": "204", "name": "Start", "to": {"name": "In Progress"}, "fields": {}}
+    ]
+  }
+}
