@@ -175,9 +175,9 @@ run under the matching event, and observe the ticket at the declared step.
 - [X] T052 [P] [US1] Mirror the conditional `counts.transitioned` in `scripts/powershell/commands/Reconcile.psm1`
 - [X] T053 [P] [US1] Add the optional `counts.transitioned` key to `specs/001-jira-reconcile-engine/contracts/run-summary.schema.json`, the schema `--json` output is validated against, marking it optional so a run with no event still validates
 - [X] T054 [US1] Rewrite the pin `@test "zero transition requests in scenario — this release evaluates the rules but never moves a ticket's status"` in `tests/bash/commands/test_reconcile_lifecycle.bats:123` to assert what stays true — a project declaring **no** mapping issues zero transition requests — rather than deleting it (research §R9) — also fixed a same-namespace local_id collision the 3-item `SPEC_KIT_JIRA_ID_SOURCE` test seam introduced now the parent shares the `tickets` map with stories (023's own change); old assertion's `/transitions$` end-anchor never matched the real `?expand=...` query string either, so it was a silent false-pass
-- [ ] T055 [US1] Rewrite the same pin in `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1:132`
-- [ ] T056 [P] [US1] Add `tests/conformance/scenarios/us023-story-advances.json` — the headline case end to end, asserting an identical recorded call sequence on both ports
-- [ ] T057 [P] [US1] Add `tests/conformance/scenarios/us023-already-at-target.json` — zero availability requests and zero moves
+- [X] T055 [US1] Rewrite the same pin in `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1:132`
+- [X] T056 [P] [US1] Add `tests/conformance/scenarios/us023-story-advances.json` — the headline case end to end, asserting an identical recorded call sequence on both ports
+- [X] T057 [P] [US1] Add `tests/conformance/scenarios/us023-already-at-target.json` — zero availability requests and zero moves
 - [X] T057a [P] [US1] ~~Add `tests/conformance/scenarios/us023-bulk-fallback.json`~~ — **SKIPPED, branch A only; T002 selected branch C** (depends on T002)
 
 **Checkpoint**: a declared mapping moves a story. This is the MVP — deliverable and demonstrable on its own.

@@ -134,7 +134,30 @@ Describe 'Invoke-JiraReconcile — the drift, halted, and Flagged rules engage a
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match 'Flagged' }).Count | Should -Be 0
     }
 
-    It "zero transition requests in every scenario — this release evaluates the rules but never moves a ticket's status" {
+    It 'a project declaring no phase_status_map issues zero transition requests' {
+        # T055: mirror of the bats fix at tests/bash/commands/test_reconcile_lifecycle.bats
+        # "a project declaring no phase_status_map issues zero transition
+        # requests" — the old pin here declared a phase_status_map (via
+        # $script:ConfigYaml) yet asserted on a regex, `/transitions$`, that
+        # never matches the real `?expand=...` query string, making it a
+        # silent false-pass regardless of what the config declared. Rewritten
+        # to assert what stays true: no mapping declared = zero requests.
+        $noMapConfig = @'
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP
+'@
+        Set-Content -NoNewline -Path (Join-Path $script:Work '.specify/jira/config.yml') -Value $noMapConfig
+
         $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
         $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
         $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
@@ -145,7 +168,7 @@ Describe 'Invoke-JiraReconcile — the drift, halted, and Flagged rules engage a
             $null = Invoke-Captured @('reconcile', $script:Spec, '--json')
         }
         finally { Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue }
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match '/transitions$' }).Count | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match 'transitions' }).Count | Should -Be 0
     }
 
     It 'under SPEC_KIT_JIRA_HOOK_CONTEXT every recognition failure exits 0 with exactly one WARNING' {
