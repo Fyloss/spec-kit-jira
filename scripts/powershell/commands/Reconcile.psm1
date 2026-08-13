@@ -1902,10 +1902,19 @@ function Invoke-JiraReconcileRun {
     catch {
         # 023, contract transition-resolution.md §2 F2: a transitions-read
         # failure fails closed for the WHOLE specification. Get-JiraLifecyclePlan
-        # throws naming the failing key — reused verbatim here, mirroring
-        # reconcile.sh's fail_closed_key handling — with the generic message
-        # as a fallback for any OTHER assembly failure.
+        # throws naming the failing key, prefixed "RC=<n>:" carrying the
+        # REAL transport exit code (fail_closed=2, auth=3, ...) -- an
+        # exception cannot carry a structured exit code natively, and a
+        # message-only throw here previously HARDCODED EXIT_CONFIG (4)
+        # regardless of what the read actually failed with, diverging from
+        # reconcile.sh's own _reconcile_fault "${lc_rc}" ..., which passes
+        # the real code straight through. The prefix is stripped from the
+        # user-facing message; a message with no prefix (any OTHER
+        # assembly failure) falls back to EXIT_CONFIG.
         $msg = [string]$_.Exception.Message
+        if ($msg -match '^RC=(\d+):(.*)$') {
+            return (Get-JiraReconcileFaultCode -Code ([int]$Matches[1]) -Message "reconcile: $($Matches[2])")
+        }
         if ($msg -match "'s available moves could not be read") {
             return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: $msg")
         }

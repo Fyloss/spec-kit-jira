@@ -66,6 +66,43 @@ setup() {
   [[ "$(jq -r '.notes[0]' <<< "$output")" == *"K-10"* ]]
 }
 
+@test "T105 -- an unclassified status withholds the move while content still mirrors (U1)" {
+  local lc
+  lc="$(jq -cn '{order:{story:["To Do","In Progress","Done"]}, base_url:"http://h",
+    tickets:{s1:{key:"K-1", status:"Weird Status", category:"unknown", target:"In Progress", transition_id:"21"}}}')"
+  run plan_lifecycle "${ACTIONS}" "${DOC}" "${lc}"
+  [ "$status" -eq 0 ]
+  [ "$(jq '[.actions[] | select(.method=="PUT")] | length' <<< "$output")" -eq 1 ]
+  [ "$(jq '[.actions[] | select(.url|endswith("/transitions"))] | length' <<< "$output")" -eq 0 ]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"unclassified"* ]]
+}
+
+@test "T107 -- a parent in a halted/Flagged/backward-drift situation produces the SAME warning wording as a story (U8)" {
+  # The parent and a story share the SAME per-ticket body by construction
+  # (023, research R6) — this test proves it concretely for two rules
+  # rather than merely asserting the architecture.
+  local doc2 actions2 parent_action2
+  doc2="$(jq -cn '{stories:[{local_id:"s1"}]}')"
+  actions2='[{"method":"PUT","url":"http://h/rest/api/3/issue/K-1","body":{"fields":{"summary":"New"}}}]'
+  parent_action2='{"method":"PUT","url":"http://h/rest/api/3/issue/K-1","body":{"fields":{"summary":"New"}}}'
+
+  local lc_story lc_parent
+  lc_story="$(jq -cn '{order:{story:["To Do","In Progress","Done"]}, base_url:"http://h",
+    tickets:{s1:{key:"K-1", status:"Blocked", category:"halted", target:"In Progress", transition_id:"21"}}}')"
+  lc_parent="$(jq -cn '{order:{specification:["To Do","In Progress","Done"]}, base_url:"http://h", parent_local_id:"s1",
+    tickets:{s1:{key:"K-1", status:"Blocked", category:"halted", target:"In Progress", transition_id:"21", role:"specification"}}}')"
+
+  local story_out parent_out
+  story_out="$(plan_lifecycle "${actions2}" "${doc2}" "${lc_story}")"
+  parent_out="$(plan_lifecycle '[]' '{"stories":[]}' "${lc_parent}" "${parent_action2}")"
+
+  local story_warn parent_warn
+  story_warn="$(jq -r '.warnings[0]' <<< "${story_out}")"
+  parent_warn="$(jq -r '.warnings[0]' <<< "${parent_out}")"
+  [ "${story_warn}" = "${parent_warn}" ]
+  [[ "${story_warn}" == *"halted"* ]]
+}
+
 @test "the PowerShell port folds the lifecycle rules byte-identically (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local ps_abs; ps_abs="$(cd "${ROOT}/scripts/powershell/sink/jira" && pwd)"

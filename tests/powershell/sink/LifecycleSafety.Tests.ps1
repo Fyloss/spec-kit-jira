@@ -43,4 +43,27 @@ Describe 'Get-JiraLifecyclePlan' {
         $r.notes[0] | Should -BeLike '*K-9*'
         $r.notes[0] | Should -BeLike '*K-10*'
     }
+
+    It 'T106 -- an unclassified status withholds the move while content still mirrors (U1)' {
+        $lc = '{"order":{"story":["To Do","In Progress","Done"]},"base_url":"http://h","tickets":{"s1":{"key":"K-1","status":"Weird Status","category":"unknown","target":"In Progress","transition_id":"21"}}}'
+        $r = Invoke-Lifecycle $lc
+        (@($r.actions | Where-Object { $_.method -eq 'PUT' }).Count) | Should -Be 1
+        (@($r.actions | Where-Object { ([string]$_.url).EndsWith('/transitions') }).Count) | Should -Be 0
+        $r.warnings[0] | Should -BeLike '*unclassified*'
+    }
+
+    It 'T108 -- a parent in a halted situation produces the SAME warning wording as a story (U8)' {
+        $doc2 = '{"stories":[{"local_id":"s1"}]}'
+        $actions2 = '[{"method":"PUT","url":"http://h/rest/api/3/issue/K-1","body":{"fields":{"summary":"New"}}}]'
+        $parentAction2 = '{"method":"PUT","url":"http://h/rest/api/3/issue/K-1","body":{"fields":{"summary":"New"}}}'
+
+        $lcStory = '{"order":{"story":["To Do","In Progress","Done"]},"base_url":"http://h","tickets":{"s1":{"key":"K-1","status":"Blocked","category":"halted","target":"In Progress","transition_id":"21"}}}'
+        $lcParent = '{"order":{"specification":["To Do","In Progress","Done"]},"base_url":"http://h","parent_local_id":"s1","tickets":{"s1":{"key":"K-1","status":"Blocked","category":"halted","target":"In Progress","transition_id":"21","role":"specification"}}}'
+
+        $storyOut = Get-JiraLifecyclePlan -ContentActionsJson $actions2 -NeutralDocJson $doc2 -LifecycleContextJson $lcStory | ConvertFrom-Json
+        $parentOut = Get-JiraLifecyclePlan -ContentActionsJson '[]' -NeutralDocJson '{"stories":[]}' -LifecycleContextJson $lcParent -ParentActionJson $parentAction2 | ConvertFrom-Json
+
+        $storyOut.warnings[0] | Should -Be $parentOut.warnings[0]
+        $storyOut.warnings[0] | Should -BeLike '*halted*'
+    }
 }

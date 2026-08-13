@@ -1296,7 +1296,7 @@ function Get-JiraLifecyclePlan {
         $dueKeys = @($due | ForEach-Object { $_.Key })
         $rc = Import-JiraTransitions -Key $dueKeys
         if ($rc -ne 0) {
-            throw "$($dueKeys[0])'s available moves could not be read (zero writes)"
+            throw "RC=${rc}:$($dueKeys[0])'s available moves could not be read (zero writes)"
         }
         foreach ($d in $due) {
             $record = Get-JiraTransitionRecord -Key $d.Key
