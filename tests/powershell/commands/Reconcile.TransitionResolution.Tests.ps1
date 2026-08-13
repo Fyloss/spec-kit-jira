@@ -88,6 +88,38 @@ Describe 'Invoke-JiraReconcile — a declared step actually moves a ticket' {
         (@($r.warnings) -join ' ') | Should -Match 'COMP-3'
     }
 
+    It 'T122 -- an ambiguous outcome names both candidates verbatim, content still mirrors, exactly one warning and idempotent on a repeat run' {
+        # A genuine content diff for COMP-3's own story -- otherwise its PUT
+        # is zero-churn (unchanged since BeforeEach's own creation run) and
+        # the content-survival assertion below would prove nothing.
+        $content = (Get-Content -Raw -LiteralPath $script:Spec) `
+            -replace 'export every invoice in a date range', 'export every invoice in a date range as a bundle'
+        Set-Content -NoNewline -Path $script:Spec -Value $content
+
+        Clear-Content -LiteralPath $script:M.CallLog
+        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+        try {
+            $r = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
+        }
+        finally { Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue }
+        $comp3Warns = @($r.warnings | Where-Object { $_ -like '*COMP-3*' })
+        $comp3Warns.Count | Should -Be 1
+        $comp3Warns[0] | Should -Be 'Story ticket COMP-3 was not moved to "In Progress": 2 transitions land on it (Start (102), Start (dup) (103)). The bridge invents no preference — perform the one you want by hand, or narrow the workflow.'
+        @($r.actions | Where-Object { ([string]$_.url).EndsWith('/rest/api/3/issue/COMP-3') -and $_.method -eq 'PUT' }).Count | Should -Be 1
+
+        # A second run under the same event produces the SAME single
+        # warning — never duplicated, never grown.
+        Clear-Content -LiteralPath $script:M.CallLog
+        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+        try {
+            $r2 = Invoke-Captured @('reconcile', $script:Spec, '--json') | ConvertFrom-Json
+        }
+        finally { Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue }
+        $comp3Warns2 = @($r2.warnings | Where-Object { $_ -like '*COMP-3*' })
+        $comp3Warns2.Count | Should -Be 1
+        $comp3Warns2[0] | Should -Be $comp3Warns[0]
+    }
+
     It 'a gated declared step moves nothing and names the withheld field' {
         Clear-Content -LiteralPath $script:M.CallLog
         $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'

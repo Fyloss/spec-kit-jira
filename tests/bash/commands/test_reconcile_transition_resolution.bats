@@ -75,6 +75,40 @@ teardown() {
   [[ "$(jq -r '.warnings | join(" ")' <<< "$output")" == *"COMP-3"* ]]
 }
 
+@test "T121 -- an ambiguous outcome names both candidates verbatim, content still mirrors, exactly one warning and idempotent on a repeat run" {
+  # A genuine content diff for COMP-3's own story -- otherwise its PUT is
+  # zero-churn (unchanged since setup's own creation run) and the content-
+  # survival assertion below would prove nothing.
+  sed -i.bak 's/export every invoice in a date range/export every invoice in a date range as a bundle/' "${SPEC}"
+  rm -f "${SPEC}.bak"
+
+  : > "${MOCK_CALLLOG}"
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile "${SPEC}" --json
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  [ "$status" -eq 0 ]
+  # Exactly one warning naming COMP-3, both candidate transition names/ids.
+  local comp3_warns
+  comp3_warns="$(jq -e '[.warnings[] | select(contains("COMP-3"))]' <<< "$output")"
+  [ "$(jq 'length' <<< "${comp3_warns}")" -eq 1 ]
+  local w
+  w="$(jq -r '.[0]' <<< "${comp3_warns}")"
+  [[ "${w}" == 'Story ticket COMP-3 was not moved to "In Progress": 2 transitions land on it (Start (102), Start (dup) (103)). The bridge invents no preference — perform the one you want by hand, or narrow the workflow.' ]]
+  # Content still mirrors: COMP-3's own PUT still fires.
+  [ "$(jq -e '[.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-3")) | select(.method == "PUT")] | length' <<< "$output")" -eq 1 ]
+
+  # A second run under the same event produces the SAME single warning —
+  # never duplicated, never grown.
+  : > "${MOCK_CALLLOG}"
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile "${SPEC}" --json
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  [ "$status" -eq 0 ]
+  comp3_warns="$(jq -e '[.warnings[] | select(contains("COMP-3"))]' <<< "$output")"
+  [ "$(jq 'length' <<< "${comp3_warns}")" -eq 1 ]
+  [ "$(jq -r '.[0]' <<< "${comp3_warns}")" = "${w}" ]
+}
+
 @test "a gated declared step moves nothing and names the withheld field" {
   : > "${MOCK_CALLLOG}"
   export SPEC_KIT_JIRA_HOOK_EVENT=after_plan

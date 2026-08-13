@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (151)" {
+@test "the conformance corpus has exactly the recorded scenario count (152)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -80,8 +80,11 @@ setup() {
   # 023 adds one: us023-move-rejected (Phase 7, US5, T118) — the mock's new
   # method-keyed fault injection lets a POST to .../transitions be rejected
   # while the GET on the same path stays healthy (150 -> 151).
+  # 023 adds one: us023-ambiguous-candidates (Phase 8, US6, T127) — two
+  # candidate transitions land on the same declared step name; the mirror
+  # invents no preference and names both verbatim (151 -> 152).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 151 ]
+  [ "${count}" -eq 152 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

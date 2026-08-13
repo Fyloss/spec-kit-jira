@@ -315,18 +315,15 @@ moves and one warning listing both candidates by name.
 
 ### Tests for User Story 6 (write first, observe failing)
 
-- [ ] T119 [P] [US6] Add to `tests/bash/sink/test_transitions.bats` the `ambiguous` branch: two or more candidates yield `{"outcome":"ambiguous","candidates":[…]}` with no preference invented (contract §3, rule M3)
-- [ ] T120 [P] [US6] Add the same `ambiguous` branch to `tests/powershell/sink/Transitions.Tests.ps1`
-- [ ] T121 [US6] Add to `tests/bash/commands/test_reconcile_lifecycle.bats`: zero moves, **exactly one** warning per ticket with the verbatim wording of contract §4, content still mirrored, and the same single warning on a later unchanged run
-- [ ] T122 [US6] Add the same end-to-end ambiguity assertions to `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1`
-
-### Implementation for User Story 6
-
-- [ ] T123 [US6] Implement the `ambiguous` branch in `scripts/bash/sink/jira/transitions.sh` (depends on T045)
-- [ ] T124 [US6] Mirror the `ambiguous` branch in `scripts/powershell/sink/jira/Transitions.psm1` (depends on T046)
-- [ ] T125 [US6] Emit the ambiguity warning verbatim from contract §4 in `scripts/bash/sink/jira/plan_apply.sh`, replacing the silent drop at `plan_apply.sh:1140` (depends on T123)
-- [ ] T126 [US6] Mirror the ambiguity warning in `scripts/powershell/sink/jira/PlanApply.psm1` (depends on T124)
-- [ ] T127 [P] [US6] Add `tests/conformance/scenarios/us023-ambiguous-candidates.json` — identical warning text on both ports
+- [X] T119 [P] [US6] Add to `tests/bash/sink/test_transitions.bats` the `ambiguous` branch: two or more candidates yield `{"outcome":"ambiguous","candidates":[…]}` with no preference invented (contract §3, rule M3) — already held from Phase 4's own implementation of all four outcomes together ("two candidates landing on the declared step resolve to ambiguous, both named")
+- [X] T120 [P] [US6] Add the same `ambiguous` branch to `tests/powershell/sink/Transitions.Tests.ps1` — already held, same test name
+- [X] T121 [US6] Add to `tests/bash/commands/test_reconcile_lifecycle.bats`: zero moves, **exactly one** warning per ticket with the verbatim wording of contract §4, content still mirrored, and the same single warning on a later unchanged run — landed in `test_reconcile_transition_resolution.bats` instead (T111's own precedent: the end-to-end declared-step suite, not the lifecycle-safety one). The existing "two candidates…" test only checked a substring match; this closes the exactly-one/verbatim-wording/content-survival/idempotent-on-repeat gap
+- [X] T122 [US6] Add the same end-to-end ambiguity assertions to `tests/powershell/commands/Reconcile.Lifecycle.Tests.ps1` — landed in `Reconcile.TransitionResolution.Tests.ps1`, mirroring T121
+- [X] T123 [US6] Implement the `ambiguous` branch in `scripts/bash/sink/jira/transitions.sh` (depends on T045) — already held (`transitions_resolve`'s `$n >= 2` branch, built with all four outcomes in Phase 4)
+- [X] T124 [US6] Mirror the `ambiguous` branch in `scripts/powershell/sink/jira/Transitions.psm1` (depends on T046) — already held (`Resolve-JiraTransition`'s `$n -ge 2` branch)
+- [X] T125 [US6] Emit the ambiguity warning verbatim from contract §4 in `scripts/bash/sink/jira/plan_apply.sh`, replacing the silent drop at `plan_apply.sh:1140` (depends on T123) — already held (`_plan_transition_warning`'s `ambiguous` case, built in Phase 4)
+- [X] T126 [US6] Mirror the ambiguity warning in `scripts/powershell/sink/jira/PlanApply.psm1` (depends on T124) — already held (`Get-JiraTransitionWarning`'s `ambiguous` case)
+- [X] T127 [P] [US6] Add `tests/conformance/scenarios/us023-ambiguous-candidates.json` — identical warning text on both ports — new fixture reuse of `repo-with-bound-story-due`; diffs byte-identical bash vs PowerShell
 
 ---
 
