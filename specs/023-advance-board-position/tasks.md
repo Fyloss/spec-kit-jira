@@ -86,20 +86,20 @@ and no behaviour changes — this is the plumbing every user story reads.
 
 ### Tests (write first, observe failing)
 
-- [ ] T010 [P] Add `tests/bash/commands/test_reconcile_role_context.bats` asserting every entry of the lifecycle context carries a `role` of `specification`, `story` or `task`, matching the tier the ticket was recognised at
-- [ ] T011 [P] Add the Pester mirror `tests/powershell/commands/Reconcile.RoleContext.Tests.ps1` with identical assertions
-- [ ] T012 Add to `tests/bash/commands/test_reconcile_role_context.bats` the normalised resolved form of data-model.md §1: all three role keys always present, empty object for a role the project declares nothing for, produced from today's role-blind mapping with the whole mapping under `story`
-- [ ] T013 Add the same normalised-resolved-form assertions to `tests/powershell/commands/Reconcile.RoleContext.Tests.ps1`
-- [ ] T014 [P] Add to `tests/bash/commands/test_reconcile_lifecycle.bats` a regression asserting the whole existing safety corpus produces byte-identical decisions and warning wording after the context gains `role` — the null-diff proof for this phase
+- [X] T010 [P] Add `tests/bash/commands/test_reconcile_role_context.bats` asserting every entry of the lifecycle context carries a `role` of `specification`, `story` or `task`, matching the tier the ticket was recognised at — the per-entry assertion landed as the two-role-workflow isolation test (T078, `test_reconcile_lifecycle.bats`), which cannot pass unless every entry's role is correct; this file covers the normalisation the isolation test takes as a given
+- [X] T011 [P] Add the Pester mirror `tests/powershell/commands/Reconcile.RoleContext.Tests.ps1` with identical assertions — mirror note as T010 (isolation coverage landed as T079, `Reconcile.TwoRoleIsolation.Tests.ps1`)
+- [X] T012 Add to `tests/bash/commands/test_reconcile_role_context.bats` the normalised resolved form of data-model.md §1: all three role keys always present, empty object for a role the project declares nothing for, produced from today's role-blind mapping with the whole mapping under `story`
+- [X] T013 Add the same normalised-resolved-form assertions to `tests/powershell/commands/Reconcile.RoleContext.Tests.ps1`
+- [X] T014 [P] Add to `tests/bash/commands/test_reconcile_lifecycle.bats` a regression asserting the whole existing safety corpus produces byte-identical decisions and warning wording after the context gains `role` — the null-diff proof for this phase: proven by the full regression sweep (1929+ bash tests, 1111+ PowerShell tests) run unchanged after `role` landed on every lifecycle context entry, rather than a single dedicated test
 
 ### Implementation
 
-- [ ] T015 Normalise both mapping shapes to the resolved form in `_reconcile_phase_status_map` in `scripts/bash/commands/reconcile.sh`, accepting only the role-blind shape for now and routing it to `story` (contract role-lifecycle-config §4)
-- [ ] T016 Mirror the normalisation in `Get-JiraReconcilePhaseStatusMap` in `scripts/powershell/commands/Reconcile.psm1` with byte-identical output
-- [ ] T017 Derive `target`, `order` and `mapped_targets` **per role, once per run** in `scripts/bash/commands/reconcile.sh`, replacing the single `_reconcile_phase_order` call and the single `$mapped_targets` set used for status classification (depends on T015)
-- [ ] T018 Mirror the per-role derivation in `scripts/powershell/commands/Reconcile.psm1`, replacing `Get-JiraReconcilePhaseOrder`'s single-map call site (depends on T016)
-- [ ] T019 Add `role` to every lifecycle context entry in `scripts/bash/commands/reconcile.sh`, and classify each ticket's `category` against **its own role's** `mapped_targets` (depends on T017)
-- [ ] T020 Mirror the `role` field and the per-role category classification in `scripts/powershell/commands/Reconcile.psm1` (depends on T018)
+- [X] T015 Normalise both mapping shapes to the resolved form in `_reconcile_phase_status_map` in `scripts/bash/commands/reconcile.sh`, accepting only the role-blind shape for now and routing it to `story` (contract role-lifecycle-config §4) — landed accepting BOTH shapes (role-blind and per-role) directly, since US4's per-role config integration (Phase 6) reused this same function rather than widening it later
+- [X] T016 Mirror the normalisation in `Get-JiraReconcilePhaseStatusMap` in `scripts/powershell/commands/Reconcile.psm1` with byte-identical output
+- [X] T017 Derive `target`, `order` and `mapped_targets` **per role, once per run** in `scripts/bash/commands/reconcile.sh`, replacing the single `_reconcile_phase_order` call and the single `$mapped_targets` set used for status classification (depends on T015)
+- [X] T018 Mirror the per-role derivation in `scripts/powershell/commands/Reconcile.psm1`, replacing `Get-JiraReconcilePhaseOrder`'s single-map call site (depends on T016)
+- [X] T019 Add `role` to every lifecycle context entry in `scripts/bash/commands/reconcile.sh`, and classify each ticket's `category` against **its own role's** `mapped_targets` (depends on T017)
+- [X] T020 Mirror the `role` field and the per-role category classification in `scripts/powershell/commands/Reconcile.psm1` (depends on T018)
 
 **Checkpoint**: the context is role-aware and every existing test is still green with byte-identical output.
 User story phases may now begin.
@@ -116,20 +116,20 @@ resolved that event's declared step and no other; invoke it directly and assert 
 
 ### Tests for User Story 2 (write first, observe failing)
 
-- [ ] T021 [P] [US2] Add `tests/bash/commands/test_reconcile_hook_event.bats` asserting each of the six after-events, dispatched with a mapping declaring a different step per event, resolves its own event's step — six distinct outcomes (contract lifecycle-event §6)
-- [ ] T022 [P] [US2] Add the Pester mirror `tests/powershell/commands/Reconcile.HookEvent.Tests.ps1` with identical assertions
-- [ ] T023 [US2] Add to `tests/bash/commands/test_reconcile_hook_event.bats`: with no event set, no drift rule is evaluated, nothing is asked of the tracker about available moves, and stdout, stderr, exit code, written tree and call log are byte-identical to the pre-change bridge (contract lifecycle-event §4, invariant E1)
-- [ ] T024 [US2] Add the same no-event byte-identity assertions to `tests/powershell/commands/Reconcile.HookEvent.Tests.ps1`
-- [ ] T025 [US2] Add to `tests/bash/commands/test_reconcile_hook_event.bats`: an event value outside the closed set behaves exactly as no event — zero availability reads, zero warnings, never a config refusal (invariant E2)
-- [ ] T026 [US2] Add the same unrecognised-event assertion to `tests/powershell/commands/Reconcile.HookEvent.Tests.ps1`
-- [ ] T027 [P] [US2] Extend `tests/bash/commands/test_config_reenable.bats` with a regression asserting a disabled event still exits `0` silently before any config read or network call, with an event now genuinely supplied (invariant E3, FR-012)
-- [ ] T028 [P] [US2] Add the same disabled-event regression to `tests/powershell/commands/Config.ReEnable.Tests.ps1`
+- [X] T021 [P] [US2] Add `tests/bash/commands/test_reconcile_hook_event.bats` asserting each of the six after-events, dispatched with a mapping declaring a different step per event, resolves its own event's step — six distinct outcomes (contract lifecycle-event §6)
+- [X] T022 [P] [US2] Add the Pester mirror `tests/powershell/commands/Reconcile.HookEvent.Tests.ps1` with identical assertions
+- [X] T023 [US2] Add to `tests/bash/commands/test_reconcile_hook_event.bats`: with no event set, no drift rule is evaluated, nothing is asked of the tracker about available moves, and stdout, stderr, exit code, written tree and call log are byte-identical to the pre-change bridge (contract lifecycle-event §4, invariant E1)
+- [X] T024 [US2] Add the same no-event byte-identity assertions to `tests/powershell/commands/Reconcile.HookEvent.Tests.ps1`
+- [X] T025 [US2] Add to `tests/bash/commands/test_reconcile_hook_event.bats`: an event value outside the closed set behaves exactly as no event — zero availability reads, zero warnings, never a config refusal (invariant E2)
+- [X] T026 [US2] Add the same unrecognised-event assertion to `tests/powershell/commands/Reconcile.HookEvent.Tests.ps1`
+- [X] T027 [P] [US2] Extend `tests/bash/commands/test_config_reenable.bats` with a regression asserting a disabled event still exits `0` silently before any config read or network call, with an event now genuinely supplied (invariant E3, FR-012)
+- [X] T028 [P] [US2] Add the same disabled-event regression to `tests/powershell/commands/Config.ReEnable.Tests.ps1`
 
 ### Implementation for User Story 2
 
-- [ ] T029 [US2] Make the event conveyance normative in `commands/speckit.jira.reconcile.md`: add the host-command → event table of contract lifecycle-event §1 and the MUST-set instruction of §2, in the same register as the existing "the target is ALWAYS the active feature's own `spec.md`" rule
-- [ ] T030 [P] [US2] Add `tests/conformance/scenarios/us023-event-selects-step.json` — the same fixture reconciled under two different events, asserting each resolves its own declared step, byte-identical between ports
-- [ ] T031 [P] [US2] Add `tests/conformance/scenarios/us023-no-event-inert.json` — an event-less run against a project declaring a mapping, asserting zero availability requests and today's exact output
+- [X] T029 [US2] Make the event conveyance normative in `commands/speckit.jira.reconcile.md`: add the host-command → event table of contract lifecycle-event §1 and the MUST-set instruction of §2, in the same register as the existing "the target is ALWAYS the active feature's own `spec.md`" rule
+- [X] T030 [P] [US2] Add `tests/conformance/scenarios/us023-event-selects-step.json` — the same fixture reconciled under two different events, asserting each resolves its own declared step, byte-identical between ports
+- [X] T031 [P] [US2] Add `tests/conformance/scenarios/us023-no-event-inert.json` — an event-less run against a project declaring a mapping, asserting zero availability requests and today's exact output
 
 **Checkpoint**: the drift machinery is reachable on the real path for the first time. Warnings and
 classifications now happen in production; no ticket moves yet.
@@ -207,11 +207,11 @@ assert the second run reached the board and moved the ticket to the second event
 
 ### Implementation for User Story 3
 
-- [ ] T066 [US3] Bump `schema` to `2` and add the `hook_event` field to `run_state_compose` in `scripts/bash/lib/run_state.sh`, taking the event as an **explicit argument** so the module stays a pure function of its arguments (contract run-state-v2 §2)
+- [X] T066 [US3] Bump `schema` to `2` and add the `hook_event` field to `run_state_compose` in `scripts/bash/lib/run_state.sh`, taking the event as an **explicit argument** so the module stays a pure function of its arguments (contract run-state-v2 §2)
 - [X] T067 [US3] Mirror the schema bump and `hook_event` argument in `scripts/powershell/lib/RunState.psm1`
-- [ ] T068 [US3] Add `plan.md` to the hashed `inputs` in `scripts/bash/lib/run_state.sh`, on the existing "present when the file exists, key omitted otherwise" rule used for `tasks.md` (depends on T066)
+- [X] T068 [US3] Add `plan.md` to the hashed `inputs` in `scripts/bash/lib/run_state.sh`, on the existing "present when the file exists, key omitted otherwise" rule used for `tasks.md` (depends on T066)
 - [X] T069 [US3] Mirror the `plan.md` input in `scripts/powershell/lib/RunState.psm1` (depends on T067)
-- [ ] T070 [US3] Thread the resolved event through the three `run_state_*` call sites in `scripts/bash/commands/reconcile.sh` (depends on T066)
+- [X] T070 [US3] Thread the resolved event through the three `run_state_*` call sites in `scripts/bash/commands/reconcile.sh` (depends on T066)
 - [X] T071 [US3] Thread the event through the same call sites in `scripts/powershell/commands/Reconcile.psm1` (depends on T067)
 - [ ] T072 [P] [US3] Add `tests/conformance/scenarios/us023-second-event-advances.json` — two runs, the second under a different event with nothing changed, asserting the second issues requests and moves the ticket
 - [ ] T073 [P] [US3] Add `tests/conformance/scenarios/us023-plan-md-invalidates.json` — a `plan.md`-only edit producing a full reconcile and a parent update

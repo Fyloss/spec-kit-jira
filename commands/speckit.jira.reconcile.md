@@ -43,16 +43,29 @@ in a consuming repository, and assuming it does is what produced the reported
    **With no active feature the step is inert**: do nothing and report nothing.
 
 2. **Invoke the bridge** by the repository-relative path above, passing the spec
-   file and `--json`:
+   file and `--json`. You MUST first set `SPEC_KIT_JIRA_HOOK_EVENT` to the
+   lifecycle event that fired this invocation — the bridge is told nothing
+   else about which step it is running for, and never infers it (contract
+   `lifecycle-event.md` §2, §5 invariant E1). No new flag exists for this;
+   the variable is the one door:
+
+   | Host command | Hook | Event value |
+   | --- | --- | --- |
+   | `/speckit.specify` | `after_specify` | `after_specify` |
+   | `/speckit.clarify` | `after_clarify` | `after_clarify` |
+   | `/speckit.plan` | `after_plan` | `after_plan` |
+   | `/speckit.tasks` | `after_tasks` | `after_tasks` |
+   | `/speckit.implement` | `after_implement` | `after_implement` |
+   | `/speckit.analyze` | `after_analyze` | `after_analyze` |
 
    ```text
-   .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile <spec-file> --json
+   SPEC_KIT_JIRA_HOOK_EVENT=after_specify .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile <spec-file> --json
    ```
 
    On Windows:
 
    ```text
-   .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 reconcile <spec-file> --json
+   $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_specify'; .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 reconcile <spec-file> --json
    ```
 
 3. **Interpret the outcome and report exactly one line** — never more than one
