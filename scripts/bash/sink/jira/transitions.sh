@@ -85,7 +85,7 @@ transitions_load() {
                             else {logical_name: ($req.value.name // $req.key), field_id: $req.key} end)
           } ] } | sortkeys | tojson )
     ] | join($sep)
-  ' <<< "${combined}")"
+  ' <<< "${combined}")" || return $?
   # kcov-excl-stop
 
   local lower entry

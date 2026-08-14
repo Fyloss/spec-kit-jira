@@ -454,9 +454,12 @@ _shim_apply_transition() {
     '((.transitions // {})[$k] // [])[] | select(.id == $t) | .to' "${MOCK_CONFIG_PATH}" 2> /dev/null)"
   [[ -z "${to}" || "${to}" == "null" ]] && return 0
   tmp="$(mktemp)"
-  jq -c --arg k "${key}" --argjson to "${to}" '
+  if ! jq -c --arg k "${key}" --argjson to "${to}" '
     if (.issues | has($k)) then .issues[$k].fields.status = $to else . end
-  ' "${MOCK_STATE_PATH}" > "${tmp}"
+  ' "${MOCK_STATE_PATH}" > "${tmp}"; then
+    rm -f "${tmp}"
+    return 1
+  fi
   mv "${tmp}" "${MOCK_STATE_PATH}"
 }
 
