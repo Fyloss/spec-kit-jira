@@ -925,9 +925,36 @@ def branchpattern:
           | if ($p | has($retired))
             then "projects[\($i)] declares `\($retired)`, which this version of spec-kit-jira no longer uses. Delete the line"
             else empty end ),
-        (if ($p | has("phase_status_map")) and
-            (($p.phase_status_map|type) != "object" or ([$p.phase_status_map[]|type] | any(. != "string")))
-         then "projects[\($i)].phase_status_map must be a mapping of lifecycle-event name to status name" else empty end),
+        (if ($p | has("phase_status_map")) then
+           ($p.phase_status_map) as $psm
+           | (if ($psm|type) != "object" then
+               "projects[\($i)].phase_status_map must be a mapping of lifecycle-event name to status name, or of hierarchy role to that role'\''s own mapping"
+             else
+               ($psm | keys_unsorted) as $ks
+               | ($ks | all(. as $k | $events | index($k) != null)) as $all_events
+               | ($ks | all(. as $k | $roles | index($k) != null)) as $all_roles
+               | if ($ks | length) == 0 then empty
+                 elif $all_events then
+                   ( $psm | to_entries[] | select((.value|type) != "string" or .value == "")
+                     | "projects[\($i)].phase_status_map.\(.key) must be a non-empty status name" )
+                 elif $all_roles then
+                   ( $psm | to_entries[] as $re
+                     | ($re.key) as $role | ($re.value) as $rv
+                     | ( (if ($rv|type) != "object" then
+                            "projects[\($i)].phase_status_map.\($role) must be a mapping of lifecycle-event name to status name"
+                          else empty end),
+                         (select($rv|type == "object") | $rv | keys_unsorted[] | select(IN($events[])|not)
+                           | "projects[\($i)].phase_status_map.\($role) declares unknown lifecycle event `\(.)`"),
+                         (select($rv|type == "object") | $rv | to_entries[] | select((.value|type) != "string" or .value == "")
+                           | "projects[\($i)].phase_status_map.\($role).\(.key) must be a non-empty status name")
+                       ) )
+                 elif ($ks | any(. as $k | ($events | index($k) != null) or ($roles | index($k) != null))) then
+                   "projects[\($i)].phase_status_map mixes lifecycle events and hierarchy roles; declare either one mapping for the story role, or one mapping per role (specification, story, task)"
+                 else
+                   ( $ks[] | "projects[\($i)].phase_status_map declares unknown key `\(.)`; the lifecycle events are after_specify, after_clarify, after_plan, after_tasks, after_implement, after_analyze and the roles are specification, story, task" )
+                 end
+             end)
+         else empty end),
         (if ($p | has("halted_statuses")) and (($p.halted_statuses|type) as $t | $t != "array" and $t != "string")
          then "projects[\($i)].halted_statuses must be a list of status names" else empty end),
         (if ($p | has("hierarchy")) then
@@ -980,10 +1007,12 @@ _CFG_LOCAL_ERRORS_JQ='
 # kcov-excl-stop
 
 # _cfg_schema_errors <jq-program> — read JSON on stdin, print each error line.
-# `$roles` is the closed role set (JIRA_ROLE_NAMES), bound once here so
-# neither jq program below repeats the literal.
+# `$roles` is the closed role set (JIRA_ROLE_NAMES) and `$events` the closed
+# lifecycle-event set (JIRA_HOOK_EVENT_NAMES, minus before_specify — 023,
+# contract role-lifecycle-config.md §2 accepts only the six after-events),
+# bound once here so neither jq program below repeats the literal.
 _cfg_schema_errors() {
-  jq -r --argjson roles "$(_cfg_role_names_json)" "${1} | .[]" 2> /dev/null
+  jq -r --argjson roles "$(_cfg_role_names_json)" --argjson events "$(_cfg_after_event_names_json)" "${1} | .[]" 2> /dev/null
 }
 
 # =============================================================================
@@ -1010,6 +1039,13 @@ JIRA_HOOK_EVENT_NAMES=(before_specify after_specify after_clarify after_plan aft
 # _cfg_hook_events_json — the closed set as a JSON array.
 _cfg_hook_events_json() {
   printf '%s\n' "${JIRA_HOOK_EVENT_NAMES[@]}" | jq -cR . | jq -cs .
+}
+
+# _cfg_after_event_names_json — the six after-events only (JIRA_HOOK_EVENT_NAMES
+# minus before_specify), the closed key set a role's lifecycle mapping accepts
+# (023, contracts/lifecycle-event.md §1, contracts/role-lifecycle-config.md §2).
+_cfg_after_event_names_json() {
+  printf '%s\n' "${JIRA_HOOK_EVENT_NAMES[@]:1}" | jq -cR . | jq -cs .
 }
 
 # The closed role set (010, contracts/role-mapping.md §1) — the repository's

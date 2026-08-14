@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (139)" {
+@test "the conformance corpus has exactly the recorded scenario count (161)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -65,8 +65,49 @@ setup() {
   # us022-checklist-entry-completed, us022-checklist-crlf,
   # us022-switch-to-checklist, us022-switch-to-subtask, us022-config-question
   # (132 -> 139).
+  # 023 adds four: us023-story-advances, us023-already-at-target (Phase 4,
+  # US1, T056/T057), us023-event-selects-step, us023-no-event-inert
+  # (Phase 3, US2, T030/T031) (139 -> 143).
+  # 023 adds two: us023-second-event-advances, us023-plan-md-invalidates
+  # (Phase 5, US3, T072/T073) (143 -> 145).
+  # 023 adds three: us023-two-role-workflows, us023-checklist-mode-inert,
+  # us023-legacy-mapping-story-only (Phase 6, US4, T102/T103/T104)
+  # (145 -> 148).
+  # 023 adds two: us023-parent-halted, us023-parent-flagged (Phase 7, US5,
+  # T117) — the parent's synthetic lifecycle entry gets the SAME
+  # halt/Flagged treatment a story already does (U8), exercised end to end
+  # rather than only at the pure plan_lifecycle level (148 -> 150).
+  # 023 adds one: us023-move-rejected (Phase 7, US5, T118) — the mock's new
+  # method-keyed fault injection lets a POST to .../transitions be rejected
+  # while the GET on the same path stays healthy (150 -> 151).
+  # 023 adds one: us023-ambiguous-candidates (Phase 8, US6, T127) — two
+  # candidate transitions land on the same declared step name; the mirror
+  # invents no preference and names both verbatim (151 -> 152).
+  # 023 adds two: us023-gated-move, us023-gated-move-with-field-default
+  # (Phase 9, US7, T136) — a gated move is refused and the demanded field
+  # named; a recorded field_defaults value of the same name is never
+  # substituted for it (rule M4) (152 -> 154).
+  # 023 adds two: us023-unreachable-step, us023-unreachable-empty-set
+  # (Phase 10, US8, T145) — the declared step is unreachable from the
+  # current status; the mirror never forces an intermediate move and names
+  # the reachable set (or the empty set) instead (154 -> 156).
+  # 023 adds one: us023-sixty-stories-due (Phase 11, US9, T158) — a
+  # 60-story specification with every story due a move, byte-identical
+  # recorded call sequence on both ports at scale (156 -> 157).
+  # 023 adds one: us023-dry-run-twin (Phase 12, US10, T165) — a --dry-run
+  # run under a hook event that resolves a real transition, predicting the
+  # move and writing nothing, byte-identical on both ports (157 -> 158).
+  # 023 adds one: us023-idempotent-rerun (Phase 13, T167) — a real move,
+  # then a second run over unchanged state that short-circuits (021's own
+  # mechanism), zero requests of any kind (158 -> 159).
+  # 023 adds one: us023-baseline-no-event (Phase 1, T003) — a project that
+  # DOES declare a phase_status_map, run with no hook event: byte-for-byte
+  # identical to a project declaring none at all (FR-011) (159 -> 160).
+  # 023 Phase 14 (convergence) adds one: us023-story-advances-prose (T181) —
+  # the us023-story-advances headline move run WITHOUT --json, proving
+  # counts.transitioned reaches the default prose report too (160 -> 161).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 139 ]
+  [ "${count}" -eq 161 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

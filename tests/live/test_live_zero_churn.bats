@@ -94,6 +94,12 @@ teardown() {
   [ "$(jq -r '.counts.tasks.created' <<< "$output")" -eq 0 ]
   [ "$(jq -r '.counts.tasks.updated' <<< "$output")" -eq 0 ]
   [ "$(jq -r '.counts.tasks.transitioned' <<< "$output")" -eq 0 ]
+  # 023 (contract §7 Z2/Z3, Constitution II): the specification/story-tier
+  # write kind extends this SAME assertion list the change that made it
+  # non-zero — this suite never sets a lifecycle event, so `counts.
+  # transitioned` (FR-011, present only when an event AND a declared step
+  # exist) must stay absent/null here, live, not merely in the mock corpus.
+  [ "$(jq -r '.counts.transitioned // 0' <<< "$output")" -eq 0 ]
   # spec.md still names the SAME parent and the SAME ticket — neither
   # identifier was ever reassigned.
   grep -qF "${parent_key}" "${SPEC}"
@@ -109,6 +115,7 @@ teardown() {
     [ "$(jq -r '.counts.created' <<< "$output")" -eq 0 ]
     [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
     [ "$(jq -r '.counts.tasks.transitioned' <<< "$output")" -eq 0 ]
+    [ "$(jq -r '.counts.transitioned // 0' <<< "$output")" -eq 0 ]
   done
 }
 

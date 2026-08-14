@@ -212,6 +212,13 @@ function ConvertTo-JiraSummaryProse {
         $lines.Add("Short-circuited: $($s.state_file)")
     }
     $lines.Add("Created: $($s.counts.created), Updated: $($s.counts.updated), Skipped: $($s.counts.skipped)")
+    # counts.transitioned (023, T181): present only when the run carries an
+    # event AND at least one role declares a step for it (data-model.md §5)
+    # — same conditional-presence rule the --json key already followed, now
+    # mirrored in the default prose output (FR-037).
+    if ($s.counts.PSObject.Properties.Name -contains 'transitioned') {
+        $lines.Add("Transitioned: $($s.counts.transitioned)")
+    }
     # recognised/assigned (Phase 7, US1/US2) exist only on reconcile's
     # summary — a reader confirms an unchanged re-run recognised every
     # story and created nothing, without needing --json.

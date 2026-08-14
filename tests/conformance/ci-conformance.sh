@@ -272,6 +272,44 @@ run_scenario() {
     rm -rf "${off_bash}" "${off_ps}"
   fi
 
+  # 023, Phase 3, US2, T030, contract lifecycle-event.md §6: the SAME
+  # scenario reconciled a second time under a DIFFERENT declared event
+  # (SPEC_KIT_JIRA_HOOK_EVENT, threaded through SPEC_KIT_JIRA_HARNESS_ENV —
+  # the one caller-side channel, same mechanism the prefetch differential
+  # above uses). The captures already taken above are the scenario's own
+  # `env` event (after_specify); this second pair is after_plan. Governing
+  # rule: bash and PowerShell agree on EACH event's own resolved step
+  # (byte-identical stdout/exit/calls.log per port pair), and the two
+  # events resolve to DIFFERENT outcomes from one another — proving the
+  # step actually came from the event, not a shared default.
+  if [[ "${name}" == us023-event-selects-step ]]; then
+    local alt_bash alt_ps
+    alt_bash="$(mktemp -d)"
+    alt_ps="$(mktemp -d)"
+    SPEC_KIT_JIRA_HARNESS_ENV="SPEC_KIT_JIRA_HOOK_EVENT=after_plan" "${harness}" "${scenario}" bash "${alt_bash}"
+    SPEC_KIT_JIRA_HARNESS_ENV="SPEC_KIT_JIRA_HOOK_EVENT=after_plan" "${harness}" "${scenario}" powershell "${alt_ps}"
+    for artifact in stdout exit calls.log; do
+      if ! diff -u "${alt_bash}/${artifact}" "${alt_ps}/${artifact}"; then
+        echo "conformance divergence in ${name} (after_plan variant, ${artifact})"
+        detail="${detail}$(byte_diff "after_plan/${artifact}" "${alt_bash}/${artifact}" "${alt_ps}/${artifact}")"$'\n'
+        failed=1
+      fi
+    done
+    _normalize_state_base_url "${alt_bash}/workdir"
+    _normalize_state_base_url "${alt_ps}/workdir"
+    if ! diff -rq "${alt_bash}/workdir" "${alt_ps}/workdir" > /dev/null 2>&1; then
+      echo "conformance divergence in ${name} (after_plan variant, written files)"
+      detail="${detail}  after_plan variant: written files differ between ports"$'\n'
+      failed=1
+    fi
+    if diff -q "${out_bash}/calls.log" "${alt_bash}/calls.log" > /dev/null 2>&1; then
+      echo "event-selects-step divergence in ${name} (after_specify and after_plan produced the SAME call sequence — the event never actually selected a distinct step)"
+      detail="${detail}  after_specify and after_plan produced identical calls.log; the two events did not resolve distinct steps"$'\n'
+      failed=1
+    fi
+    rm -rf "${alt_bash}" "${alt_ps}"
+  fi
+
   if [ "${failed}" -ne 0 ]; then
     { printf '%s\n' "${name}"; printf '%s' "${detail}"; } > "${REPORT_DIR}/${name}"
   fi

@@ -122,8 +122,13 @@ function Get-JiraRecognitionReadParent {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Key)
+    # 023, research R6: the field projection widens from summary,description,
+    # labels to also carry status, issuelinks and Flagged — every safety rule
+    # FR-021 requires the parent to be evaluated against. The prefetch's
+    # requested union already carries all three, so only this reader's own
+    # projection changes; the bulk request itself is unchanged.
     if (-not $env:_RECOGNITION_NO_PREFETCH) {
-        $hit = Get-JiraPrefetch -Key $Key -FieldsCsv 'summary,description,labels'
+        $hit = Get-JiraPrefetch -Key $Key -FieldsCsv 'summary,description,labels,status,issuelinks,Flagged'
         if ($null -ne $hit) {
             $h = $hit | ConvertFrom-Json -Depth 100
             return [pscustomobject]@{ ExitCode = 0; Gone = $false; Marker = $h.marker; Fields = $h.fields }
@@ -131,7 +136,7 @@ function Get-JiraRecognitionReadParent {
     }
     $base = if ($env:SPEC_KIT_JIRA_BASE_URL) { $env:SPEC_KIT_JIRA_BASE_URL } else { '' }
     $idKey = Get-JiraRecognitionIdentityKey
-    $url = "$base/rest/api/3/issue/$Key`?properties=$idKey&fields=summary,description,labels"
+    $url = "$base/rest/api/3/issue/$Key`?properties=$idKey&fields=summary,description,labels,status,issuelinks,Flagged"
     $r = Invoke-JiraRequest -Method GET -Url $url
     if ([int]$r.ExitCode -eq 0) {
         $body = $r.Body | ConvertFrom-Json -Depth 100
@@ -229,7 +234,35 @@ function Invoke-JiraRecognitionParentRun {
             }
             $origin = [string](Get-JiraRecognitionSafe $marker 'origin')
             if ([string]::IsNullOrEmpty($origin)) { $origin = 'bridge' }
-            $entry = [ordered]@{ state = 'bound'; key = $key; current = $current; origin = $origin }
+            # 023, research R6: status/status_category/flagged/blockers, the
+            # same shape a story's bound entry already carries — what makes
+            # the parent evaluable by the SAME lifecycle-safety body a story
+            # already runs through (FR-021).
+            $statusObj = Get-JiraRecognitionSafe $fields 'status'
+            $status = if ($statusObj) { [string](Get-JiraRecognitionSafe $statusObj 'name') } else { '' }
+            $statusCategoryObj = if ($statusObj) { Get-JiraRecognitionSafe $statusObj 'statusCategory' } else { $null }
+            $statusCategory = if ($statusCategoryObj) { [string](Get-JiraRecognitionSafe $statusCategoryObj 'key') } else { '' }
+            $flaggedVal = Get-JiraRecognitionSafe $fields 'Flagged'
+            $flagged = ($null -ne $flaggedVal) -and (@($flaggedVal).Count -gt 0)
+            $links = @(Get-JiraRecognitionSafe $fields 'issuelinks')
+            $blockers = [System.Collections.Generic.List[string]]::new()
+            foreach ($link in $links) {
+                $type = Get-JiraRecognitionSafe $link 'type'
+                $inwardIssue = Get-JiraRecognitionSafe $link 'inwardIssue'
+                if ($type -and (Get-JiraRecognitionSafe $type 'inward') -and $inwardIssue) {
+                    $blockers.Add([string](Get-JiraRecognitionSafe $inwardIssue 'key'))
+                }
+            }
+            $entry = [ordered]@{
+                state           = 'bound'
+                key             = $key
+                current         = $current
+                origin          = $origin
+                status          = $status
+                status_category = $statusCategory
+                flagged         = $flagged
+                blockers        = $blockers
+            }
             # last_summary (018, T045; contracts/summary-record.md §1/§5:
             # every tier, including the parent) — from the same
             # already-fetched marker, omitted for a marker predating it.

@@ -228,3 +228,83 @@ Describe 'Locale independence (research R7, spec A-7)' {
 }
 
 }
+
+# --- B4 (023, T152, spawn-budget.md §4): the timing report's phase
+# attribution is real, not just internally consistent, when feature 023's
+# own requests are in play. Mirror of test_timing.bats's B4 (T151).
+
+Describe 'Invoke-JiraReconcile — timing-attribution budget (B4)' {
+    BeforeAll {
+        $CmdDir = Join-Path $PSScriptRoot '../../../scripts/powershell/commands'
+        $Mock = Join-Path $PSScriptRoot '../../conformance/mock-jira'
+        $Fixture60 = Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-sixty-stories-due'
+        Import-Module (Join-Path $Mock 'Mock.psm1') -Force
+        Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
+
+        $env:JIRA_EMAIL = 'user@example.com'
+        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+        $env:JIRA_NO_SLEEP = '1'
+        Remove-Item Env:\SPEC_KIT_JIRA_PLAN_CONTEXT -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_LIFECYCLE -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_PROJECT_KEY -ErrorAction SilentlyContinue
+
+        function Invoke-Captured {
+            param([string[]] $ArgList)
+            $sw = [System.IO.StringWriter]::new()
+            $se = [System.IO.StringWriter]::new()
+            $oo = [Console]::Out
+            $oe = [Console]::Error
+            [Console]::SetOut($sw)
+            [Console]::SetError($se)
+            try { $script:code = Invoke-JiraReconcile -Arguments $ArgList } finally { [Console]::SetOut($oo); [Console]::SetError($oe) }
+            return $sw.ToString() + $se.ToString()
+        }
+    }
+
+    It 'B4 -- 023''s transitions reads land wholly in the plan phase, and per-phase counts sum to the mock''s own call log total' {
+        $work60 = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse $Fixture60 $work60
+        $spec60 = Join-Path $work60 'specs/001-widget/spec.md'
+        $env:JIRA_CONFIG_DIR = Join-Path $work60 '.specify/jira'
+        $env:SPEC_KIT_JIRA_REPO = 'acme/app'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-widget'
+        $m = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/tasks-sixty-transitions.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $m.BaseUrl
+        $env:SPEC_KIT_JIRA_TIMING = '1'
+        try {
+            $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+            $captured = Invoke-Captured @('reconcile', $spec60, '--json')
+
+            $log = @(Get-JiraMockCallLog -Mock $m)
+            $totalCalls = $log.Count
+            $totalCalls | Should -BeGreaterThan 0
+
+            $totalReported = [regex]::Match($captured, 'timing: total\s+\d+ ms\s+(\d+) requests').Groups[1].Value
+            $totalReported | Should -Be "$totalCalls"
+
+            # The harness's own log, never timing's self-report, is what
+            # "attributed to plan" is checked against: every availability
+            # read this feature issues (GET .../transitions?…) is issued
+            # only from inside the plan-phase bracket, and this scenario's
+            # due set issues nothing else during plan — so the two counts
+            # are exactly equal, not just plan-request-count > 0.
+            $transitionsReads = @($log | Where-Object { $_ -match '^GET .*/transitions\?expand=' }).Count
+            $transitionsReads | Should -BeGreaterThan 0
+            $planReported = [regex]::Match($captured, 'timing: plan\s+\d+ ms\s+(\d+) requests').Groups[1].Value
+            $planReported | Should -Be "$transitionsReads"
+
+            # The write half of the same feature (the transition POST) is
+            # issued only after reconcile's own apply-phase mark, so it is
+            # counted under apply, never folded back into plan.
+            $transitionsWrites = @($log | Where-Object { $_ -match '^POST .*/transitions' }).Count
+            $transitionsWrites | Should -BeGreaterThan 0
+            $applyReported = [regex]::Match($captured, 'timing: apply\s+\d+ ms\s+(\d+) requests').Groups[1].Value
+            [int]$applyReported | Should -BeGreaterOrEqual $transitionsWrites
+        }
+        finally {
+            Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
+            Remove-Item Env:\SPEC_KIT_JIRA_TIMING -ErrorAction SilentlyContinue
+            Stop-JiraMock -Mock $m
+        }
+    }
+}

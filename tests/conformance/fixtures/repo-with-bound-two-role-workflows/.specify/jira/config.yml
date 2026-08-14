@@ -1,0 +1,26 @@
+# 023, T102: two independent per-role workflows (contract role-lifecycle-
+# config.md §5 I1) — specification on a delivery workflow (starting at the
+# mock's own universal default status "To Do", advancing to "Building"),
+# story on a development workflow (To Do -> In Progress). "To Do" is
+# declared for BOTH roles deliberately: the same status name in two roles'
+# mappings is a coincidence with no effect (I3) — each role resolves only
+# against its own tickets' available moves.
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    phase_status_map:
+      specification:
+        after_specify: "To Do"
+        after_plan: "Building"
+      story:
+        after_specify: "To Do"
+        after_plan: "In Progress"
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP

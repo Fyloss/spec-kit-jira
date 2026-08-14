@@ -1,0 +1,15 @@
+{
+  "projects": {"COMP": "company"},
+  "transitions": {
+    "COMP-2": [
+      {"id": "101", "name": "Start", "to": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}}, "fields": {}}
+    ],
+    "COMP-3": [
+      {"id": "102", "name": "Start", "to": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}}, "fields": {}},
+      {"id": "103", "name": "Start (dup)", "to": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}}, "fields": {}}
+    ],
+    "COMP-4": [
+      {"id": "104", "name": "Start", "to": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}}, "fields": {"resolution": {"required": true, "name": "Resolution"}}}
+    ]
+  }
+}

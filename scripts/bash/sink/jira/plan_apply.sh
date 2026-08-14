@@ -32,6 +32,8 @@ source "${_plan_apply_dir}/client.sh"
 source "${_plan_apply_dir}/adf.sh"
 # shellcheck source=/dev/null
 source "${_plan_apply_dir}/ticket.sh" # jira_create_fields_base — the shared creation-fields builder (research R3)
+# shellcheck source=/dev/null
+source "${_plan_apply_dir}/transitions.sh" # 023 — the declared-step read + name resolution
 # The sink may consume the neutral engine (the boundary only forbids engine->sink).
 # shellcheck source=/dev/null
 source "${_plan_apply_dir}/../../engine/drift.sh"
@@ -972,15 +974,25 @@ plan_writes_tasks() {
 }
 
 # _plan_transition_action <base_url> <key> <transition_id> <blockers-json> <label>
+#   [role] [declared-step]
 #   The single transition-POST emission site (012, T091), shared by
 #   plan_lifecycle (story tier) and plan_lifecycle_tasks (task tier) rather
 #   than each building its own. Returns {action, note} — note is empty when
-#   the ticket carries no open blocking link.
+#   the ticket carries no open blocking link. `role`/`declared-step` (023,
+#   T115) ride along on the action itself — never sent to Jira,
+#   `_plan_apply_write` only reads method/url/body off it — so a write-time
+#   rejection can be reported naming the ticket, its role, and the step it
+#   was headed for (FR-038) without a second lookup. Passed only by the
+#   transition-resolution.md call sites (contract §2); the task tier's own
+#   done/not-done completion pass predates 023 and is out of this
+#   requirement's scope, so its calls leave both empty.
 _plan_transition_action() {
-  local base="$1" key="$2" transition_id="$3" blockers="$4" label="$5"
+  local base="$1" key="$2" transition_id="$3" blockers="$4" label="$5" role="${6:-}" declared_step="${7:-}"
   local taction
   taction="$(jq -cn --arg u "${base}/rest/api/3/issue/${key}/transitions" --arg tid "${transition_id}" \
-    '{method:"POST", url:$u, body:{transition:{id:$tid}}}')"
+    --arg role "${role}" --arg step "${declared_step}" \
+    '{method:"POST", url:$u, body:{transition:{id:$tid}}}
+     + (if $role != "" then {role:$role, declared_step:$step} else {} end)')"
   local note=""
   local bcount; bcount="$(jq 'length' <<< "${blockers}")"
   if [[ "${bcount}" -gt 0 ]]; then
@@ -991,20 +1003,70 @@ _plan_transition_action() {
   jq -cn --argjson a "${taction}" --arg n "${note}" '{action:$a, note:(if $n == "" then null else $n end)}'
 }
 
+# _plan_transition_warning <outcome-json> <role> <key> <declared-step>
+#   <current-status> — contracts/transition-resolution.md §4's verbatim
+#   wording for the three non-move outcomes (never called for "move"). Every
+#   non-move outcome now carries exactly one warning naming the ticket, its
+#   role, what did not happen, and what a human can do (FR-038,
+#   Principle XVI) — replacing the silent drop plan_lifecycle used to
+#   produce whenever `transition_id` was empty.
+_plan_transition_warning() {
+  local outcome="$1" role="$2" key="$3" declared="$4" current="$5"
+  local role_label; role_label="$(tr '[:lower:]' '[:upper:]' <<< "${role:0:1}")${role:1}"
+  local kind; kind="$(jq -r '.outcome' <<< "${outcome}")"
+  case "${kind}" in
+    ambiguous)
+      local n names
+      n="$(jq '.candidates | length' <<< "${outcome}")"
+      names="$(jq -r '[.candidates[] | "\(.name) (\(.id))"] | join(", ")' <<< "${outcome}")"
+      printf '%s ticket %s was not moved to "%s": %s transitions land on it (%s). The bridge invents no preference — perform the one you want by hand, or narrow the workflow.' \
+        "${role_label}" "${key}" "${declared}" "${n}" "${names}"
+      ;;
+    gated)
+      local field; field="$(jq -r '.gated_field.logical_name' <<< "${outcome}")"
+      printf '%s ticket %s was not moved to "%s": completing that transition requires "%s", which the bridge does not hold and never guesses. Set it by hand, then reconcile.' \
+        "${role_label}" "${key}" "${declared}" "${field}"
+      ;;
+    unreachable)
+      local rn rl
+      rn="$(jq '.reachable | length' <<< "${outcome}")"
+      if ((rn > 0)); then
+        rl="$(jq -r '.reachable | join(", ")' <<< "${outcome}")"
+        printf '%s ticket %s was not moved to "%s": no transition from "%s" lands on it. Reachable from here: %s. Move it by hand, or map this event to one of those.' \
+          "${role_label}" "${key}" "${declared}" "${current}" "${rl}"
+      else
+        printf '%s ticket %s was not moved to "%s": no transition from "%s" is available at all. Move it by hand, or map this event to a reachable step.' \
+          "${role_label}" "${key}" "${declared}" "${current}"
+      fi
+      ;;
+  esac
+}
+
 # plan_lifecycle <content-actions-json> <neutral-doc-json> <lifecycle-ctx-json>
+#   [parent-content-action-json]
 #   Fold the US6 lifecycle-safety rules over the planned content actions and emit
-#   the final action set plus the human-facing warnings/notes. PURE: no Jira reads
-#   or writes happen here; the current Jira facts (status, its classification,
-#   Flagged marker, open blockers, the transition id) arrive in the lifecycle
-#   context — the seam the config/discovery integration fills from a fail-closed
-#   read. content-actions[i] corresponds to neutral-doc.stories[i] (plan_writes
-#   emits one content action per story, in order).
+#   the final action set plus the human-facing warnings/notes. PURE except for
+#   the read transitions_load issues (see below): the current Jira facts
+#   (status, its classification, Flagged marker, open blockers) arrive in the
+#   lifecycle context — the seam the config/discovery integration fills from a
+#   fail-closed read. content-actions[i] corresponds to neutral-doc.stories[i]
+#   (plan_writes emits one content action per story, in order).
 #
-# lifecycle-ctx: { on_drift, base_url, order:[status,...],
-#   tickets:{ <local_id>: { key, current:{fields...}, status, category, target,
-#                           transition_id, flagged, blockers:[...] } } }
+#   023, research R6/contract §5 U8: the OPTIONAL 4th argument is the
+#   parent's own content action (`_plan_writes_parent`'s return, or "null"/
+#   absent) — the same per-ticket body below runs over the parent too, keyed
+#   by `lc.parent_local_id`, so its decisions and warning wording are
+#   identical to a story's BY CONSTRUCTION. Its content is never re-appended
+#   to the returned `actions`: `_plan_writes_parent` already decided it and
+#   it travels through the plan's own `parent` slot; only the parent's
+#   TRANSITION (if any) joins the returned array, exactly like a transition
+#   already rides alongside a story's content action there.
 #
-# Rules applied per story:
+# lifecycle-ctx: { on_drift, base_url, order:{<role>:[status,...]},
+#   parent_local_id, tickets:{ <local_id>: { key, current:{fields...}, status,
+#     category, target, role, transition_id, flagged, blockers:[...] } } }
+#
+# Rules applied per ticket:
 #   - Zero churn (FR-030): an UPDATE whose desired fields already match the
 #     ticket's `current` fields is dropped — no content write.
 #   - Drift (FR-031/034/035): the drift engine decides the transition. `withhold`
@@ -1015,12 +1077,27 @@ _plan_transition_action() {
 #     surfaced; the bridge never sets or removes the flag (no flag write is emitted).
 #   - Human links (FR-037): the bridge emits no link mutation, so human links are
 #     never modified; advancing past open blockers adds an info note, not a block.
-# Returns { actions, warnings, notes } (canonical).
+#   - Resolution (023, contract transition-resolution.md §1-§4): when the
+#     ticket's context ALREADY carries a `transition_id` (the
+#     SPEC_KIT_JIRA_LIFECYCLE test seam supplying one directly), it is used
+#     as-is — unchanged from before this feature. Otherwise the ticket joins
+#     the due set: one read (transitions_load, called ONCE for the whole due
+#     set — T047) resolves every candidate move by destination NAME, never
+#     category (contract M1). A `move` outcome fills transition_id and emits
+#     it exactly as today; every other outcome emits exactly one warning
+#     naming the ticket, never a silent drop (contract §4).
+#
+# Returns { actions, warnings, notes } (canonical) on success. On a
+# transitions-read failure (contract §2 F2 — the authoritative read
+# exhausted retries), returns the failing exit code with
+# {"fail_closed_key": "<key>"} on stdout instead — fail-closed for the WHOLE
+# specification: the content actions already gathered are discarded, never
+# returned, so the caller writes nothing for this run.
 plan_lifecycle() {
-  local actions="$1" doc="$2" lc="$3"
-  local on_drift order n i
+  local actions="$1" doc="$2" lc="$3" parent_action="${4:-null}"
+  local on_drift order_by_role n i
   on_drift="$(jq -r '.on_drift // "abort"' <<< "${lc}")"
-  order="$(jq -c '.order // []' <<< "${lc}")"
+  order_by_role="$(jq -c '.order // {}' <<< "${lc}")"
 
   # 024, contracts/spawn-budget.md C1.2/C1.3: the loop below used to re-read
   # `.stories[i].local_id`, `.[i]` (the action), `.method`, and six fields of
@@ -1031,8 +1108,8 @@ plan_lifecycle() {
   # is `null` in jq too — the same as the per-index `// null` it replaces).
   local _lc_sep=$'\x1f'
   local -a _lc_sid=() _lc_action=() _lc_method=() _lc_tk=() _lc_status=() _lc_target=() \
-    _lc_category=() _lc_flagged=() _lc_transition_id=() _lc_key=() _lc_blockers=()
-  local _lc_i=0 _f1 _f2 _f3 _f4 _f5 _f6 _f7 _f8 _f9 _f10 _f11
+    _lc_category=() _lc_flagged=() _lc_transition_id=() _lc_key=() _lc_blockers=() _lc_role=()
+  local _lc_i=0 _f1 _f2 _f3 _f4 _f5 _f6 _f7 _f8 _f9 _f10 _f11 _f12
   # 024, T053 real-machine finding: `actions` and `doc` both grow with story
   # count, and Linux caps a SINGLE jq argument at MAX_ARG_STRLEN (128 KiB)
   # independently of the much larger total ARG_MAX (research/#31's original
@@ -1054,11 +1131,11 @@ plan_lifecycle() {
     _lc_acts_arg="$(cygpath -m "${_lc_acts_f}")"
     _lc_lc_arg="$(cygpath -m "${_lc_lc_f}")"
   fi
-  while IFS="${_lc_sep}" read -r _f1 _f2 _f3 _f4 _f5 _f6 _f7 _f8 _f9 _f10 _f11; do
+  while IFS="${_lc_sep}" read -r _f1 _f2 _f3 _f4 _f5 _f6 _f7 _f8 _f9 _f10 _f11 _f12; do
     _lc_sid[_lc_i]="${_f1}"; _lc_action[_lc_i]="${_f2}"; _lc_method[_lc_i]="${_f3}"
     _lc_tk[_lc_i]="${_f4}"; _lc_status[_lc_i]="${_f5}"; _lc_target[_lc_i]="${_f6}"
     _lc_category[_lc_i]="${_f7}"; _lc_flagged[_lc_i]="${_f8}"; _lc_transition_id[_lc_i]="${_f9}"
-    _lc_key[_lc_i]="${_f10}"; _lc_blockers[_lc_i]="${_f11}"
+    _lc_key[_lc_i]="${_f10}"; _lc_blockers[_lc_i]="${_f11}"; _lc_role[_lc_i]="${_f12}"
     _lc_i=$((_lc_i + 1))
   done < <(jq -r --arg sep "${_lc_sep}" --slurpfile acts_f "${_lc_acts_arg}" --slurpfile lc_f "${_lc_lc_arg}" '
     ($acts_f[0]) as $acts | ($lc_f[0]) as $lc |
@@ -1070,13 +1147,51 @@ plan_lifecycle() {
       ($tk | tostring),
       ($tk.status // ""), ($tk.target // ""), ($tk.category // "unknown"),
       (($tk.flagged // false) | tostring), ($tk.transition_id // ""), ($tk.key // ""),
-      ($tk.blockers // [] | tostring)
+      ($tk.blockers // [] | tostring), ($tk.role // "story")
     ] | join($sep)
   ' <<< "${doc}")
   rm -f "${_lc_acts_f}" "${_lc_lc_f}"
   n="${_lc_i}"
 
-  local kept="[]" warns="[]" notes="[]"
+  # 023, research R6: the parent gets one more entry in the SAME arrays, so
+  # the per-ticket body below — zero-churn drop, flagged check,
+  # drift_evaluate, transition — runs over it unchanged (contract §5 U8).
+  # Appended after the decode-once call rather than inside it: there is
+  # exactly one parent per run, so the extra `jq` calls here cost nothing
+  # the decode-once shape (built for the STORY count) exists to avoid.
+  local -a _lc_is_parent=()
+  local parent_lid; parent_lid="$(jq -r '.parent_local_id // ""' <<< "${lc}")"
+  if [[ -n "${parent_lid}" ]]; then
+    local ptk parent_entry_action; ptk="$(jq -c --arg id "${parent_lid}" '.tickets[$id] // {}' <<< "${lc}")"
+    # 023 fix: the parent has no pending CONTENT write on a run where its
+    # content is unchanged (parent_action is the literal string "null"
+    # then) — that must never suppress its own lifecycle-safety
+    # evaluation, exactly as a story with no content change still reaches
+    # drift_evaluate. A story always has a real action to decode-once
+    # here; the parent, gated separately in reconcile.sh, does not — so an
+    # empty placeholder stands in only when there is no real one, never
+    # treated as a content write (_lc_is_parent[n] below already excludes
+    # the parent from `kept` unconditionally).
+    parent_entry_action="${parent_action}"
+    [[ "${parent_entry_action}" == "null" ]] && parent_entry_action='{}'
+    _lc_sid[n]="${parent_lid}"
+    _lc_action[n]="${parent_entry_action}"
+    _lc_method[n]="$(jq -r '.method // ""' <<< "${parent_entry_action}")"
+    _lc_tk[n]="${ptk}"
+    _lc_status[n]="$(jq -r '.status // ""' <<< "${ptk}")"
+    _lc_target[n]="$(jq -r '.target // ""' <<< "${ptk}")"
+    _lc_category[n]="$(jq -r '.category // "unknown"' <<< "${ptk}")"
+    _lc_flagged[n]="$(jq -r '(.flagged // false) | tostring' <<< "${ptk}")"
+    _lc_transition_id[n]="$(jq -r '.transition_id // ""' <<< "${ptk}")"
+    _lc_key[n]="$(jq -r '.key // ""' <<< "${ptk}")"
+    _lc_blockers[n]="$(jq -c '.blockers // []' <<< "${ptk}")"
+    _lc_role[n]="$(jq -r '.role // "specification"' <<< "${ptk}")"
+    _lc_is_parent[n]="true"
+    n=$((n + 1))
+  fi
+
+  local kept="[]" warns="[]" notes="[]" parent_content_dropped="false"
+  local -a due_idx=()
   for ((i = 0; i < n; i++)); do
     local sid action method tk
     sid="${_lc_sid[i]}"
@@ -1085,7 +1200,7 @@ plan_lifecycle() {
     method="${_lc_method[i]}"
     tk="${_lc_tk[i]}"
 
-    local drop_content="false" do_transition="false"
+    local drop_content="false"
     # --- Zero churn: drop an unchanged UPDATE ---------------------------------
     # The managed-panel path is now UNCONDITIONAL (018, T026): every
     # recognised ticket's description churn is decided on its managed
@@ -1110,20 +1225,24 @@ plan_lifecycle() {
     fi
 
     # --- Drift / Flagged: decide the transition -------------------------------
-    local status target category flagged transition_id key
+    local status target category flagged transition_id key role_order
     status="${_lc_status[i]}"
     target="${_lc_target[i]}"
     category="${_lc_category[i]}"
     flagged="${_lc_flagged[i]}"
     transition_id="${_lc_transition_id[i]}"
     key="${_lc_key[i]}"
+    # 023, data-model.md §1: `order` is now PER ROLE — a specification and a
+    # story on different workflows are never compared against each other's
+    # step order (contract role-lifecycle-config.md §5 I1).
+    role_order="$(jq -c --arg r "${_lc_role[i]:-story}" '.[$r] // []' <<< "${order_by_role}")"
 
     if [[ -n "${status}" && -n "${target}" && "${status}" != "${target}" ]]; then
       if [[ "${flagged}" == "true" ]]; then
         warns="$(jq -c --arg w "ticket \"${sid}\" carries the Flagged (impediment) marker; its transition is withheld and the flag is left untouched" '. + [$w]' <<< "${warns}")"
       else
         local di dec d cw dwarns
-        di="$(jq -cn --arg cs "${status}" --arg cc "${category}" --arg ts "${target}" --argjson o "${order}" --arg od "${on_drift}" \
+        di="$(jq -cn --arg cs "${status}" --arg cc "${category}" --arg ts "${target}" --argjson o "${role_order}" --arg od "${on_drift}" \
           '{current_status:$cs, current_category:$cc, target_status:$ts, order:$o, on_drift:$od}')"
         dec="$(drift_evaluate "${di}")"
         d="$(jq -r '.decision' <<< "${dec}")"
@@ -1131,27 +1250,167 @@ plan_lifecycle() {
         dwarns="$(jq -c '.warnings' <<< "${dec}")"
         warns="$(jq -c --argjson dw "${dwarns}" '. + $dw' <<< "${warns}")"
         [[ "${cw}" == "false" ]] && drop_content="true"
-        [[ "${d}" == "transition" ]] && do_transition="true"
+        if [[ "${d}" == "transition" && -n "${key}" ]]; then
+          if [[ -n "${transition_id}" ]]; then
+            # The SPEC_KIT_JIRA_LIFECYCLE test seam already supplies an id
+            # directly — unchanged from before this feature; resolution is
+            # never consulted for a ticket that already has one.
+            local tres note
+            tres="$(_plan_transition_action "$(jq -r '.base_url // ""' <<< "${lc}")" "${key}" "${transition_id}" "${_lc_blockers[i]}" "${sid}")"
+            kept="$(jq -c --argjson a "$(jq -c '.action' <<< "${tres}")" '. + [$a]' <<< "${kept}")"
+            note="$(jq -r '.note // empty' <<< "${tres}")"
+            [[ -n "${note}" ]] && notes="$(jq -c --arg n "${note}" '. + [$n]' <<< "${notes}")"
+          else
+            due_idx+=("${i}")
+          fi
+        fi
       fi
     fi
 
-    [[ "${drop_content}" == "false" ]] && kept="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${kept}")"
-
-    if [[ "${do_transition}" == "true" && -n "${transition_id}" && -n "${key}" ]]; then
-      local base tres note
-      base="$(jq -r '.base_url // ""' <<< "${lc}")"
-      tres="$(_plan_transition_action "${base}" "${key}" "${transition_id}" "${_lc_blockers[i]}" "${sid}")"
-      kept="$(jq -c --argjson a "$(jq -c '.action' <<< "${tres}")" '. + [$a]' <<< "${kept}")"
-      note="$(jq -r '.note // empty' <<< "${tres}")"
-      [[ -n "${note}" ]] && notes="$(jq -c --arg n "${note}" '. + [$n]' <<< "${notes}")"
+    if [[ "${_lc_is_parent[i]:-false}" == "true" ]]; then
+      # 023, U8: the parent's own halt decision (drop_content, set only by
+      # drift_evaluate's "halted" branch) is never routed through `kept` —
+      # the parent's content write is a SEPARATE code path in the caller
+      # (reconcile.sh's own parent-first write, never this array) — so it
+      # must ride back out as its own field or the caller has no way to
+      # learn a halted parent's content must stay unwritten too, exactly
+      # like a halted story's.
+      parent_content_dropped="${drop_content}"
+    elif [[ "${drop_content}" == "false" ]]; then
+      kept="$(jq -c --argjson a "${action}" '. + [$a]' <<< "${kept}")"
     fi
   done
 
-  # shellcheck disable=SC2016  # a jq filter: $a/$w/$no are jq variables
+  # Resolution (023, contract transition-resolution.md §1/§2): the read is
+  # issued only for the due set assembled above — D1-D5 already hold for
+  # every entry in due_idx — and ONCE for the whole set, never per ticket
+  # (T047). A failure fails closed for the WHOLE specification: the content
+  # actions already gathered above are discarded (never returned), not only
+  # the moves (contract §2 F2).
+  if ((${#due_idx[@]} > 0)); then
+    local -a due_keys=()
+    local di
+    for di in "${due_idx[@]}"; do due_keys+=("${_lc_key[di]}"); done
+    local rc_tl=0
+    transitions_load "${due_keys[@]}" || rc_tl=$?
+    if ((rc_tl != 0)); then
+      jq -cn --arg k "${due_keys[0]}" '{fail_closed_key:$k}'
+      return "${rc_tl}"
+    fi
+    local base; base="$(jq -r '.base_url // ""' <<< "${lc}")"
+
+    # 023, T182 (Phase 14, Convergence): decode-once resolution — one jq call
+    # resolves EVERY due ticket's outcome at once against the transitions
+    # map transitions_load already populated in-process (_TRANSITIONS_MAP),
+    # replacing what used to be transitions_get + transitions_resolve (2 jq
+    # spawns each, transitions_resolve's own call plus json_canonical's)
+    # PLUS a redundant outer `.outcome`/`.transition_id` re-parse, per due
+    # ticket (FR-028, SC-013, contract transition-resolution.md §6 B3).
+    # _plan_transition_action/_plan_transition_warning are left unchanged:
+    # they are shared with reconcile.sh's own task-tier due-set and with
+    # the transition_id-already-known branch above, so widening past this
+    # read/parse plumbing into shared per-item business logic is the
+    # "separate, larger, riskier refactor" T155 already deferred.
+    local _tr_sep=$'\x1f'
+    local -a due_sids=()
+    for di in "${due_idx[@]}"; do due_sids+=("${_lc_sid[di]}"); done
+
+    # _TRANSITIONS_MAP's keys are lower-cased Jira issue keys
+    # (`[a-z][a-z0-9]*-[0-9]+`, transitions_load's own trust boundary) and
+    # its values are already-canonical compact JSON — safe to concatenate
+    # into one object with no escaping, exactly as transitions_load builds
+    # its own combined request array.
+    local _tr_map="{" _tr_map_first=true _tr_mk
+    for _tr_mk in "${!_TRANSITIONS_MAP[@]}"; do
+      if ${_tr_map_first}; then _tr_map_first=false; else _tr_map+=","; fi
+      _tr_map+="\"${_tr_mk}\":${_TRANSITIONS_MAP[${_tr_mk}]}"
+    done
+    _tr_map+="}"
+    local _tr_map_f; _tr_map_f="$(mktemp)"
+    printf '%s' "${_tr_map}" > "${_tr_map_f}"
+    local _tr_map_arg="${_tr_map_f}"
+    if [[ "${JIRA_PATH_STYLE}" == "native" ]] && command -v cygpath > /dev/null 2>&1; then
+      _tr_map_arg="$(cygpath -m "${_tr_map_f}")"
+    fi
+
+    local -a _tr_kind=() _tr_tid=() _tr_outcome=()
+    local _tr_i=0 _r1 _r2 _r3
+    while IFS="${_tr_sep}" read -r _r1 _r2 _r3; do
+      _tr_kind[_tr_i]="${_r1}"; _tr_tid[_tr_i]="${_r2}"; _tr_outcome[_tr_i]="${_r3}"
+      _tr_i=$((_tr_i + 1))
+    done < <(jq -rn --argjson lc "${lc}" --slurpfile trmap_f "${_tr_map_arg}" --arg sep "${_tr_sep}" '
+      ($trmap_f[0]) as $trmap
+      | ($ARGS.positional) as $sids
+      | $sids[] as $sid
+      | ($lc.tickets[$sid]) as $tk
+      | (($tk.key // "") | ascii_downcase) as $kl
+      | ($trmap[$kl] // {moves: []}) as $rec
+      | (($tk.target) // "") as $declared
+      | ($rec.moves // []) as $moves
+      | [ $moves[] | select(.to == $declared) ] as $cands
+      | ($cands | length) as $n
+      | ( if $n == 1 and $cands[0].gated_field == null then
+            {outcome:"move", transition_id: $cands[0].id}
+          elif $n == 1 then
+            {outcome:"gated", gated_field: $cands[0].gated_field}
+          elif $n >= 2 then
+            {outcome:"ambiguous", candidates: [ $cands[] | {id, name} ]}
+          else
+            {outcome:"unreachable", reachable: [ $moves[].to ]}
+          end
+        ) as $o
+      | [ $o.outcome, ($o.transition_id // ""), ($o | tojson) ] | join($sep)
+    ' --args -- "${due_sids[@]}")
+    rm -f "${_tr_map_f}"
+
+    local -a _tr_kept=() _tr_new_warns=() _tr_new_notes=()
+    local _tr_j
+    for ((_tr_j = 0; _tr_j < ${#due_idx[@]}; _tr_j++)); do
+      local di="${due_idx[_tr_j]}"
+      local rkey rsid rtarget rstatus rrole kind outcome
+      rkey="${_lc_key[di]}"; rsid="${_lc_sid[di]}"; rtarget="${_lc_target[di]}"
+      rstatus="${_lc_status[di]}"; rrole="${_lc_role[di]:-story}"
+      kind="${_tr_kind[_tr_j]}"; outcome="${_tr_outcome[_tr_j]}"
+      if [[ "${kind}" == "move" ]]; then
+        local tid tres note
+        tid="${_tr_tid[_tr_j]}"
+        tres="$(_plan_transition_action "${base}" "${rkey}" "${tid}" "${_lc_blockers[di]}" "${rsid}" "${rrole}" "${rtarget}")"
+        _tr_kept+=("$(jq -c '.action' <<< "${tres}")")
+        note="$(jq -r '.note // empty' <<< "${tres}")"
+        [[ -n "${note}" ]] && _tr_new_notes+=("${note}")
+      else
+        local w; w="$(_plan_transition_warning "${outcome}" "${rrole}" "${rkey}" "${rtarget}" "${rstatus}")"
+        _tr_new_warns+=("${w}")
+      fi
+    done
+
+    # One merge each, regardless of how many due tickets resolved to that
+    # branch — the same "decode/encode once" shape as the arrays above,
+    # replacing what used to be a `. + [$x]` jq call per due ticket.
+    if ((${#_tr_kept[@]} > 0)); then
+      local _tr_kept_f; _tr_kept_f="$(mktemp)"
+      printf '%s\n' "${_tr_kept[@]}" > "${_tr_kept_f}"
+      kept="$(jq -c --slurpfile add "${_tr_kept_f}" '. + $add' <<< "${kept}")"
+      rm -f "${_tr_kept_f}"
+    fi
+    if ((${#_tr_new_warns[@]} > 0)); then
+      local _tr_warns_f; _tr_warns_f="$(mktemp)"
+      printf '%s\n' "${_tr_new_warns[@]}" > "${_tr_warns_f}"
+      warns="$(jq -c --argjson add "$(jq -Rs 'split("\n") | map(select(length > 0))' "${_tr_warns_f}")" '. + $add' <<< "${warns}")"
+      rm -f "${_tr_warns_f}"
+    fi
+    if ((${#_tr_new_notes[@]} > 0)); then
+      local _tr_notes_f; _tr_notes_f="$(mktemp)"
+      printf '%s\n' "${_tr_new_notes[@]}" > "${_tr_notes_f}"
+      notes="$(jq -c --argjson add "$(jq -Rs 'split("\n") | map(select(length > 0))' "${_tr_notes_f}")" '. + $add' <<< "${notes}")"
+      rm -f "${_tr_notes_f}"
+    fi
+  fi
+
   local _out
-  # shellcheck disable=SC2016  # a jq filter: $a/$w/$no are jq variables
-  _out="$(json_build '{actions:$a, warnings:$w, notes:$no}' \
-    a "${kept}" w "${warns}" no "${notes}")" || return $?
+  # shellcheck disable=SC2016  # a jq filter: $a/$w/$no/$pcd are jq variables
+  _out="$(json_build '{actions:$a, warnings:$w, notes:$no, parent_content_dropped:$pcd}' \
+    a "${kept}" w "${warns}" no "${notes}" pcd "${parent_content_dropped}")" || return $?
   printf '%s' "${_out}" | json_canonical
 }
 
@@ -1269,10 +1528,42 @@ _apply_known_coords() {
 # nothing is printed here for it.
 _plan_apply_report_rejection() {
   local method="$1" url="$2" action="$3" defaultable_by_type="${4:-{\}}"
+  if [[ "${method}" == "POST" && "${url}" == */transitions ]]; then
+    _plan_apply_report_transition_rejection "${url}" "${action}"
+    return 0
+  fi
   [[ "${method}" == "POST" && "${url}" == */issue && "${JIRA_LAST_STATUS:-}" == "400" ]] || return 0
   local msg
   msg="$(ticket_field_rejection_message "${defaultable_by_type}" "${action}" "${JIRA_LAST_ERROR_BODY:-{\}}")"
   [[ -n "${msg}" ]] && printf '%s\n' "${msg}" >&2
+}
+
+# _plan_apply_report_transition_rejection <url> <action-json> — 023, T115,
+# FR-035/FR-038: the tracker rejected a move `_plan_transition_action`
+# already decided was available (a human moved the ticket between the read
+# and this write, or the tracker's own workflow changed underneath it). A
+# no-op unless `action` carries the `role`/`declared_step` pair only the
+# transition-resolution.md call sites attach (see `_plan_transition_action`)
+# — the task tier's own done/not-done completion pass predates 023 and stays
+# silent here, exactly as before this feature. No retry, no re-ask of
+# available moves, no substitute move within this run: the caller already
+# returns immediately after calling this (contract §2 U6).
+_plan_apply_report_transition_rejection() {
+  local url="$1" action="$2"
+  local role; role="$(jq -r '.role // empty' <<< "${action}")"
+  [[ -z "${role}" ]] && return 0
+  local declared key role_label errbody reason
+  declared="$(jq -r '.declared_step // empty' <<< "${action}")"
+  key="$(sed -E 's#.*/issue/##; s#/transitions$##' <<< "${url}")"
+  role_label="$(tr '[:lower:]' '[:upper:]' <<< "${role:0:1}")${role:1}"
+  errbody="${JIRA_LAST_ERROR_BODY:-{\}}"
+  jq -e . > /dev/null 2>&1 <<< "${errbody}" || errbody='{}'
+  reason="$(jq -r '
+    [ (.errorMessages // [])[], ((.errors // {}) | to_entries[] | "\(.key): \(.value)") ] | join("; ")
+  ' <<< "${errbody}")"
+  [[ -z "${reason}" ]] && reason="the tracker gave no reason"
+  printf 'reconcile: %s ticket %s was not moved to "%s": the tracker rejected the transition — %s. It was not retried, and no other move was attempted for it, within this run; reconcile will read its available moves again next run.\n' \
+    "${role_label}" "${key}" "${declared}" "${reason}" >&2
 }
 
 # _plan_apply_write <method> <url> <body-json-or-empty> <resp-file> — the

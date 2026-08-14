@@ -1,0 +1,22 @@
+# Team config — 023 US9 conformance/budget fixture (committable,
+# credential-free): reuses 021's own 60-story widget fixture (repo-with-
+# widget-spec-61, contracts/recognition-prefetch.md's own counting-case
+# corpus), adding a declared story-role phase_status_map so every one of
+# the 60 stories is due a move under a single event — the shape budgets
+# B1-B3/B8 (contract §1/§2) need.
+projects:
+  - key: TASKS
+    style: company_managed
+    hierarchy:
+      specification: Deliverable
+      story: Story
+      task: "Sub-task"
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    phase_status_map:
+      story:
+        after_specify: "To Do"
+        after_plan: "In Progress"
+routing_default: TASKS

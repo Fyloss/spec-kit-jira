@@ -126,6 +126,27 @@ summary() { grep '^{' <<< "$output"; }
   [ -n "$output" ]
 }
 
+@test "T027 [023, US2] -- a disabled event exits 0 silently before any config read or network call, event genuinely supplied (contract lifecycle-event.md §4 invariant E3, FR-012)" {
+  # shellcheck source=/dev/null
+  source "${CMD_DIR}/reconcile.sh"
+  local spec="${WORK}/spec.md"
+  printf '%s\n' \
+    '# Feature Specification: Held' '' 'A spec.' '' \
+    '### User Story 1 - The core story (Priority: P1)' '' \
+    '- **Given** a user' '- **When** they act' '- **Then** it works' > "${spec}"
+
+  config_hooks_disabled_add after_plan "${JIRA_CONFIG_DIR}" > /dev/null
+  # An unreachable base URL: if the dispatch guard failed to hold the run
+  # BEFORE any network call, this run would fault loudly rather than exit 0
+  # silently.
+  export SPEC_KIT_JIRA_BASE_URL="http://127.0.0.1:1"
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile --json "${spec}"
+  unset SPEC_KIT_JIRA_HOOK_EVENT SPEC_KIT_JIRA_BASE_URL
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "requires a value, and says so (usage)" {
   run cmd_config config --enable-hook
   [ "$status" -eq 1 ]

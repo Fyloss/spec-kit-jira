@@ -238,9 +238,18 @@ function Get-ProjectSearchPage {
 }
 
 function Get-Fault {
-    param([string]$Path)
+    # A fault entry may declare "method" to fire only for that HTTP method
+    # (023, T115: lets a POST /transitions rejection be injected while a GET
+    # on the same path stays healthy). Omitting "method" matches any method,
+    # unchanged from every fault declared before this parameter existed.
+    param([string]$Path, [string]$Method = '')
     foreach ($key in $Faults.Keys) {
-        if ($Path -match "/$([regex]::Escape($key))(/|-|$)") { return $Faults[$key] }
+        if ($Path -match "/$([regex]::Escape($key))(/|-|$)") {
+            $candidate = $Faults[$key]
+            $faultMethod = $null
+            if ($candidate.ContainsKey('method')) { $faultMethod = [string]$candidate.method }
+            if (-not $faultMethod -or $faultMethod -eq $Method) { return $candidate }
+        }
     }
     return $GlobalFault
 }
@@ -280,7 +289,7 @@ function Get-IssueBulkfetch {
             if ($k.ToLowerInvariant() -eq $reqKey.ToLowerInvariant()) { $matchKey = $k; break }
         }
         if (-not $matchKey) { continue }
-        $fault = Get-Fault -Path "/rest/api/3/issue/$matchKey"
+        $fault = Get-Fault -Path "/rest/api/3/issue/$matchKey" -Method 'GET'
         if ($fault) { continue }
 
         $issue = $script:Issues[$matchKey]
@@ -408,7 +417,26 @@ function Resolve-Route {
             if ($Method -eq 'POST') { return (Get-IssueBulkfetch -Body $Body) }
         }
         '^/rest/api/3/issue/[^/]+/transitions$' {
-            if ($Method -eq 'POST') { return @{ status = 204; body = '' } }
+            if ($Method -eq 'POST') {
+                $ikey = ($Path -split '/')[-2]
+                # 023, contract transition-resolution.md §7 Z2: apply the
+                # move's destination status to the issue's recorded state —
+                # mirrors curl-shim.sh's `_shim_apply_transition` so a second
+                # read (recognition, or this same request replayed) observes
+                # the ticket already at its declared step on BOTH ports.
+                try {
+                    $bodyObj = $Body | ConvertFrom-Json -AsHashtable
+                    $tid = $bodyObj.transition.id
+                }
+                catch { $tid = $null }
+                if ($tid -and $Transitions.ContainsKey($ikey)) {
+                    $matched = @($Transitions[$ikey]) | Where-Object { "$($_.id)" -eq "$tid" } | Select-Object -First 1
+                    if ($matched -and $script:Issues.ContainsKey($ikey)) {
+                        $script:Issues[$ikey].fields['status'] = $matched.to
+                    }
+                }
+                return @{ status = 204; body = '' }
+            }
             if ($Method -eq 'GET') {
                 $ikey = ($Path -split '/')[-2]
                 # `$list = if (...) {...} else {@()}` unrolls a one-element
@@ -589,7 +617,7 @@ try {
             if ($method -eq 'POST' -and $path -eq '/rest/api/3/issue' -and $body -match '"project"\s*:\s*\{\s*"key"\s*:\s*"([^"]+)"') {
                 $faultPath = "/$($Matches[1])"
             }
-            $fault = Get-Fault -Path $faultPath
+            $fault = Get-Fault -Path $faultPath -Method $method
             # ifFieldPresent (018, T069, FR-011): mirrors curl-shim.sh — a
             # fault only fires while the request body's `.fields` still
             # carries the named key, so a retry with that field stripped

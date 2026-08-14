@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-14
+
+### Added
+
+- `reconcile` now advances a recognised ticket's board position at the
+  specification and story tiers, not only the sub-task tier: when a
+  dispatched lifecycle event's declared step names exactly one of the
+  ticket's real available transitions, the bridge issues it. Any other
+  shape — two transitions landing on the declared step, one gated on a
+  field the bridge does not hold, or none reaching it at all — withholds
+  the move instead, with one warning naming the ticket and the reason; the
+  move is never guessed or forced through an intermediate step.
+- `phase_status_map` may now be declared once per hierarchy role
+  (`specification`, `story`, `task`) instead of once per project, so an
+  Epic and a Story on genuinely different workflows each advance on their
+  own — a ticket of one role is never compared against another role's step
+  name. The existing role-blind shape keeps routing wholesale to `story`,
+  unchanged.
+- `--dry-run` predicts a resolved move exactly: the preview's action set
+  and warnings are identical to the real run's, and the preview itself
+  issues no transition request.
+
 ### Changed
 
 - The process budget (feature 024's per-item spawn discipline and its argument-routing companion)

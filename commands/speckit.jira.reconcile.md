@@ -43,16 +43,29 @@ in a consuming repository, and assuming it does is what produced the reported
    **With no active feature the step is inert**: do nothing and report nothing.
 
 2. **Invoke the bridge** by the repository-relative path above, passing the spec
-   file and `--json`:
+   file and `--json`. You MUST first set `SPEC_KIT_JIRA_HOOK_EVENT` to the
+   lifecycle event that fired this invocation — the bridge is told nothing
+   else about which step it is running for, and never infers it (contract
+   `lifecycle-event.md` §2, §5 invariant E1). No new flag exists for this;
+   the variable is the one door:
+
+   | Host command | Hook | Event value |
+   | --- | --- | --- |
+   | `/speckit.specify` | `after_specify` | `after_specify` |
+   | `/speckit.clarify` | `after_clarify` | `after_clarify` |
+   | `/speckit.plan` | `after_plan` | `after_plan` |
+   | `/speckit.tasks` | `after_tasks` | `after_tasks` |
+   | `/speckit.implement` | `after_implement` | `after_implement` |
+   | `/speckit.analyze` | `after_analyze` | `after_analyze` |
 
    ```text
-   .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile <spec-file> --json
+   SPEC_KIT_JIRA_HOOK_EVENT=after_specify .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile <spec-file> --json
    ```
 
    On Windows:
 
    ```text
-   .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 reconcile <spec-file> --json
+   $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_specify'; .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 reconcile <spec-file> --json
    ```
 
 3. **Interpret the outcome and report exactly one line** — never more than one
@@ -253,10 +266,10 @@ were withheld. There is no cleanup step, no flag, and no repair command.
 ## Configuring lifecycle safety: `phase_status_map` and `halted_statuses`
 
 Two optional, hand-edited keys under a project entry in `config.yml` let
-reconcile evaluate drift and operator-halted states against a ticket's real,
-recognised status. Neither has a default table — an operator's configured
-workflow is authoritative, and omitting both keeps this machinery inert
-exactly as it was before recognition existed:
+reconcile evaluate drift, operator-halted states, and board advancement
+against a ticket's real, recognised status. Neither has a default table — an
+operator's configured workflow is authoritative, and omitting both keeps this
+machinery inert exactly as it was before recognition existed:
 
 ```yaml
 projects:
@@ -272,9 +285,14 @@ projects:
 - `phase_status_map` maps a lifecycle event name (`after_specify`,
   `after_clarify`, `after_plan`, `after_tasks`, `after_implement`,
   `after_analyze`) to the Jira status that event implies. When the run was
-  dispatched for one of these events, a recognised ticket already sitting
-  **ahead** of that status raises a named drift warning; its content still
-  reconciles, but reconcile never issues a status transition itself.
+  dispatched for one of these events, a recognised ticket carries that status
+  as its declared step: if the ticket already sits **ahead** of it, reconcile
+  raises a named drift warning and reconciles content without moving anything;
+  otherwise it looks up the ticket's real available transitions and, when
+  exactly one of them lands on the declared step, issues it (023). Any other
+  shape — two candidates landing on it, one gated on a field reconcile does
+  not hold, or none reaching it at all — withholds the move instead, with one
+  warning naming the ticket and the reason.
 - `halted_statuses` names statuses the operator uses to pause a ticket by
   hand. A recognised ticket sitting in one of these statuses has its content
   write suppressed (not just its transition), with a named warning — an
@@ -283,6 +301,35 @@ projects:
 A ticket carrying the Jira **Flagged** field is treated the same way as a
 halted ticket: surfaced, its write withheld, and the flag itself is never
 touched.
+
+### Per-role mapping (023)
+
+The shape above is role-blind: it routes wholesale to the `story` role, for
+back-compatibility with every mapping written before this feature. An Epic
+and a Story rarely share a workflow, so `phase_status_map` may instead declare
+one mapping per hierarchy role — `specification`, `story`, and `task` — each
+with its own set of lifecycle events and status names:
+
+```yaml
+projects:
+  - key: COMP
+    hierarchy: { specification: "Epic", story: "Story", task: "Sub-task" }
+    phase_status_map:
+      specification:
+        after_plan: "Building"
+      story:
+        after_specify: "To Do"
+        after_plan: "In Progress"
+```
+
+One run under `after_plan` here advances the parent to "Building" and every
+story to "In Progress" — never comparing a ticket of one role against another
+role's step name. A role omitted from the mapping (here, `task`) is never
+evaluated at all: no warning, no request, exactly as if the project declared
+no mapping. The two shapes — legacy (lifecycle-event keys at the top level)
+and per-role (hierarchy-role keys, each holding its own lifecycle-event
+mapping) — may not be mixed in one project's `phase_status_map`; a project
+declaring both refuses to load.
 
 ## The consolidated field-defaults question (011)
 
@@ -332,6 +379,9 @@ waits.
 - `--json` — emit the machine-readable run summary (`run-summary.schema.json`).
 - `--dry-run` — compute the full action set and report it, writing nothing to
   Jira. The dry-run action set equals the real run's exactly.
+- `--force` (021) — skip the state-phase short-circuit and run the full
+  pipeline even when the recorded state document matches every local input.
+  Neither `--force` nor `--dry-run` ever reads or writes that document.
 - `--accept-defaults` — proceed with every recorded default, skipping the
   consolidated question (011).
 - `--field-value <KEY>=<Type>=<Label>=<Value>` — repeatable; an answer for
@@ -339,6 +389,13 @@ waits.
 - `--on-drift=abort|proceed` — drift handling (default `abort`).
 - `--verbose` — extra diagnostics (the token never appears, even here).
 - `--help` — usage; exits `0`.
+
+The shared command-line parser also accepts `speckit.jira.config`'s own flags —
+`--style`, `--child-type`, `--issue-type`, `--field-default`, `--task-mirror`,
+`--use-team`, `--enable-hook` — on `reconcile` without refusing them. They have
+**no effect** here: `reconcile` never reads the values this parser stores for
+them. Pass them to `speckit.jira.config` instead, where they are documented
+and acted on.
 
 ## Exit codes
 

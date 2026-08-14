@@ -38,14 +38,21 @@ Describe 'RunState' {
         It 'carries exactly the documented top-level fields, and no project_key' {
             $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
             $keys = ($doc | ConvertFrom-Json).PSObject.Properties.Name | Sort-Object
-            ($keys -join ',') | Should -Be 'base_url,email,extension_version,field_values,inputs,on_drift,schema'
+            ($keys -join ',') | Should -Be 'base_url,email,extension_version,field_values,hook_event,inputs,on_drift,schema'
         }
 
-        It 'schema is the integer 1 at introduction' {
+        It 'schema is the integer 2 since 023''s hook_event/plan.md inputs (contracts/run-state-v2.md C1)' {
             $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
             $parsed = $doc | ConvertFrom-Json
-            [int]$parsed.schema | Should -Be 1
-            $doc | Should -Match '"schema":1[,}]'
+            [int]$parsed.schema | Should -Be 2
+            $doc | Should -Match '"schema":2[,}]'
+        }
+
+        It 'hook_event is carried verbatim, empty string when a run has none' {
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan'
+            ($doc | ConvertFrom-Json).hook_event | Should -Be 'after_plan'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            ($doc | ConvertFrom-Json).hook_event | Should -Be ''
         }
 
         It 'carries base_url, email, on_drift, and field_values verbatim' {
@@ -84,6 +91,19 @@ Describe 'RunState' {
             $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
             $want = (& git hash-object --no-filters $tasksPath)
             $got = ($doc | ConvertFrom-Json).inputs.'tasks.md'
+            $got | Should -Be $want
+        }
+
+        It 'plan.md is omitted when absent, present with its hash when it exists (contracts/run-state-v2.md C3)' {
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $inputs = ($doc | ConvertFrom-Json).inputs
+            ($inputs.PSObject.Properties.Name -contains 'plan.md') | Should -BeFalse
+
+            $planPath = Join-Path (Split-Path -Parent $script:Spec) 'plan.md'
+            [System.IO.File]::WriteAllText($planPath, "## Summary`n")
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $want = (& git hash-object --no-filters $planPath)
+            $got = ($doc | ConvertFrom-Json).inputs.'plan.md'
             $got | Should -Be $want
         }
 
@@ -139,6 +159,16 @@ Describe 'RunState' {
         It 'is $false once field_values differs' {
             Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
             Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues 'KEY=Story=Label=New' | Should -BeFalse
+        }
+
+        It 'is $false once hook_event differs — an unhonoured lifecycle event is never skipped (S1, S9)' {
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan' | Should -BeFalse
+        }
+
+        It 'is $true after Save-JiraRunState with the identical hook_event' {
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan'
+            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan' | Should -BeTrue
         }
 
         It 'is $false when the recorded file is corrupt JSON' {
@@ -201,6 +231,81 @@ Describe 'RunState' {
             $after | Should -Not -Be $before
             $expected = (& git hash-object --no-filters $cfgPath 2>$null | Select-Object -First 1).Trim()
             $after | Should -Be $expected
+        }
+    }
+}
+
+# --- T162 [Phase 12, US10]: invariant S6 under a NEW event -- a lifecycle
+# event that resolves an actual transition. Mirror of test_run_state.bats's
+# S6 (T161).
+
+Describe 'Invoke-JiraReconcile — S6, --dry-run under a resolved transition (contracts/run-state-v2.md §5)' {
+    BeforeAll {
+        $CmdDir = Join-Path $PSScriptRoot '../../../scripts/powershell/commands'
+        $MockDir = Join-Path $PSScriptRoot '../../conformance/mock-jira'
+        $Fixture = Join-Path $PSScriptRoot '../../conformance/fixtures/repo-with-bound-story-due'
+        Import-Module (Join-Path $MockDir 'Mock.psm1') -Force
+        Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
+        # Re-imported LAST and forced: Reconcile.psm1's own (unforced) import
+        # of RunState.psm1 as its dependency can otherwise leave
+        # Get-JiraRunStatePath unresolved in this scope (the same defect
+        # class as project memory powershell-import-force-clobbers-caller-scope).
+        Import-Module $ModulePath -Force
+
+        $env:JIRA_EMAIL = 'user@example.com'
+        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+        $env:JIRA_NO_SLEEP = '1'
+        Remove-Item Env:\SPEC_KIT_JIRA_PLAN_CONTEXT -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_LIFECYCLE -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_PROJECT_KEY -ErrorAction SilentlyContinue
+
+        function Invoke-Captured {
+            param([string[]] $ArgList)
+            $sw = [System.IO.StringWriter]::new()
+            $se = [System.IO.StringWriter]::new()
+            $oo = [Console]::Out
+            $oe = [Console]::Error
+            [Console]::SetOut($sw)
+            [Console]::SetError($se)
+            try { $script:code = Invoke-JiraReconcile -Arguments $ArgList } finally { [Console]::SetOut($oo); [Console]::SetError($oe) }
+            return $sw.ToString() + $se.ToString()
+        }
+    }
+
+    It '--dry-run under a hook event that resolves a transition neither reads nor writes the state document' {
+        $work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse $Fixture $work
+        $spec = Join-Path $work 'specs/001-declared-mapping/spec.md'
+        $env:JIRA_CONFIG_DIR = Join-Path $work '.specify/jira'
+        $env:SPEC_KIT_JIRA_REPO = 'acme/app'
+        $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-declared-mapping'
+
+        $m = Start-JiraMock -ConfigPath (Join-Path $MockDir 'configs/comp-bound-story-due-seed.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $m.BaseUrl
+        try {
+            $null = Invoke-Captured @('reconcile', $spec, '--json')
+
+            # The priming run above (no hook event, zero warnings) already
+            # recorded state -- so "unwritten" is proven by content staying
+            # IDENTICAL across the dry-run, not by the file's absence.
+            $stateFile = Get-JiraRunStatePath -SpecPath $spec
+            Test-Path -LiteralPath $stateFile | Should -Be $true
+            $beforeDry = Get-Content -Raw -LiteralPath $stateFile
+
+            $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+            $null = Invoke-Captured @('reconcile', $spec, '--json', '--dry-run')
+            $afterDry = Get-Content -Raw -LiteralPath $stateFile
+            $afterDry | Should -Be $beforeDry
+
+            $null = Invoke-Captured @('reconcile', $spec, '--json')
+            Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
+            $afterReal = Get-Content -Raw -LiteralPath $stateFile
+            $afterReal | Should -Not -Be $beforeDry
+            (ConvertFrom-Json $afterReal).hook_event | Should -Be 'after_plan'
+        }
+        finally {
+            Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
+            Stop-JiraMock -Mock $m
         }
     }
 }

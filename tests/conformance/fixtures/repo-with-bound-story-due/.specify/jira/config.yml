@@ -1,0 +1,18 @@
+# Team config for the 023 US1 conformance fixture (committable,
+# credential-free): declares a role-blind phase_status_map, which routes
+# wholesale to the `story` role (FR-020, back-compatible by construction).
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    phase_status_map:
+      after_specify: "To Do"
+      after_plan: "In Progress"
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP

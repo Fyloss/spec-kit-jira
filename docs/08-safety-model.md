@@ -145,7 +145,7 @@ flowchart TD
     Cat -->|"post-scope — Jira's own done category"| Post{"Did the disk phase regress?"}
     Cat -->|"mapped — a declared phase target"| Mapped{"Has the ticket advanced<br/>beyond the target Jira-side?"}
 
-    Post -->|"no"| Trans["TRANSITION"]
+    Post -->|"no"| Trans["TRANSITION<br/>the move itself is resolved by sink/jira/transitions.sh (023)<br/>against the ticket's real available moves, never guessed"]
     Post -->|"yes"| Abort["Backward transition aborts by default<br/>requires --on-drift=proceed"]
 
     Mapped -->|"yes"| With2["WITHHOLD and warn<br/>--on-drift=proceed pulls it back"]
@@ -161,6 +161,17 @@ Three decisions, and what each means for content:
 | `transition` | emitted | yes |
 | `withhold` | suppressed | **yes** — a withheld transition is not a suppressed update |
 | `halt` | suppressed | **no** — the orphaned spec is surfaced for a human |
+
+`transition | emitted` becomes true at the specification and story tiers for
+the first time in 023 — every earlier release reached this decision but
+issued no request for it there (only the task tier's own, unrelated,
+category-based done/not-done transition ever moved anything). 023's own
+resolution is a separate rule (`transitions.sh`'s `transitions_resolve`,
+contracts/transition-resolution.md): the declared step is matched against
+the ticket's actual available moves by destination NAME, and a move is
+issued only when exactly one candidate lands on it — ambiguous, gated, and
+unreachable candidates each withhold instead, with their own named warning,
+never inventing a preference.
 
 None of this machinery has a default table. `phase_status_map` and
 `halted_statuses` are optional, hand-edited keys under a project entry in

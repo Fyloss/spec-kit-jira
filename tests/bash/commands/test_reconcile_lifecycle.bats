@@ -46,7 +46,12 @@ YAML
   export JIRA_EMAIL="user@example.com"
   export JIRA_API_TOKEN="RAWSECRETXYZ"
   export JIRA_NO_SLEEP=1
-  export SPEC_KIT_JIRA_ID_SOURCE="1111111111111111 2222222222222222 3333333333333333"
+  # 023: the parent now gets its own entry in the SAME lifecycle-context
+  # `tickets` map stories key into (role "specification", by local_id) — a
+  # 3-item source wraps (index 3 % 3 == 0) and hands the epic the SAME
+  # local_id as the first story, so its entry silently overwrites COMP-2's.
+  # A 4th distinct id keeps every local_id unique.
+  export SPEC_KIT_JIRA_ID_SOURCE="1111111111111111 2222222222222222 3333333333333333 4444444444444444"
   unset SPEC_KIT_JIRA_PLAN_CONTEXT SPEC_KIT_JIRA_LIFECYCLE
 }
 
@@ -120,7 +125,28 @@ teardown() {
   unset SPEC_KIT_JIRA_HOOK_EVENT
 }
 
-@test "zero transition requests in every scenario — this release evaluates the rules but never moves a ticket's status" {
+# T054: this pin predates 023, which now DOES move a ticket's status for a
+# project that declares a mapping (superseded by the "headline" scenario
+# covered elsewhere). What stays true is the FR-026 bound this test now
+# asserts: a project declaring NO phase_status_map issues zero transition
+# reads — `due_idx` is never populated absent a declared target (research
+# §R9's original no-op default, still exercised for the undeclared case).
+@test "a project declaring no phase_status_map issues zero transition requests" {
+  cat > "${WORK}/.specify/jira/config.yml" << 'YAML'
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP
+YAML
+
   mock_start "${MOCK}/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
@@ -130,7 +156,7 @@ teardown() {
   cmd_reconcile reconcile "${SPEC}" --json > /dev/null
   unset SPEC_KIT_JIRA_HOOK_EVENT
   run mock_calls
-  [ "$(grep -c '/transitions$' <<< "$output")" -eq 0 ]
+  [ "$(grep -c 'transitions' <<< "$output")" -eq 0 ]
 }
 
 @test "under SPEC_KIT_JIRA_HOOK_CONTEXT every recognition failure exits 0 with exactly one WARNING" {
@@ -238,4 +264,209 @@ YAML
     " 2>/dev/null)"
   [[ "$(jq -r '.warnings[0]' <<< "${out}")" == *"halted"* ]]
   [ "$(grep -c '^PUT /rest/api/3/issue/COMP-2$' "${MOCK_CALLLOG}")" -eq 0 ]
+}
+
+
+# =============================================================================
+# T078 [Phase 6, US4] — isolation rule I1: two independent per-role
+# workflows never cross-evaluate each other's step name (contract
+# role-lifecycle-config.md §5 I1).
+# =============================================================================
+
+@test "T078 -- the parent and every story advance on independent workflows, zero cross-role evaluations" {
+  local twork="${BATS_TEST_TMPDIR}/two-role"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-two-role-workflows" "${twork}"
+  local tspec="${twork}/specs/001-two-role-example/spec.md"
+
+  export JIRA_CONFIG_DIR="${twork}/.specify/jira"
+  export JIRA_EMAIL="user@example.com"
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  export JIRA_NO_SLEEP=1
+  export SPEC_KIT_JIRA_ID_SOURCE="1111111111111111 2222222222222222 3333333333333333 4444444444444444"
+  unset SPEC_KIT_JIRA_PLAN_CONTEXT SPEC_KIT_JIRA_LIFECYCLE
+
+  mock_start "${MOCK}/configs/comp-two-role-transitions.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${tspec}" --json > /dev/null
+
+  # The mock always creates a fresh issue at "To Do" regardless of
+  # project/role -- a status the specification role's OWN delivery
+  # workflow never declares. Move the parent to "Funnel" (its
+  # after_specify step) directly, exactly as an operator's own board
+  # would show it after the team's first triage -- so drift_evaluate has
+  # a classifiable starting point for the specification role.
+  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-1" \
+    -H 'Content-Type: application/json' \
+    -d '{"fields":{"status":{"name":"Funnel","statusCategory":{"key":"new"}}}}' > /dev/null
+
+  : > "${MOCK_CALLLOG}"
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile "${tspec}" --json
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  [ "$status" -eq 0 ]
+
+  # The parent lands on "Building" (its own delivery workflow) ...
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-1/transitions")) | .body.transition.id' <<< "$output")" = '"201"' ]
+  # ... each story lands on "In Progress" (its own development workflow) ...
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-2/transitions")) | .body.transition.id' <<< "$output")" = '"202"' ]
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-3/transitions")) | .body.transition.id' <<< "$output")" = '"203"' ]
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-4/transitions")) | .body.transition.id' <<< "$output")" = '"204"' ]
+  # ... zero warnings (no ambiguous/gated/unreachable outcome for any ticket) ...
+  [ "$(jq '.warnings | length' <<< "$output")" -eq 0 ]
+  # ... and exactly one availability read per ticket -- never more, never a
+  # read against the other role's declared step.
+  [ "$(grep -c '/transitions?expand=' "${MOCK_CALLLOG}")" -eq 4 ]
+}
+
+# =============================================================================
+# T080 [Phase 6, US4] — isolation rule I2: with `story` declared alone,
+# stories advance, the parent is not moved, and no warning is raised about
+# the parent (contract role-lifecycle-config.md §5 I2).
+# =============================================================================
+
+@test "T080 -- with story declared alone, stories advance and the parent is untouched, no warning about it" {
+  local twork="${BATS_TEST_TMPDIR}/story-only"
+  cp -R "${ROOT}/tests/conformance/fixtures/repo-with-two-role-workflows" "${twork}"
+  local tspec="${twork}/specs/001-two-role-example/spec.md"
+
+  # Per-role, but ONLY `story` declared -- no `specification` key at all
+  # (distinct from T076/B2's role-blind case, and from T078's both-roles
+  # case).
+  cat > "${twork}/.specify/jira/config.yml" << 'YAML'
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    phase_status_map:
+      story:
+        after_specify: "To Do"
+        after_plan: "In Progress"
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP
+YAML
+
+  export JIRA_CONFIG_DIR="${twork}/.specify/jira"
+  export JIRA_EMAIL="user@example.com"
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  export JIRA_NO_SLEEP=1
+  export SPEC_KIT_JIRA_ID_SOURCE="1111111111111111 2222222222222222 3333333333333333 4444444444444444"
+  unset SPEC_KIT_JIRA_PLAN_CONTEXT SPEC_KIT_JIRA_LIFECYCLE
+  mock_start "${MOCK}/configs/comp-two-role-transitions.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${tspec}" --json > /dev/null
+
+  # Put the parent somewhere a specification-role mapping WOULD treat as
+  # advanced-beyond-target, if it were ever evaluated at all.
+  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-1" \
+    -H 'Content-Type: application/json' \
+    -d '{"fields":{"status":{"name":"Building","statusCategory":{"key":"indeterminate"}}}}' > /dev/null
+
+  : > "${MOCK_CALLLOG}"
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile "${tspec}" --json
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  [ "$status" -eq 0 ]
+
+  # Stories advance normally.
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-2/transitions")) | .body.transition.id' <<< "$output")" = '"202"' ]
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-3/transitions")) | .body.transition.id' <<< "$output")" = '"203"' ]
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-4/transitions")) | .body.transition.id' <<< "$output")" = '"204"' ]
+
+  # The parent is never read for transitions, never moved, and no warning
+  # ever names it.
+  [ "$(grep -c 'COMP-1/transitions' "${MOCK_CALLLOG}")" -eq 0 ]
+  [ "$(jq -e '[.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-1/transitions"))] | length' <<< "$output")" -eq 0 ]
+  [[ "$(jq -r '.warnings | join(" ")' <<< "$output")" != *"COMP-1"* ]]
+}
+
+# --- T159 [Phase 12, US10]: the dry-run twin, four outcomes (contract §7
+# Z4) -- `--dry-run` and a real run against the SAME state predict the SAME
+# moves and warnings; the preview performs none. Resolution (the read and
+# the decision) runs identically either way -- only the WRITE is guarded
+# (scripts/bash/commands/reconcile.sh's own `if [[ "${dry_run}" != "true" ]]`
+# around apply_writes_with_recognition); `counts.transitioned` and
+# `warnings` are read off the PLANNED action set built during the plan
+# phase, never off the confirmed-write outcome, so they hold identically in
+# both modes.
+
+@test "T159 -- the dry-run preview predicts move/ambiguous/gated outcomes identically to the real run, and writes nothing (US10, Z4)" {
+  mock_start "${MOCK}/configs/comp-transitions.json"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${SPEC}" --json > /dev/null
+
+  : > "${MOCK_CALLLOG}"
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile "${SPEC}" --json --dry-run
+  [ "$status" -eq 0 ]
+  local preview="$output"
+  [ "$(jq -r '.dry_run' <<< "${preview}")" = "true" ]
+  # Zero transition WRITES in the preview (Z4: "the preview performs
+  # none") -- the availability READS the decision needs still fire.
+  [ "$(grep -c '^POST .*/transitions$' "${MOCK_CALLLOG}")" -eq 0 ]
+  [ "$(grep -c '^GET .*/transitions?expand=' "${MOCK_CALLLOG}")" -eq 3 ]
+
+  : > "${MOCK_CALLLOG}"
+  run cmd_reconcile reconcile "${SPEC}" --json
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  [ "$status" -eq 0 ]
+  local real="$output"
+  [ "$(jq -r '.dry_run' <<< "${real}")" = "false" ]
+
+  # Identical predicted vs. performed: the move count, the move's own
+  # transition id, and every warning's wording (naming the ambiguous and
+  # gated tickets), byte-for-byte between preview and real.
+  [ "$(jq -r '.counts.transitioned' <<< "${preview}")" = "$(jq -r '.counts.transitioned' <<< "${real}")" ]
+  [ "$(jq -c '.warnings' <<< "${preview}")" = "$(jq -c '.warnings' <<< "${real}")" ]
+  [ "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-2/transitions")) | .body.transition.id' <<< "${preview}")" \
+    = "$(jq -e '.actions[] | select(.url | endswith("/rest/api/3/issue/COMP-2/transitions")) | .body.transition.id' <<< "${real}")" ]
+
+  # The real run, unlike the preview, actually issues the one write.
+  [ "$(grep -c '^POST .*/transitions$' "${MOCK_CALLLOG}")" -eq 1 ]
+}
+
+@test "T159 -- the dry-run preview predicts an unreachable outcome identically to the real run (all three wordings), and writes nothing (US10, Z4)" {
+  mock_stop
+  local work2="${BATS_TEST_TMPDIR}/dry-run-unreachable"
+  cp -R "${FIXTURE}" "${work2}"
+  local spec2="${work2}/specs/001-billing-invoices/spec.md"
+  cp "${WORK}/.specify/jira/config.yml" "${work2}/.specify/jira/config.yml"
+  export JIRA_CONFIG_DIR="${work2}/.specify/jira"
+
+  local cfg
+  cfg="$(mock_write_config '{
+    "projects":{"COMP":"company"},
+    "transitions":{
+      "COMP-2":[{"id":"201","name":"Review","to":{"name":"Under Review"},"fields":{}}],
+      "COMP-3":[],
+      "COMP-4":[{"id":"203","name":"Start","to":{"name":"in progress"},"fields":{}}]
+    }
+  }')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  cmd_reconcile reconcile "${spec2}" --json > /dev/null
+
+  : > "${MOCK_CALLLOG}"
+  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  run cmd_reconcile reconcile "${spec2}" --json --dry-run
+  [ "$status" -eq 0 ]
+  local preview="$output"
+  [ "$(jq -r '.dry_run' <<< "${preview}")" = "true" ]
+  [ "$(grep -c '^POST .*/transitions$' "${MOCK_CALLLOG}")" -eq 0 ]
+
+  : > "${MOCK_CALLLOG}"
+  run cmd_reconcile reconcile "${spec2}" --json
+  unset SPEC_KIT_JIRA_HOOK_EVENT
+  [ "$status" -eq 0 ]
+  local real="$output"
+  [ "$(jq -r '.dry_run' <<< "${real}")" = "false" ]
+
+  [ "$(jq -c '.warnings' <<< "${preview}")" = "$(jq -c '.warnings' <<< "${real}")" ]
+  # Never forces an intermediate move, in either mode.
+  [ "$(grep -c '^POST .*/transitions$' "${MOCK_CALLLOG}")" -eq 0 ]
 }

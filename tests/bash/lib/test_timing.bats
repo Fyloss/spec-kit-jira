@@ -370,3 +370,49 @@ teardown() {
   _timing_now_ms
   [ "${_TIMING_NOW_MS}" = "0" ]
 }
+
+# --- B4 (023, T151, spawn-budget.md §4): the timing report's phase
+# attribution is real, not just internally consistent, when feature 023's
+# own requests are in play -----------------------------------------------
+
+@test "B4 -- feature 023's transitions reads land wholly in the plan phase, and per-phase counts sum to calls.log's total (023, T151)" {
+  local root="${BATS_TEST_DIRNAME}/../../.."
+  # shellcheck source=/dev/null
+  source "${root}/tests/bash/helpers/calls_log.bash"
+  local outdir="${BATS_TMPDIR}/timing_budget_b4_$$"
+  rm -rf "${outdir}"
+
+  SPEC_KIT_JIRA_HARNESS_ENV="SPEC_KIT_JIRA_TIMING=1" \
+    bash "${root}/tests/conformance/run-scenario.sh" \
+    "${root}/tests/conformance/scenarios/us023-sixty-stories-due.json" bash "${outdir}" > /dev/null
+
+  local total_calls total_reported
+  total_calls="$(helper_calls_total "${outdir}/calls.log")"
+  total_reported="$(grep '^timing: total' "${outdir}/stderr" | sed -E 's/^timing: total +[0-9]+ ms +([0-9]+) requests.*/\1/')"
+  [ "${total_calls}" -gt 0 ]
+  [ "${total_reported}" = "${total_calls}" ]
+
+  # The harness's own log, never timing's self-report, is what "attributed
+  # to plan" is checked against: every availability read this feature issues
+  # (GET .../transitions?expand=…) is a plan-phase request (transitions_load
+  # is called only from inside plan_lifecycle/plan_lifecycle_tasks, both
+  # invoked between reconcile.sh's own plan begin/end marks), and this
+  # scenario's due set issues nothing else during plan — so the two counts
+  # are exactly equal, not just plan-request-count > 0.
+  local transitions_reads plan_reported
+  transitions_reads="$(grep -c '^GET .*/transitions?expand=' "${outdir}/calls.log")"
+  plan_reported="$(grep '^timing: plan ' "${outdir}/stderr" | sed -E 's/^timing: plan +[0-9]+ ms +([0-9]+) requests.*/\1/')"
+  [ "${transitions_reads}" -gt 0 ]
+  [ "${plan_reported}" = "${transitions_reads}" ]
+
+  # The write half of the same feature (the transition POST) is issued from
+  # apply_writes, called only after reconcile.sh's own apply begin mark —
+  # so it is counted under apply, never folded back into plan.
+  local transitions_writes apply_reported
+  transitions_writes="$(grep -c '^POST .*/transitions' "${outdir}/calls.log")"
+  apply_reported="$(grep '^timing: apply ' "${outdir}/stderr" | sed -E 's/^timing: apply +[0-9]+ ms +([0-9]+) requests.*/\1/')"
+  [ "${transitions_writes}" -gt 0 ]
+  [ "${apply_reported}" -ge "${transitions_writes}" ]
+
+  rm -rf "${outdir}"
+}

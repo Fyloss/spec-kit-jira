@@ -7,6 +7,7 @@ BeforeAll {
     $Mock = Join-Path $PSScriptRoot '../../conformance/mock-jira'
     Import-Module (Join-Path $Mock 'Mock.psm1') -Force
     Import-Module (Join-Path $SinkDir 'Recognition.psm1') -Force
+    Import-Module (Join-Path $SinkDir 'Prefetch.psm1') -Force
     $env:JIRA_EMAIL = 'user@example.com'
     $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
     $env:JIRA_NO_SLEEP = '1'
@@ -184,6 +185,38 @@ Describe 'T055 — an inconclusive read is NEVER downgraded to "no parent exists
         $r = Invoke-JiraRecognitionParentRun -MarkerInfoJson $minfo -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath $script:SpecPath
         $r.ExitCode | Should -Be 2
         $r.Json | Should -Be ''
+    }
+}
+
+Describe 'T083 [023, Phase 6, US4] — the widened parent field projection' {
+    AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
+
+    It 'the bound parent read carries status, flagged and blockers (research R6), identical on a prefetch hit and a prefetch miss' {
+        $cfg = New-JiraMockConfig '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","role":"parent"}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        Invoke-RestMethod -Method Put -Uri "$($script:M.BaseUrl)/rest/api/3/issue/COMP-412" `
+            -ContentType 'application/json' `
+            -Body '{"fields":{"status":{"name":"Building","statusCategory":{"key":"indeterminate"}},"Flagged":[{"value":"Impediment"}],"issuelinks":[{"type":{"inward":"is blocked by"},"inwardIssue":{"key":"COMP-999"}}]}}' | Out-Null
+
+        $minfo = '{"state":"bound","id":"3f2a91c04b7e6d18","ticket":"COMP-412","lines":[2]}'
+
+        # Prefetch MISS: _RECOGNITION_NO_PREFETCH forces the fall-through GET.
+        $env:_RECOGNITION_NO_PREFETCH = '1'
+        $missResult = Invoke-JiraRecognitionParentRun -MarkerInfoJson $minfo -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath $script:SpecPath
+        Remove-Item Env:\_RECOGNITION_NO_PREFETCH -ErrorAction SilentlyContinue
+        $missResult.ExitCode | Should -Be 0
+        $miss = $missResult.Json | ConvertFrom-Json
+        $miss.status | Should -Be 'Building'
+        $miss.status_category | Should -Be 'indeterminate'
+        $miss.flagged | Should -Be $true
+        @($miss.blockers).Count | Should -Be 1
+
+        # Prefetch HIT: prime the cache with the same key first.
+        Invoke-JiraPrefetchLoad -Keys @('COMP-412') | Out-Null
+        $hitResult = Invoke-JiraRecognitionParentRun -MarkerInfoJson $minfo -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath $script:SpecPath
+        $hitResult.ExitCode | Should -Be 0
+        $hitResult.Json | Should -Be $missResult.Json
     }
 }
 

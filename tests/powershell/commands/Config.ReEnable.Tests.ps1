@@ -132,6 +132,31 @@ Describe 'The operator release flag' {
         $se2.ToString() | Should -Not -BeNullOrEmpty
     }
 
+    It 'T028 [023, US2] -- a disabled event exits 0 silently before any config read or network call, event genuinely supplied (contract lifecycle-event.md §4 invariant E3, FR-012)' {
+        $spec = Join-Path $script:Work 'spec.md'
+        @(
+            '# Feature Specification: Held', '', 'A spec.', '',
+            '### User Story 1 - The core story (Priority: P1)', '',
+            '- **Given** a user', '- **When** they act', '- **Then** it works'
+        ) -join "`n" | Set-Content -LiteralPath $spec -NoNewline
+
+        $null = Add-JiraHooksDisabled -LifecycleEvent 'after_plan' -ConfigDir $env:JIRA_CONFIG_DIR
+        # An unreachable base URL: if the dispatch guard failed to hold the run
+        # BEFORE any network call, this run would fault loudly rather than
+        # exit 0 silently.
+        $env:SPEC_KIT_JIRA_BASE_URL = 'http://127.0.0.1:1'
+        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+
+        $sw = [System.IO.StringWriter]::new(); $se = [System.IO.StringWriter]::new()
+        $oo = [Console]::Out; $oe = [Console]::Error
+        [Console]::SetOut($sw); [Console]::SetError($se)
+        try { $code = Invoke-JiraReconcile -Arguments @('reconcile', '--json', $spec) }
+        finally { [Console]::SetOut($oo); [Console]::SetError($oe); Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue }
+        [int]$code | Should -Be 0
+        $sw.ToString() | Should -BeNullOrEmpty
+        $se.ToString() | Should -BeNullOrEmpty
+    }
+
     It 'requires a value, and says so (usage)' {
         $r = Invoke-ConfigRun @('config', '--enable-hook')
         $r.ExitCode | Should -Be 1

@@ -31,11 +31,11 @@ flowchart TD
     Build --> Recognise["6 · RECOGNISE — read every recorded ticket back by key<br/>parent, story AND sub-task"]
     Recognise --> Context["7 · Build the plan context from the local binding"]
     Context --> Plan["8 · PLAN the ordered action set<br/>epic → stories → tasks"]
-    Plan --> Lifecycle["9 · LIFECYCLE filter<br/>drift, halted states, flagged, zero-churn drop"]
+    Plan --> Lifecycle["9 · LIFECYCLE filter<br/>drift, halted states, flagged, zero-churn drop<br/>the declared-step MOVE is resolved here too (023)<br/>sink/jira/transitions.sh, against the ticket's real available moves"]
     Lifecycle --> Apply{"--dry-run?"}
 
     Apply -->|"yes"| Summary
-    Apply -->|"no"| Write["10 · APPLY — privacy guard, then write<br/>stamp and record each created key immediately"]
+    Apply -->|"no"| Write["10 · APPLY — privacy guard, then write<br/>stamp and record each created key immediately<br/>the resolved transition (023) is issued here, alongside content"]
     Write --> Complete["10a · COMPLETE — for each checked task,<br/>transition its recognised sub-task to a done-category status (012)"]
     Complete --> Summary["11 · Run summary<br/>counts · actions · warnings · notes · hook health"]
     Summary --> Hook{"Running inside a hook<br/>with a non-zero exit?"}
@@ -48,14 +48,33 @@ is not incidental: the write path is the last thing that happens, after every
 decision has already been made.
 
 The **state phase (021)** trades one guarantee for the speed: while the recorded
-document matches the local inputs — `spec.md`, `tasks.md`, `config.yml`,
-`config.local.yml`, and the run's own flags — a reconcile that changed nothing
+document matches the local inputs — `spec.md`, `plan.md`, `tasks.md`, `config.yml`,
+`config.local.yml`, the dispatched `hook_event` (023, contracts/run-state-v2.md),
+and the run's own flags — a reconcile that changed nothing
 locally exits in under a second having issued zero requests, but a change made
 only on the Jira side (a deleted ticket, an edited description, a stripped
 label) goes undetected and unhealed until a local edit, or `--force`, restores
-a full reconcile. See
+a full reconcile. `--dry-run` skips this read entirely (§3), so a preview can
+never itself short-circuit, and never records the document either — a preview
+leaves the following real run's own short-circuit decision untouched. See
 [`contracts/run-state.md`](../specs/021-reconcile-performance/contracts/run-state.md) for the full
 decision table.
+
+## The lifecycle event (023)
+
+Each of the six `after_*` hooks fires `reconcile` with `SPEC_KIT_JIRA_HOOK_EVENT`
+set to its own name in the environment — never a flag, for the same reason
+`SPEC_KIT_JIRA_TIMING` below is one: the host invokes the hook, not the
+operator, so a flag could never reach it. Step 9 (LIFECYCLE) reads it, looks
+up each recognised tier's own declared step for that event in its project's
+`phase_status_map`
+([`contracts/role-lifecycle-config.md`](../specs/023-advance-board-position/contracts/role-lifecycle-config.md)),
+and resolves the move
+([`contracts/transition-resolution.md`](../specs/023-advance-board-position/contracts/transition-resolution.md))
+against the ticket's real available transitions — never against a declared
+target it merely hopes is reachable. A direct invocation, or an event outside
+the closed six, carries no target and leaves every tier's board position
+exactly where it already was.
 
 ## Timing instrumentation (021)
 
@@ -374,6 +393,7 @@ classDiagram
         +int assigned
         +int warnings
         +int errors
+        +int transitioned
         +TaskCounts tasks
     }
 
@@ -429,3 +449,10 @@ Two details that make the summary trustworthy:
   tier byte-for-byte identical to before feature 012 (FR-011). Its own
   `transitioned` count is never folded into `updated`: a completion is a
   transition, not a content change (research R5).
+- **`counts.transitioned` (023) appears only when the run carries a lifecycle
+  event AND at least one role declares a step for it** — the same absence-not-
+  zero rule, for the same reason: a run with no event, or one no project's
+  `phase_status_map` answers, stays byte-for-byte identical to before this
+  feature. It is read off the resolved action set built during the plan phase,
+  not off what the write step confirmed — so a `--dry-run` preview reports the
+  identical count the real run goes on to perform.

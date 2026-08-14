@@ -86,22 +86,25 @@ _recognition_project_of() {
 }
 
 # _recognition_read_parent <key> — one GET folding the identity property
-# into the issue fetch, fields limited to summary,description (contract
-# hierarchy-resolution.md §7: parent recognition never needs priority,
-# status or links, unlike a story's read). Prints canonical JSON on success:
+# into the issue fetch. 023, research R6: the field projection widens from
+# summary,description,labels to also carry status, issuelinks and Flagged —
+# every safety rule FR-021 requires the parent to be evaluated against. The
+# prefetch's requested union already carries all three
+# (sink/jira/prefetch.sh:26), so only this reader's own projection changes;
+# the bulk request itself is unchanged. Prints canonical JSON on success:
 # {"gone":false,"marker":<marker-or-null>,"fields":{...}}, or {"gone":true}
 # on a 404. Any other transport failure returns the mapped exit code, zero
 # stdout (fail-closed, Constitution III).
 _recognition_read_parent() {
   local key="$1" base url resp rc tmp hit
   if [[ -z "${_RECOGNITION_NO_PREFETCH:-}" ]]; then
-    if hit="$(prefetch_get "${key}" "summary,description,labels")"; then
+    if hit="$(prefetch_get "${key}" "summary,description,labels,status,issuelinks,Flagged")"; then
       printf '%s' "${hit}"
       return 0
     fi
   fi
   base="${SPEC_KIT_JIRA_BASE_URL:-}"
-  url="${base}/rest/api/3/issue/${key}?properties=${SPEC_KIT_JIRA_IDENTITY_KEY}&fields=summary,description,labels"
+  url="${base}/rest/api/3/issue/${key}?properties=${SPEC_KIT_JIRA_IDENTITY_KEY}&fields=summary,description,labels,status,issuelinks,Flagged"
   tmp="$(mktemp)"
   jira_request GET "${url}" > "${tmp}"
   rc=$?
@@ -203,15 +206,24 @@ recognition_parent_run() {
         return 0
       fi
 
-      local fields current origin last_summary
+      local fields current origin last_summary status status_category flagged blockers
       fields="$(jq -c '.fields' <<< "${read_result}")"
       current="$(jq -c '{summary:(.summary // ""), description:(.description // {}), labels:((.labels // []) | unique)}' <<< "${fields}")"
       origin="$(jq -r '.origin // "bridge"' <<< "${marker}")"
       # last_summary (018, T044; contracts/summary-record.md §1/§5: every
       # tier, including the parent) — from the same already-fetched marker.
       last_summary="$(jq -r '.summary // empty' <<< "${marker}")"
+      # 023, research R6: status/status_category/flagged/blockers, the same
+      # shape a story's bound entry already carries — what makes the parent
+      # evaluable by the SAME lifecycle-safety body a story already runs
+      # through (FR-021).
+      status="$(jq -r '.status.name // ""' <<< "${fields}")"
+      status_category="$(jq -r '.status.statusCategory.key // ""' <<< "${fields}")"
+      flagged="$(jq -r 'if ((.["Flagged"]? // []) | length) > 0 then true else false end' <<< "${fields}")"
+      blockers="$(jq -c '[(.issuelinks // [])[] | select(.type.inward? and .inwardIssue?) | .inwardIssue.key]' <<< "${fields}")"
       jq -cn --arg k "${key}" --argjson c "${current}" --arg o "${origin}" --arg ls "${last_summary}" \
-        '{state:"bound", key:$k, current:$c, origin:$o}
+        --arg st "${status}" --arg sc "${status_category}" --argjson fl "${flagged}" --argjson bl "${blockers}" \
+        '{state:"bound", key:$k, current:$c, origin:$o, status:$st, status_category:$sc, flagged:$fl, blockers:$bl}
          + (if $ls == "" then {} else {last_summary:$ls} end)' | json_canonical
       return 0
       ;;

@@ -13,7 +13,7 @@ flowchart TB
         A3["routing + routing_default"]
         A4["teams catalogue"]
         A5["privacy.allowlist"]
-        A6["phase_status_map · halted_statuses"]
+        A6["phase_status_map (per role since 023) · halted_statuses"]
         A7["task_mirror per project (022) — subtask | checklist"]
     end
 

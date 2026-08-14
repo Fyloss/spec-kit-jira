@@ -19,7 +19,8 @@ Import-Module (Join-Path $PSScriptRoot 'Output.psm1')   # ConvertTo-JiraJsonValu
 
 # Shape version of the run-state document (data-model.md §1). A change to the
 # *set* of recorded inputs bumps it, invalidating every existing file.
-$script:RunStateSchema = 1
+# 023, contracts/run-state-v2.md C1: 1 -> 2 for `hook_event` and `plan.md`.
+$script:RunStateSchema = 2
 
 function Get-JiraConfigDir {
     # Mirror of Credentials.psm1's private helper of the same name — every
@@ -71,6 +72,10 @@ function New-JiraRunStateDocument {
         # refusal), and the bash port's run_state_matches tolerates "" fine.
         [Parameter(Mandatory)] [AllowEmptyString()] [string] $Email,
         [Parameter(Mandatory)] [string] $OnDrift,
+        # 023, contracts/run-state-v2.md §2: an explicit argument, never read
+        # from $env:SPEC_KIT_JIRA_HOOK_EVENT itself — keeps this module a pure
+        # function of its arguments, like BaseUrl/Email/OnDrift/FieldValues.
+        [AllowEmptyString()] [string] $HookEvent = '',
         [string] $FieldValues = ''
     )
     if (-not (Test-Path -LiteralPath $SpecPath -PathType Leaf)) { return $null }
@@ -90,6 +95,17 @@ function New-JiraRunStateDocument {
         $inputs['tasks.md'] = $hash
     }
 
+    # C3 (contracts/run-state-v2.md §1): plan.md is read on every run and
+    # spliced onto the parent's description, so a change to it must
+    # invalidate — the same "present when the file exists, key omitted
+    # otherwise" rule tasks.md already has.
+    $planPath = Join-Path (Split-Path -Parent $SpecPath) 'plan.md'
+    if (Test-Path -LiteralPath $planPath -PathType Leaf) {
+        $hash = Get-JiraGitHash -Path $planPath
+        if (-not $hash) { return $null }
+        $inputs['plan.md'] = $hash
+    }
+
     $configDir = Get-JiraConfigDir
     foreach ($f in @('config.yml', 'config.local.yml', 'personal.yml')) {
         $p = Join-Path $configDir $f
@@ -106,6 +122,7 @@ function New-JiraRunStateDocument {
         base_url          = $BaseUrl
         email             = $Email
         on_drift          = $OnDrift
+        hook_event        = $HookEvent
         field_values      = $FieldValues
         inputs            = $inputs
     }
@@ -125,6 +142,7 @@ function Test-JiraRunStateMatch {
         [Parameter(Mandatory)] [string] $BaseUrl,
         [Parameter(Mandatory)] [AllowEmptyString()] [string] $Email,
         [Parameter(Mandatory)] [string] $OnDrift,
+        [AllowEmptyString()] [string] $HookEvent = '',
         [string] $FieldValues = ''
     )
     $recordedPath = Get-JiraRunStatePath -SpecPath $SpecPath
@@ -140,7 +158,7 @@ function Test-JiraRunStateMatch {
     }
     catch { return $false }
 
-    $fresh = New-JiraRunStateDocument -SpecPath $SpecPath -BaseUrl $BaseUrl -Email $Email -OnDrift $OnDrift -FieldValues $FieldValues
+    $fresh = New-JiraRunStateDocument -SpecPath $SpecPath -BaseUrl $BaseUrl -Email $Email -OnDrift $OnDrift -HookEvent $HookEvent -FieldValues $FieldValues
     if (-not $fresh) { return $false }
 
     return [string]::Equals($recorded, $fresh, [System.StringComparison]::Ordinal)
@@ -160,6 +178,7 @@ function Save-JiraRunState {
         [Parameter(Mandatory)] [string] $BaseUrl,
         [Parameter(Mandatory)] [AllowEmptyString()] [string] $Email,
         [Parameter(Mandatory)] [string] $OnDrift,
+        [AllowEmptyString()] [string] $HookEvent = '',
         [string] $FieldValues = ''
     )
     $recordedPath = Get-JiraRunStatePath -SpecPath $SpecPath
@@ -187,7 +206,7 @@ function Save-JiraRunState {
         }
     }
 
-    $doc = New-JiraRunStateDocument -SpecPath $SpecPath -BaseUrl $BaseUrl -Email $Email -OnDrift $OnDrift -FieldValues $FieldValues
+    $doc = New-JiraRunStateDocument -SpecPath $SpecPath -BaseUrl $BaseUrl -Email $Email -OnDrift $OnDrift -HookEvent $HookEvent -FieldValues $FieldValues
     if (-not $doc) {
         Write-JiraWarning 'run-state: could not compose the state document; state not recorded'
         return

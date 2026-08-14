@@ -210,6 +210,38 @@ EOF
   [ "$(jq -r '.current.labels | join(",")' <<< "$output")" = "alpha,zeta" ]
 }
 
+# --- T082 [023, Phase 6, US4]: the widened parent field projection ----------
+
+@test "T082 -- the bound parent read carries status, flagged and blockers (research R6), identical on a prefetch hit and a prefetch miss" {
+  local cfg; cfg="$(_seed_config '{"origin":"bridge","repo":"acme/app","spec_slug":"001-billing","role":"parent"}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  curl -s -X PUT "${MOCK_BASE_URL}/rest/api/3/issue/COMP-412" \
+    -H 'Content-Type: application/json' \
+    -d '{"fields":{"status":{"name":"Building","statusCategory":{"key":"indeterminate"}},"Flagged":[{"value":"Impediment"}],"issuelinks":[{"type":{"inward":"is blocked by"},"inwardIssue":{"key":"COMP-999"}}]}}' > /dev/null
+
+  local minfo='{"state":"bound","id":"3f2a91c04b7e6d18","ticket":"COMP-412","lines":[2]}'
+
+  # Prefetch MISS: _RECOGNITION_NO_PREFETCH forces the fall-through GET.
+  export _RECOGNITION_NO_PREFETCH=1
+  run recognition_parent_run "${minfo}" "${SPEC_REF}" "COMP" "${SPEC_PATH}"
+  unset _RECOGNITION_NO_PREFETCH
+  [ "$status" -eq 0 ]
+  local miss="$output"
+  [ "$(jq -r '.status' <<< "${miss}")" = "Building" ]
+  [ "$(jq -r '.status_category' <<< "${miss}")" = "indeterminate" ]
+  [ "$(jq -r '.flagged' <<< "${miss}")" = "true" ]
+  [ "$(jq -r '.blockers | length' <<< "${miss}")" -eq 1 ]
+
+  # Prefetch HIT: prime the cache with the same key first.
+  prefetch_load "COMP-412"
+  run recognition_parent_run "${minfo}" "${SPEC_REF}" "COMP" "${SPEC_PATH}"
+  [ "$status" -eq 0 ]
+  local hit="$output"
+
+  [ "${hit}" = "${miss}" ]
+}
+
 # --- Cross-port parity -------------------------------------------------------
 
 @test "the PowerShell port decides the same outcome for every row (NFR-1)" {

@@ -1,0 +1,25 @@
+# Team config — 023 US7 conformance fixture (committable, credential-free):
+# same declared mapping as repo-with-bound-story-due, plus a recorded
+# field_defaults value sharing the gated field's own logical name
+# ("Resolution") — proves rule M4 (FR-006): a gated transition never
+# consults field_defaults, so the demanded value is never substituted.
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    phase_status_map:
+      after_specify: "To Do"
+      after_plan: "In Progress"
+field_defaults:
+  COMP:
+    ask: false
+    Story:
+      Resolution: "Done"
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP

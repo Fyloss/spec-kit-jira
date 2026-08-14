@@ -25,6 +25,16 @@ Import-Module (Join-Path $PSScriptRoot '../sink/jira/Recognition.psm1') -Force #
 # Recognition.psm1's scope and reattach them to this one instead.
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Prefetch.psm1')        # 021 US4 — the recognition prefetch
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/PlanApply.psm1') -Force
+# No -Force on either of the next two: PlanApply.psm1 (imported above)
+# already loads both internally — a second -Force reimport here would tear
+# their exports out of PlanApply.psm1's own scope and reattach them to this
+# one instead (the same hazard the Prefetch.psm1 comment above documents).
+# 023, US4: the task-role mapping's own due set (Get-JiraDriftDecision,
+# Import-JiraTransitions/Get-JiraTransitionRecord/Resolve-JiraTransition)
+# is resolved directly in this module now, mirroring reconcile.sh, which
+# gets both transitively for free from bash's lack of real module scoping.
+Import-Module (Join-Path $PSScriptRoot '../engine/Drift.psm1')
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/Transitions.psm1')
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force # Phase 8, US5 — the completion pass's transitions read
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/DuplicateProbe.psm1') -Force # US4, droppable — the second, best-effort guard
 Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force # hook health — READ ONLY (003 FR-022)
@@ -137,22 +147,47 @@ function Resolve-JiraReconcileRouting {
 function Get-JiraReconcilePhaseStatusMap {
     <#
     .SYNOPSIS
-      The resolved project's declared phase->status map (Phase 6, US4,
-      research R9), or {} when the project declares none. Mirror of
-      _reconcile_phase_status_map.
+      The resolved, PER-ROLE phase->status map (023, contracts/
+      role-lifecycle-config.md §2/§4): all three role keys always present, an
+      empty object where the project declares nothing for that role. Both
+      accepted shapes normalise to this one — a project's committed
+      role-blind mapping (every key a lifecycle event) routes wholesale to
+      the `story` role (FR-020, back-compatible by construction); a per-role
+      mapping (every key a hierarchy role) is used as-is. Config.psm1's
+      schema validator has already refused anything mixed or unknown before
+      this ever runs, so only the two valid shapes and the empty map reach
+      here. Mirror of _reconcile_phase_status_map.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $ProjectKey, [Parameter(Mandatory)] [string] $ConfigJson)
     $cfg = $ConfigJson | ConvertFrom-Json -Depth 100
     $projectsVal = Get-JiraPlanPropSafe $cfg 'projects'
     $projects = if ($null -ne $projectsVal) { @($projectsVal) } else { @() }
+    $v = $null
     foreach ($p in $projects) {
         if ([string](Get-JiraPlanPropSafe $p 'key') -eq $ProjectKey) {
             $v = Get-JiraPlanPropSafe $p 'phase_status_map'
-            if ($null -ne $v) { return (ConvertTo-JiraJsonValue $v) }
+            break
         }
     }
-    return '{}'
+    $roleNames = Get-JiraRoleNameList
+    $perRole = [ordered]@{}
+    if ($v -is [System.Management.Automation.PSCustomObject]) {
+        $ks = @($v.PSObject.Properties.Name)
+        if ($ks.Count -gt 0 -and (@($ks | Where-Object { $roleNames -notcontains $_ })).Count -eq 0) {
+            # Already per-role.
+            foreach ($k in $ks) { $perRole[$k] = (Get-JiraPlanPropSafe $v $k) }
+        }
+        elseif ($ks.Count -gt 0) {
+            # Role-blind — routes wholesale to `story`.
+            $perRole['story'] = $v
+        }
+    }
+    $out = [ordered]@{}
+    foreach ($r in $roleNames) {
+        $out[$r] = if ($perRole.Contains($r)) { $perRole[$r] } else { [ordered]@{} }
+    }
+    return (ConvertTo-JiraJsonValue $out)
 }
 
 function Get-JiraReconcileHaltedStatuses {
@@ -179,7 +214,7 @@ function Get-JiraReconcileHaltedStatuses {
 function Get-JiraReconcilePhaseOrder {
     <#
     .SYNOPSIS
-      The DISTINCT statuses a phase->status map resolves to, IN THE FIXED
+      The DISTINCT statuses EACH ROLE's own map resolves to, IN THE FIXED
       CANONICAL LIFECYCLE-EVENT ORDER (extension.yml's own hook list) —
       deliberately NOT Get-JiraPhaseStatusTargetSet, whose own tested
       contract accepts arbitrary phase names and therefore returns them
@@ -188,22 +223,36 @@ function Get-JiraReconcilePhaseOrder {
       map alone). Reconcile's phase names ARE the fixed lifecycle events, so
       this local helper can use that closed vocabulary to restore the true
       chronological order drift's ahead/behind comparison depends on
-      (Phase 6, US4, research R9). Mirror of _reconcile_phase_order.
+      (Phase 6, US4, research R9).
+
+      023, data-model.md §1: `order` is now derived PER ROLE — a
+      specification and a story on different workflows are never compared
+      against each other's step order (contract role-lifecycle-config.md §5
+      I1). PhaseStatusMapJson must already be the RESOLVED per-role shape
+      (Get-JiraReconcilePhaseStatusMap's own output). Returns
+      {specification:[...], story:[...], task:[...]}. Mirror of
+      _reconcile_phase_order.
     #>
     [CmdletBinding()]
     param([string] $PhaseStatusMapJson = '{}')
     $pm = $PhaseStatusMapJson | ConvertFrom-Json -Depth 100
     $canonicalOrder = @('before_specify', 'after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')
-    $distinct = [System.Collections.Generic.List[string]]::new()
-    foreach ($phaseEvent in $canonicalOrder) {
-        if ($pm -isnot [System.Management.Automation.PSCustomObject]) { continue }
-        $member = $pm.PSObject.Properties[$phaseEvent]
-        if ($null -eq $member) { continue }
-        $v = [string]$member.Value
-        if ([string]::IsNullOrEmpty($v)) { continue }
-        if (-not $distinct.Contains($v)) { $distinct.Add($v) }
+    $roleNames = Get-JiraRoleNameList
+    $out = [ordered]@{}
+    foreach ($role in $roleNames) {
+        $roleMap = Get-JiraPlanPropSafe $pm $role
+        $distinct = [System.Collections.Generic.List[string]]::new()
+        foreach ($phaseEvent in $canonicalOrder) {
+            if ($roleMap -isnot [System.Management.Automation.PSCustomObject]) { continue }
+            $member = $roleMap.PSObject.Properties[$phaseEvent]
+            if ($null -eq $member) { continue }
+            $v = [string]$member.Value
+            if ([string]::IsNullOrEmpty($v)) { continue }
+            if (-not $distinct.Contains($v)) { $distinct.Add($v) }
+        }
+        $out[$role] = $distinct
     }
-    return (ConvertTo-JiraJsonValue $distinct)
+    return (ConvertTo-JiraJsonValue $out)
 }
 
 function Get-JiraReconcileFieldDefaultNote {
@@ -703,7 +752,7 @@ function Invoke-JiraReconcileRun {
     $shortCircuited = $false
     $email = if ($env:JIRA_EMAIL) { $env:JIRA_EMAIL } else { '' }
     if (-not $force -and -not $dryRun) {
-        if (Test-JiraRunStateMatch -SpecPath $specFile -BaseUrl $base -Email $email -OnDrift $onDrift -FieldValues $fieldValues) {
+        if (Test-JiraRunStateMatch -SpecPath $specFile -BaseUrl $base -Email $email -OnDrift $onDrift -HookEvent $hookEvent -FieldValues $fieldValues) {
             $shortCircuited = $true
         }
     }
@@ -1351,6 +1400,21 @@ function Invoke-JiraReconcileRun {
     # both pure notes, never a write. Mirror of reconcile.sh's own block; see
     # there for the full rationale.
     $taskNotes = [System.Collections.Generic.List[string]]::new()
+    # 023, US4, I4/I5: a DECLARED `task` mapping that currently has no
+    # effect produces exactly ONE note per run — never a warning, never
+    # per ticket. Two inert cases: `checklist` mode, and no task role
+    # resolved at all ($taskTierMode is empty). An EMPTY mapping stays
+    # silent instead (I2's general rule). Mirror of reconcile.sh.
+    $taskRoleMapForNote = Get-JiraPlanPropSafe ($phaseStatusMap | ConvertFrom-Json -Depth 100) 'task'
+    $taskRoleMapForNoteCount = if ($taskRoleMapForNote) { @($taskRoleMapForNote.PSObject.Properties).Count } else { 0 }
+    if ($taskRoleMapForNoteCount -gt 0 -and $taskTierMode -ne 'subtask') {
+        if ($taskTierMode -eq 'checklist') {
+            $taskNotes.Add("the task-role lifecycle mapping for $projectKey has no effect while its tasks are mirrored as a checklist")
+        }
+        else {
+            $taskNotes.Add("the task-role lifecycle mapping for $projectKey has no effect: the project declares no task role")
+        }
+    }
     if ($taskTierMode -eq 'subtask') {
         $tasksRecogForNotes = $tasksRecogJson | ConvertFrom-Json -Depth 100
         $tasksRecogBoundForNotes = Get-JiraPlanPropSafe $tasksRecogForNotes 'bound'
@@ -1584,6 +1648,19 @@ function Invoke-JiraReconcileRun {
     # resolved here, never inside the PURE Get-JiraTaskLifecyclePlan: only the
     # command layer knows --on-drift. Mirror of reconcile.sh.
     if ($taskRoleActive -and $taskTierMode -eq 'subtask') {
+        # 023, US4, I4/I7: the `task` role's own declared mapping, resolved
+        # once up front. Mirror of reconcile.sh.
+        $phaseStatusMapObj = $phaseStatusMap | ConvertFrom-Json -Depth 100
+        $taskRoleMapObj = Get-JiraPlanPropSafe $phaseStatusMapObj 'task'
+        # Get-JiraPlanPropSafe indexes .PSObject.Properties[$Name] directly,
+        # which throws under StrictMode for an EMPTY string name — the
+        # ubiquitous "no event" case ($hookEvent = ''). Guard here rather
+        # than widen the shared helper's contract for every other caller.
+        $taskLcTarget = if ($hookEvent) { [string](Get-JiraPlanPropSafe $taskRoleMapObj $hookEvent) } else { '' }
+        $taskLcMapped = if ($taskRoleMapObj) { @($taskRoleMapObj.PSObject.Properties | ForEach-Object { [string]$_.Value }) } else { @() }
+        $taskLcOrder = @((Get-JiraReconcilePhaseOrder -PhaseStatusMapJson $phaseStatusMap | ConvertFrom-Json -Depth 100).task)
+        $taskDueMeta = [ordered]@{}
+
         $tasksRecogForCompletion = $tasksRecogJson | ConvertFrom-Json -Depth 100
         $tasksRecogBoundForCompletion = Get-JiraPlanPropSafe $tasksRecogForCompletion 'bound'
         $completionTasks = [ordered]@{}
@@ -1626,6 +1703,29 @@ function Invoke-JiraReconcileRun {
                     }
                     $cEntry = [ordered]@{ key = $cKey; blockers = $cBlockers; already_done_diverged = $true; backward = $cBwd }
                 }
+                elseif ((-not $cDone) -and $taskLcTarget) {
+                    # 023, US4: a genuinely unchecked sub-task (not diverged
+                    # into a done status — that case is handled above), with
+                    # the task role declaring a step for this event. Same
+                    # drift/Flagged safety a story or the parent already
+                    # runs through (research R6). Mirror of reconcile.sh.
+                    $cStatus = [string](Get-JiraPlanPropSafe $cBound 'status')
+                    $cFlagged = [bool](Get-JiraPlanPropSafe $cBound 'flagged')
+                    if ($cStatus -and $cStatus -ne $taskLcTarget) {
+                        if ($cFlagged) {
+                            $taskWarns.Add("sub-task $cKey carries the Flagged (impediment) marker; its transition is withheld and the flag is left untouched")
+                        }
+                        else {
+                            $tCategory = if ($taskLcMapped -contains $cStatus) { 'mapped' } else { 'unknown' }
+                            $tDi = ConvertTo-JiraJsonValue ([ordered]@{ current_status = $cStatus; current_category = $tCategory; target_status = $taskLcTarget; order = $taskLcOrder; on_drift = $onDrift })
+                            $tDec = Get-JiraDriftDecision -InputJson $tDi | ConvertFrom-Json -Depth 100
+                            foreach ($dw in @($tDec.warnings)) { $taskWarns.Add([string]$dw) }
+                            if ([string]$tDec.decision -eq 'transition') {
+                                $taskDueMeta[$cId] = [ordered]@{ key = $cKey; target = $taskLcTarget; status = $cStatus; blockers = $cBlockers }
+                            }
+                        }
+                    }
+                }
 
                 if ($null -ne $cEntry) { $completionTasks[$cId] = $cEntry }
             }
@@ -1638,6 +1738,31 @@ function Invoke-JiraReconcileRun {
             $tasksActionsJson = ConvertTo-JiraJsonValue @(Get-JiraPlanPropSafe $completionResult 'actions')
             foreach ($w in @(Get-JiraPlanPropSafe $completionResult 'warnings')) { $taskWarns.Add([string]$w) }
             foreach ($n in @(Get-JiraPlanPropSafe $completionResult 'notes')) { $taskNotes.Add([string]$n) }
+        }
+
+        # 023, US4: the task-role due set resolved by DESTINATION NAME
+        # (contract transition-resolution.md §1-§4) — the SAME resolution
+        # engine the story tier uses, one read for the whole due set.
+        if ($taskDueMeta.Count -gt 0) {
+            $taskDueKeys = @($taskDueMeta.Values | ForEach-Object { [string]$_.key })
+            $rcTtl = Import-JiraTransitions -Key $taskDueKeys
+            if ($rcTtl -ne 0) {
+                return (Get-JiraReconcileFaultCode -Code $rcTtl -Message 'reconcile: sub-task transitions could not be read (zero writes)')
+            }
+            foreach ($tdueId in $taskDueMeta.Keys) {
+                $tmeta = $taskDueMeta[$tdueId]
+                $trecord = Get-JiraTransitionRecord -Key ([string]$tmeta.key)
+                if ($null -eq $trecord) { continue }
+                $toutcome = Resolve-JiraTransition -RecordJson $trecord -DeclaredStep ([string]$tmeta.target) | ConvertFrom-Json -Depth 100
+                if ([string]$toutcome.outcome -eq 'move') {
+                    $tres = Get-JiraTransitionAction -BaseUrl $base -Key ([string]$tmeta.key) -TransitionId ([string]$toutcome.transition_id) -Blockers $tmeta.blockers -Label $tdueId -Role 'task' -DeclaredStep ([string]$tmeta.target)
+                    $tasksActionsJson = ConvertTo-JiraJsonValue (@(($tasksActionsJson | ConvertFrom-Json -Depth 100)) + $tres.Action)
+                    if ($tres.Note) { $taskNotes.Add($tres.Note) }
+                }
+                else {
+                    $taskWarns.Add((Get-JiraTransitionWarning -Outcome $toutcome -Role 'task' -Key ([string]$tmeta.key) -Declared ([string]$tmeta.target) -Current ([string]$tmeta.status)))
+                }
+            }
         }
     }
 
@@ -1675,24 +1800,30 @@ function Invoke-JiraReconcileRun {
         # managed-panel comparison is origin-independent (contract §3), so
         # there is no longer a "bridge" value that would route a ticket
         # incorrectly.
-        # target/category (Phase 6, US4, research R9): target is the status
-        # the CURRENT lifecycle event maps to, via the routed project's
-        # phase_status_map — empty when this run has no hook event or the
-        # event has no declared mapping (R9's inert fallback). category
-        # classifies each recognised ticket's OWN status the same way
-        # config_classify_statuses seeds it: mapped (a declared phase
-        # target) overrides an operator-designated halted state, which
-        # overrides Jira's own "done" statusCategory (post-scope), else
-        # unknown.
+        # target (Phase 6, US4, research R9; 023 role-lifecycle-config.md
+        # §4): the status the CURRENT lifecycle event maps to, via the
+        # routed project's phase_status_map — resolved PER ROLE now, empty
+        # when this run has no hook event or that role's map has no
+        # declared step for it (R9's inert fallback). category classifies
+        # each recognised ticket's OWN status against ITS OWN ROLE's mapped
+        # targets (contract §5 I1) the same way Get-JiraStatusClassification
+        # seeds it: mapped (a declared phase target) overrides an
+        # operator-designated halted state, which overrides Jira's own
+        # "done" statusCategory (post-scope), else unknown. role: "story"
+        # for every entry here — the ticket tier `.bound` always names
+        # (parent/task have their own entries).
         $phaseMapObj = $phaseStatusMap | ConvertFrom-Json -Depth 100
+        $storyMap = Get-JiraPlanPropSafe $phaseMapObj 'story'
         $mappedTargets = @()
-        if ($phaseMapObj -is [System.Management.Automation.PSCustomObject]) {
-            $mappedTargets = @($phaseMapObj.PSObject.Properties | ForEach-Object { [string]$_.Value })
+        if ($storyMap -is [System.Management.Automation.PSCustomObject]) {
+            $mappedTargets = @($storyMap.PSObject.Properties | ForEach-Object { [string]$_.Value })
         }
-        $order = @(Get-JiraReconcilePhaseOrder -PhaseStatusMapJson $phaseStatusMap | ConvertFrom-Json -Depth 100)
+        # 023, data-model.md §1: `order` is now PER ROLE — passed through as
+        # the resolved {specification;story;task} object, never flattened.
+        $order = Get-JiraReconcilePhaseOrder -PhaseStatusMapJson $phaseStatusMap | ConvertFrom-Json -Depth 100
         $target = ''
-        if ($phaseMapObj -is [System.Management.Automation.PSCustomObject] -and -not [string]::IsNullOrEmpty($hookEvent)) {
-            $target = [string](Get-JiraPlanPropSafe $phaseMapObj $hookEvent)
+        if ($storyMap -is [System.Management.Automation.PSCustomObject] -and -not [string]::IsNullOrEmpty($hookEvent)) {
+            $target = [string](Get-JiraPlanPropSafe $storyMap $hookEvent)
         }
         $haltedList = @($haltedStatuses | ConvertFrom-Json -Depth 100 | ForEach-Object { [string]$_ })
 
@@ -1712,6 +1843,7 @@ function Invoke-JiraReconcileRun {
                     status   = $statusVal
                     category = $category
                     target   = $target
+                    role     = 'story'
                     flagged  = Get-JiraPlanPropSafe $p.Value 'flagged'
                     blockers = Get-JiraPlanPropSafe $p.Value 'blockers'
                 }
@@ -1719,15 +1851,90 @@ function Invoke-JiraReconcileRun {
                 $lcTickets[$p.Name] = $entry
             }
         }
-        $lcJson = ConvertTo-JiraJsonValue ([ordered]@{ base_url = $base; on_drift = $onDrift; order = $order; tickets = $lcTickets })
+
+        $lcMap2 = [ordered]@{ base_url = $base; on_drift = $onDrift; order = $order; tickets = $lcTickets }
+
+        # 023, research R6: the parent's own lifecycle context entry, keyed
+        # by its durable local identifier (epic.local_id — the same key the
+        # parent-content write already uses), role "specification". Only for
+        # a RECOGNISED parent — a not-yet-created one has no status to
+        # evaluate drift against (D3).
+        $parentLocalIdCtx = ''
+        if ($docForWriteObj -and (Get-JiraPlanPropSafe $docForWriteObj 'epic')) {
+            $parentLocalIdCtx = [string](Get-JiraPlanPropSafe (Get-JiraPlanPropSafe $docForWriteObj 'epic') 'local_id')
+        }
+        if ($parentState -eq 'bound' -and -not [string]::IsNullOrEmpty($parentLocalIdCtx)) {
+            $specMap = Get-JiraPlanPropSafe $phaseMapObj 'specification'
+            $pTarget = ''
+            if ($specMap -is [System.Management.Automation.PSCustomObject] -and -not [string]::IsNullOrEmpty($hookEvent)) {
+                $pTarget = [string](Get-JiraPlanPropSafe $specMap $hookEvent)
+            }
+            $pMappedTargets = @()
+            if ($specMap -is [System.Management.Automation.PSCustomObject]) {
+                $pMappedTargets = @($specMap.PSObject.Properties | ForEach-Object { [string]$_.Value })
+            }
+            $pStatus = [string](Get-JiraPlanPropSafe $recogParent 'status')
+            $pStatusCategory = [string](Get-JiraPlanPropSafe $recogParent 'status_category')
+            $pCategory = 'unknown'
+            if ($pMappedTargets -contains $pStatus) { $pCategory = 'mapped' }
+            elseif ($haltedList -contains $pStatus) { $pCategory = 'halted' }
+            elseif ($pStatusCategory -eq 'done') { $pCategory = 'post-scope' }
+            $pEntry = [ordered]@{
+                key      = [string](Get-JiraPlanPropSafe $recogParent 'key')
+                current  = $null
+                blockers = Get-JiraPlanPropSafe $recogParent 'blockers'
+                status   = $pStatus
+                category = $pCategory
+                target   = $pTarget
+                role     = 'specification'
+                flagged  = Get-JiraPlanPropSafe $recogParent 'flagged'
+                origin   = 'bridge'
+            }
+            $lcMap2['parent_local_id'] = $parentLocalIdCtx
+            $lcTickets[$parentLocalIdCtx] = $pEntry
+        }
+
+        $lcJson = ConvertTo-JiraJsonValue $lcMap2
     }
-    try { $lresult = Get-JiraLifecyclePlan -ContentActionsJson $actionsJson -NeutralDocJson $docForWriteJson -LifecycleContextJson $lcJson | ConvertFrom-Json -Depth 100 }
+    try {
+        $lresult = Get-JiraLifecyclePlan -ContentActionsJson $actionsJson -NeutralDocJson $docForWriteJson -LifecycleContextJson $lcJson -ParentActionJson (ConvertTo-JiraJsonValue $parentAction) | ConvertFrom-Json -Depth 100
+    }
     catch {
+        # 023, contract transition-resolution.md §2 F2: a transitions-read
+        # failure fails closed for the WHOLE specification. Get-JiraLifecyclePlan
+        # throws naming the failing key, prefixed "RC=<n>:" carrying the
+        # REAL transport exit code (fail_closed=2, auth=3, ...) -- an
+        # exception cannot carry a structured exit code natively, and a
+        # message-only throw here previously HARDCODED EXIT_CONFIG (4)
+        # regardless of what the read actually failed with, diverging from
+        # reconcile.sh's own _reconcile_fault "${lc_rc}" ..., which passes
+        # the real code straight through. The prefix is stripped from the
+        # user-facing message; a message with no prefix (any OTHER
+        # assembly failure) falls back to EXIT_CONFIG.
+        $msg = [string]$_.Exception.Message
+        if ($msg -match '^RC=(\d+):(.*)$') {
+            return (Get-JiraReconcileFaultCode -Code ([int]$Matches[1]) -Message "reconcile: $($Matches[2])")
+        }
+        if ($msg -match "'s available moves could not be read") {
+            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: $msg")
+        }
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the lifecycle plan could not be assembled (zero writes)')
     }
     $actionsJson = ConvertTo-JiraJsonValue $lresult.actions
     $warnsJson = ConvertTo-JiraJsonValue $lresult.warnings
     $notesJson = ConvertTo-JiraJsonValue $lresult.notes
+    # 023, U8: the parent's content write is a SEPARATE code path from
+    # $kept (Reconcile.psm1's own parent-first write, PlanApply.psm1's
+    # per-ticket loop unconditionally excludes it) — so a halted parent's
+    # content_writes:false decision, computed inside Get-JiraLifecyclePlan
+    # but with nowhere else to surface, must be applied here or the parent
+    # silently keeps writing content a halted STORY would have withheld.
+    # Every downstream consumer of $parentAction (counts, the apply plan,
+    # the run summary's own display) reads it AFTER this point.
+    $parentContentDroppedVal = Get-JiraPlanPropSafe $lresult 'parent_content_dropped'
+    if ($null -ne $parentContentDroppedVal -and [bool]$parentContentDroppedVal) {
+        $parentAction = $null
+    }
 
     # Every blocked story produces exactly one warning from the diagnostics
     # catalogue (FR-011, FR-016, FR-021) — folded into the same channel the
@@ -1773,6 +1980,26 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
     if ($null -ne $parentAction) {
         if ($parentAction.method -eq 'POST') { $created++ }
         elseif ($parentAction.method -eq 'PUT') { $updated++ }
+    }
+    # 023, data-model.md §5, FR-011: counts.transitioned is present ONLY when
+    # this run carries an event AND at least one role declares a step for it
+    # — absence, not a zeroed count, is the off switch that keeps a run with
+    # no event byte-identical to before this feature. Never folded into
+    # created/updated: a move is a position change, not a content one.
+    # Computed from `actions` (the parent's transition, if any, already
+    # rides in this same array — Get-JiraLifecyclePlan appends it there,
+    # never to a second slot).
+    $countsTransitioned = $null
+    if (-not [string]::IsNullOrEmpty($hookEvent)) {
+        $phaseMapForCount = $phaseStatusMap | ConvertFrom-Json -Depth 100
+        $anyRoleDeclaresStep = $false
+        foreach ($prop in $phaseMapForCount.PSObject.Properties) {
+            $stepVal = [string](Get-JiraPlanPropSafe $prop.Value $hookEvent)
+            if (-not [string]::IsNullOrEmpty($stepVal)) { $anyRoleDeclaresStep = $true; break }
+        }
+        if ($anyRoleDeclaresStep) {
+            $countsTransitioned = @($actions | Where-Object { $_.method -eq 'POST' -and ([string]$_.url).EndsWith('/transitions') }).Count
+        }
     }
     $warnCount = @($warnsJson | ConvertFrom-Json -Depth 100).Count
     $noteCount = @($notesJson | ConvertFrom-Json -Depth 100).Count
@@ -2171,6 +2398,7 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
         counts         = [ordered]@{ created = $created; updated = $updated; skipped = $skippedCount; warnings = $warnCount; errors = 0; recognised = $recognisedCount; assigned = $assignedCount }
         actions        = $disp
     }
+    if ($null -ne $countsTransitioned) { $summaryObj.counts['transitioned'] = $countsTransitioned }
     if ($null -ne $taskCounts) { $summaryObj.counts['tasks'] = $taskCounts }
     if ($null -ne $checklistCounts) {
         $summaryObj.counts['checklists'] = [ordered]@{ created = $checklistCounts.created; updated = $checklistCounts.updated; unchanged = $checklistCounts.unchanged }
@@ -2194,7 +2422,7 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
     # above, long before this point, so reaching here already proves that
     # condition).
     if (-not $dryRun -and $rcBeforeHookDowngrade -eq 0 -and $warnCount -eq 0) {
-        Save-JiraRunState -SpecPath $specFile -BaseUrl $base -Email $email -OnDrift $onDrift -FieldValues $fieldValues
+        Save-JiraRunState -SpecPath $specFile -BaseUrl $base -Email $email -OnDrift $onDrift -HookEvent $hookEvent -FieldValues $fieldValues
     }
 
     if ($json) {
