@@ -138,6 +138,14 @@ if [[ -n "${SINCE_REF}" ]]; then
               < <(find "${GIT_TOPLEVEL}/tests/bash/${module}" -type f -name '*.bats' | sort)
           fi
           ;;
+        packaging/*)
+          # Mirror packaging/... onto tests/bash/packaging/ — same rationale as
+          # the scripts/bash/<module> mirror above.
+          if [[ -d "${GIT_TOPLEVEL}/tests/bash/packaging" ]]; then
+            while IFS= read -r tf; do SELECTED+=("${tf}"); done \
+              < <(find "${GIT_TOPLEVEL}/tests/bash/packaging" -type f -name '*.bats' | sort)
+          fi
+          ;;
         *) : ;; # a non-bash change (docs, workflows, ...) selects nothing on its own
       esac
     done

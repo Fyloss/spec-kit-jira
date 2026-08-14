@@ -1,0 +1,40 @@
+# T044 (026) — cutting a version tag builds the archive, gates it, and
+# publishes it under both asset names. The workflow holds no logic of its
+# own: every decision (version cross-check, asset naming, overwrite refusal)
+# lives in packaging/publish-artifact.sh, and every gate lives in
+# packaging/verify-artifact.sh, so both are reachable by a test that does not
+# require cutting a release (contracts/publication.md C2.7).
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, gate and publish the release artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the artifact and capture its manifest
+        run: packaging/build-artifact.sh "${{ runner.temp }}/spec-kit-jira.zip" | tee "${{ runner.temp }}/spec-kit-jira.manifest"
+
+      # Blocks publication on failure — no override path (C2.3, C2.6).
+      - name: Verify the artifact
+        run: |
+          packaging/verify-artifact.sh bounds "${{ runner.temp }}/spec-kit-jira.zip" "${{ runner.temp }}/spec-kit-jira.manifest"
+          packaging/verify-artifact.sh completeness-purity "${{ runner.temp }}/spec-kit-jira.zip"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: packaging/publish-artifact.sh "${{ github.ref_name }}" "${{ runner.temp }}/spec-kit-jira.zip"

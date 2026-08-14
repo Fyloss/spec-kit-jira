@@ -60,6 +60,29 @@ Describe 'Command documents invoke a bridge that exists' {
         Test-Path -LiteralPath (Join-Path $script:Root 'scripts/powershell/spec-kit-jira.ps1') | Should -BeTrue
     }
 
+    It 'invokes the Bash entry point through the interpreter, never bare-path (026 FR-016, C2.3)' {
+        # A zip install on a host below 0.14.3 does not restore the executable
+        # bit (research R3), so a bare-path invocation can fail with
+        # "permission denied" on an entirely intact install. `bash <path>`
+        # works either way. Only lines shaped as an actual invocation — the
+        # path followed by a subcommand or flag — are checked.
+        $pattern = [regex]::Escape($script:BashEntry) + '\s+(--help|config|reconcile|feature|mention)'
+        foreach ($doc in $script:Docs) {
+            $text = Get-Content -Raw -LiteralPath $doc.FullName
+            foreach ($line in ($text -split "`r?`n")) {
+                if ($line -match $pattern -and $line -notmatch ('bash ' + $pattern)) {
+                    throw "$($doc.Name) invokes the Bash entry point without the `"bash `" interpreter prefix: $($line.Trim())"
+                }
+            }
+        }
+    }
+
+    It 'requires no document to treat a lost executable bit as fatal (026 FR-016)' {
+        foreach ($doc in $script:Docs) {
+            (Get-Content -Raw -LiteralPath $doc.FullName) | Should -Not -Match '(?i)is not executable'
+        }
+    }
+
     It 'instructs no machine-wide install anywhere (FR-008)' {
         foreach ($doc in $script:Docs) {
             $text = Get-Content -Raw -LiteralPath $doc.FullName

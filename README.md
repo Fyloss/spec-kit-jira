@@ -14,10 +14,15 @@ Install it into a consuming repository with the official Spec Kit command,
 which creates `.specify/extensions/jira/` there automatically:
 
 ```sh
-specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/archive/refs/heads/main.zip
+specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
 # or, while developing the extension itself:
 specify extension add --dev <path-to-spec-kit-jira> --force
 ```
+
+Installing from this address is outside spec-kit's configured extension catalog, so the
+host raises an `⚠ Untrusted Source` panel and asks `Continue with installation? [y/N]:` —
+answer `y`. With no stdin available (e.g. piped into a non-interactive script) it prints
+`Aborted.` and installs nothing, which can otherwise look like a silent no-op.
 
 Then run the one-command install ceremony in the consuming repository:
 
@@ -99,14 +104,16 @@ Reload with `source ~/.zshrc`, then check both with `echo`.
 ### 5. Install the extension into the consuming repository
 
 ```sh
-specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/archive/refs/heads/main.zip
+specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
 ```
+
+Answer `y` at the `⚠ Untrusted Source` confirmation prompt this address raises.
 
 This copies the extension to `.specify/extensions/jira/` **and registers and
 activates the seven lifecycle hooks**. Verify the bridge answers:
 
 ```sh
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
 ```
 
 ### 6. Bind the repository to a Jira project
@@ -209,8 +216,8 @@ No trailing slash on the URL — the sink appends `/rest/api/3/…` directly.
 ### 5. Install the extension into the consuming repository
 
 ```sh
-specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/archive/refs/heads/main.zip
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
+bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
 ```
 
 ### 6. Bind the repository and mirror
@@ -306,7 +313,7 @@ does not reach sessions that were already running. Check with
 ### 5. Install the extension into the consuming repository
 
 ```powershell
-specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/archive/refs/heads/main.zip
+specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
 .specify\extensions\jira\scripts\powershell\spec-kit-jira.ps1 --help
 ```
 

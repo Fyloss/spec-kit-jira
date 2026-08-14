@@ -53,12 +53,12 @@ prereq_bridge_missing() {
       return 0
     fi
   done
-  # The Bash entry point must additionally be executable, or this port cannot be
-  # invoked by path at all — the exact shape of the reported defect.
-  if [[ ! -x "${root}/scripts/bash/spec-kit-jira.sh" ]]; then
-    printf '%s' "${PREREQ_BRIDGE_BASH}"
-    return 0
-  fi
+  # A lost executable bit is NOT treated as a missing bridge (026 FR-016,
+  # bridge-invocation.md C2.2): a zip install on a host below 0.14.3 lands the
+  # entry point at 0644 (research R3), and it remains runnable through the
+  # interpreter — `bash <path>`, which is how every command document, and this
+  # port's own message literals, now instruct it (C2.3). Only a genuinely
+  # absent entry point (the `-f` checks above) is a broken install.
   return 0
 }
 
@@ -102,8 +102,8 @@ prereq_check() {
   local bridge
   bridge="$(prereq_bridge_missing)"
   if [[ -n "${bridge}" ]]; then
-    printf 'spec-kit-jira: the bridge entry point %s was not found or is not executable — the extension install is incomplete. Restore it with: %s\n' \
-      "${bridge}" 'specify extension add --dev <path-to-spec-kit-jira> --force' >&2
+    printf 'spec-kit-jira: the bridge entry point %s was not found — the extension install is incomplete. Restore it with: %s (it will ask you to confirm an untrusted-source prompt — answer y)\n' \
+      "${bridge}" 'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force' >&2
     return "${EXIT_PREREQ}"
   fi
 

@@ -98,12 +98,12 @@ declared_commands() {
 }
 
 @test "the two per-port entry points exist at the paths the messages name" {
-  # A message is only runnable as spelled if the path it spells is real.
+  # A message is only runnable as spelled if the path it spells is real. The
+  # Bash entry point need not be executable (026 FR-016): every message and
+  # command document invokes it through the interpreter, `bash <path>`, which
+  # only requires the file to exist and be readable.
   [ -f "${ROOT}/scripts/bash/spec-kit-jira.sh" ]
   [ -f "${ROOT}/scripts/powershell/spec-kit-jira.ps1" ]
-  # And the Bash entry point must be executable, or invoking it by path — which
-  # is what every command document instructs — cannot work after install.
-  [ -x "${ROOT}/scripts/bash/spec-kit-jira.sh" ]
 }
 
 @test "no message or documented flag names --repair-hooks — it no longer exists (T073)" {
@@ -137,7 +137,8 @@ declared_commands() {
   local bad
   bad="$(grep -nE 'specify extension add[[:space:]]+[^`]' "${SCOPE[@]}" \
     | grep -vE 'specify extension add --dev <path-to-spec-kit-jira> --force' \
-    | grep -vE 'specify extension add jira --from https://github\.com/Fyloss/spec-kit-jira/archive/refs/heads/main\.zip' || true)"
+    | grep -vE 'specify extension add jira --from https://github\.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira\.zip( --force)?' \
+    | grep -vE 'specify extension add jira --from https://github\.com/Fyloss/spec-kit-jira/releases/download/v<X\.Y\.Z>/spec-kit-jira-<X\.Y\.Z>\.zip' || true)"
   if [[ -n "${bad}" ]]; then
     printf 'host install command not in its runnable form:\n%s\n' "${bad}" >&2
     return 1
@@ -159,7 +160,7 @@ declared_commands() {
 
   # missing -> the official install command, in its runnable form.
   hint="$(register_hooks_health "${work}/absent.yml" | jq -r '.repair_hint')"
-  [[ "${hint}" == *"specify extension add --dev <path-to-spec-kit-jira> --force"* ]]
+  [[ "${hint}" == *"specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force"* ]]
 
   # held disabled -> the release flag on a declared command.
   printf 'hooks: {}\n' > "${work}/e.yml"

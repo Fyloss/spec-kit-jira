@@ -119,7 +119,9 @@ Describe '(c) Host commands' {
         # third spelling nobody can execute.
         $runnable = @(
             'specify extension add --dev <path-to-spec-kit-jira> --force'
-            'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/archive/refs/heads/main.zip'
+            'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'
+            'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip'
+            'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/download/v<X.Y.Z>/spec-kit-jira-<X.Y.Z>.zip'
         )
         foreach ($row in (Select-ScopeLine)) {
             if ($row.Text -match 'specify extension add\s+[^`]') {
@@ -146,7 +148,7 @@ Describe 'The literals the reader emits at runtime' {
         try {
             # missing -> the official install command, in its runnable form.
             $h = Get-JiraHookHealth -Path (Join-Path $work 'absent.yml') | ConvertFrom-Json
-            $h.repair_hint | Should -Match ([regex]::Escape('specify extension add --dev <path-to-spec-kit-jira> --force'))
+            $h.repair_hint | Should -Match ([regex]::Escape('specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'))
 
             # held disabled -> the release flag on a declared command.
             $empty = Join-Path $work 'e.yml'

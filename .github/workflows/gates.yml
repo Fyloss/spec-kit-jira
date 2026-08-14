@@ -55,7 +55,7 @@ jobs:
           # Fail open: an empty/undetermined diff runs the real gate rather than
           # skipping it, so a detection glitch can never hide a coverage drop.
           if [ -z "${changed}" ] || printf '%s\n' "${changed}" \
-            | grep -qE '^(scripts/bash/|tests/bash/|tests/coverage/|tests/conformance/|\.github/workflows/gates\.yml)'; then
+            | grep -qE '^(scripts/bash/|tests/bash/|tests/coverage/|tests/conformance/|packaging/|\.github/workflows/gates\.yml)'; then
             echo "bash=true" >> "${GITHUB_OUTPUT}"
           else
             echo "bash=false" >> "${GITHUB_OUTPUT}"
@@ -278,3 +278,54 @@ jobs:
           fi
 
           exit "${violations}"
+
+      # T052 (026), FR-023 — the source-archive URL this feature replaced must
+      # never reappear in the two consumer-facing documents: it is what made
+      # the documented install command fail in the first place
+      # (contracts/publication.md C3.1, C3.6). The version-literal scan above
+      # already covers README.md and INSTALL.md repo-wide, so this is the one
+      # check that scan does not already perform.
+      - name: README.md and INSTALL.md name no repository source-archive address (FR-023)
+        run: |
+          set -euo pipefail
+          if grep -rnF 'archive/refs/' README.md INSTALL.md; then
+            echo "::error::a source-archive address reappeared in README.md or INSTALL.md (FR-023)"
+            exit 1
+          fi
+
+  artifact-gates:
+    # T039 (026) — the cheap release-artifact gates, on EVERY pull request:
+    # build, bounds, completeness, purity, determinism, version resolution.
+    # No network (the --dev corroboration inside verify-artifact.sh's
+    # completeness-purity gate is skipped when `specify` is not on PATH — it
+    # is optional corroboration, not this job's primary check), seconds of
+    # wall clock. The expensive three-OS install proof lives in
+    # install-e2e.yml instead (contracts/publication.md, plan.md "CI
+    # triggering").
+    name: Release artifact gates (build, bounds, completeness, purity, determinism, version)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the artifact and capture its manifest
+        run: packaging/build-artifact.sh "${{ runner.temp }}/spec-kit-jira.zip" | tee "${{ runner.temp }}/spec-kit-jira.manifest"
+
+      - name: Bounds gate (entry/size/path ceilings, Windows-hostile names)
+        run: packaging/verify-artifact.sh bounds "${{ runner.temp }}/spec-kit-jira.zip" "${{ runner.temp }}/spec-kit-jira.manifest"
+
+      - name: Completeness and purity gates
+        run: packaging/verify-artifact.sh completeness-purity "${{ runner.temp }}/spec-kit-jira.zip"
+
+      - name: Determinism — building twice yields byte-identical archives (C4.1)
+        run: |
+          set -euo pipefail
+          packaging/build-artifact.sh "${{ runner.temp }}/repeat.zip" > /dev/null
+          a="$(shasum -a 256 "${{ runner.temp }}/spec-kit-jira.zip" | awk '{print $1}')"
+          b="$(shasum -a 256 "${{ runner.temp }}/repeat.zip" | awk '{print $1}')"
+          if [ "${a}" != "${b}" ]; then
+            echo "::error::two builds from the same commit produced different archives"
+            exit 1
+          fi
+
+      - name: Version resolution (single source, fails loudly if absent)
+        run: packaging/resolve-version.sh

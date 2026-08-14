@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The documented install command (`specify extension add jira --from
+  …/archive/refs/heads/main.zip`) never worked: the repository's source
+  archive carries 1 638 zip entries against the host's pre-extraction
+  ceiling of 512. Releases now attach a purpose-built archive of exactly the
+  87-file installable surface — `spec-kit-jira.zip` (version-free, always
+  the latest) and `spec-kit-jira-<version>.zip` (pinned) — and `README.md`
+  / `INSTALL.md` point at it instead.
+- A zip install on a `specify` host below 0.14.3 (the declared floor,
+  `>=0.13.0`) left the Bash entry point at `0644`; the prerequisite gate
+  then rejected it as missing and advised `--dev`, a route a URL-installing
+  consumer does not have. The gate no longer treats a present-but-non-
+  executable entry point as fatal, and every documented invocation now
+  goes through the interpreter (`bash <path>`), which does not depend on
+  the bit having survived.
+- `specify extension add --dev` copied this repository's `.git` directory
+  (6 165 files, 38 MB) into every consuming repository's
+  `.specify/extensions/jira/`. `.extensionignore` now excludes `.git/`.
+
+### Added
+
+- `packaging/` — development-only release tooling (excluded from every
+  install): `build-artifact.sh` derives the installable surface from
+  `.extensionignore` via git's own ignore engine and writes a deterministic
+  archive; `verify-artifact.sh` gates it (entry/size/path bounds,
+  completeness, purity, Windows-hostile names); `publish-artifact.sh`
+  cross-checks a release tag against `extension.yml`'s version and attaches
+  both asset names, refusing to overwrite an existing one silently.
+- `.github/workflows/release.yml` publishes a gated artifact on every
+  version tag; `.github/workflows/install-e2e.yml` proves a real install on
+  all three operating systems, on both the floor and current `specify`
+  host; the cheap gates run on every pull request in `gates.yml`.
+
 ## [0.16.0] - 2026-08-14
 
 ### Added

@@ -91,7 +91,7 @@ function Test-JiraPrereq {
     # missing tool the operator should go and install.
     $bridge = Get-JiraMissingBridgeEntry
     if ($bridge) {
-        Write-Warning ("spec-kit-jira: the bridge entry point {0} was not found or is not executable — the extension install is incomplete. Restore it with: {1}" -f $bridge, 'specify extension add --dev <path-to-spec-kit-jira> --force')
+        Write-Warning ("spec-kit-jira: the bridge entry point {0} was not found — the extension install is incomplete. Restore it with: {1} (it will ask you to confirm an untrusted-source prompt — answer y)" -f $bridge, 'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force')
         return $script:ExitPrereq
     }
 

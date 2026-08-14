@@ -29,7 +29,10 @@ installs no machine-wide executable. Invoke the entry point by its
 
 You MUST NOT invoke a bare `spec-kit-jira` command name. No such command exists
 in a consuming repository, and assuming it does is what produced the reported
-"spec-kit-jira CLI not installed" message.
+"spec-kit-jira CLI not installed" message. Invoke the Bash entry point **through
+the interpreter** (`bash <path>`) rather than by bare path: a zip install on an
+older host does not always restore the executable bit, and the interpreter form
+works either way (026 FR-016).
 
 ## Ordered procedure
 
@@ -59,7 +62,7 @@ in a consuming repository, and assuming it does is what produced the reported
    | `/speckit.analyze` | `after_analyze` | `after_analyze` |
 
    ```text
-   SPEC_KIT_JIRA_HOOK_EVENT=after_specify .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile <spec-file> --json
+   SPEC_KIT_JIRA_HOOK_EVENT=after_specify bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile <spec-file> --json
    ```
 
    On Windows:
@@ -98,7 +101,7 @@ At most **one** message per host command run, naming the **true** cause:
 | Credentials rejected | Exit `3` | Jira rejected the credentials — they exist but are not accepted |
 | Prerequisite missing | Exit `5` | The named prerequisite is missing; relay the entry point's own message |
 | Jira unreachable | Exit `2` after exhausted retries | Jira could not be reached; nothing was mirrored |
-| **Bridge unavailable** | The entry point above does not exist at its repository-relative path, or exists but is not executable | Emit the fallback block below **verbatim** |
+| **Bridge unavailable** | The entry point above does not exist at its repository-relative path | Emit the fallback block below **verbatim** |
 
 The last row is the only cause the bridge cannot report on, because in that state
 it never starts and produces nothing. Everything the developer sees then comes
@@ -106,17 +109,18 @@ from you — which is why its text is fixed here rather than composed at runtime
 
 ## The fallback block — emit exactly as written
 
-When the entry point is not found or is not executable, emit the following text
-**exactly as written**. Do not paraphrase it, do not summarise it, and do not
-compose your own explanation of the situation:
+When the entry point is not found, emit the following text **exactly as
+written**. Do not paraphrase it, do not summarise it, and do not compose your
+own explanation of the situation:
 
 ```text
 Jira bridge not available: the entry point
 .specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found or
-is not executable. This spec-kit command completed normally and nothing was
-mirrored to Jira. To restore the bridge, reinstall the extension with
-`specify extension add --dev <path-to-spec-kit-jira> --force`.
+.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+This spec-kit command completed normally and nothing was mirrored to Jira. To
+restore the bridge, reinstall the extension with
+`specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force`
+(it will ask you to confirm an untrusted-source prompt — answer y).
 ```
 
 ## Command literals — normative
