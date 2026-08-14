@@ -44,3 +44,18 @@ setup() {
   run grep -qxF '.extensionignore' <<< "$output"
   [ "$status" -ne 0 ]
 }
+
+@test "the derivation is locale-independent — a non-C collation must not silently include everything" {
+  # `comm` requires BOTH its inputs sorted under ITS OWN ambient collation,
+  # not merely under whatever collation `sort` used to produce them. Pinning
+  # `LC_ALL=C` on the `sort` calls alone (surface.sh) leaves `comm` itself
+  # reading them under the caller's locale; under en_US.UTF-8 that mismatch
+  # makes `comm` treat both inputs as unsorted and it silently stops
+  # excluding anything, so the derived surface becomes every tracked file
+  # instead of the 87-file surface (SC-004, C2.1).
+  if ! locale -a 2> /dev/null | grep -qxF 'en_US.UTF-8'; then
+    skip "en_US.UTF-8 locale is not installed on this host"
+  fi
+  count="$(LC_ALL=en_US.UTF-8 bash -c "source '${ROOT}/packaging/lib/surface.sh'; packaging_derive_surface | grep -c .")"
+  [ "${count}" -eq 87 ]
+}

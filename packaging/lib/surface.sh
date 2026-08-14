@@ -41,6 +41,12 @@ packaging_derive_surface() {
     return 1
   fi
 
-  comm -23 <(LC_ALL=C sort <<< "${candidates}") <(LC_ALL=C sort <<< "${ignored}") \
+  # `comm` reads both inputs under ITS OWN ambient collation, not whatever
+  # collation produced them — pinning LC_ALL=C on the `sort` calls alone
+  # leaves `comm` itself locale-dependent, and under a non-C locale it treats
+  # correctly-C-sorted input as unsorted and stops excluding anything (a
+  # non-C-locale host would silently widen the surface to every tracked
+  # file). LC_ALL=C must cover the `comm` invocation too.
+  LC_ALL=C comm -23 <(LC_ALL=C sort <<< "${candidates}") <(LC_ALL=C sort <<< "${ignored}") \
     | grep -vxF '.extensionignore' || true
 }

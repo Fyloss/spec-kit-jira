@@ -36,6 +36,27 @@ teardown() {
   [[ "$output" == *'unparseable'* ]]
 }
 
+@test "bounds fails closed on a manifest with a duplicated field — never silently skips the check" {
+  # A manifest with two `entries:` lines feeds the bound check a multi-line
+  # value; without `head -n1` and numeric validation, `((entries > ceiling))`
+  # throws a bash arithmetic syntax error that is swallowed (no `set -e`), the
+  # entries check is skipped entirely, and the gate exits 0 — reporting a
+  # tampered or malformed manifest as passing.
+  "${BUILDER}" "${WORK}/good.zip" > /dev/null
+  printf 'entries: 5\nentries: 999\nuncompressed_bytes: 100\nlargest_member_bytes: 50\nlargest_member_path: foo\n' > "${WORK}/dup.manifest"
+  run "${VERIFY}" bounds "${WORK}/good.zip" "${WORK}/dup.manifest"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'unparseable'* ]]
+}
+
+@test "bounds fails closed on a manifest with a non-numeric field" {
+  "${BUILDER}" "${WORK}/good.zip" > /dev/null
+  printf 'entries: not-a-number\nuncompressed_bytes: 100\nlargest_member_bytes: 50\nlargest_member_path: foo\n' > "${WORK}/nan.manifest"
+  run "${VERIFY}" bounds "${WORK}/good.zip" "${WORK}/nan.manifest"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'unparseable'* ]]
+}
+
 @test "completeness-purity fails closed on an absent archive" {
   run "${VERIFY}" completeness-purity "${WORK}/does-not-exist.zip"
   [ "$status" -ne 0 ]

@@ -72,7 +72,16 @@ verify_bounds() {
   largest_bytes="$(sed -n 's/^largest_member_bytes: //p' "${manifest}")"
   largest_path="$(sed -n 's/^largest_member_path: //p' "${manifest}")"
 
-  if [[ -z "${entries}" || -z "${uncompressed}" || -z "${largest_bytes}" ]]; then
+  # Exactly one line per field, and a numeric value for every count/size
+  # field: a duplicated field or a non-numeric value would otherwise reach
+  # `((entries > ceiling))` below, which throws a bash arithmetic syntax
+  # error that `set -u` does not catch — the check is silently skipped
+  # rather than failing closed. A duplicate is never "first one wins";
+  # it fails the same as any other unparseable manifest.
+  if [[ "$(wc -l <<< "${entries}")" -ne 1 || "$(wc -l <<< "${uncompressed}")" -ne 1 \
+    || "$(wc -l <<< "${largest_bytes}")" -ne 1 || "$(wc -l <<< "${largest_path}")" -ne 1 \
+    || ! "${entries}" =~ ^[0-9]+$ || ! "${uncompressed}" =~ ^[0-9]+$ \
+    || ! "${largest_bytes}" =~ ^[0-9]+$ || -z "${largest_path}" ]]; then
     _verify_report "verify-artifact: manifest is unparseable: ${manifest}"
     return
   fi
@@ -147,9 +156,11 @@ verify_completeness_purity() {
     return
   fi
 
+  # `comm` reads under its own ambient collation, not whichever collation
+  # sorted `expected`/`archived` above — LC_ALL=C here too (see surface.sh).
   local missing extra
-  missing="$(comm -23 <(printf '%s\n' "${expected}") <(printf '%s\n' "${archived}"))"
-  extra="$(comm -13 <(printf '%s\n' "${expected}") <(printf '%s\n' "${archived}"))"
+  missing="$(LC_ALL=C comm -23 <(printf '%s\n' "${expected}") <(printf '%s\n' "${archived}"))"
+  extra="$(LC_ALL=C comm -13 <(printf '%s\n' "${expected}") <(printf '%s\n' "${archived}"))"
 
   if [[ -n "${missing}" ]]; then
     _verify_report "verify-artifact: the archive is missing files the reference install produced:"

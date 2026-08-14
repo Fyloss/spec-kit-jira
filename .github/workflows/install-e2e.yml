@@ -108,11 +108,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          py="python3"
+          command -v "${py}" > /dev/null 2>&1 || py="python"
+          command -v "${py}" > /dev/null 2>&1 || { echo "::error::neither python3 nor python is on PATH" >&2; exit 1; }
           log="$(mktemp)"
-          (cd "${{ runner.temp }}/artifact" && exec python3 -u -m http.server 0 --bind 127.0.0.1) > "${log}" 2>&1 &
+          (cd "${{ runner.temp }}/artifact" && exec "${py}" -u -m http.server 0 --bind 127.0.0.1) > "${log}" 2>&1 &
           pid=$!
           port=""
-          for _ in $(seq 1 50); do
+          for _ in $(seq 1 100); do
             port="$(sed -nE 's/.*[Pp]ort ([0-9]+).*/\1/p' "${log}" | head -n1)"
             [ -n "${port}" ] && break
             kill -0 "${pid}" 2> /dev/null || break
@@ -120,7 +123,10 @@ jobs:
           done
           if [ -z "${port}" ]; then
             echo "::error::loopback server never reported a listening port" >&2
-            cat "${log}" >&2
+            # Annotations are readable without repo admin rights; a raw job log
+            # is not (gh-token-lacks-admin-on-repo), so surface the server's own
+            # output as one so a future failure here is diagnosable from the PR.
+            while IFS= read -r line; do echo "::error::server output: ${line}" >&2; done < "${log}"
             exit 1
           fi
           echo "port=${port}" >> "${GITHUB_OUTPUT}"
