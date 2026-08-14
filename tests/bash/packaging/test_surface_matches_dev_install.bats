@@ -18,7 +18,12 @@ setup() {
 }
 
 teardown() {
+  # `[ -n "" ]` exits 1; as teardown's last command that turns a correctly
+  # skipped test into a reported failure (bats treats a nonzero teardown
+  # exit as a failure regardless of skip). Never let cleanup's own exit
+  # status become the test's.
   [ -n "${REPO}" ] && fixture_cleanup "${REPO}"
+  true
 }
 
 @test "a --dev install tree equals the derived surface, both directions (C3.1, C3.2)" {

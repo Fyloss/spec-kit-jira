@@ -124,8 +124,15 @@ jobs:
           if [ -z "${port}" ]; then
             echo "::error::loopback server never reported a listening port" >&2
             # Annotations are readable without repo admin rights; a raw job log
-            # is not (gh-token-lacks-admin-on-repo), so surface the server's own
-            # output as one so a future failure here is diagnosable from the PR.
+            # is not (gh-token-lacks-admin-on-repo), so surface diagnostics as
+            # one so a future failure here is diagnosable from the PR alone.
+            echo "::error::resolved interpreter: ${py} -> $(command -v "${py}"), $("${py}" --version 2>&1)" >&2
+            if kill -0 "${pid}" 2> /dev/null; then
+              echo "::error::server process ${pid} is still alive after the poll window" >&2
+            else
+              echo "::error::server process ${pid} is no longer alive" >&2
+            fi
+            echo "::error::server log is $(wc -c < "${log}" | tr -d ' ') bytes" >&2
             while IFS= read -r line; do echo "::error::server output: ${line}" >&2; done < "${log}"
             exit 1
           fi

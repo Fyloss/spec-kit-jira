@@ -23,9 +23,13 @@ setup() {
 }
 
 teardown() {
+  # `rm -rf ""` exits 0, which only accidentally keeps this teardown from
+  # the same failure the sibling file had: bats treats a nonzero teardown
+  # exit as a failure regardless of skip. Never leave that to chance.
   [ -n "${PID}" ] && fixture_stop_server "${PID}"
   [ -n "${REPO}" ] && fixture_cleanup "${REPO}"
   rm -rf "${WORK}"
+  true
 }
 
 @test "a bridge with a lost executable bit is not reported as missing, and runs via bash <path> (C2.1/C2.2)" {
