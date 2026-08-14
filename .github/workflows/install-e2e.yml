@@ -81,6 +81,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The runner image only ships Apple's Bash 3.2, which the port refuses
+      # by design (prereq_check requires Bash >= 4); brew's bash lands in
+      # /opt/homebrew/bin, ahead of /bin in the image PATH, so the bare
+      # `bash` this workflow later invokes the bridge with resolves to it
+      # (ci.yml's own precedent for the same host).
+      - name: Install a modern Bash (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bash jq
+
       - uses: actions/download-artifact@v4
         with:
           name: spec-kit-jira-zip
