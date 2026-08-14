@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (159)" {
+@test "the conformance corpus has exactly the recorded scenario count (160)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -100,8 +100,11 @@ setup() {
   # 023 adds one: us023-idempotent-rerun (Phase 13, T167) — a real move,
   # then a second run over unchanged state that short-circuits (021's own
   # mechanism), zero requests of any kind (158 -> 159).
+  # 023 adds one: us023-baseline-no-event (Phase 1, T003) — a project that
+  # DOES declare a phase_status_map, run with no hook event: byte-for-byte
+  # identical to a project declaring none at all (FR-011) (159 -> 160).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 159 ]
+  [ "${count}" -eq 160 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {
