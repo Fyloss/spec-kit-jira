@@ -223,6 +223,13 @@ summary_render_prose() {
     printf 'Short-circuited: %s\n' "$(jq -r '.state_file' <<< "${json}")"
   fi
   printf 'Created: %s, Updated: %s, Skipped: %s\n' "${created}" "${updated}" "${skipped}"
+  # counts.transitioned (023, T181): present only when the run carries an
+  # event AND at least one role declares a step for it (data-model.md §5) —
+  # same conditional-presence rule the --json key already followed, now
+  # mirrored in the default prose output (FR-037).
+  if [[ "$(jq -r '.counts | has("transitioned")' <<< "${json}")" == "true" ]]; then
+    printf 'Transitioned: %s\n' "$(jq -r '.counts.transitioned' <<< "${json}")"
+  fi
   # recognised/assigned (Phase 7, US1/US2) exist only on reconcile's summary
   # — a reader confirms an unchanged re-run recognised every story and
   # created nothing, without needing --json.

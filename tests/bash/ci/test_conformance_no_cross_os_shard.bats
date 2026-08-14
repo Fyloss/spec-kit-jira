@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (160)" {
+@test "the conformance corpus has exactly the recorded scenario count (161)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -103,8 +103,11 @@ setup() {
   # 023 adds one: us023-baseline-no-event (Phase 1, T003) — a project that
   # DOES declare a phase_status_map, run with no hook event: byte-for-byte
   # identical to a project declaring none at all (FR-011) (159 -> 160).
+  # 023 Phase 14 (convergence) adds one: us023-story-advances-prose (T181) —
+  # the us023-story-advances headline move run WITHOUT --json, proving
+  # counts.transitioned reaches the default prose report too (160 -> 161).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 160 ]
+  [ "${count}" -eq 161 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

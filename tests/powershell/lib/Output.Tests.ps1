@@ -74,3 +74,18 @@ Describe 'ConvertTo-JiraSummaryProse style audit (T098)' {
         $indented.Count | Should -Be 0
     }
 }
+
+# T181 [Phase 14, Convergence] — counts.transitioned reaches the PROSE report
+# too, not only --json (FR-037). Cross-port byte-parity proven in
+# tests/bash/lib/test_output.bats.
+Describe 'ConvertTo-JiraSummaryProse Transitioned (T181)' {
+    It 'renders Transitioned when the summary carries counts.transitioned' {
+        $json = '{"schema_version":"1.0","command":"reconcile","dry_run":false,"counts":{"created":0,"updated":1,"skipped":0,"warnings":0,"errors":0,"transitioned":2},"actions":[],"hook_health":{},"exit_code":0}'
+        (ConvertTo-JiraSummaryProse $json) | Should -Match 'Transitioned: 2'
+    }
+
+    It 'omits Transitioned when counts.transitioned is absent' {
+        $json = '{"schema_version":"1.0","command":"reconcile","dry_run":false,"counts":{"created":0,"updated":0,"skipped":0,"warnings":0,"errors":0},"actions":[],"hook_health":{},"exit_code":0}'
+        (ConvertTo-JiraSummaryProse $json) | Should -Not -Match 'Transitioned'
+    }
+}

@@ -166,3 +166,34 @@ _output_wrapper() {
     [Console]::Out.Write((ConvertTo-JiraSummaryProse -Json '${json}'))")"
   [ "${b}" = "${p}" ]
 }
+
+# =============================================================================
+# T181 [Phase 14, Convergence] — counts.transitioned reaches the PROSE report
+# too, not only --json (FR-037). Conditional presence mirrors counts.transitioned
+# itself: present in the JSON, rendered; absent, no "Transitioned" line at all.
+# =============================================================================
+
+@test "prose renders Transitioned when the summary carries counts.transitioned" {
+  local json='{"schema_version":"1.0","command":"reconcile","dry_run":false,"counts":{"created":0,"updated":1,"skipped":0,"warnings":0,"errors":0,"transitioned":2},"actions":[],"hook_health":{},"exit_code":0}'
+  run _output_wrapper "${json}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Transitioned: 2"* ]]
+}
+
+@test "prose omits Transitioned when counts.transitioned is absent (no event, or no role declares a step)" {
+  local json='{"schema_version":"1.0","command":"reconcile","dry_run":false,"counts":{"created":0,"updated":0,"skipped":0,"warnings":0,"errors":0},"actions":[],"hook_health":{},"exit_code":0}'
+  run _output_wrapper "${json}"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Transitioned"* ]]
+}
+
+@test "the PowerShell port renders Transitioned identically (T181)" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local json='{"schema_version":"1.0","command":"reconcile","dry_run":false,"counts":{"created":0,"updated":1,"skipped":0,"warnings":0,"errors":0,"transitioned":2},"actions":[],"hook_health":{},"exit_code":0}'
+  local b p
+  b="$(printf '%s' "${json}" | summary_render_prose)"
+  p="$(pwsh -NoProfile -Command "
+    Import-Module '${PS_LIB}/Output.psm1' -Force
+    [Console]::Out.Write((ConvertTo-JiraSummaryProse -Json '${json}'))")"
+  [ "${b}" = "${p}" ]
+}

@@ -134,3 +134,73 @@ teardown() {
 
   rm -rf "${shim_dir}" "${count_file_30}" "${count_file_60}"
 }
+
+@test "B3 (T183, Phase 14, Convergence) -- the WHOLE due-set resolution pass grows sub-linearly, not one-for-one, with the due set" {
+  # The B3 test above isolates transitions_load's OWN parsing step, with
+  # jira_request stubbed before plan_lifecycle's due-set resolution loop
+  # ever runs — T182's decode-once fix to THAT loop (transitions_get,
+  # transitions_resolve, the outer `.outcome` read, and the kept/warns
+  # appends) is invisible to it. This test calls plan_lifecycle directly —
+  # the same PURE-function isolation style as test_lifecycle_safety.bats —
+  # over a synthetic due set of 30, then 60, tickets ALL resolving to
+  # "move" (contract transition-resolution.md §6 B3), asserting the total
+  # jq spawn count across the WHOLE pass (transitions_load's decode PLUS
+  # the resolution loop PLUS one _plan_transition_action call per moved
+  # ticket) stays well under doubling — the same "sub-linear, not
+  # one-for-one" bar T150 established for the pre-T182 implementation,
+  # never a stricter near-constant bound: _plan_transition_action's own
+  # per-ticket cost (building each real POST body) is inherent, shared
+  # with two other call sites, and out of T182's scope by design.
+  local helpers="${ROOT}/tests/bash/helpers"
+  # shellcheck source=/dev/null
+  source "${helpers}/spawn_count.bash"
+  local shim_dir="${BATS_TMPDIR}/aw_plan_lifecycle_shims_$$"
+  local count_file_30="${BATS_TMPDIR}/aw_plan_lifecycle_count30_$$.log"
+  local count_file_60="${BATS_TMPDIR}/aw_plan_lifecycle_count60_$$.log"
+
+  local n
+  for n in 30 60; do
+    local -a actions=() tickets=()
+    local i
+    for ((i = 1; i <= n; i++)); do
+      actions+=("{\"method\":\"PUT\",\"url\":\"http://h/rest/api/3/issue/STORY-${i}\",\"body\":{\"fields\":{\"summary\":\"New ${i}\"}}}")
+      tickets+=("\"s${i}\":{\"key\":\"STORY-${i}\",\"status\":\"To Do\",\"category\":\"mapped\",\"target\":\"In Progress\",\"role\":\"story\",\"flagged\":false,\"blockers\":[]}")
+    done
+    local doc_stories="[" j
+    for ((j = 1; j <= n; j++)); do
+      [ "$j" -gt 1 ] && doc_stories+=","
+      doc_stories+="{\"local_id\":\"s${j}\"}"
+    done
+    doc_stories+="]"
+    local doc="{\"stories\":${doc_stories}}"
+    local acts_json; acts_json="[$(
+      IFS=,
+      echo "${actions[*]}"
+    )]"
+    local tickets_json; tickets_json="{$(
+      IFS=,
+      echo "${tickets[*]}"
+    )}"
+    local lc="{\"order\":{\"story\":[\"To Do\",\"In Progress\"]},\"base_url\":\"http://h\",\"tickets\":${tickets_json}}"
+
+    local count_file="${BATS_TMPDIR}/aw_plan_lifecycle_count${n}_$$.log"
+    helper_spawn_count_setup "${shim_dir}" "${count_file}"
+
+    local stub='
+      source "'"${ROOT}"'/scripts/bash/sink/jira/plan_apply.sh"
+      jira_request() { printf "%s" "{\"transitions\":[{\"id\":\"101\",\"name\":\"Start\",\"to\":{\"name\":\"In Progress\"},\"fields\":{}}]}"; }
+      plan_lifecycle "$1" "$2" "$3" > /dev/null
+    '
+    PATH="${shim_dir}:${PATH}" bash -c "${stub}" _ "${acts_json}" "${doc}" "${lc}"
+  done
+
+  local jq30 jq60
+  jq30="$(helper_spawn_count_for "${count_file_30}" jq)"
+  jq60="$(helper_spawn_count_for "${count_file_60}" jq)"
+  [ "${jq30}" -gt 0 ]
+  [ "${jq60}" -gt 0 ]
+  # Sub-linear: doubling the due set must not double the jq spawn count.
+  [ "${jq60}" -lt "$((jq30 * 2))" ]
+
+  rm -rf "${shim_dir}" "${count_file_30}" "${count_file_60}"
+}

@@ -1298,25 +1298,113 @@ plan_lifecycle() {
       return "${rc_tl}"
     fi
     local base; base="$(jq -r '.base_url // ""' <<< "${lc}")"
-    for di in "${due_idx[@]}"; do
-      local rkey rsid rtarget rstatus rrole avail outcome kind
+
+    # 023, T182 (Phase 14, Convergence): decode-once resolution — one jq call
+    # resolves EVERY due ticket's outcome at once against the transitions
+    # map transitions_load already populated in-process (_TRANSITIONS_MAP),
+    # replacing what used to be transitions_get + transitions_resolve (2 jq
+    # spawns each, transitions_resolve's own call plus json_canonical's)
+    # PLUS a redundant outer `.outcome`/`.transition_id` re-parse, per due
+    # ticket (FR-028, SC-013, contract transition-resolution.md §6 B3).
+    # _plan_transition_action/_plan_transition_warning are left unchanged:
+    # they are shared with reconcile.sh's own task-tier due-set and with
+    # the transition_id-already-known branch above, so widening past this
+    # read/parse plumbing into shared per-item business logic is the
+    # "separate, larger, riskier refactor" T155 already deferred.
+    local _tr_sep=$'\x1f'
+    local -a due_sids=()
+    for di in "${due_idx[@]}"; do due_sids+=("${_lc_sid[di]}"); done
+
+    # _TRANSITIONS_MAP's keys are lower-cased Jira issue keys
+    # (`[a-z][a-z0-9]*-[0-9]+`, transitions_load's own trust boundary) and
+    # its values are already-canonical compact JSON — safe to concatenate
+    # into one object with no escaping, exactly as transitions_load builds
+    # its own combined request array.
+    local _tr_map="{" _tr_map_first=true _tr_mk
+    for _tr_mk in "${!_TRANSITIONS_MAP[@]}"; do
+      if ${_tr_map_first}; then _tr_map_first=false; else _tr_map+=","; fi
+      _tr_map+="\"${_tr_mk}\":${_TRANSITIONS_MAP[${_tr_mk}]}"
+    done
+    _tr_map+="}"
+    local _tr_map_f; _tr_map_f="$(mktemp)"
+    printf '%s' "${_tr_map}" > "${_tr_map_f}"
+    local _tr_map_arg="${_tr_map_f}"
+    if [[ "${JIRA_PATH_STYLE}" == "native" ]] && command -v cygpath > /dev/null 2>&1; then
+      _tr_map_arg="$(cygpath -m "${_tr_map_f}")"
+    fi
+
+    local -a _tr_kind=() _tr_tid=() _tr_outcome=()
+    local _tr_i=0 _r1 _r2 _r3
+    while IFS="${_tr_sep}" read -r _r1 _r2 _r3; do
+      _tr_kind[_tr_i]="${_r1}"; _tr_tid[_tr_i]="${_r2}"; _tr_outcome[_tr_i]="${_r3}"
+      _tr_i=$((_tr_i + 1))
+    done < <(jq -rn --argjson lc "${lc}" --slurpfile trmap_f "${_tr_map_arg}" --arg sep "${_tr_sep}" '
+      ($trmap_f[0]) as $trmap
+      | ($ARGS.positional) as $sids
+      | $sids[] as $sid
+      | ($lc.tickets[$sid]) as $tk
+      | (($tk.key // "") | ascii_downcase) as $kl
+      | ($trmap[$kl] // {moves: []}) as $rec
+      | (($tk.target) // "") as $declared
+      | ($rec.moves // []) as $moves
+      | [ $moves[] | select(.to == $declared) ] as $cands
+      | ($cands | length) as $n
+      | ( if $n == 1 and $cands[0].gated_field == null then
+            {outcome:"move", transition_id: $cands[0].id}
+          elif $n == 1 then
+            {outcome:"gated", gated_field: $cands[0].gated_field}
+          elif $n >= 2 then
+            {outcome:"ambiguous", candidates: [ $cands[] | {id, name} ]}
+          else
+            {outcome:"unreachable", reachable: [ $moves[].to ]}
+          end
+        ) as $o
+      | [ $o.outcome, ($o.transition_id // ""), ($o | tojson) ] | join($sep)
+    ' --args -- "${due_sids[@]}")
+    rm -f "${_tr_map_f}"
+
+    local -a _tr_kept=() _tr_new_warns=() _tr_new_notes=()
+    local _tr_j
+    for ((_tr_j = 0; _tr_j < ${#due_idx[@]}; _tr_j++)); do
+      local di="${due_idx[_tr_j]}"
+      local rkey rsid rtarget rstatus rrole kind outcome
       rkey="${_lc_key[di]}"; rsid="${_lc_sid[di]}"; rtarget="${_lc_target[di]}"
       rstatus="${_lc_status[di]}"; rrole="${_lc_role[di]:-story}"
-      avail="$(transitions_get "${rkey}")" || continue
-      outcome="$(transitions_resolve "${avail}" "${rtarget}")"
-      kind="$(jq -r '.outcome' <<< "${outcome}")"
+      kind="${_tr_kind[_tr_j]}"; outcome="${_tr_outcome[_tr_j]}"
       if [[ "${kind}" == "move" ]]; then
         local tid tres note
-        tid="$(jq -r '.transition_id' <<< "${outcome}")"
+        tid="${_tr_tid[_tr_j]}"
         tres="$(_plan_transition_action "${base}" "${rkey}" "${tid}" "${_lc_blockers[di]}" "${rsid}" "${rrole}" "${rtarget}")"
-        kept="$(jq -c --argjson a "$(jq -c '.action' <<< "${tres}")" '. + [$a]' <<< "${kept}")"
+        _tr_kept+=("$(jq -c '.action' <<< "${tres}")")
         note="$(jq -r '.note // empty' <<< "${tres}")"
-        [[ -n "${note}" ]] && notes="$(jq -c --arg n "${note}" '. + [$n]' <<< "${notes}")"
+        [[ -n "${note}" ]] && _tr_new_notes+=("${note}")
       else
         local w; w="$(_plan_transition_warning "${outcome}" "${rrole}" "${rkey}" "${rtarget}" "${rstatus}")"
-        warns="$(jq -c --arg w "${w}" '. + [$w]' <<< "${warns}")"
+        _tr_new_warns+=("${w}")
       fi
     done
+
+    # One merge each, regardless of how many due tickets resolved to that
+    # branch — the same "decode/encode once" shape as the arrays above,
+    # replacing what used to be a `. + [$x]` jq call per due ticket.
+    if ((${#_tr_kept[@]} > 0)); then
+      local _tr_kept_f; _tr_kept_f="$(mktemp)"
+      printf '%s\n' "${_tr_kept[@]}" > "${_tr_kept_f}"
+      kept="$(jq -c --slurpfile add "${_tr_kept_f}" '. + $add' <<< "${kept}")"
+      rm -f "${_tr_kept_f}"
+    fi
+    if ((${#_tr_new_warns[@]} > 0)); then
+      local _tr_warns_f; _tr_warns_f="$(mktemp)"
+      printf '%s\n' "${_tr_new_warns[@]}" > "${_tr_warns_f}"
+      warns="$(jq -c --argjson add "$(jq -Rs 'split("\n") | map(select(length > 0))' "${_tr_warns_f}")" '. + $add' <<< "${warns}")"
+      rm -f "${_tr_warns_f}"
+    fi
+    if ((${#_tr_new_notes[@]} > 0)); then
+      local _tr_notes_f; _tr_notes_f="$(mktemp)"
+      printf '%s\n' "${_tr_new_notes[@]}" > "${_tr_notes_f}"
+      notes="$(jq -c --argjson add "$(jq -Rs 'split("\n") | map(select(length > 0))' "${_tr_notes_f}")" '. + $add' <<< "${notes}")"
+      rm -f "${_tr_notes_f}"
+    fi
   fi
 
   local _out

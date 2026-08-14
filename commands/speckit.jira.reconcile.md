@@ -390,6 +390,13 @@ waits.
 - `--verbose` — extra diagnostics (the token never appears, even here).
 - `--help` — usage; exits `0`.
 
+The shared command-line parser also accepts `speckit.jira.config`'s own flags —
+`--style`, `--child-type`, `--issue-type`, `--field-default`, `--task-mirror`,
+`--use-team`, `--enable-hook` — on `reconcile` without refusing them. They have
+**no effect** here: `reconcile` never reads the values this parser stores for
+them. Pass them to `speckit.jira.config` instead, where they are documented
+and acted on.
+
 ## Exit codes
 
 `0` success, an inert run, or a reported degraded state · `1` usage · `2`
