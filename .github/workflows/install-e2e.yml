@@ -111,12 +111,26 @@ jobs:
           py="python3"
           command -v "${py}" > /dev/null 2>&1 || py="python"
           command -v "${py}" > /dev/null 2>&1 || { echo "::error::neither python3 nor python is on PATH" >&2; exit 1; }
+          # `python3 -m http.server`'s own startup binds via HTTPServer, whose
+          # server_bind() calls socket.getfqdn(host) — a reverse DNS lookup —
+          # before it ever prints its banner (cpython Lib/http/server.py).
+          # Bind directly via socketserver.TCPServer instead, which has no
+          # such call, and print the port before serving. The code is passed
+          # with -c, not a script file: a script's own directory becomes
+          # sys.path[0], and `import` scans it — under heavy concurrent /tmp
+          # churn (many parallel installs each minting temp files) that
+          # directory scan itself stalls for seconds (measured: getdirentries64
+          # in cpython's import machinery). -c carries no such directory.
+          pycode='import http.server, socketserver
+          with socketserver.TCPServer(("127.0.0.1", 0), http.server.SimpleHTTPRequestHandler) as httpd:
+              print(f"port={httpd.server_address[1]}", flush=True)
+              httpd.serve_forever()'
           log="$(mktemp)"
-          (cd "${{ runner.temp }}/artifact" && exec "${py}" -u -m http.server 0 --bind 127.0.0.1) > "${log}" 2>&1 &
+          (cd "${{ runner.temp }}/artifact" && exec "${py}" -u -c "${pycode}") > "${log}" 2>&1 &
           pid=$!
           port=""
           for _ in $(seq 1 100); do
-            port="$(sed -nE 's/.*[Pp]ort ([0-9]+).*/\1/p' "${log}" | head -n1)"
+            port="$(sed -nE 's/^port=([0-9]+)$/\1/p' "${log}" | head -n1)"
             [ -n "${port}" ] && break
             kill -0 "${pid}" 2> /dev/null || break
             sleep 0.1

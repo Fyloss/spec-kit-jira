@@ -65,14 +65,28 @@ fixture_new_repo() {
 # a port the OPERATING SYSTEM assigns (bind 0), never a fixed one. On success
 # prints "<port> <pid>" on one line, once the server is confirmed listening.
 fixture_serve() {
-  local dir="$1" log pid port tries=0
+  local dir="$1" pycode log pid port tries=0
+  # `python3 -m http.server`'s own startup binds via HTTPServer, whose
+  # server_bind() calls socket.getfqdn(host) — a reverse DNS lookup — before
+  # it ever prints its banner (cpython Lib/http/server.py). Bind directly via
+  # socketserver.TCPServer instead, which has no such call, and print the
+  # port before serving. The code is passed with -c, not a script file: a
+  # script's own directory becomes sys.path[0], and `import` scans it —
+  # under heavy concurrent /tmp churn (many fixtures minting temp files in
+  # parallel) that directory scan itself stalls for seconds (measured:
+  # getdirentries64 in cpython's import machinery, every invocation, every
+  # time, with 40-way parallelism). -c carries no such directory.
+  pycode='import http.server, socketserver
+with socketserver.TCPServer(("127.0.0.1", 0), http.server.SimpleHTTPRequestHandler) as httpd:
+    print(f"port={httpd.server_address[1]}", flush=True)
+    httpd.serve_forever()'
   log="$(mktemp)"
-  (cd "${dir}" && exec python3 -u -m http.server 0 --bind 127.0.0.1) > "${log}" 2>&1 &
+  (cd "${dir}" && exec python3 -u -c "${pycode}") > "${log}" 2>&1 &
   pid=$!
 
   port=''
   while ((tries < 50)); do
-    port="$(sed -nE 's/.*[Pp]ort ([0-9]+).*/\1/p' "${log}" | head -n1)"
+    port="$(sed -nE 's/^port=([0-9]+)$/\1/p' "${log}" | head -n1)"
     [[ -n "${port}" ]] && break
     kill -0 "${pid}" 2> /dev/null || break
     sleep 0.1
