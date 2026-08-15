@@ -158,6 +158,15 @@ Shipped, and described in detail in the [system documentation](README.md):
   reads the ticket's identity marker, refuses with zero writes if the ticket
   already belongs to another spec, fetches its content so the drafted spec
   starts informed, and thereafter treats the description as human-authored.
+- **Seeds a whole specification from named Jira issues**, not just one.
+  `/speckit.jira.feature --parent … --story …` resolves a set of existing
+  issues before anything is named, and `/speckit.jira.seed` drafts `spec.md`
+  from their own summaries and descriptions, validates the pinning marker
+  bijection, and — only after an explicit confirmation of the rendered write
+  plan — binds, adopts, creates a not-yet-existing parent from free text, and
+  re-parents a story only onto the parent the operator designated, disclosing
+  every re-parenting line and every scattered story it left alone. See
+  `specs/027-seed-spec-from-jira/` and [the safety model](08-safety-model.md).
 - **Records a default for a mandatory custom field, once, so a mirror never
   blocks.** A project whose written issue types require a field beyond what
   the bridge supplies used to be refused outright; the config ceremony now
@@ -284,20 +293,34 @@ on the parent, on the story that consumes them, or on both.
 
 ### 6. Completing a ticket a human created, without overwriting them
 
-*Shipped in substance* — the managed-panel splice and the `mention` adoption
-path together already deliver this: a human's Story or Epic can be handed to
-the extension, which then fills its own delimited region and leaves every
-human-written byte alone, permanently.
+*Shipped* — the managed-panel splice, `speckit.jira.feature`'s own mentioned-key
+naming, and now `specs/027-seed-spec-from-jira/` together deliver this in full,
+and for more than one ticket at a time: an operator names an existing epic and
+its stories — by key, by browser URL, or (for a not-yet-existing parent) by
+free-text title — and `speckit.jira.seed` drafts `spec.md` from their own
+summaries and descriptions, pins each named story to the section it seeded, and
+binds, adopts, creates, and re-parents only after an explicit confirmation.
+Every one of those tickets keeps the managed-panel guarantee this entry
+originally asked for: the extension fills its own delimited region and leaves
+every human-written byte alone, permanently.
 
-What remains, and is *envisioned*: `mention` is implemented in both ports but
-is **not exposed as an agent command** — `extension.yml` declares only
-`speckit.jira.config`, `speckit.jira.feature`, and `speckit.jira.reconcile`.
-So the capability exists and is tested, yet a user cannot reach it from their
-agent. Surfacing it as `/speckit.jira.mention`, with the accompanying command
-definition and lifecycle wiring, is the gap between "built" and "usable".
+Unlike `mention` (below), `speckit.jira.seed` is declared in `extension.yml`'s
+`provides.commands` and reachable today — this is the entry that closed the
+gap between "built" and "usable" this section used to describe, just through a
+newer, broader command rather than through `mention` itself.
+
+What remains, and is still *envisioned*: `commands/mention.sh` is implemented
+in both ports and adopts a **single** already-named ticket mid-conversation
+(distinct from seeding a whole new specification from several), but it is
+still **not exposed as an agent command** — `extension.yml` declares
+`speckit.jira.config`, `speckit.jira.feature`, `speckit.jira.reconcile`, and
+`speckit.jira.seed`, not `speckit.jira.mention`. Surfacing it as
+`/speckit.jira.mention`, with the accompanying command definition and
+lifecycle wiring, is the same unreachable-capability gap this entry has
+recorded since before 027, now narrower in scope than it once was.
 
 The neighbouring capability — adopting a ticket by **label** rather than by an
-explicit mention — remains out of scope until specified.
+explicit mention or a seed designator — remains out of scope until specified.
 
 ### 7. Two estimations, side by side
 

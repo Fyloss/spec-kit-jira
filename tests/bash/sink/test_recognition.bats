@@ -352,3 +352,17 @@ EOF
   [[ "${all_details}" != *"127.0.0.1"* ]]
   [[ "$(jq -c '.' <<< "$output")" != *"127.0.0.1"* ]]
 }
+
+# --- T105a [027]: FR-011 regression — a seeded (origin:human) marker classifies exactly like a bridge one ---
+
+@test "T105a [027]: an origin:human marker (a seeded story) is recognised exactly as an origin:bridge one" {
+  local cfg; cfg="$(_seed_config '{"origin":"human","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111","role":"story"}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  local stories='[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+  run recognition_run "${stories}" "${SPEC_REF}" "COMP" "spec.md"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.bound["1111111111111111"].key' <<< "$output")" = "COMP-1" ]
+  [ "$(jq '.new | length' <<< "$output")" -eq 0 ]
+  [ "$(jq '.blocked | length' <<< "$output")" -eq 0 ]
+}

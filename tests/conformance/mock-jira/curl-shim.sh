@@ -296,7 +296,8 @@ _shim_create_issue() {
         issuelinks: [],
         parent: ($sf.parent // null),
         issuetype: ($sf.issuetype // null),
-        labels: ($sf.labels // [])
+        labels: ($sf.labels // []),
+        project: ($sf.project // {key: $pk})
       } as $fields
     | ($withCounter | .issues[$key] = {fields: $fields, properties: {}}) as $state
     | {state: $state, key: $key}
@@ -333,6 +334,7 @@ _shim_issue_bulkfetch() {
   local ids_json n i issues="[]"
   ids_json="$(jq -c '.issueIdsOrKeys // []' <<< "${body_json}")"
   n="$(jq 'length' <<< "${ids_json}")"
+  local -a entries=()
   for ((i = 0; i < n; i++)); do
     local reqkey matchkey fault
     reqkey="$(jq -r ".[${i}]" <<< "${ids_json}")"
@@ -351,6 +353,13 @@ _shim_issue_bulkfetch() {
               {subtasks: [ .issues | to_entries[] | select(.value.fields.parent.key == $k)
                 | {key: .key, fields: {issuetype: (.value.fields.issuetype // {id: null})}} ]}
             else {} end)
+          # 027 research R5: Jira Cloud embeds a reduced parent representation
+          # (fields.summary/status) inline on the parent field of a child
+          # issue, at no extra request -- this is what keeps the current-
+          # parent disclosure at zero additional cost.
+          + (if ($i.fields.parent != null) and (.issues | has($i.fields.parent.key)) then
+              {parent: ($i.fields.parent + {fields: (.issues[$i.fields.parent.key].fields | {summary, status})})}
+            else {} end)
         ) as $flds
       | {key: $k, fields: $flds}
       + (if $props != "" then
@@ -358,8 +367,20 @@ _shim_issue_bulkfetch() {
             | reduce $names[] as $n ({}; . + (if ($i.properties | has($n)) then {($n): $i.properties[$n]} else {} end)) )}
         else {} end)
     ' "${MOCK_STATE_PATH}")"
-    issues="$(jq -c --argjson e "${entry}" '. + [$e]' <<< "${issues}")"
+    entries+=("${entry}")
   done
+  # An issue field (a description, say) has no size ceiling: accumulating
+  # `issues` one entry at a time via `--argjson` would hand a potentially
+  # oversized value to jq as an argv element (execve's 128 KiB cap). Every
+  # entry is instead concatenated in-process into a temp file and slurped in
+  # ONE jq call — the same shape adoption.sh's own callers use.
+  if ((${#entries[@]} > 0)); then
+    local entries_file
+    entries_file="$(mktemp)"
+    printf '%s\n' "${entries[@]}" > "${entries_file}"
+    issues="$(jq -sc '.' "${entries_file}")"
+    rm -f "${entries_file}"
+  fi
 
   # Project fields down to the caller's requested list — the mock stores every
   # field the per-key GET already knows, so this mirrors Jira's own selection.
@@ -371,7 +392,7 @@ _shim_issue_bulkfetch() {
   fi
 
   RESP_STATUS=200
-  RESP_BODY="$(jq -cn --argjson issues "${issues}" '{issues:$issues, issueErrors:[]}')"
+  RESP_BODY="$(jq -c '{issues:., issueErrors:[]}' <<< "${issues}")"
 }
 
 _shim_issue_put() {

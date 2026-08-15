@@ -103,6 +103,11 @@ Questions asked and answered in this pass:
 - Q: Which named issue supplies the slug, and what supplies it when the specification-role designator is free text and has no key? (C2) → A: The parent's key when the parent is designated by key or URL; otherwise the first story-role key, "first" fixed by FR-054; otherwise — free-text parent with no story designated — the ordinary description-derived naming, unchanged, which is not a refusal. Two further rules: the slug is computed **once** on the first run and recorded in the seeded-not-bound state beside the designator set, and a resume reads it rather than re-deriving it (FR-060) — otherwise an edit to the description between declining and resuming would point the run at a folder that does not exist. And the Assumptions record that the fifth shape is the only one whose folder carries no ticket key, deliberately.
 - Q: Is `REF-DECOMP` raised by the drafting agent, or by a deterministic validation of the artifact after it is written to disk? (C1) → A: By a deterministic validation of the file. The agent drafts `spec.md` carrying explicit **pinning markers** (FR-056), and the script then validates the file (FR-058) on four mechanical properties — no key dropped, no orphan marker, no split or merge, no reorder — emitting `REF-DECOMP` from that validation alone. The validation reads the markers and nothing else: not headings, not prose, not section order except through marker positions. The pinning marker is written by the **agent** at drafting time and expresses an *intention*; the identity marker of FR-027 is written by the **script** after the confirmation gate and expresses a *binding*. A seeded-not-bound specification therefore carries pinning markers and no identity markers, which is what makes the two states mechanically distinguishable (FR-057). FR-015 is reclassified as a drafting instruction rather than a script-enforced requirement, since no deterministic check can judge prose quality; a testability table records which requirements the corpus can prove and where the rest live.
 
+### Session 2026-08-15 (third pass — the two carried decisions)
+
+- Q: Must the adopted-versus-created distinction be visible to a human reading Jira, or is the machine-readable record enough? (OD-4) → A: **Machine-readable only.** The distinction lives in the identity marker's existing `origin` field — `human` for an issue the operator named, `bridge` for a parent the ceremony created — and nothing further is written: no additive label, no line in the managed panel. The alternative would add a write to every adopted issue, against Principle II's zero-churn rule, to surface a distinction no acceptance scenario asks for, which Principle XV forbids building. The choice is deliberately the reversible one: adding a visible marker later is additive, whereas removing one consumers have begun reading is not.
+- Q: What happens on the next invocation after a run that began binding and failed part-way? (OD-5) → A: **It resumes from the completed bindings; it never rolls back.** Rollback is not merely unattractive but unavailable — it would have to delete a created parent, which Principle I forbids. Refusing until the operator intervenes by hand contradicts FR-040, whose zero-write second run is only reachable if the run can tell what is already done and skip it. No new mechanism is needed: FR-028's per-item stamp-and-record ordering means a run interrupted after three bindings has three recorded keys, and resumption is recognition doing its ordinary job — an artifact whose marker already carries `ticket=KEY` is bound and skipped. Whether a partially bound state also warrants a distinct warning class is a tasks-phase refinement that changes no requirement.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Story-role issues only, no parent named (Priority: P1)
@@ -199,8 +204,9 @@ invocation creates nothing.
    title.
 7. **Given** the parent creation succeeded but placement of the second story
    failed, **When** the run ends, **Then** the run reports precisely which
-   issues were bound and which were not, and the recorded state is such that
-   the documented resumption behaviour applies [NEEDS CLARIFICATION: OD-5].
+   issues were bound and which were not, the completed bindings are left in
+   place, and the next invocation resumes from them rather than rolling back
+   or refusing (FR-042).
 8. **Given** the whole ceremony completed, **When** it is invoked a second time
    with the same designators, **Then** zero writes of every kind are issued.
 
@@ -788,10 +794,12 @@ issue, every drafted user story, and every intended write.
     rename survives.
   - **Never written by this ceremony** — on every issue the operator **named**:
     the summary, the status, and every field not enumerated above.
-- **FR-031**: Whether an adopted issue and a created issue are distinguishable
-  after the fact is [NEEDS CLARIFICATION: OD-4]. The identity marker already
-  records origin `human` versus `bridge_created`; the open question is whether
-  that distinction must also be visible to a human reading Jira.
+- **FR-031**: An adopted issue and a created issue MUST be distinguishable after
+  the fact by the identity marker's existing `origin` field — `human` for every
+  issue the operator named, `bridge` for a parent the ceremony created. That
+  record is the whole of the requirement: no additive label, no line in the
+  managed panel, and no write of any kind may be introduced to surface the
+  distinction to a human reading Jira.
 
 #### Provenance and confirmation
 
@@ -888,8 +896,12 @@ issue, every drafted user story, and every intended write.
 
 - **FR-035**: Every refusal MUST perform zero writes of every kind, name the
   offending designator or issue key, and carry a copy-pasteable remediation
-  line. The run MUST exit non-zero with a documented code, escalating
-  monotonically.
+  line. The run MUST exit non-zero with a code drawn from the existing
+  documented ladder — `EXIT_USAGE` (1) for a malformed flag, `EXIT_FAILCLOSED`
+  (2) for an unreliable read with designators supplied (FR-038), `EXIT_CONFIG`
+  (4) for every refusal class of FR-036. The ladder is shared with the rest of
+  the extension and no code is introduced for this feature; a refusal class is
+  identified by its `REF-` code in the message, never by a distinct exit status.
 - **FR-036**: The refusal classes are exactly these, each with its remediation:
 
   | Code | Condition | Remediation |
@@ -931,8 +943,12 @@ issue, every drafted user story, and every intended write.
   or seeded-not-bound.
 - **FR-042**: A run that began binding and failed part-way — parent created, one
   adoption failed — MUST report exactly which bindings completed and which did
-  not, and MUST leave a recorded state whose behaviour on the next invocation is
-  [NEEDS CLARIFICATION: OD-5]. The neighbouring case — a run that performed
+  not, and MUST leave its completed bindings in place. The next invocation with
+  the identical designator set MUST resume from them: every issue already
+  stamped and recorded is recognised and skipped, and only the outstanding
+  bindings are performed. The run MUST NOT roll back — deleting the created
+  parent is forbidden by Principle I — and MUST NOT refuse, which would put
+  FR-040's zero-write second run out of reach. The neighbouring case — a run that performed
   **zero** bindings — is not open: it is the seeded-not-bound state of FR-049,
   resumed by FR-050.
 
@@ -999,35 +1015,12 @@ issue, every drafted user story, and every intended write.
 - **Seeding source** — the human-authored content of a named issue, read once,
   never re-read.
 
-## Open Decisions *(to be settled by `/speckit-clarify`)*
+## Open Decisions
 
-Two decisions remain open after the 2026-08-15 clarification session, both
-referenced from the requirement they govern. OD-1, OD-2, OD-3, OD-6, and OD-7
-were settled in that session and are recorded under Clarifications. Neither
-survivor blocks `/speckit-plan`: OD-4 changes only whether an existing
-distinction is surfaced to a human, and OD-5's zero-binding case is already
-settled by FR-049 and FR-050.
-
-**OD-4 — Distinguishing adopted from created, after the fact.**
-*Referenced by FR-031.*
-
-| Option | Behaviour | Trade-off |
-| --- | --- | --- |
-| A | Machine-readable only — the existing origin field in the identity marker | Nothing new to build; already how human-origin protection works. Invisible to a Product Owner reading the board. |
-| B | Also visible in Jira — a distinct additive label, or a line in the managed panel | Legible to a human. Adds a write to every adopted issue and a new thing the mirror must never remove. |
-
-**OD-5 — A partially completed run.**
-*Referenced by FR-042, US2 AC4. Narrowed by the OD-2 decision: the case where
-**zero** bindings were performed is now settled — that is the seeded-not-bound
-state of FR-049, resumed by FR-050. What remains open is only the case where
-binding began and then failed part-way, leaving some issues stamped and others
-not.*
-
-| Option | Behaviour | Trade-off |
-| --- | --- | --- |
-| A | Roll back — delete the created parent, unstamp the adopted issues | Cleanest state. But the bridge never deletes a Jira artifact (Principle I), so this option is very likely unavailable. |
-| B | Leave in place; the next invocation resumes from the recorded bindings | Consistent with the per-item stamp-and-record ordering the bridge already uses. Requires resumption to be idempotent per issue. |
-| C | Leave in place and refuse the next invocation until the operator resolves it | Fail-closed and simple. Costs the operator manual work in exactly the situation they least want it. |
+None. All seven decisions raised during drafting — OD-1 through OD-7 — are
+settled and recorded under Clarifications. OD-4 and OD-5, the two carried past
+the first two sessions, were closed in the third pass on the answers
+`research.md` R13 and R14 had already argued for; neither changed a requirement.
 
 ## Constitution Check *(mandatory)*
 

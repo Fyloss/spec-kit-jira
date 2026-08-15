@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -38,17 +38,20 @@
 
 ## Notes
 
-- **Updated after two `/speckit-clarify` sessions on 2026-08-15.**
+- **Updated after three `/speckit-clarify` sessions on 2026-08-15.**
   - *First session*: five of the seven open decisions settled — OD-1, OD-2,
     OD-3, OD-6, OD-7 — adding FR-049 through FR-053 and taking the refusal
     classes from fifteen to thirteen (`REF-PARENT-NAME` went with OD-7,
     `REF-REPARENT` with OD-1).
   - *Second session (review pass)*: five blocking gaps closed — C1 through C5 —
     adding FR-054 through FR-064 and one refusal class, `REF-DRAFT-EDIT`, for
-    fourteen. Six inconsistencies were corrected directly, and **US2 moved from
+    fourteen. FR-065 (the privacy guard over seeded content) was added
+    afterwards by the cross-artifact analysis. Six inconsistencies were
+    corrected directly, and **US2 moved from
     P1 to P2** so that P1 is now the irreversible-write-free slice (US1, US3,
     US5, US6).
-  - Requirements run FR-001 through FR-064 with no gaps and no duplicates. Every
+  - *Third pass*: OD-4 and OD-5 closed — see below. No requirement changed.
+  - Requirements run FR-001 through FR-065 with no gaps and no duplicates. Every
     requirement added by a clarification session took the next free number
     rather than renumbering, so no cross-reference in the spec ever broke.
 - **The agent/script boundary is now explicit**, which was the single largest
@@ -63,16 +66,17 @@
   detail leaking into the spec — it is an artifact an operator reads and edits
   in their own file, exactly like the existing `spec=` and `story=` markers
   documented in `docs/08-safety-model.md`, and its exact form was requested.
-- **The three remaining [NEEDS CLARIFICATION] markers are deliberate**, and are
-  the only reason the item above stays unchecked. They reference OD-4 (FR-031)
-  and OD-5 (FR-042, US2 AC7). Neither blocks `/speckit-plan`:
-  - **OD-4** decides only whether an already-recorded distinction — the identity
-    marker's `human` versus `bridge_created` origin — is also made visible to a
-    human reading Jira. No requirement changes either way.
-  - **OD-5** was narrowed by the OD-2 decision. Its zero-binding case is now
-    fully specified as the seeded-not-bound state (FR-049, FR-050). What remains
-    open is only a run that began binding and failed part-way.
+- **All [NEEDS CLARIFICATION] markers are now closed.** A *third pass* on
+  2026-08-15 settled the two decisions the first two sessions carried, on the
+  answers `research.md` R13 and R14 had already argued for:
+  - **OD-4** → the adopted-versus-created distinction stays machine-readable,
+    in the identity marker's existing `origin` field (`human` versus `bridge`).
+    FR-031 now states it as a requirement instead of asking the question.
+  - **OD-5** → a partially bound run resumes from its completed bindings and
+    never rolls back, which Principle I and FR-040 jointly force. FR-042 and
+    US2 AC7 now state it.
+
+  Neither changed a requirement's substance, and no cross-reference broke.
 - OD-7 was **not** in the originally supplied list; it was surfaced during
   drafting and settled in the first session.
-- Run `/speckit-plan` next, or `/speckit-clarify` again if OD-4 and OD-5 should
-  be closed first.
+- `/speckit-plan` and `/speckit-tasks` have both run. Next: `/speckit-implement`.

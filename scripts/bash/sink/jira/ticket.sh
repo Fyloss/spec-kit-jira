@@ -123,11 +123,15 @@ _ticket_create_body() {
     '{fields: $base}'
 }
 
-# ticket_create <project> <summary> <story-type-id> [labels-json] [components-json] [spec-ref-json]
+# ticket_create <project> <summary> <story-type-id> [labels-json] [components-json] [spec-ref-json] [role]
 # Guarded write: PASS-1 privacy guard, POST /issue, identity stamp. Prints {key}.
+# <role> (027, FR-023) is optional and empty by default — the feature
+# ceremony's own ordinary ticket has no role in the 027 sense; a seed-created
+# parent passes "parent" so reconcile's own recognition can tell a
+# bridge-created parent from any other bridge-created issue.
 ticket_create() {
   local project="$1" summary="$2" typeid="$3"
-  local spec_ref="${6:-}"
+  local spec_ref="${6:-}" role="${7:-}"
   [[ -z "${spec_ref}" ]] && spec_ref='{}'
   local base="${SPEC_KIT_JIRA_BASE_URL:-}"
   if [[ -z "${base}" ]]; then
@@ -157,7 +161,10 @@ ticket_create() {
   key="$(jq -r '.key' <<< "${resp}")"
 
   # (3) Identity stamp — the created ticket is a bridge-created artifact.
-  identity_write "${key}" "${spec_ref}" "bridge" || return $?
+  # The summary this create sent becomes the LAST-WRITTEN summary record
+  # (018, contracts/summary-record.md §1/§2): a later reconcile compares
+  # against it, never against the text that seeded the create.
+  identity_write "${key}" "${spec_ref}" "bridge" "" "${role}" "${summary}" || return $?
 
   jq -cn --arg k "${key}" '{key: $k}' | json_canonical
 }

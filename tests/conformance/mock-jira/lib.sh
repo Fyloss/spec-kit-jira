@@ -80,7 +80,11 @@ _mock_start_shim() {
                 status: (.value.status // default_status(.key | sub("-[0-9]+$"; ""))),
                 issuelinks: (.value.issuelinks // []),
                 parent: (.value.parent // null),
-                issuetype: (.value.issuetype // null)
+                issuetype: (.value.issuetype // null),
+                project: (.value.project // null),
+                assignee: (.value.assignee // null),
+                reporter: (.value.reporter // null),
+                labels: (.value.labels // [])
               }
               + (if (.value.flagged // false) then {Flagged: [{value: "Impediment"}]} else {} end)
             ),

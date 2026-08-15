@@ -243,6 +243,6 @@ intentionally empty.*
 
 | Item | Status |
 | --- | --- |
-| **OD-4** — adopted versus created, visible to a human? | Provisionally settled by R13: origin field only. Changes no requirement; reversible additively. |
-| **OD-5** — a run that failed part-way through binding | Provisionally settled by R14: resume, never roll back — forced by Principle I and FR-040. The residual question (a distinct warning class for a partially bound state) is a tasks-phase decision. |
+| **OD-4** — adopted versus created, visible to a human? | **Closed in spec.md** (third clarification pass), on R13: origin field only (`human` versus `bridge`). FR-031 states it as a requirement. |
+| **OD-5** — a run that failed part-way through binding | **Closed in spec.md** (third clarification pass), on R14: resume, never roll back — forced by Principle I and FR-040. FR-042 and US2 AC7 state it; T137/T138 implement it. The residual question (a distinct warning class for a partially bound state) remains a tasks-phase decision and changes no requirement. |
 | Agent conveyance of moment 2 | Named in R1. Mitigated by the command definition and by a fail-safe design: a forgotten invocation leaves a resumable seeded-not-bound state, never a duplicate. |

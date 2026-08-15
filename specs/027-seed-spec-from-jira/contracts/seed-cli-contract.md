@@ -255,3 +255,4 @@ no exit-code change, never blocking.
 | C-16 | `--dry-run` predicts the identical action set and writes no seed record | FR-034 |
 | C-17 | Reparent line renders with the `! ` column-1 prefix of §5.1, naming parent key + summary + status + child-loss count; the rendered plan is byte-identical between ports for a fixture containing all four line kinds | FR-051, FR-046 |
 | C-18 | No parent designator + already-parented stories → scatter note, exit 0, zero writes | FR-061 |
+| C-19 | Resume of a declined run with `N` designators → the **same** `ceil(N / B)` reads as the first run, no per-issue read, and no `comment` field requested | FR-043, FR-062 |

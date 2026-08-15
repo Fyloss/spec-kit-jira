@@ -187,6 +187,8 @@ from any timing run.
 | Spawn count at 10 vs 100 designators | does not grow per issue |
 | Request body | reaches `jira_request` via a temp file, never argv |
 | Run naming nothing | 0 additional requests |
+| **Resume** of a declined run, 100 designators | 1 `bulkfetch` — the same as the first run |
+| Any read on the resume path | no `comment` field in the field union |
 
 The argv assertion matters most on Linux: a single argument is capped at 128 KiB
 (`MAX_ARG_STRLEN`) independently of `ARG_MAX`, and macOS has no such cap — so

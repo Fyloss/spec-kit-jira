@@ -123,6 +123,25 @@ boot() {
   mock_calls | grep -q 'PUT /rest/api/3/issue/IJT-123/properties/spec-kit-jira'
 }
 
+@test "027, FR-023: an optional 7th argument stamps the identity's role — a created parent's identity is recognisable as role:parent" {
+  boot '{"projects":{"IJT":"team"},"createdKey":"IJT-123"}'
+  run ticket_create "IJT" "Payment webhooks rollout" "10000" '[]' '[]' '{"repo":"acme/app","spec_slug":"003-x"}' "parent"
+  [ "$status" -eq 0 ]
+  local stored
+  stored="$(curl -sf "${MOCK_BASE_URL}/rest/api/3/issue/IJT-123/properties/spec-kit-jira" | jq -c '.value')"
+  [ "$(jq -r '.role' <<< "${stored}")" = "parent" ]
+  [ "$(jq -r '.summary' <<< "${stored}")" = "Payment webhooks rollout" ]
+}
+
+@test "the 7th argument is entirely optional — omitting it behaves exactly as before (regression)" {
+  boot '{"projects":{"IJT":"team"},"createdKey":"IJT-123"}'
+  run ticket_create "IJT" "invoice export" "10201" '[]' '[]' '{"repo":"acme/app","spec_slug":"003-x"}'
+  [ "$status" -eq 0 ]
+  local stored
+  stored="$(curl -sf "${MOCK_BASE_URL}/rest/api/3/issue/IJT-123/properties/spec-kit-jira" | jq -c '.value')"
+  [ "$(jq -r 'has("role")' <<< "${stored}")" = "false" ]
+}
+
 @test "the PASS-1 privacy guard blocks BEFORE the POST (exit 9, zero writes)" {
   boot '{"projects":{"IJT":"team"},"createdKey":"IJT-123"}'
   run ticket_create "IJT" "summary with token ATATT3xFfGF0abcdef" "10201"

@@ -47,8 +47,8 @@ restore the bridge, reinstall the extension with
 EOF
 }
 
-@test "each of the three command documents contains the block VERBATIM (FR-030)" {
-  [ "${#DOCS[@]}" -eq 3 ]
+@test "each of the four command documents contains the block VERBATIM (FR-030)" {
+  [ "${#DOCS[@]}" -eq 4 ]
   local doc
   for doc in "${DOCS[@]}"; do
     grep -qF -- "${BLOCK}" "${doc}" || {

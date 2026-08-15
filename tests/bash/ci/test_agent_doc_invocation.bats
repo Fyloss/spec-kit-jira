@@ -22,8 +22,8 @@ setup() {
   PWSH_ENTRY='.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1'
 }
 
-@test "there are three command documents, one per declared command" {
-  [ "${#DOCS[@]}" -eq 3 ]
+@test "there are four command documents, one per declared command" {
+  [ "${#DOCS[@]}" -eq 4 ]
 }
 
 @test "no command document invokes a bare spec-kit-jira name (FR-014)" {

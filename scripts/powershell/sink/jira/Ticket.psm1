@@ -196,14 +196,17 @@ function New-JiraTicket {
     .SYNOPSIS
       Guarded write: PASS-1 privacy guard, POST /issue, identity stamp. Mirror
       of ticket_create. Returns { ExitCode; Json } — Json is the canonical
-      {key} document.
+      {key} document. -Role (027, FR-023) is optional and empty by default —
+      a seed-created parent passes 'parent' so reconcile's own recognition
+      can tell a bridge-created parent from any other bridge-created issue.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string] $ProjectKey,
         [Parameter(Mandatory)] [string] $Summary,
         [Parameter(Mandatory)] [string] $StoryTypeId,
-        [string] $SpecRefJson = ''
+        [string] $SpecRefJson = '',
+        [string] $Role = ''
     )
     if ([string]::IsNullOrEmpty($SpecRefJson)) { $SpecRefJson = '{}' }
     $base = $env:SPEC_KIT_JIRA_BASE_URL
@@ -226,7 +229,10 @@ function New-JiraTicket {
     $key = [string] (($r.Body | ConvertFrom-Json -Depth 100).key)
 
     # (3) Identity stamp — the created ticket is a bridge-created artifact.
-    $stamp = Set-JiraIdentity -IssueKey $key -SpecRefJson $SpecRefJson -Origin 'bridge'
+    # The summary this create sent becomes the LAST-WRITTEN summary record
+    # (018, contracts/summary-record.md §1/§2): a later reconcile compares
+    # against it, never against the text that seeded the create.
+    $stamp = Set-JiraIdentity -IssueKey $key -SpecRefJson $SpecRefJson -Origin 'bridge' -Story '' -Role $Role -Summary $Summary
     if ($stamp -ne 0) { return [pscustomobject]@{ ExitCode = [int] $stamp; Json = '' } }
 
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue ([ordered]@{ key = $key })) }

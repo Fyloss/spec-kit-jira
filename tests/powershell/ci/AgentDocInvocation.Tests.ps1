@@ -22,8 +22,8 @@ BeforeAll {
 }
 
 Describe 'Command documents invoke a bridge that exists' {
-    It 'has three command documents, one per declared command' {
-        $script:Docs.Count | Should -Be 3
+    It 'has four command documents, one per declared command' {
+        $script:Docs.Count | Should -Be 4
     }
 
     It 'invokes no bare spec-kit-jira name (FR-014)' {

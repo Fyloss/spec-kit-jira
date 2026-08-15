@@ -392,7 +392,7 @@ material, not the command definitions — so this text reaches consumers.
 
 ---
 
-## R13 — OD-4, provisionally: adopted versus created stays machine-readable
+## R13 — OD-4: adopted versus created stays machine-readable
 
 **Decision for this plan.** Ship **option A** — the distinction lives only in the
 identity marker's existing `origin` field (`human` versus `bridge`). No new
@@ -406,13 +406,14 @@ demands. Option B would add a write to every adopted issue — measurably agains
 Principle II's zero-churn rule — to surface a distinction no acceptance scenario
 asks for.
 
-**Status.** OD-4 remains formally open in the spec. This is the plan's provisional
-answer, and it is the one that costs nothing to reverse: adding a visible marker
-later is additive, whereas removing one that consumers have started reading is not.
+**Status.** Adopted into the spec by the third clarification pass; FR-031 now
+states it as a requirement. It is the answer that costs nothing to reverse:
+adding a visible marker later is additive, whereas removing one that consumers
+have started reading is not.
 
 ---
 
-## R14 — OD-5, provisionally: a partial binding resumes, it does not roll back
+## R14 — OD-5: a partial binding resumes, it does not roll back
 
 **Decision for this plan.** Ship **option B** — a run that began binding and
 failed part-way leaves its completed bindings in place, reports exactly which
@@ -432,7 +433,8 @@ interrupted after three creations has three recorded keys"
 (`docs/08-safety-model.md`). Resumption is then recognition doing its ordinary
 job: a story whose marker already carries `ticket=KEY` is bound and skipped.
 
-**Status.** OD-5 remains formally open. What is settled here is only the case that
+**Status.** Adopted into the spec by the third clarification pass; FR-042 and
+US2 AC7 now state it. What it settles is the case that
 was already forced by the constitution and by FR-040; the residual question —
 whether a partially bound state should additionally be surfaced as a distinct
 warning class — is left to the tasks phase and changes no requirement.
@@ -455,5 +457,5 @@ warning class — is left to the tasks phase and changes no requirement.
 | R10 | Chunked bulk read, temp file, single-pass validation | `docs/11-process-budget.md` |
 | R11 | CR-by-CR trim, `lib/output.sh`, `cygpath -m`; probe, not emulation | `docs/10-windows-portability.md`, Constitution VI |
 | R12 | FR-015 lives in `commands/speckit.jira.feature.md` | Spec's own testability table |
-| R13 | OD-4 → origin field only (provisional) | Principle XV |
-| R14 | OD-5 → resume, never roll back (provisional) | Principle I + FR-040 |
+| R13 | OD-4 → origin field only (adopted into FR-031) | Principle XV |
+| R14 | OD-5 → resume, never roll back (adopted into FR-042) | Principle I + FR-040 |

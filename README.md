@@ -362,6 +362,46 @@ which a ticket is surfaced and otherwise left completely alone — stays
 hand-written. Both are yours to edit afterwards: the ceremony never rewrites a
 mapping it finds, and deleting the key restores the no-movement behaviour.
 
+## Seeding a specification from existing Jira issues
+
+When the work already exists on your board — an epic and its stories, written
+by a human before spec-kit ever entered the picture — you do not have to
+re-describe it from scratch. Name the issues when you start the feature:
+
+```sh
+specify /speckit.specify --parent PROJ-1 --story PROJ-11 --story PROJ-12 "add payment webhooks"
+```
+
+A key, a full issue URL, or the browser board link all resolve the same way.
+A specification-role designator you type as free text — not a key, not a
+URL — is never looked up: it is always the title of a new parent, created only
+once you confirm (see below). This is the one way to tell the bridge "this is
+an existing issue" apart from "this does not exist yet": name an existing
+parent by key or URL to adopt it; type a title to create one.
+
+The agent then drafts `spec.md` from those issues' own summaries and
+descriptions — their words are the draft, not a paraphrase of it — and marks
+which user story came from which issue. Nothing has been written to Jira yet.
+Once you are ready to bind it, the agent runs:
+
+```text
+/speckit.jira.seed specs/<your-feature>/spec.md
+```
+
+This shows you the exact write plan — which issues will be adopted, which
+(if any) will be created, and whether any named story is being moved off a
+parent it currently sits under (that line is marked with a leading `!`, since
+it is the one write here that touches something you did not directly name).
+Nothing is written until you say yes; re-invoking without `--confirm` shows
+you the same gate again, recomputed against Jira as it now stands. Say yes,
+and the agent re-invokes with `--confirm` to bind everything.
+
+**A decision that lives only in a Jira comment thread will never reach
+`spec.md`.** The bridge reads an issue's summary and description — never its
+comments — both when it seeds the draft and on every later reconcile. If the
+real decision is buried in a comment, promote it into the issue's description
+first, or it will not make it into the specification.
+
 ## If the lifecycle hooks do not see your variables
 
 The hooks run in the shell the agent spawns, which does not always load your

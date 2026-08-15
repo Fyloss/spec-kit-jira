@@ -118,6 +118,23 @@ Describe 'Ticket sink' {
         $r.ExitCode | Should -Be 9
         @(Get-JiraMockCallLog -Mock $M | Where-Object { $_ }).Count | Should -Be 0
     }
+
+    It "027, FR-023: -Role stamps the identity's role — a created parent's identity is recognisable as role:parent" {
+        Start-TestMock '{"projects":{"IJT":"team"},"createdKey":"IJT-123"}'
+        $r = New-JiraTicket -ProjectKey 'IJT' -Summary 'Payment webhooks rollout' -StoryTypeId '10000' -SpecRefJson '{"repo":"acme/app","spec_slug":"003-x"}' -Role 'parent'
+        $r.ExitCode | Should -Be 0
+        $stored = Invoke-RestMethod -Method Get -Uri "$($M.BaseUrl)/rest/api/3/issue/IJT-123/properties/spec-kit-jira"
+        $stored.value.role | Should -Be 'parent'
+        $stored.value.summary | Should -Be 'Payment webhooks rollout'
+    }
+
+    It '-Role is entirely optional — omitting it behaves exactly as before (regression)' {
+        Start-TestMock '{"projects":{"IJT":"team"},"createdKey":"IJT-123"}'
+        $r = New-JiraTicket -ProjectKey 'IJT' -Summary 'invoice export' -StoryTypeId '10201' -SpecRefJson '{"repo":"acme/app","spec_slug":"003-x"}'
+        $r.ExitCode | Should -Be 0
+        $stored = Invoke-RestMethod -Method Get -Uri "$($M.BaseUrl)/rest/api/3/issue/IJT-123/properties/spec-kit-jira"
+        ($stored.value.PSObject.Properties.Name -contains 'role') | Should -BeFalse
+    }
 }
 
 Describe 'Get-JiraCreateFieldsBase — field defaults (011, T030/T030a)' {

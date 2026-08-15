@@ -132,11 +132,15 @@ function Invoke-JiraCliParse {
     $fieldDefaults = [System.Collections.Generic.List[string]]::new()
     $fieldValues = [System.Collections.Generic.List[string]]::new()
     $taskMirrors = [System.Collections.Generic.List[string]]::new()
+    $parentSeen = 'false'
+    $parent = ''
+    $confirm = 'false'
+    $stories = [System.Collections.Generic.List[string]]::new()
 
     for ($idx = 0; $idx -lt $Arguments.Count; $idx++) {
         $arg = $Arguments[$idx]
         switch -Regex ($arg) {
-            '^(config|reconcile|mention|feature)$' {
+            '^(config|reconcile|mention|feature|seed)$' {
                 if ([string]::IsNullOrEmpty($command)) { $command = $arg } else { $positional.Add($arg) }
                 break
             }
@@ -275,6 +279,39 @@ function Invoke-JiraCliParse {
                 }
                 break
             }
+            '^--parent$' {
+                # 027, contract seed-cli-contract.md §2: at most once — key,
+                # URL, or free text (may contain spaces). ParentSeen is
+                # recorded separately from Parent because FR-055 requires a
+                # blank value and an absent flag to differ.
+                if ($idx + 1 -ge $Arguments.Count) {
+                    $parseError = '--parent requires a value (--parent <designator>)'
+                }
+                else {
+                    $idx++
+                    $parentSeen = 'true'
+                    $parent = $Arguments[$idx]
+                }
+                break
+            }
+            '^--story$' {
+                # 027, contract seed-cli-contract.md §2: repeatable, argv
+                # order is normative (FR-054).
+                if ($idx + 1 -ge $Arguments.Count) {
+                    $parseError = '--story requires a value (--story <designator>)'
+                }
+                else {
+                    $idx++
+                    $stories.Add($Arguments[$idx])
+                }
+                break
+            }
+            '^--confirm$' {
+                # 027, contract seed-cli-contract.md §2: `seed` only, at
+                # most once — passes the confirmation gate.
+                $confirm = 'true'
+                break
+            }
             '^--on-drift=' {
                 $onDrift = $arg.Substring($arg.IndexOf('=') + 1)
                 if ($onDrift -ne 'abort' -and $onDrift -ne 'proceed') {
@@ -314,6 +351,10 @@ function Invoke-JiraCliParse {
         $lines.Add("field_defaults=$($fieldDefaults -join $usJoin)")
         $lines.Add("field_values=$($fieldValues -join $usJoin)")
         $lines.Add("task_mirrors=$($taskMirrors -join ' ')")
+        $lines.Add("parent_seen=$parentSeen")
+        $lines.Add("parent=$parent")
+        $lines.Add("stories=$($stories -join $usJoin)")
+        $lines.Add("confirm=$confirm")
         $lines.Add("accept_defaults=$acceptDefaults")
         $lines.Add("args=$($positional -join ' ')")
         $lines.Add("exit=$($script:ExitCodes.ok)")

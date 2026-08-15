@@ -26,6 +26,332 @@ source "${_cmd_feature_dir}/../lib/config.sh"
 source "${_cmd_feature_dir}/../engine/naming.sh"
 # shellcheck source=/dev/null
 source "${_cmd_feature_dir}/../sink/jira/ticket.sh"
+# shellcheck source=/dev/null
+source "${_cmd_feature_dir}/../sink/jira/designator.sh"
+# shellcheck source=/dev/null
+source "${_cmd_feature_dir}/../sink/jira/adoption.sh"
+# shellcheck source=/dev/null
+source "${_cmd_feature_dir}/../lib/seed_state.sh"
+# shellcheck source=/dev/null
+source "${_cmd_feature_dir}/../sink/jira/privacy_guard.sh"
+
+# _feat_designator_number_source <parent-classified-json-or-empty>
+# <stories-classified-json-array> — FR-059/research R9: which key supplies
+# the naming engine's number. `engine/naming.sh` gains zero lines — this
+# selects WHICH key is handed to the existing `naming_ticket_number`.
+# Prints the key and returns 0 for shapes 1-4; returns 1 and prints nothing
+# for shape 5 (free-text parent, no stories) — NOT a refusal, the caller
+# falls through to the ordinary description-derived naming unchanged.
+_feat_designator_number_source() {
+  local parent_json="${1:-}" stories_json="${2:-[]}"
+  if [[ -n "${parent_json}" ]]; then
+    local form
+    form="$(jq -r '.form // empty' <<< "${parent_json}")"
+    if [[ "${form}" == "key" || "${form}" == "url" ]]; then
+      jq -r '.key' <<< "${parent_json}"
+      return 0
+    fi
+  fi
+  local first_story
+  first_story="$(jq -r '[.[] | select(.role=="story")] | sort_by(.position) | .[0].key // empty' <<< "${stories_json}")"
+  if [[ -n "${first_story}" ]]; then
+    printf '%s' "${first_story}"
+    return 0
+  fi
+  return 1
+}
+
+# _feat_resolved_slug <parent-classified-json-or-empty> <stories-classified-json-array>
+# <description> — FR-059: the resolved slug. Shapes 1-4 (a key/URL resolves)
+# derive the slug from that KEY via the existing `naming_slug` (so the
+# folder carries the ticket, "ticket-first folder naming" per the spec's
+# Assumptions); shape 5 and the no-designator case fall through to the
+# ordinary description-derived slug, unchanged (C-1). Zero new engine code:
+# `naming_slug` is reused unmodified, only fed a different argument.
+_feat_resolved_slug() {
+  local parent_json="${1:-}" stories_json="${2:-[]}" desc="$3" key
+  if key="$(_feat_designator_number_source "${parent_json}" "${stories_json}")"; then
+    naming_slug "${key}"
+  else
+    naming_slug "${desc}"
+  fi
+}
+
+# _feat_declared_type_for <role> <project-key> <merged-config-json> — the
+# committed `projects[].hierarchy.<role>` issue-type name, or empty when the
+# project declares no hierarchy or no mapping for that role (adoption_evaluate
+# skips the REF-ROLE check on an empty declared type).
+_feat_declared_type_for() {
+  local role="$1" pkey="$2" merged="$3"
+  jq -r --arg k "${pkey}" --arg r "${role}" \
+    '[.projects[]? | select(.key == $k)][0].hierarchy[$r] // ""' <<< "${merged}"
+}
+
+# _feat_halted_csv_for <project-key> <merged-config-json> — the committed
+# `projects[].halted_statuses` as a comma-separated list, or empty.
+_feat_halted_csv_for() {
+  local pkey="$1" merged="$2"
+  jq -r --arg k "${pkey}" \
+    '([.projects[]? | select(.key == $k)][0].halted_statuses // []) | join(",")' <<< "${merged}"
+}
+
+# _feat_ref_message <code> <detail> — compose the message + remediation for
+# a moment-1 refusal class not already carrying one (designator.sh and
+# adoption_dedupe/multiproject return only a code; adoption_evaluate already
+# composes its own). Text mirrors spec.md's FR-036 table verbatim.
+_feat_ref_message() {
+  local code="$1" detail="$2"
+  case "${code}" in
+    REF-DESIGNATOR) printf '%s: %s — paste the issue key or the browser URL of the issue; or, for a parent to create, type its title' "${code}" "${detail}" ;;
+    REF-HOST) printf '%s: %s — paste a URL from the configured site, or correct the site base URL in the configuration' "${code}" "${detail}" ;;
+    REF-DUPLICATE) printf '%s: %s — remove the duplicate designator' "${code}" "${detail}" ;;
+    REF-MULTIPROJECT) printf '%s: %s — name issues from one project per specification' "${code}" "${detail}" ;;
+    REF-EXISTS) printf '%s: %s — retro-seeding is out of scope; create a new specification' "${code}" "${detail}" ;;
+    *) printf '%s: %s' "${code}" "${detail}" ;;
+  esac
+}
+
+# _feat_seed_from_designators <json> <dry-run> <desc> <eff-id> <eff-project>
+# <prefix> <pattern> <override-used> <merged-config-json> <parent-seen>
+# <parent-raw> <stories-joined> — moment 1's designator path (027, contract
+# seed-cli-contract.md §3, research R1). Zero Jira mutations. Emits via
+# _feat_emit and returns the exit code.
+_feat_seed_from_designators() {
+  local json="$1" dry_run="$2" desc="$3" eff_id="$4" eff_project="$5" \
+    prefix="$6" pattern="$7" override_used="$8" merged="$9" \
+    parent_seen="${10}" parent_raw="${11}" stories_joined="${12}"
+  local base_url="${SPEC_KIT_JIRA_BASE_URL:-}"
+
+  # --- §3 steps 1-2: parse + classify, REF-DESIGNATOR / REF-HOST -----------
+  local -a classified=()
+  if [[ "${parent_seen}" == "true" ]]; then
+    classified+=("$(designator_classify specification "${parent_raw}" "${base_url}")")
+  fi
+  local -a story_raws=()
+  if [[ -n "${stories_joined}" ]]; then
+    IFS=$'\x1f' read -r -a story_raws <<< "${stories_joined}"
+    local raw
+    for raw in "${story_raws[@]}"; do
+      classified+=("$(designator_classify story "${raw}" "${base_url}")")
+    done
+  fi
+  local all_json
+  all_json="$(printf '%s\n' "${classified[@]}" | jq -s -c .)"
+
+  local refusing refusing_count
+  refusing="$(jq -c '[.[] | select(has("refuse"))]' <<< "${all_json}")"
+  refusing_count="$(jq 'length' <<< "${refusing}")"
+  if ((refusing_count > 0)); then
+    local line
+    while IFS= read -r line; do
+      local code="${line%%:*}" detail="${line#*: }"
+      printf 'feature: %s\n' "$(_feat_ref_message "${code}" "designator \"${detail}\" did not resolve")" >&2
+    done <<< "$(jq -r '.[] | "\(.refuse): \(.raw)"' <<< "${refusing}")"
+    return "$(cli_exit_code config)"
+  fi
+
+  # --- §3 step 3: de-duplicate -----------------------------------------------
+  local dedupe
+  dedupe="$(designator_dedupe "${all_json}")"
+  if [[ "$(jq -r '.ok' <<< "${dedupe}")" != "true" ]]; then
+    local dups
+    dups="$(jq -r '.duplicates | join(", ")' <<< "${dedupe}")"
+    printf 'feature: %s\n' "$(_feat_ref_message REF-DUPLICATE "issue(s) named more than once: ${dups}")" >&2
+    return "$(cli_exit_code config)"
+  fi
+  local designators
+  designators="$(jq -c '.designators' <<< "${dedupe}")"
+  local parent_json stories_json
+  parent_json="$(jq -c '[.[] | select(.role=="specification")][0] // empty' <<< "${designators}")"
+  stories_json="$(jq -c '[.[] | select(.role=="story")] | sort_by(.position)' <<< "${designators}")"
+
+  # --- resolved slug / short-name (FR-059) ----------------------------------
+  local bare_slug short_name synth_spec_path
+  bare_slug="$(_feat_resolved_slug "${parent_json}" "${stories_json}" "${desc}")"
+  short_name="$(naming_short_name "${prefix}" "${bare_slug}")"
+  synth_spec_path="specs/${short_name}/spec.md"
+
+  # --- §3 step 4: folder exists? -> REF-EXISTS ------------------------------
+  if [[ -d "specs/${short_name}" ]]; then
+    printf 'feature: %s\n' "$(_feat_ref_message REF-EXISTS "the specification folder specs/${short_name} already exists")" >&2
+    return "$(cli_exit_code config)"
+  fi
+
+  # --- §3 step 5: one bulkfetch ----------------------------------------------
+  local pkey=""
+  [[ -n "${parent_json}" ]] && pkey="$(jq -r 'if (.form=="key" or .form=="url") then .key else empty end' <<< "${parent_json}")"
+  local -a keys=()
+  [[ -n "${pkey}" ]] && keys+=("${pkey}")
+  local n i
+  n="$(jq 'length' <<< "${stories_json}")"
+  for ((i = 0; i < n; i++)); do
+    keys+=("$(jq -r ".[${i}].key" <<< "${stories_json}")")
+  done
+
+  if ((${#keys[@]} > 0)); then
+    local load_rc=0
+    adoption_load "${keys[@]}" || load_rc=$?
+    if ((load_rc != 0)); then
+      printf 'feature: an unreliable read occurred while resolving the named issues — designators were supplied, so the run refuses rather than proceeding without them (FR-038)\n' >&2
+      return "$(cli_exit_code fail_closed)"
+    fi
+  fi
+
+  # --- §3 steps 6-12: per-key and set-wide refusal classes, aggregated -----
+  # spec_ref.spec_slug prefers SPEC_KIT_JIRA_SPEC_SLUG (the host's own
+  # numbered feature id), exactly as the existing ticket-create path already
+  # does below — never the resolved short_name, which is this extension's
+  # OWN ticket-based folder name and a different identifier entirely.
+  local spec_ref
+  spec_ref="$(jq -cn --arg r "${SPEC_KIT_JIRA_REPO:-local/repo}" --arg s "${SPEC_KIT_JIRA_SPEC_SLUG:-spec}" '{repo:$r, spec_slug:$s}')"
+  local -a eval_results=()
+  if [[ -n "${pkey}" ]]; then
+    local ptype pterm
+    ptype="$(_feat_declared_type_for specification "${eff_project}" "${merged}")"
+    pterm="$(_feat_halted_csv_for "${eff_project}" "${merged}")"
+    eval_results+=("$(adoption_evaluate "${eff_project}" specification "${pkey}" "${ptype}" "${pterm}" "${spec_ref}")")
+  fi
+  local stype sterm
+  stype="$(_feat_declared_type_for story "${eff_project}" "${merged}")"
+  sterm="$(_feat_halted_csv_for "${eff_project}" "${merged}")"
+  n="$(jq 'length' <<< "${stories_json}")"
+  for ((i = 0; i < n; i++)); do
+    local skey
+    skey="$(jq -r ".[${i}].key" <<< "${stories_json}")"
+    eval_results+=("$(adoption_evaluate "${eff_project}" story "${skey}" "${stype}" "${sterm}" "${spec_ref}")")
+  done
+  local eval_json
+  if ((${#eval_results[@]} > 0)); then
+    eval_json="$(printf '%s\n' "${eval_results[@]}" | jq -s -c .)"
+  else
+    eval_json='[]'
+  fi
+
+  local story_keys_json mp
+  story_keys_json="$(jq -c '[.[].key]' <<< "${stories_json}")"
+  mp="$(adoption_multiproject_violation "${story_keys_json}")"
+  if [[ "$(jq 'length' <<< "${mp}")" -gt 0 ]]; then
+    eval_json="$(jq -c --arg msg "$(_feat_ref_message REF-MULTIPROJECT "named story-role issues span more than one project: $(jq -r 'join(", ")' <<< "${mp}")")" \
+      '. + [{"code":"REF-MULTIPROJECT","key":"","message":$msg}]' <<< "${eval_json}")"
+  fi
+
+  local refusals refusals_count
+  refusals="$(adoption_aggregate_refusals "${eval_json}")"
+  refusals_count="$(jq 'length' <<< "${refusals}")"
+  if ((refusals_count > 0)); then
+    while IFS= read -r line; do
+      printf 'feature: %s\n' "${line}" >&2
+    done <<< "$(jq -r '.[] | "\(.code): \(.message)"' <<< "${refusals}")"
+    return "$(cli_exit_code config)"
+  fi
+
+  # --- naming (FR-059/R9): the SAME key feeds naming_ticket_number ---------
+  local desig_key="" number=""
+  if desig_key="$(_feat_designator_number_source "${parent_json}" "${stories_json}")"; then
+    number="$(naming_ticket_number "${desig_key}")"
+  else
+    desig_key=""
+  fi
+  local branch_name=""
+  [[ -n "${number}" ]] && branch_name="$(naming_expand_pattern "${pattern}" "${number}" "${bare_slug}")"
+
+  # --- §3 step 15 (material) precedes 13-14 (record): FR-065 requires the scan
+  # to run "before it is handed to the drafting agent", and a BLOCK is zero
+  # writes of any kind — so the seed record must not be written before the
+  # scan clears. A named issue's description has no size ceiling, so it must
+  # never reach jq via --arg/--argjson (an execve argv, capped at 128 KiB on
+  # Linux — docs/11-process-budget.md). Every entry is concatenated in-process
+  # (a bash string op, not a spawn) into ONE temp file, then read by exactly
+  # one jq invocation over that file — R10's "no jq per designator".
+  local combined="[" first="true" role key entry_json
+  if [[ -n "${pkey}" ]]; then
+    entry_json="$(adoption_get "${pkey}")"
+    combined+="{\"role\":\"specification\",\"key\":\"${pkey}\",\"entry\":${entry_json}}"
+    first="false"
+  fi
+  n="$(jq 'length' <<< "${stories_json}")"
+  for ((i = 0; i < n; i++)); do
+    key="$(jq -r ".[${i}].key" <<< "${stories_json}")"
+    entry_json="$(adoption_get "${key}")"
+    [[ "${first}" == "false" ]] && combined+=","
+    combined+="{\"role\":\"story\",\"key\":\"${key}\",\"entry\":${entry_json}}"
+    first="false"
+  done
+  combined+="]"
+  local combined_file
+  combined_file="$(mktemp)"
+  printf '%s' "${combined}" > "${combined_file}"
+  local material_content
+  material_content="$(jq -c '
+    def adf_text: if (. | type) == "string" then . else ([.. | .text? // empty] | join(" ")) end;
+    [.[] | {
+      role, key,
+      summary:(.entry.fields.summary // ""),
+      description:(.entry.fields.description | adf_text),
+      status:(.entry.fields.status.name // ""),
+      parent:(if .entry.fields.parent then
+          {key:.entry.fields.parent.key, summary:(.entry.fields.parent.fields.summary // ""), status:(.entry.fields.parent.fields.status.name // "")}
+        else null end)
+    }]
+  ' "${combined_file}" | json_canonical)"
+  rm -f "${combined_file}"
+
+  # --- FR-065: the two-tier pre-write privacy guard, over the seed material,
+  # before it is handed to the drafting agent. A BLOCK is zero writes of any
+  # kind — local or Jira — including the seed record below.
+  privacy_guard_scan "${material_content}" "[]" "${SPEC_KIT_JIRA_ALLOWLIST:-[]}" || return $?
+
+  # --- §3 steps 13-14: slug + seed record -----------------------------------
+  # The material path is DETERMINISTIC (a sibling of the seed record, under
+  # the same state directory) rather than a fresh `mktemp` path: a random
+  # OS temp path in the emitted JSON would never be byte-identical across a
+  # conformance run's two ports (NFR-1/Constitution VI), even though the
+  # material's CONTENT already is.
+  local seed_material_path=""
+  if [[ "${dry_run}" != "true" ]]; then
+    # routing: the routed project, the declared types/terminal statuses
+    # moment 1 already resolved from config.yml, and the RESOLVED numeric
+    # type ids from config.local.yml (parent_type.id/child_type.id, the same
+    # fields reconcile.sh's own binding already carries) — recorded so a
+    # resume (FR-062) can re-evaluate every refusal class from Jira alone,
+    # and so a free-text parent create (FR-023) has the type id it needs,
+    # without moment 2 ever opening config.yml/personal.yml/config.local.yml
+    # itself.
+    local local_binding parent_type_id child_type_id
+    local_binding="$(jq -c --arg k "${eff_project}" '.resolved_ids[$k] // empty' <<< "$(_cfg_local_json "${JIRA_CONFIG_DIR:-.specify/jira}" 2> /dev/null)" 2> /dev/null)"
+    parent_type_id="$(jq -r '.parent_type.id // ""' <<< "${local_binding:-{\}}" 2> /dev/null)"
+    child_type_id="$(jq -r '.child_type.id // ""' <<< "${local_binding:-{\}}" 2> /dev/null)"
+    local routing
+    routing="$(jq -cn --arg p "${eff_project}" \
+      --arg dts "$(_feat_declared_type_for specification "${eff_project}" "${merged}")" \
+      --arg dtst "$(_feat_declared_type_for story "${eff_project}" "${merged}")" \
+      --arg term "$(_feat_halted_csv_for "${eff_project}" "${merged}")" \
+      --arg ptid "${parent_type_id}" --arg ctid "${child_type_id}" \
+      '{project:$p, declared_type_specification:$dts, declared_type_story:$dtst, terminal_statuses_csv:$term,
+        parent_type_id:$ptid, child_type_id:$ctid}')"
+    local doc
+    doc="$(seed_state_compose "${short_name}" "${designators}" "" "${routing}" "[]")"
+    seed_state_write "${synth_spec_path}" "${doc}"
+    seed_material_path="${JIRA_CONFIG_DIR:-.specify/jira}/state/${short_name}.seed-material.json"
+    printf '%s' "${material_content}" > "${seed_material_path}"
+  fi
+
+  local ticket_key_json="null" num_json="null" branch_json="null" material_json="null" action="none"
+  if [[ -n "${desig_key}" ]]; then
+    ticket_key_json="$(jq -Rn --arg v "${desig_key}" '$v')"
+    num_json="$(jq -Rn --arg v "${number}" '$v')"
+    branch_json="$(jq -Rn --arg v "${branch_name}" '$v')"
+    action="adopted"
+  fi
+  [[ -n "${seed_material_path}" ]] && material_json="$(jq -Rn --arg v "${seed_material_path}" '$v')"
+
+  _feat_emit "$(jq -cn --arg t "${eff_id}" --argjson tk "${ticket_key_json}" --argjson num "${num_json}" \
+    --arg act "${action}" --argjson bn "${branch_json}" --arg sn "${short_name}" --argjson ou "${override_used}" \
+    --argjson sm "${material_json}" \
+    '{active:true, team:$t, ticket:{key:$tk, number:$num, action:$act},
+      branch_name:$bn, short_name:$sn, override_used:$ou, warnings:[], seed_material:$sm}' | json_canonical)" "${json}"
+  return 0
+}
 
 # _feat_emit <json> <json-flag> — print the canonical result (JSON or prose).
 _feat_emit() {
@@ -71,6 +397,7 @@ _feat_render_prose() {
 # returns the exit code.
 cmd_feature() {
   local parsed json="false" dry_run="false" args="" use_team="" exit_code="0" error=""
+  local parent_seen="false" parent="" stories=""
   parsed="$(cli_parse "$@")"
   while IFS='=' read -r key value; do
     case "${key}" in
@@ -80,6 +407,9 @@ cmd_feature() {
       args) args="${value}" ;;
       exit) exit_code="${value}" ;;
       error) error="${value}" ;;
+      parent_seen) parent_seen="${value}" ;;
+      parent) parent="${value}" ;;
+      stories) stories="${value}" ;;
     esac
   done <<< "${parsed}"
   if [[ "${exit_code}" != "0" ]]; then
@@ -166,6 +496,16 @@ cmd_feature() {
 
   local slug
   slug="$(naming_slug "${desc}")"
+
+  # (027, US1/US3): designators supplied ⇒ moment 1's seed-from-Jira path
+  # takes over ticket resolution and naming entirely (contract
+  # seed-cli-contract.md §3). Byte-identical to the release below when
+  # neither flag is supplied (C-1, US5).
+  if [[ "${parent_seen}" == "true" || -n "${stories}" ]]; then
+    _feat_seed_from_designators "${json}" "${dry_run}" "${desc}" "${eff_id}" "${eff_project}" \
+      "${prefix}" "${pattern}" "${override_used}" "${merged}" "${parent_seen}" "${parent}" "${stories}"
+    return $?
+  fi
 
   # (5) Ticket resolution BEFORE naming.
   local number action ticket_key_out
