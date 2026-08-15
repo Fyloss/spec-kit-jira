@@ -189,8 +189,9 @@ _md_work() {
   [[ "$output" != *"not bound to a Jira project"* ]]
   # ...and from the generic prerequisite gate.
   [[ "$output" != *"missing required command"* ]]
-  # The remedy is the official install, in its runnable form (FR-018).
-  [[ "$output" == *"specify extension add --dev <path-to-spec-kit-jira> --force"* ]]
+  # The remedy is the official install, in the form a URL-installing consumer
+  # actually has (026 FR-016, C2.4) — not `--dev`, which they do not.
+  [[ "$output" == *"specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force"* ]]
   rm -rf "${MDWORK}"
 }
 

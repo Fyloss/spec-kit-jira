@@ -59,7 +59,7 @@ HOOK_BEFORE_COMMAND='speckit.jira.feature'
 
 # The remedies the report names. Each literal is runnable exactly as spelled —
 # tests/bash/ci/test_message_command_literals.bats asserts it (FR-018).
-HOOK_INSTALL_COMMAND='specify extension add --dev <path-to-spec-kit-jira> --force'
+HOOK_INSTALL_COMMAND='specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'
 HOOK_RELEASE_COMMAND='/speckit.jira.config --enable-hook'
 
 # register_hooks_command_for <event> — the command that event must name.

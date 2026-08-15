@@ -191,8 +191,9 @@ Describe 'Message discipline (T049 / T088, 003 US5)' {
         $r.Err | Should -Not -Match 'not bound to a Jira project'
         # ...and from the generic prerequisite gate.
         $r.Err | Should -Not -Match 'missing required command'
-        # The remedy is the official install, in its runnable form (FR-018).
-        $r.Err | Should -Match ([regex]::Escape('specify extension add --dev <path-to-spec-kit-jira> --force'))
+        # The remedy is the official install, in the form a URL-installing
+        # consumer actually has (026 FR-016, C2.4) — not `--dev`.
+        $r.Err | Should -Match ([regex]::Escape('specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'))
     }
 
     It 'emits exactly ONE message per run (FR-016)' {

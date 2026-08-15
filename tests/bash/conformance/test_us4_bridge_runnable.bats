@@ -48,22 +48,26 @@ snapshot_environment() {
   } | shasum -a 256 | awk '{print $1}'
 }
 
-@test "the Bash entry point runs by repository-relative path immediately after install (FR-012)" {
+@test "the Bash entry point runs through the interpreter immediately after install (FR-012, 026 FR-016)" {
   harness_install "${REPO}"
   [ -f "${REPO}/${BASH_ENTRY}" ]
-  # By PATH, from the repository root, with nothing done in between: no PATH
-  # edit, no chmod, no `bash` prefix. Exactly what the command documents instruct.
-  run bash -c "cd '${REPO}' && ./${BASH_ENTRY} --help"
+  # Through the interpreter, from the repository root, with nothing done in
+  # between: no PATH edit, no chmod. Exactly what the command documents
+  # instruct (026 C2.3).
+  run bash -c "cd '${REPO}' && bash ${BASH_ENTRY} --help"
   [ "$status" -eq 0 ]
   [[ "$output" == *"usage: spec-kit-jira"* ]]
 }
 
-@test "the entry point arrives EXECUTABLE — invoking it by path requires it (FR-012)" {
-  # Shipped as 0644, every documented invocation fails with "permission denied"
-  # in a freshly installed repository while the file plainly exists — a state
-  # indistinguishable, from the developer's side, from "not installed".
+@test "the entry point runs via bash <path> even without the executable bit (026 FR-016, C2.1)" {
+  # A zip install on a host below 0.14.3 lands the entry point at 0644
+  # (research R3). `chmod 644` here reproduces that state deterministically —
+  # the bridge must remain runnable through the interpreter regardless.
   harness_install "${REPO}"
-  [ -x "${REPO}/${BASH_ENTRY}" ]
+  chmod 644 "${REPO}/${BASH_ENTRY}"
+  run bash -c "cd '${REPO}' && bash ${BASH_ENTRY} --help"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"usage: spec-kit-jira"* ]]
 }
 
 @test "the PowerShell entry point is installed at the path the documents name (FR-013)" {
@@ -115,7 +119,7 @@ snapshot_environment() {
   # scenario must point at.
   mkdir -p "${REPO}/specs/001-x"
   printf '# Feature Specification: X\n' > "${REPO}/specs/001-x/spec.md"
-  run bash -c "cd '${REPO}' && ./${BASH_ENTRY} reconcile --json specs/001-x/spec.md 2>&1"
+  run bash -c "cd '${REPO}' && bash ${BASH_ENTRY} reconcile --json specs/001-x/spec.md 2>&1"
   [ "$status" -eq 0 ]
   [[ "$output" == *"not bound to a Jira project yet"* ]]
   [[ "$output" == *"/speckit.jira.config"* ]]

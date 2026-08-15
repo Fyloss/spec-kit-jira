@@ -39,10 +39,23 @@ credential-shaped values in either YAML layer are rejected at config time (exit 
    FR-055/SC-009):
 
    ```sh
-   specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/archive/refs/heads/main.zip
+   specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
    # or, while developing the extension itself:
    specify extension add --dev <path-to-spec-kit-jira> --force
    ```
+
+   To pin a specific released version instead of always installing the latest,
+   substitute the version for the placeholder:
+
+   ```sh
+   specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/download/v<X.Y.Z>/spec-kit-jira-<X.Y.Z>.zip
+   ```
+
+   Both release addresses are outside spec-kit's configured extension catalog, so
+   the host raises an `⚠ Untrusted Source` panel and blocks on
+   `Continue with installation? [y/N]:` — answer `y`. There is no `--yes` flag on
+   `specify extension add`; with no stdin available the install prints `Aborted.`
+   and installs **nothing**, which in a script can look like a silent no-op.
 
    **This step registers the lifecycle hooks and activates them.** See below.
 
@@ -95,7 +108,7 @@ got all four wrong:
   | Report | What it means, and what to do |
   | --- | --- |
   | `healthy` | All seven events present and enabled |
-  | `incomplete` | An event has no entry. Re-run `specify extension add --dev <path-to-spec-kit-jira> --force` |
+  | `incomplete` | An event has no entry. Re-run `specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force` (confirm the untrusted-source prompt with `y`) |
   | `held_disabled` | You disabled an event. No mirroring runs for it, whatever the registry says. Release it with `/speckit.jira.config --enable-hook <event>` |
   | `duplicated` | A leftover entry from a version before manifest-declared hooks. Neither the install nor the extension can remove it — the report gives you the exact edit |
   | `unreadable` | The registry could not be read. The file is named; no claim is made about the hooks |
@@ -180,7 +193,7 @@ zero-churn guarantee as any other settled ticket.
   the install places nothing on your `PATH`, by design:
 
   ```sh
-  .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+  bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
   # on Windows:
   .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 --help
   ```

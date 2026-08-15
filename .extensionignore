@@ -41,3 +41,15 @@ CLAUDE.md
 # consumer's tree — a policy that exists to protect OUR Windows test fixtures
 # and is none of their business.
 .gitattributes
+
+# The `--dev` copy route walks the working tree, not the git index, so without
+# this entry it copies this repository's own .git directory — 6 165 files,
+# 38 MB of history — into every consuming repository (research R5, FR-002a).
+# The zip route is unaffected: `git ls-files` never lists `.git/`.
+.git/
+
+# The release-artifact builder and its gates (packaging/build-artifact.sh,
+# packaging/verify-artifact.sh, packaging/publish-artifact.sh). Development
+# tooling a consuming repository cannot use and must not receive
+# (Principle XV, research R10).
+packaging/

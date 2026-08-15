@@ -30,13 +30,20 @@ setup() {
   mapfile -t DOCS < <(find "${DOCS_DIR}" -name '*.md' -type f | LC_ALL=C sort)
 
   # The block, fixed in contracts/reconcile-command.md. Byte for byte.
+  #
+  # 026 FR-016: a lost executable bit is no longer a fatal cause (a zip
+  # install below `specify` 0.14.3 does not restore it — research R3), so the
+  # block no longer names it, and the remediation command is the URL route a
+  # consumer who installed from a URL actually has (bridge-invocation.md
+  # C2.4) rather than `--dev`, which such a consumer cannot run.
   read -r -d '' BLOCK << 'EOF' || true
 Jira bridge not available: the entry point
 .specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found or
-is not executable. This spec-kit command completed normally and nothing was
-mirrored to Jira. To restore the bridge, reinstall the extension with
-`specify extension add --dev <path-to-spec-kit-jira> --force`.
+.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+This spec-kit command completed normally and nothing was mirrored to Jira. To
+restore the bridge, reinstall the extension with
+`specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force`
+(it will ask you to confirm an untrusted-source prompt — answer y).
 EOF
 }
 
@@ -70,8 +77,10 @@ EOF
 }
 
 @test "the block names the true cause — a missing file, not a missing CLI (FR-030)" {
-  [[ "${BLOCK}" == *'was not found or'* ]]
-  [[ "${BLOCK}" == *'is not executable'* ]]
+  [[ "${BLOCK}" == *'was not found.'* ]]
+  # A lost executable bit is no longer a cause the block reports on — it does
+  # not stop `bash <path>` from running (026 FR-016, C2.2).
+  [[ "${BLOCK}" != *'is not executable'* ]]
   # The wording the reported message used, and which was never true of this
   # extension: it is not delivered as a machine-wide CLI at all.
   [[ "${BLOCK}" != *'CLI not installed'* ]]
@@ -89,9 +98,9 @@ EOF
   [ -f "${ROOT}/scripts/bash/spec-kit-jira.sh" ]
   [ -f "${ROOT}/scripts/powershell/spec-kit-jira.ps1" ]
 
-  # ...and the reinstall command is the official one, in the form the operator
-  # actually runs.
-  [[ "${BLOCK}" == *'specify extension add --dev <path-to-spec-kit-jira> --force'* ]]
+  # ...and the reinstall command is the official one, in the form a
+  # URL-installing consumer actually has (not `--dev`, which they do not).
+  [[ "${BLOCK}" == *'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'* ]]
 
   # Nothing in the block names an assistant command, so there is nothing for the
   # assistant to misremember — the failure mode that produced `/speckit-jira-conifg`.

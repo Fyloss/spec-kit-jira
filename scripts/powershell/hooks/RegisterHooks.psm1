@@ -42,7 +42,7 @@ $script:HookExitConfig = 4
 
 # The remedies the report names. Each literal is runnable exactly as spelled —
 # tests/powershell/ci/MessageCommandLiterals.Tests.ps1 asserts it (FR-018).
-$script:HookInstallCommand = 'specify extension add --dev <path-to-spec-kit-jira> --force'
+$script:HookInstallCommand = 'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'
 $script:HookReleaseCommand = '/speckit.jira.config --enable-hook'
 
 function Get-JiraHookEventList {

@@ -37,26 +37,30 @@ installs no machine-wide executable. Invoke the entry point by its
 | Windows | `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1` |
 
 ```text
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config [PROJECT_KEY] [flags]
+bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh config [PROJECT_KEY] [flags]
 ```
 
 You MUST NOT invoke a bare `spec-kit-jira` command name. No such command exists
 in a consuming repository, and assuming it does is what produced the reported
-"spec-kit-jira CLI not installed" message.
+"spec-kit-jira CLI not installed" message. Invoke the Bash entry point **through
+the interpreter** (`bash <path>`) rather than by bare path: a zip install on an
+older host does not always restore the executable bit, and the interpreter form
+works either way (026 FR-016).
 
 ### When the entry point is missing — emit exactly as written
 
-When the entry point is not found or is not executable, emit the following text
-**exactly as written**. Do not paraphrase it, do not summarise it, and do not
-compose your own explanation of the situation:
+When the entry point is not found, emit the following text **exactly as
+written**. Do not paraphrase it, do not summarise it, and do not compose your
+own explanation of the situation:
 
 ```text
 Jira bridge not available: the entry point
 .specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found or
-is not executable. This spec-kit command completed normally and nothing was
-mirrored to Jira. To restore the bridge, reinstall the extension with
-`specify extension add --dev <path-to-spec-kit-jira> --force`.
+.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+This spec-kit command completed normally and nothing was mirrored to Jira. To
+restore the bridge, reinstall the extension with
+`specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force`
+(it will ask you to confirm an untrusted-source prompt — answer y).
 ```
 
 ## Git state is never a source (FR-004/FR-007) — normative
@@ -110,7 +114,7 @@ and never trigger the degraded mode — do not retry into it.
    `GET /project/search` read (key, name, style). Ask the operator to choose
    **from that list only**, persist the choice into `config.yml`, and re-invoke
    the entry point by its repository-relative path with the chosen key:
-   `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config <KEY>` (on
+   `bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh config <KEY>` (on
    Windows, the `powershell/spec-kit-jira.ps1` twin). An unknown or
    unresolvable key fails closed
    with the transport's exit code — never substitute another key (FR-006).
@@ -252,7 +256,7 @@ It reports one of five states, and names what the operator should do:
 | State | Meaning and remedy |
 | --- | --- |
 | `healthy` | All seven events present and enabled; nothing to do |
-| `incomplete` | One or more events have no entry. Re-run the official install: `specify extension add --dev <path-to-spec-kit-jira> --force` |
+| `incomplete` | One or more events have no entry. Re-run the official install: `specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force` (confirm the untrusted-source prompt with `y`) |
 | `held_disabled` | The operator disabled one or more events. No bridge step runs for them, whatever the registry currently says. Release one with `/speckit.jira.config --enable-hook <event>` |
 | `duplicated` | A leftover entry from a version that predates manifest-declared hooks: our command with no owning `extension` field. Neither the install nor this extension can remove it, so the report gives the exact manual edit |
 | `unreadable` | The registry could not be read. The file is named as the cause; **no claim is made about the hooks** |

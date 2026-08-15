@@ -1,0 +1,225 @@
+# T029/T030 (026) — the expensive proof: a locally built release artifact
+# installs and runs on all three operating systems, on both the current
+# `specify` host and the floor host this extension declares support for
+# (`requires.speckit_version` in extension.yml). Research R3 measured that the
+# defect FR-016 fixes is invisible on any host above 0.14.3, so a matrix
+# pinned to "current" would be green against a population that is not the one
+# at risk (contracts/publication.md C4.1-C4.3).
+#
+# Triggered narrowly — not on every pull request — because this project's
+# runners are roughly an order of magnitude slower than local and a
+# windows-latest run is the slow, occasionally flaky one (docs/11-process-budget.md
+# and this project's measured CI experience). The cheap gates in gates.yml
+# cover every pull request instead.
+#
+# Each install job asserts ONLY its own outcomes and shares no state with any
+# other suite in this repository, so its signal stays readable against a
+# `windows-latest` baseline that is independently red (C4.7).
+name: Install end-to-end
+
+on:
+  push:
+    paths:
+      - "packaging/**"
+      - ".extensionignore"
+      - "extension.yml"
+      - "scripts/**"
+      - "commands/**"
+      - "templates/**"
+      - "README.md"
+      - "INSTALL.md"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/install-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # The builder runs on the release runner only (research R10) — one
+    # artifact is built once here and reused by every OS/host leg below,
+    # which is also what proves C1.3/C2.2: a single published artifact, not
+    # one per platform.
+    name: Build the release artifact
+    runs-on: ubuntu-latest
+    outputs:
+      floor-version: ${{ steps.floor.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build packaging/build-artifact.sh's archive
+        run: packaging/build-artifact.sh "${{ runner.temp }}/spec-kit-jira.zip"
+
+      - name: Resolve the declared floor host version (never written into this file)
+        id: floor
+        run: |
+          set -euo pipefail
+          floor="$(sed -n 's/^[[:space:]]*speckit_version:[[:space:]]*">=\{0,1\}\([0-9.]*\)".*/\1/p' extension.yml | head -n1)"
+          [ -n "${floor}" ] || { echo "::error::could not resolve requires.speckit_version from extension.yml" >&2; exit 1; }
+          echo "version=${floor}" >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spec-kit-jira-zip
+          path: ${{ runner.temp }}/spec-kit-jira.zip
+          retention-days: 1
+
+  install:
+    name: Install (${{ matrix.os }}, ${{ matrix.host }} host)
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        host: [floor, current]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner image only ships Apple's Bash 3.2, which the port refuses
+      # by design (prereq_check requires Bash >= 4); brew's bash lands in
+      # /opt/homebrew/bin, ahead of /bin in the image PATH, so the bare
+      # `bash` this workflow later invokes the bridge with resolves to it
+      # (ci.yml's own precedent for the same host).
+      - name: Install a modern Bash (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bash jq
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: spec-kit-jira-zip
+          path: ${{ runner.temp }}/artifact
+
+      - uses: astral-sh/setup-uv@v5
+
+      # Both legs land `specify` on PATH by the same mechanism, differing only
+      # in the git ref — so every step after this one is host-agnostic.
+      - name: Install specify (current host)
+        if: matrix.host == 'current'
+        shell: bash
+        run: uv tool install specify-cli --from git+https://github.com/github/spec-kit.git
+
+      - name: Install specify (floor host — requires.speckit_version)
+        if: matrix.host == 'floor'
+        shell: bash
+        run: uv tool install specify-cli --from "git+https://github.com/github/spec-kit.git@v${{ needs.build.outputs.floor-version }}"
+
+      # `file://` is rejected by the host (research R7) and a fixed
+      # well-known port is forbidden by Constitution XIII, so the artifact is
+      # served over loopback on a port the OS assigns and this step records.
+      - name: Serve the artifact over loopback on an OS-assigned port
+        id: serve
+        shell: bash
+        run: |
+          set -euo pipefail
+          py="python3"
+          command -v "${py}" > /dev/null 2>&1 || py="python"
+          command -v "${py}" > /dev/null 2>&1 || { echo "::error::neither python3 nor python is on PATH" >&2; exit 1; }
+          # `python3 -m http.server`'s own startup binds via HTTPServer, whose
+          # server_bind() calls socket.getfqdn(host) — a reverse DNS lookup —
+          # before it ever prints its banner (cpython Lib/http/server.py).
+          # Bind directly via socketserver.TCPServer instead, which has no
+          # such call, and print the port before serving. The code is passed
+          # with -c, not a script file: a script's own directory becomes
+          # sys.path[0], and `import` scans it — under heavy concurrent /tmp
+          # churn (many parallel installs each minting temp files) that
+          # directory scan itself stalls for seconds (measured: getdirentries64
+          # in cpython's import machinery). -c carries no such directory.
+          pycode='import http.server, socketserver
+          with socketserver.TCPServer(("127.0.0.1", 0), http.server.SimpleHTTPRequestHandler) as httpd:
+              print(f"port={httpd.server_address[1]}", flush=True)
+              httpd.serve_forever()'
+          log="$(mktemp)"
+          (cd "${{ runner.temp }}/artifact" && exec "${py}" -u -c "${pycode}") > "${log}" 2>&1 &
+          pid=$!
+          port=""
+          for _ in $(seq 1 100); do
+            port="$(sed -nE 's/^port=([0-9]+)$/\1/p' "${log}" | head -n1)"
+            [ -n "${port}" ] && break
+            kill -0 "${pid}" 2> /dev/null || break
+            sleep 0.1
+          done
+          if [ -z "${port}" ]; then
+            echo "::error::loopback server never reported a listening port" >&2
+            # Annotations are readable without repo admin rights; a raw job log
+            # is not (gh-token-lacks-admin-on-repo), so surface diagnostics as
+            # one so a future failure here is diagnosable from the PR alone.
+            echo "::error::resolved interpreter: ${py} -> $(command -v "${py}"), $("${py}" --version 2>&1)" >&2
+            if kill -0 "${pid}" 2> /dev/null; then
+              echo "::error::server process ${pid} is still alive after the poll window" >&2
+            else
+              echo "::error::server process ${pid} is no longer alive" >&2
+            fi
+            echo "::error::server log is $(wc -c < "${log}" | tr -d ' ') bytes" >&2
+            while IFS= read -r line; do echo "::error::server output: ${line}" >&2; done < "${log}"
+            exit 1
+          fi
+          echo "port=${port}" >> "${GITHUB_OUTPUT}"
+          echo "pid=${pid}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create a pristine consumer fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/consumer"
+          cd "${{ runner.temp }}/consumer"
+          git init -q .
+          specify init --here --force --integration claude --script sh --ignore-agent-tools
+
+      # The install blocks on an untrusted-source confirmation for any URL
+      # outside a configured catalog (research R8); there is no --yes option.
+      - name: Install from the loopback URL, answering the untrusted-source prompt
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${{ runner.temp }}/consumer"
+          printf 'y\n' | specify extension add jira \
+            --from "http://127.0.0.1:${{ steps.serve.outputs.port }}/spec-kit-jira.zip"
+
+      - name: The installed tree equals the derived surface, member for member (C4.4)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck source=packaging/lib/surface.sh
+          source packaging/lib/surface.sh
+          installed="$(cd "${{ runner.temp }}/consumer/.specify/extensions/jira" && find . -type f | sed 's|^\./||' | LC_ALL=C sort)"
+          expected="$(packaging_derive_surface | LC_ALL=C sort)"
+          diff <(printf '%s\n' "${expected}") <(printf '%s\n' "${installed}")
+
+      - name: The bridge answers --help, invoked exactly as the command documents instruct (C4.4)
+        shell: bash
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          cd "${{ runner.temp }}/consumer"
+          bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+
+      - name: The bridge answers --help (PowerShell port, C4.2)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-Location "${{ runner.temp }}/consumer"
+          & ./.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 --help
+
+      - name: All seven lifecycle events are registered and enabled (C4.4)
+        shell: bash
+        run: |
+          set -euo pipefail
+          registry="${{ runner.temp }}/consumer/.specify/extensions.yml"
+          [ -f "${registry}" ]
+          count="$(grep -c 'enabled: true' "${registry}")"
+          [ "${count}" -eq 7 ] || {
+            echo "::error::expected 7 enabled hook entries, found ${count}" >&2
+            cat "${registry}" >&2
+            exit 1
+          }
+
+      - name: Stop the loopback server
+        if: always()
+        shell: bash
+        run: kill "${{ steps.serve.outputs.pid }}" 2> /dev/null || true

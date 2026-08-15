@@ -33,21 +33,25 @@ installs no machine-wide executable. Invoke the entry point by its
 
 You MUST NOT invoke a bare `spec-kit-jira` command name. No such command exists
 in a consuming repository, and assuming it does is what produced the reported
-"spec-kit-jira CLI not installed" message.
+"spec-kit-jira CLI not installed" message. Invoke the Bash entry point **through
+the interpreter** (`bash <path>`) rather than by bare path: a zip install on an
+older host does not always restore the executable bit, and the interpreter form
+works either way (026 FR-016).
 
 ### When the entry point is missing — emit exactly as written
 
-When the entry point is not found or is not executable, emit the following text
-**exactly as written**. Do not paraphrase it, do not summarise it, and do not
-compose your own explanation of the situation:
+When the entry point is not found, emit the following text **exactly as
+written**. Do not paraphrase it, do not summarise it, and do not compose your
+own explanation of the situation:
 
 ```text
 Jira bridge not available: the entry point
 .specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found or
-is not executable. This spec-kit command completed normally and nothing was
-mirrored to Jira. To restore the bridge, reinstall the extension with
-`specify extension add --dev <path-to-spec-kit-jira> --force`.
+.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+This spec-kit command completed normally and nothing was mirrored to Jira. To
+restore the bridge, reinstall the extension with
+`specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force`
+(it will ask you to confirm an untrusted-source prompt — answer y).
 ```
 
 ## Inputs (all deterministic)
@@ -64,7 +68,7 @@ mirrored to Jira. To restore the bridge, reinstall the extension with
 1. **Run the deterministic command** by its repository-relative path:
 
    ```text
-   .specify/extensions/jira/scripts/bash/spec-kit-jira.sh feature [TICKET-KEY] [--use-team <id>] [--json] [--dry-run] <description>
+   bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh feature [TICKET-KEY] [--use-team <id>] [--json] [--dry-run] <description>
    ```
 
    On Windows:

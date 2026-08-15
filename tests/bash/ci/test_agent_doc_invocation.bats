@@ -72,10 +72,44 @@ setup() {
   [ -f "${ROOT}/${PWSH_ENTRY#.specify/extensions/jira/}" ]
 }
 
-@test "the Bash entry point is executable — invoking it by path requires it (FR-012)" {
-  # Committed as 0644, every documented invocation would fail with "permission
-  # denied" in a freshly installed repository, while the file plainly exists.
-  [ -x "${ROOT}/scripts/bash/spec-kit-jira.sh" ]
+@test "every command document invokes the Bash entry point through the interpreter (026 FR-016, C2.3)" {
+  # A zip install on a host below 0.14.3 does not restore the executable bit
+  # (research R3), so a bare-path invocation can fail with "permission denied"
+  # on an entirely intact install. `bash <path>` works either way.
+  #
+  # Only lines shaped as an actual invocation — the path followed by a
+  # subcommand or flag — are checked; the table naming the entry point and the
+  # fallback block naming the missing path are descriptive, not invocations.
+  local doc invocations bad
+  local pattern="${BASH_ENTRY//./\\.}[[:space:]]+(--help|config|reconcile|feature|mention)"
+  for doc in "${DOCS[@]}"; do
+    invocations="$(grep -nE "${pattern}" "${doc}" || true)"
+    [[ -z "${invocations}" ]] && continue
+    bad="$(grep -vE "bash ${pattern}" <<< "${invocations}" || true)"
+    if [[ -n "${bad}" ]]; then
+      printf '%s invokes the Bash entry point without the "bash " interpreter prefix:\n%s\n' "${doc}" "${bad}" >&2
+      return 1
+    fi
+  done
+}
+
+@test "at least one command document demonstrates the interpreter-prefixed invocation" {
+  local doc found=0
+  for doc in "${DOCS[@]}"; do
+    grep -qF "bash ${BASH_ENTRY}" "${doc}" && found=1
+  done
+  [ "${found}" -eq 1 ]
+}
+
+@test "no command document requires the executable bit to have survived (026 FR-016)" {
+  local doc
+  for doc in "${DOCS[@]}"; do
+    grep -qiE 'is not executable' "${doc}" && {
+      printf '%s still treats a lost executable bit as a fatal cause\n' "${doc}" >&2
+      return 1
+    }
+  done
+  true
 }
 
 @test "no command document tells the assistant to install anything machine-wide (FR-008)" {
