@@ -43,7 +43,7 @@ Describe 'Get-JiraFeatDesignatorNumberSource' {
     }
 }
 
-Describe 'Invoke-JiraFeatSeedFromDesignators (T070)' {
+Describe 'Invoke-JiraFeatSeedFromDesignator (T070)' {
     BeforeAll {
         $Root = Join-Path $PSScriptRoot '../../..'
         Import-Module (Join-Path $Root 'tests/conformance/mock-jira/Mock.psm1') -Force

@@ -111,18 +111,18 @@ function Get-JiraAdoptionDescriptionText {
     if ($null -eq $Description) { return '' }
     if ($Description -is [string]) { return $Description }
     $parts = [System.Collections.Generic.List[string]]::new()
-    function Get-Texts($node) {
+    function Get-Text($node) {
         if ($null -eq $node) { return }
         if ($node -is [System.Management.Automation.PSCustomObject]) {
             $textProp = $node.PSObject.Properties['text']
             if ($textProp -and $textProp.Value -is [string]) { $parts.Add($textProp.Value) }
-            foreach ($p in $node.PSObject.Properties) { Get-Texts $p.Value }
+            foreach ($p in $node.PSObject.Properties) { Get-Text $p.Value }
         }
         elseif ($node -is [System.Collections.IEnumerable] -and $node -isnot [string]) {
-            foreach ($item in $node) { Get-Texts $item }
+            foreach ($item in $node) { Get-Text $item }
         }
     }
-    Get-Texts $Description
+    Get-Text $Description
     return ($parts -join ' ')
 }
 
@@ -222,7 +222,7 @@ function Get-JiraAdoptionMultiprojectViolation {
     return '[]'
 }
 
-function Get-JiraAdoptionAggregateRefusals {
+function Get-JiraAdoptionAggregateRefusal {
     <#
     .SYNOPSIS
       Filters to only the refusing entries (Principle XVI, C-4).
@@ -235,4 +235,4 @@ function Get-JiraAdoptionAggregateRefusals {
 }
 
 Export-ModuleMember -Function Reset-JiraAdoption, Invoke-JiraAdoptionLoad, Get-JiraAdoption, Test-JiraAdoptionEvaluate, `
-    Get-JiraAdoptionMultiprojectViolation, Get-JiraAdoptionAggregateRefusals, Get-JiraAdoptionDescriptionText
+    Get-JiraAdoptionMultiprojectViolation, Get-JiraAdoptionAggregateRefusal, Get-JiraAdoptionDescriptionText

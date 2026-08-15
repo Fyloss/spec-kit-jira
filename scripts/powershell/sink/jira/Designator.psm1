@@ -64,7 +64,7 @@ function Get-JiraDesignatorUrlCandidate {
     return $null
 }
 
-function Get-JiraDesignatorUrlParts {
+function Get-JiraDesignatorUrlPart {
     <#
     .SYNOPSIS
       Prints scheme/host/port. Mirror of _desig_url_parts. Returns $null
@@ -95,8 +95,8 @@ function Test-JiraDesignatorHostMatch {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Url, [Parameter(Mandatory)] [string] $BaseUrl)
-    $u = Get-JiraDesignatorUrlParts -Url $Url
-    $b = Get-JiraDesignatorUrlParts -Url $BaseUrl
+    $u = Get-JiraDesignatorUrlPart -Url $Url
+    $b = Get-JiraDesignatorUrlPart -Url $BaseUrl
     if (-not $u -or -not $b) { return $false }
     $uHost = $u.Host.TrimEnd('.').ToLowerInvariant()
     $bHost = $b.Host.TrimEnd('.').ToLowerInvariant()

@@ -52,15 +52,15 @@ Describe 'ConvertTo-JiraPinMarkerInfo' {
 Describe 'P-2: placement' {
     It 'finds a ### heading' {
         $spec = "# Feature`n`n### User Story 1 - Thing (Priority: P1)`n`nBody`n"
-        @(Get-JiraPinMarkerAnchors -Content $spec) | Should -Be @(3)
+        @(Get-JiraPinMarkerAnchor -Content $spec) | Should -Be @(3)
     }
     It 'finds ##, ###, #### mixed' {
         $spec = "# Feature`n`n## User Story 1 - A (Priority: P1)`n`nBody`n`n#### User Story 2 - B (Priority: P1)`n`nBody`n"
-        @(Get-JiraPinMarkerAnchors -Content $spec) | Should -Be @(3, 7)
+        @(Get-JiraPinMarkerAnchor -Content $spec) | Should -Be @(3, 7)
     }
     It 'falls back to the first H1 when no story heading exists' {
         $spec = "# Feature Title`n`nSome prose, no story headings.`n"
-        @(Get-JiraPinMarkerAnchors -Content $spec) | Should -Be @(1)
+        @(Get-JiraPinMarkerAnchor -Content $spec) | Should -Be @(1)
     }
 }
 

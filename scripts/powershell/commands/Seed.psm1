@@ -36,7 +36,7 @@ function Write-JiraSeedResult {
     }
 }
 
-function Get-JiraSeedDesignatorKeys {
+function Get-JiraSeedDesignatorKey {
     # The ordered array of designated keys (role=story) recorded in the seed
     # record, for Test-JiraPinMarkerValidate. Mirror of _seed_designator_keys.
     [CmdletBinding()]
@@ -75,7 +75,7 @@ function Get-JiraSeedRefMessage {
     }
 }
 
-function Get-JiraSeedDecompMessages {
+function Get-JiraSeedDecompMessage {
     <#
     .SYNOPSIS
       One human line per FR-058 violation (P1-P4), naming the offending
@@ -100,10 +100,10 @@ function Get-JiraSeedDecompMessages {
     return $out
 }
 
-function Get-JiraSeedDraftEditMessages {
+function Get-JiraSeedDraftEditMessage {
     <#
     .SYNOPSIS
-      The same four properties as Get-JiraSeedDecompMessages, worded for a
+      The same four properties as Get-JiraSeedDecompMessage, worded for a
       RESUME (REF-DRAFT-EDIT, FR-063): the cause is the operator's own edit
       to spec.md, not the agent's draft.
     #>
@@ -134,7 +134,7 @@ function Get-JiraSeedOverviewText {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Content)
-    $anchors = @(Get-JiraPinMarkerAnchors -Content $Content | ForEach-Object { [int]$_ })
+    $anchors = @(Get-JiraPinMarkerAnchor -Content $Content | ForEach-Object { [int]$_ })
     $end = if ($anchors.Count -gt 0) { $anchors[0] } else { 0 }
     $lines = $Content -split "`n"
     $h1 = 0
@@ -150,7 +150,7 @@ function Get-JiraSeedOverviewText {
     return (($parts -join ' ').Trim())
 }
 
-function Get-JiraSeedBoundStoryKeys {
+function Get-JiraSeedBoundStoryKey {
     <#
     .SYNOPSIS
       The subset of the given keys already carrying a BOUND
@@ -167,7 +167,7 @@ function Get-JiraSeedBoundStoryKeys {
     return (ConvertTo-JiraJsonValue $out)
 }
 
-function Get-JiraSeedPlanEntries {
+function Get-JiraSeedPlanEntry {
     <#
     .SYNOPSIS
       Builds the plan entries (§5.1): an adopt/create line for the parent
@@ -291,7 +291,7 @@ function Get-JiraSeedPlanDelta {
     return (ConvertTo-JiraJsonValue ([ordered]@{ added = $added; removed = $removed }))
 }
 
-function Get-JiraSeedScatterWarnings {
+function Get-JiraSeedScatterWarning {
     <#
     .SYNOPSIS
       FR-061: the run-summary half of the scatter disclosure. Mirror of
@@ -414,7 +414,7 @@ function Invoke-JiraSeed {
     # The record is always the authoritative designator source (order,
     # roles, keys) — a resupplied set on this invocation was only a safety
     # check, already proven equal above.
-    $storyKeys = Get-JiraSeedDesignatorKeys -RecordJson $record
+    $storyKeys = Get-JiraSeedDesignatorKey -RecordJson $record
     $parentDesignator = Get-JiraSeedParentDesignator -RecordJson $record
     $pform = if ($parentDesignator) { [string]$parentDesignator.form } else { '' }
     $pkey = ''
@@ -436,7 +436,7 @@ function Invoke-JiraSeed {
     # --- R14/FR-042: a partial run's completed bindings are excluded from
     # every remaining step. -----------------------------------------------
     $specContent = [System.IO.File]::ReadAllText($specFile)
-    $boundKeysJson = Get-JiraSeedBoundStoryKeys -Content $specContent -StoryKeysJson $storyKeys
+    $boundKeysJson = Get-JiraSeedBoundStoryKey -Content $specContent -StoryKeysJson $storyKeys
     $boundKeys = @($boundKeysJson | ConvertFrom-Json -Depth 100)
     $storyKeysArrAll = @($storyKeys | ConvertFrom-Json -Depth 100)
     $remainingStoryKeysArr = @($storyKeysArrAll | Where-Object { $boundKeys -notcontains $_ })
@@ -539,12 +539,12 @@ function Invoke-JiraSeed {
     $violationsArr = @($violations | ConvertFrom-Json -Depth 100)
     if ($violationsArr.Count -gt 0) {
         if ($resume) {
-            foreach ($msg in (Get-JiraSeedDraftEditMessages -ViolationsJson $violations)) {
+            foreach ($msg in (Get-JiraSeedDraftEditMessage -ViolationsJson $violations)) {
                 [Console]::Error.WriteLine("seed: REF-DRAFT-EDIT: $msg")
             }
         }
         else {
-            foreach ($msg in (Get-JiraSeedDecompMessages -ViolationsJson $violations)) {
+            foreach ($msg in (Get-JiraSeedDecompMessage -ViolationsJson $violations)) {
                 [Console]::Error.WriteLine("seed: REF-DECOMP: $msg")
             }
         }
@@ -565,9 +565,9 @@ function Invoke-JiraSeed {
 
     # §4 step 7: compute the write plan from the CURRENT spec.md.
     $targetKey = $pkey
-    $entries = Get-JiraSeedPlanEntries -Mode $mode -TargetKey $targetKey -FreeText $freeText -StoryKeysJson $remainingStoryKeys -InfosJson $infos
+    $entries = Get-JiraSeedPlanEntry -Mode $mode -TargetKey $targetKey -FreeText $freeText -StoryKeysJson $remainingStoryKeys -InfosJson $infos
     $plan = ConvertTo-JiraSeedPlanRendered -EntriesJson $entries
-    $scatterWarnings = Get-JiraSeedScatterWarnings -EntriesJson $entries
+    $scatterWarnings = Get-JiraSeedScatterWarning -EntriesJson $entries
 
     # §4 step 8: provenance.
     $provenance = Get-JiraPinMarkerProvenance -Content $specContent -DesignatorsJson $remainingStoryKeys

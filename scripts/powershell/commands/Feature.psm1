@@ -118,7 +118,7 @@ function Get-JiraFeatRefMessage {
     }
 }
 
-function Invoke-JiraFeatSeedFromDesignators {
+function Invoke-JiraFeatSeedFromDesignator {
     <#
     .SYNOPSIS
       Moment 1's designator path (027, contract seed-cli-contract.md §3,
@@ -231,7 +231,7 @@ function Invoke-JiraFeatSeedFromDesignators {
     }
 
     $evalJson = ConvertTo-JiraJsonValue $evalResults
-    $refusals = @(Get-JiraAdoptionAggregateRefusals -Items $evalJson | ConvertFrom-Json -Depth 100)
+    $refusals = @(Get-JiraAdoptionAggregateRefusal -Items $evalJson | ConvertFrom-Json -Depth 100)
     if ($refusals.Count -gt 0) {
         foreach ($r in $refusals) {
             [Console]::Error.WriteLine("feature: $($r.code): $($r.message)")
@@ -527,7 +527,7 @@ function Invoke-JiraFeature {
     # takes over ticket resolution and naming entirely. Byte-identical to
     # the release below when neither flag is supplied (C-1, US5).
     if ($parentSeen -or $storiesJoined) {
-        return (Invoke-JiraFeatSeedFromDesignators -Json $json -DryRun $dryRun -Description $desc -EffId $effId `
+        return (Invoke-JiraFeatSeedFromDesignator -Json $json -DryRun $dryRun -Description $desc -EffId $effId `
                 -EffProject $effProject -Prefix $prefix -Pattern $pattern -OverrideUsed $overrideUsed -Merged $merged `
                 -ParentSeen $parentSeen -ParentRaw $parentRaw -StoriesJoined $storiesJoined)
     }
@@ -615,4 +615,4 @@ function Invoke-JiraFeature {
 }
 
 Export-ModuleMember -Function Invoke-JiraFeature, Get-JiraFeatDesignatorNumberSource, Get-JiraFeatResolvedSlug, `
-    Invoke-JiraFeatSeedFromDesignators
+    Invoke-JiraFeatSeedFromDesignator

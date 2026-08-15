@@ -186,7 +186,7 @@ Describe 'C-4: refusals aggregated together' {
         $r1 = Test-JiraAdoptionEvaluate -RoutedProject 'PROJ' -Role 'story' -Key 'PROJ-1' -DeclaredType 'Story' -TerminalStatusesCsv '' -SpecRefJson ''
         $r2 = Test-JiraAdoptionEvaluate -RoutedProject 'PROJ' -Role 'story' -Key 'PROJ-2' -DeclaredType 'Story' -TerminalStatusesCsv '' -SpecRefJson ''
         $r3 = Test-JiraAdoptionEvaluate -RoutedProject 'PROJ' -Role 'story' -Key 'PROJ-3' -DeclaredType 'Story' -TerminalStatusesCsv '' -SpecRefJson ''
-        $agg = Get-JiraAdoptionAggregateRefusals -Items "[$r1,$r2,$r3]" | ConvertFrom-Json
+        $agg = Get-JiraAdoptionAggregateRefusal -Items "[$r1,$r2,$r3]" | ConvertFrom-Json
         @($agg).Count | Should -Be 3
     }
 }

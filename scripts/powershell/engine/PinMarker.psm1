@@ -47,7 +47,7 @@ function ConvertTo-JiraPinMarkerInfo {
     return (ConvertTo-JiraJsonValue ([ordered]@{ kind = 'valid'; key = $val }))
 }
 
-function Get-JiraPinMarkerAnchors {
+function Get-JiraPinMarkerAnchor {
     <#
     .SYNOPSIS
       §4 placement. Mirror of pin_marker_anchors — verbatim
@@ -67,7 +67,7 @@ function Test-JiraPinMarkerValidate {
     param([Parameter(Mandatory)] [string] $SpecPath, [Parameter(Mandatory)] [string] $DesignatorsJson)
 
     $content = [System.IO.File]::ReadAllText($SpecPath)
-    $anchors = @(Get-JiraPinMarkerAnchors -Content $content | ForEach-Object { [int]$_ })
+    $anchors = @(Get-JiraPinMarkerAnchor -Content $content | ForEach-Object { [int]$_ })
     $n = $anchors.Count
     $totalLines = (Get-JiraMarkerSpliceLineCount -Content $content)
 
@@ -189,7 +189,7 @@ function Get-JiraPinMarkerProvenance {
     [CmdletBinding()]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Content, [Parameter(Mandatory)] [string] $DesignatorsJson)
 
-    $anchors = @(Get-JiraPinMarkerAnchors -Content $Content | ForEach-Object { [int]$_ })
+    $anchors = @(Get-JiraPinMarkerAnchor -Content $Content | ForEach-Object { [int]$_ })
     $n = $anchors.Count
     $totalLines = (Get-JiraMarkerSpliceLineCount -Content $Content)
     $lines = $Content -split "`n"
@@ -257,5 +257,5 @@ function ConvertTo-JiraPinMarkerConsumed {
     return (Set-JiraMarkerSpliceReplaceLine -Content $Content -N $found -Text $ReplacementLine -Nl $Nl)
 }
 
-Export-ModuleMember -Function Format-JiraPinMarkerLine, ConvertTo-JiraPinMarkerInfo, Get-JiraPinMarkerAnchors, `
+Export-ModuleMember -Function Format-JiraPinMarkerLine, ConvertTo-JiraPinMarkerInfo, Get-JiraPinMarkerAnchor, `
     Test-JiraPinMarkerValidate, Get-JiraPinMarkerProvenance, ConvertTo-JiraPinMarkerConsumed
