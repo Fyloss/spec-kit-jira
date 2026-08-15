@@ -57,3 +57,35 @@ setup() {
   grep -q -- '--field-default <KEY>=<Type>=<Label>=<Value>' "${DOC}"
   grep -q 'writing the entry by hand into `config.yml`'\''s `field_defaults`' "${DOC}"
 }
+
+# --- The two questions a run actually produces ------------------------------
+#
+# A team reported that the ceremony "asked nothing". Both questions it emits
+# were undocumented here: the task-mirroring one the entry point prints on
+# every run with no value recorded (022), and the board-position mapping the
+# agent is to propose (023). A question the definition never names is a
+# question the operator never hears.
+
+@test "the definition tells the agent to relay the task-mirroring question" {
+  grep -q 'Closed question (task mirroring, 022)' "${DOC}"
+  grep -q -- '--task-mirror <KEY>=<subtask|checklist>' "${DOC}"
+}
+
+@test "the board-position proposal draws every status from the discovered list" {
+  grep -q 'Board-position mapping (023)' "${DOC}"
+  grep -q 'The only permitted status names are the ones' "${DOC}"
+  grep -q 'projects\[\].statuses\[\]' "${DOC}"
+}
+
+@test "a project that already declares phase_status_map is never re-asked" {
+  grep -q 'do not re-ask, do not rewrite it' "${DOC}"
+}
+
+@test "declining the proposal writes nothing, and is not pressed again" {
+  grep -q 'Declining' "${DOC}"
+  grep -q 'Do not press a declined proposal a second time' "${DOC}"
+}
+
+@test "the one exception to model-independence is stated up front, not buried" {
+  grep -q 'with exactly \*\*one\*\* stated exception' "${DOC}"
+}

@@ -15,7 +15,12 @@ is exactly one of
 - a **closed, enumerated question** to the operator (a fixed list of choices — no
   free-form judgement, no inferred field or key).
 
-No step is left to model judgement. Because the ceremony reads only and persists
+No step is left to model judgement, with exactly **one** stated exception: the
+board-position mapping of step 11, where you may propose a draft. That exception
+is bounded and named there — the proposal draws every status name from the
+project's own discovered list, it decides nothing on its own, and declining it
+writes nothing. Everything the entry point itself does remains
+model-independent. Because the ceremony reads only and persists
 through the canonical serialiser, running it twice against an unchanged project
 produces a **byte-identical** `config.local.yml` on both ports (FR-003, SC-004).
 
@@ -215,7 +220,61 @@ and never trigger the degraded mode — do not retry into it.
    `--field-default`) and re-running reconcile creates exactly the
    withheld sub-tasks on that next run (FR-039) — there is no cleanup step,
    no flag, and no repair command.
-10. **Persist (deterministic write)** — the resolved-id table (logical name → id
+10. **Closed question (task mirroring, 022)** — when a project has no
+    `task_mirror` value recorded, the entry point prints its closed question on
+    stderr on **every** run, followed by the per-project effect line
+    `Task mirror: <KEY> — not recorded; today's behaviour applies`. **Relay that
+    question**; it is one of the two the run itself emits, and a run that
+    reports it while you say nothing is how a team ends up believing the
+    ceremony asked nothing. The two answers are `subtask` and `checklist`, and
+    recording nothing is a legitimate third state that keeps today's behaviour.
+    Answer by re-invoking with `--task-mirror <KEY>=<subtask|checklist>`, which
+    splices the value into `config.yml`'s `task_mirror` managed region.
+11. **Board-position mapping (023)** — spec-kit's lifecycle events are not a
+    workflow; **your team's workflow is**, and nothing in this product holds an
+    opinion about which status an event should land on. So this step is a
+    proposal you make and the operator judges, never a decision you take:
+
+    - **When it happens.** After the entry point's run has completed — what it
+      reads is the discovery that run has just persisted. A degraded or refused
+      run reaches no board-position proposal at all: there are no discovered
+      statuses to draw one from, and a mapping is never proposed from anything
+      else.
+    - **Source of names.** The only permitted status names are the ones
+      discovery just wrote for that project into `.specify/jira/config.local.yml`
+      (`projects[].statuses[]`, each with its `name` and `status_category`).
+      Never propose a name from anywhere else — not from another project, not
+      from Jira's defaults, not from the spelling a human used in conversation.
+    - **When to skip.** A project whose `config.yml` entry already declares
+      `phase_status_map` is finished: do not re-ask, do not rewrite it, do not
+      offer to improve it. The same holds for `halted_statuses`.
+    - **The proposal.** Present a draft `phase_status_map` in the per-role
+      shape, covering only the roles the project actually resolved at step 8,
+      and only the events your draft has a defensible status for — an event you
+      would have to invent a status for is left out, not filled. State the
+      status_category you drew each line from, so the operator can see the
+      reasoning rather than trust it. Print the full discovered status list
+      beside the draft.
+    - **The three answers.** Accept, amend (the operator names a different
+      discovered status for any line, or removes a line), or decline. Declining
+      writes nothing, and nothing is exactly what the shipped behaviour is: a
+      project that declares no mapping is never moved and never warned about.
+      Do not press a declined proposal a second time.
+    - **The write.** Write the confirmed mapping by hand into `config.yml`,
+      under that project's entry, exactly as the template documents it.
+      `config.yml` is the human-owned layer — the entry point owns only its two
+      marker-delimited regions — so leave every other byte of the file, comments
+      included, untouched. Then re-invoke the ceremony once: it validates the
+      shape and refuses with exit `4`, naming the offending key, if the mapping
+      is malformed.
+    - **What you must tell the operator.** The mapping moves a ticket only when
+      exactly one of its real available transitions lands on the declared status
+      ungated; ambiguous, gated, and unreachable each withhold the move and warn
+      once, at reconcile time, naming the ticket. And it only takes effect on a
+      reconcile run that carries the lifecycle event — the
+      `SPEC_KIT_JIRA_HOOK_EVENT` variable the `/speckit.jira.reconcile`
+      definition requires you to set.
+12. **Persist (deterministic write)** — the resolved-id table (logical name → id
     for issue types — with hierarchy level and sub-task flag — priorities,
     statuses, `style`/`style_source`, the resolved `roles.<role>` map with each
     role's provenance, the dual-written `child_type`/`parent_type` derived from
@@ -281,6 +340,10 @@ in your own words when the report already names it.
   an optional defaultable field without ever being asked. A value outside
   `allowedValues`, an empty value, an unknown type, or an unknown field
   label each refuse with zero writes, naming the offending item.
+- `--task-mirror <KEY>=<subtask|checklist>` — repeatable (022); the operator's
+  answer to the task-mirroring question the run prints for any project with no
+  value recorded. Last occurrence per key wins; the value is spliced into
+  `config.yml`'s `task_mirror` managed region.
 - `--enable-hook <event>` — repeatable; release one lifecycle event the operator
   previously disabled. It clears the extension's own record and **does not touch
   the hook registry**.

@@ -322,6 +322,46 @@ specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releas
 Run `/speckit.jira.config`. If it reports a degraded run, it names the missing
 connection setting. From then on every lifecycle step mirrors on its own.
 
+## Telling the bridge where each lifecycle step leaves a ticket
+
+By default nothing on your board moves: the bridge mirrors content and never
+touches a ticket's status. Moving one is opt-in, per project, through
+`phase_status_map` in `.specify/jira/config.yml` — declared per hierarchy role:
+
+```yaml
+projects:
+  - key: PROJ
+    phase_status_map:
+      specification:
+        after_plan: In Progress
+      story:
+        after_specify: To Do
+        after_implement: In Review
+    halted_statuses:
+      - Blocked
+```
+
+Each value is the **destination status name, spelled exactly as your project
+spells it**. A ticket moves only when exactly one of its real available
+transitions lands on that status and is not gated on a field the bridge does not
+hold; two candidates, a gated one, or none reachable in a single move each leave
+the ticket alone and warn once, naming it and the reason. There is no built-in
+status table: your workflow is authoritative, and a project that declares
+nothing keeps today's no-movement behaviour.
+
+The lifecycle events are `after_specify`, `after_clarify`, `after_plan`,
+`after_tasks`, `after_implement`, and `after_analyze`; the roles are
+`specification`, `story`, and `task` (the last applies only where tasks are
+mirrored as sub-tasks). A mapping whose keys are all events is the story role's —
+the original role-blind shape, still valid. Mixing the two key sets in one
+mapping is refused with exit `4`.
+
+`/speckit.jira.config` proposes a draft over the statuses discovered in your own
+project and records the answer you confirm; `halted_statuses` — the statuses at
+which a ticket is surfaced and otherwise left completely alone — stays
+hand-written. Both are yours to edit afterwards: the ceremony never rewrites a
+mapping it finds, and deleting the key restores the no-movement behaviour.
+
 ## If the lifecycle hooks do not see your variables
 
 The hooks run in the shell the agent spawns, which does not always load your
