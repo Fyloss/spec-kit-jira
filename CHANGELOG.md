@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The board-position mapping a team declares — `phase_status_map`, and the
+  `halted_statuses` beside it — is now reachable from the files a consuming
+  team actually opens. `templates/config.yml.template` documents both keys as
+  comments (both accepted shapes, the exact-status-name rule, and the
+  single-ungated-transition rule), and the README gains a section naming them.
+  Neither key is pre-declared: a template that declared one would move a board
+  on the strength of a placeholder nobody chose. No runtime behaviour changes —
+  a project that declares nothing is still never moved.
+- `/speckit.jira.config` gains two documented steps for the two questions a run
+  produces: relaying the task-mirroring question the entry point already prints
+  for every project with no `task_mirror` recorded (022, with the
+  previously-undocumented `--task-mirror` flag), and proposing a draft
+  board-position mapping over the statuses discovered in the operator's own
+  project (023). The proposal is the ceremony's one stated exception to
+  model-independence, and it is bounded: every status name comes from the
+  project's discovered list, a project that already declares a mapping is never
+  re-asked, and declining writes nothing.
+
 ## [0.16.0] - 2026-08-14
 
 ### Added

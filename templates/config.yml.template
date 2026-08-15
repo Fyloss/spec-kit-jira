@@ -52,6 +52,47 @@ projects:
     #   story: Story
     #   task: Sub-task
 
+    # Where each spec-kit lifecycle event should leave a ticket on your
+    # board, declared per hierarchy role. OPTIONAL — a project that declares
+    # nothing is never moved at all, which is exactly today's behaviour.
+    #
+    # A value is the DESTINATION STATUS NAME, spelled exactly as your own
+    # project spells it: the comparison is exact string equality, and a near
+    # miss is reported rather than guessed. A ticket is moved only when
+    # exactly ONE of its real available transitions lands on the declared
+    # status and is not gated on a field the bridge does not hold; two
+    # candidates, a gated one, or none reachable in a single move each
+    # withhold the move instead and warn once, naming the ticket and the
+    # reason. There is no built-in status table and no assumed ordering —
+    # your workflow is authoritative.
+    #
+    # The lifecycle events are after_specify, after_clarify, after_plan,
+    # after_tasks, after_implement and after_analyze; the roles are
+    # specification, story and task. Declare one role, two, or all three. A
+    # mapping whose keys are all lifecycle events is the STORY role's (the
+    # pre-023 shape, still valid); mixing the two key sets in one mapping is
+    # refused (exit 4). A `task` mapping applies only where tasks are
+    # mirrored as sub-tasks.
+    #
+    # `/speckit.jira.config` proposes a draft over the statuses discovered in
+    # YOUR project and records the answer you confirm. Edit it by hand at any
+    # time — the ceremony never rewrites a mapping it finds, and deleting the
+    # key restores the no-movement behaviour.
+    # phase_status_map:
+    #   specification:
+    #     after_plan: In Progress
+    #   story:
+    #     after_specify: To Do
+    #     after_implement: In Review
+    #   task:
+    #     after_implement: Done
+
+    # Statuses that mean "a human has taken this ticket out of the flow".
+    # A ticket standing at one is surfaced and left alone: no transition and
+    # no content write. Project-wide, never per role.
+    # halted_statuses:
+    #   - Blocked
+
 # Route each spec folder to a project. First matching rule wins.
 routing:
   - match:

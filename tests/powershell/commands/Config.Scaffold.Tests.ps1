@@ -32,4 +32,22 @@ Describe 'The shipped config.yml.template' {
         $obj = $yaml | ConvertFrom-Json -Depth 100
         $obj.PSObject.Properties['field_defaults'] | Should -BeNullOrEmpty
     }
+
+    # The board-position keys are documented, never pre-declared: a template
+    # that DECLARED either would move a board on the strength of a placeholder
+    # nobody chose. Mirror of the bash twin's last two cases.
+    It 'documents phase_status_map and halted_statuses' {
+        $text = Get-Content -LiteralPath $script:Template -Raw
+        $text | Should -Match 'phase_status_map:'
+        $text | Should -Match 'halted_statuses:'
+    }
+
+    It 'keeps both board-position keys commented — no project declares either' {
+        $yaml = ConvertFrom-JiraConfigYaml -Path $script:Template
+        $obj = $yaml | ConvertFrom-Json -Depth 100
+        foreach ($p in @($obj.projects)) {
+            $p.PSObject.Properties['phase_status_map'] | Should -BeNullOrEmpty
+            $p.PSObject.Properties['halted_statuses'] | Should -BeNullOrEmpty
+        }
+    }
 }
