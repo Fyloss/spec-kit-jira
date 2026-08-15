@@ -326,8 +326,7 @@ connection setting. From then on every lifecycle step mirrors on its own.
 
 By default nothing on your board moves: the bridge mirrors content and never
 touches a ticket's status. Moving one is opt-in, per project, through
-`phase_status_map` in `.specify/jira/config.yml` — declared per hierarchy role
-since 0.16.0:
+`phase_status_map` in `.specify/jira/config.yml` — declared per hierarchy role:
 
 ```yaml
 projects:
@@ -354,8 +353,8 @@ The lifecycle events are `after_specify`, `after_clarify`, `after_plan`,
 `after_tasks`, `after_implement`, and `after_analyze`; the roles are
 `specification`, `story`, and `task` (the last applies only where tasks are
 mirrored as sub-tasks). A mapping whose keys are all events is the story role's —
-the pre-0.16.0 shape, still valid. Mixing the two key sets in one mapping is
-refused with exit `4`.
+the original role-blind shape, still valid. Mixing the two key sets in one
+mapping is refused with exit `4`.
 
 `/speckit.jira.config` proposes a draft over the statuses discovered in your own
 project and records the answer you confirm; `halted_statuses` — the statuses at
