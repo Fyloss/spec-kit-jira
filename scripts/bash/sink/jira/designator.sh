@@ -53,7 +53,7 @@ _desig_percent_decode() {
     if [[ "${c}" == "%" && $((i + 2)) -lt $((len + 1)) ]]; then
       hex="${s:i+1:2}"
       if [[ "${hex}" =~ ^[0-9A-Fa-f]{2}$ ]]; then
-        out+="$(printf "\\x${hex}")"
+        out+="$(printf '%b' "\\x${hex}")"
         i=$((i + 3))
         continue
       fi
