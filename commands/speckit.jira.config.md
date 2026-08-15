@@ -235,10 +235,11 @@ and never trigger the degraded mode — do not retry into it.
     opinion about which status an event should land on. So this step is a
     proposal you make and the operator judges, never a decision you take:
 
-    - **When it happens.** After the entry point's run has completed, since it
-      reads what step 12 has just persisted. A degraded or refused run reaches
-      no board-position proposal at all — there are no discovered statuses to
-      draw one from, and a mapping is never proposed from anything else.
+    - **When it happens.** After the entry point's run has completed — what it
+      reads is the discovery that run has just persisted. A degraded or refused
+      run reaches no board-position proposal at all: there are no discovered
+      statuses to draw one from, and a mapping is never proposed from anything
+      else.
     - **Source of names.** The only permitted status names are the ones
       discovery just wrote for that project into `.specify/jira/config.local.yml`
       (`projects[].statuses[]`, each with its `name` and `status_category`).
