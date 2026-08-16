@@ -45,7 +45,16 @@ teardown() {
   export SPEC_KIT_JIRA_SPEC_SLUG="001-widget"
   export SPEC_KIT_JIRA_REPO="acme/app"
   export SPEC_KIT_JIRA_PROJECT_KEY="COMP"
-  export JIRA_CONFIG_DIR="${ROOT}/tests/conformance/fixtures/repo-with-reconcile-binding/.specify/jira"
+  # A COPY, never the tracked fixture itself: reconcile writes its run-state
+  # into ${JIRA_CONFIG_DIR}/state/, so pointing this at the repo's own fixture
+  # mutates the checkout as a side effect of running the suite. That artefact
+  # is gitignored, so `git status` stays clean and only
+  # tests/bash/ci/test_fixtures_are_tracked.bats notices — and only when it
+  # happens to run after this test, which under the parallel runner is a coin
+  # flip. That is a CI flake with no relation to the change under test.
+  export JIRA_CONFIG_DIR="${BATS_TEST_TMPDIR}/jira-config"
+  mkdir -p "${JIRA_CONFIG_DIR}"
+  cp "${ROOT}/tests/conformance/fixtures/repo-with-reconcile-binding/.specify/jira/"*.yml "${JIRA_CONFIG_DIR}/"
   export JIRA_EMAIL="user@example.com"
   export JIRA_API_TOKEN="RAWSECRETXYZ"
   export JIRA_NO_SLEEP=1

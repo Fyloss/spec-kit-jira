@@ -57,7 +57,13 @@ _write_large_spec() {
   export SPEC_KIT_JIRA_SPEC_SLUG="001-widget"
   export SPEC_KIT_JIRA_REPO="acme/app"
   export SPEC_KIT_JIRA_PROJECT_KEY="COMP"
-  export JIRA_CONFIG_DIR="${ROOT}/tests/conformance/fixtures/repo-with-reconcile-binding/.specify/jira"
+  # A COPY, never the tracked fixture itself — see the note in
+  # tests/bash/sink/test_argv_size.bats: reconcile writes run-state into
+  # ${JIRA_CONFIG_DIR}/state/, and doing that inside the checkout leaves a
+  # gitignored artefact that reddens the fixture-tracking guard at random.
+  export JIRA_CONFIG_DIR="${BATS_TEST_TMPDIR}/jira-config"
+  mkdir -p "${JIRA_CONFIG_DIR}"
+  cp "${ROOT}/tests/conformance/fixtures/repo-with-reconcile-binding/.specify/jira/"*.yml "${JIRA_CONFIG_DIR}/"
   export JIRA_EMAIL="user@example.com"
   export JIRA_API_TOKEN="RAWSECRETXYZ"
   export JIRA_NO_SLEEP=1
