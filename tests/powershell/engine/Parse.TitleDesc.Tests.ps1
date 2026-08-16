@@ -81,9 +81,9 @@ Describe 'Get-JiraParsedAcceptance' {
         $g | Should -Be 'a user arrives on the Homepage'
         $w | Should -Be 'they click Login'
         $t | Should -Be 'the login form appears.'
-        $g | Should -Not -Match '(Given|When|Then)'
-        $w | Should -Not -Match '(Given|When|Then)'
-        $t | Should -Not -Match '(Given|When)'
+        $g | Should -Not -Match '^(Given|When|Then)\b'
+        $w | Should -Not -Match '^(Given|When|Then)\b'
+        $t | Should -Not -Match '^(Given|When|Then)\b'
         "$g, $w, $t" | Should -Be 'a user arrives on the Homepage, they click Login, the login form appears.'
     }
 

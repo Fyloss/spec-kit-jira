@@ -121,9 +121,12 @@ setup() {
   [ "$g" = "a user arrives on the Homepage" ]
   [ "$w" = "they click Login" ]
   [ "$t" = "the login form appears." ]
-  [[ "$g" != Given* && "$g" != *When* && "$g" != *Then* ]]
-  [[ "$w" != When* && "$w" != *Given* && "$w" != *Then* ]]
-  [[ "$t" != Then* && "$t" != *Given* && "$t" != *When* ]]
+  # Anchored at the start (word-boundary, not a bare substring match) — a
+  # clause legitimately containing "when" or "then" mid-body (FR-007) must
+  # not fail this check (Copilot review).
+  [[ ! "$g" =~ ^(Given|When|Then)([^[:alpha:]]|$) ]]
+  [[ ! "$w" =~ ^(Given|When|Then)([^[:alpha:]]|$) ]]
+  [[ ! "$t" =~ ^(Given|When|Then)([^[:alpha:]]|$) ]]
   [ "${g}, ${w}, ${t}" = "a user arrives on the Homepage, they click Login, the login form appears." ]
 }
 
