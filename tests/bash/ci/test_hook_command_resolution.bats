@@ -90,7 +90,7 @@ hook_commands() {
     }
     i=$((i + 1))
   done <<< "${names}" 3<<< "${files}"
-  [ "${i}" -eq 3 ]
+  [ "${i}" -eq 4 ]
 }
 
 @test "speckit.jira.reconcile is declared, filed and referenced (FR-010, FR-011)" {

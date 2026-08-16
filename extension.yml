@@ -14,7 +14,7 @@ schema_version: "1.0"
 extension:
   id: jira
   name: Jira Reconcile Engine
-  version: 0.17.0
+  version: 0.18.0
   description: >-
     Mirrors a repository's Spec Kit artifacts (spec.md, plan.md, tasks.md) into
     Jira Cloud as a self-healing, idempotent, fail-closed bridge. Twin native
@@ -49,6 +49,13 @@ provides:
         Mirror the current feature's spec-kit artifacts into Jira — the
         deterministic, non-blocking reconcile every after_* lifecycle event
         fires.
+    - name: speckit.jira.seed
+      file: commands/speckit.jira.seed.md
+      description: >-
+        Seed a specification from named, existing Jira issues — validate the
+        drafted pinning, confirm the write plan, then bind, create, and
+        re-parent. Agent-invoked, after spec.md exists; bound to no hook
+        event (a confirmation prompt cannot live in a lifecycle hook).
 
 # Lifecycle hooks — a TOP-LEVEL key, a sibling of `provides:`.
 #

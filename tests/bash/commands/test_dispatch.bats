@@ -15,6 +15,9 @@ EOF
   cat > "${STUBDIR}/reconcile.sh" << 'EOF'
 cmd_reconcile() { echo "reconcile-ran"; return 0; }
 EOF
+  cat > "${STUBDIR}/seed.sh" << 'EOF'
+cmd_seed() { echo "seed-ran"; return 0; }
+EOF
   export SPEC_KIT_JIRA_COMMANDS_DIR="${STUBDIR}"
 }
 
@@ -65,4 +68,12 @@ teardown() {
 @test "a routed but unbuilt command is a usage error (exit 1)" {
   run bash "${ENTRY}" mention
   [ "$status" -eq 1 ]
+}
+
+# T005 (027) — `seed` is a recognised command word, routed exactly like
+# every other command.
+@test "routes seed to its cmd_seed entry" {
+  run bash "${ENTRY}" seed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"seed-ran"* ]]
 }

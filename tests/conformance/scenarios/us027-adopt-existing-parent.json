@@ -1,0 +1,29 @@
+{
+  "name": "us027-adopt-existing-parent",
+  "description": "US3 (027): an operator-named existing parent is adopted — never created — alongside two named stories. Moment 1 (feature --parent --story x2) resolves all three in one bulkfetch; moment 2 (seed --confirm) binds the parent (spec= marker, origin:human role:parent) and both stories, issuing zero POST /rest/api/3/issue of any kind. Byte-identical across ports.",
+  "mock": {
+    "issues": {
+      "IJT-1": {"summary": "Payment webhooks rollout", "description": "Epic body", "status": {"name": "To Do", "statusCategory": {"key": "new"}}, "issuetype": {"id": "10000", "name": "Epic"}, "project": {"key": "IJT"}},
+      "IJT-11": {"summary": "Accept a partial payment", "description": "Story one body", "status": {"name": "To Do", "statusCategory": {"key": "new"}}, "issuetype": {"id": "10001", "name": "Story"}, "project": {"key": "IJT"}},
+      "IJT-12": {"summary": "Refund a captured payment", "description": "Story two body", "status": {"name": "To Do", "statusCategory": {"key": "new"}}, "issuetype": {"id": "10001", "name": "Story"}, "project": {"key": "IJT"}}
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-teams",
+  "runs": [
+    {"argv": ["feature", "--json", "--parent", "IJT-1", "--story", "IJT-11", "--story", "IJT-12", "invoice export"]},
+    {
+      "before": {
+        "write": {
+          "specs/ijt-1/spec.md": "# Feature\n\n### User Story 1 - A (Priority: P1)\n<!-- speckit-jira pin=IJT-11 -->\n\nBody one.\n\n### User Story 2 - B (Priority: P1)\n<!-- speckit-jira pin=IJT-12 -->\n\nBody two.\n"
+        }
+      },
+      "argv": ["seed", "specs/ijt-1/spec.md", "--confirm", "--json"]
+    }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222 3333333333333333"
+  }
+}

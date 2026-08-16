@@ -1,7 +1,7 @@
 ---
 name: "speckit.jira.feature"
-description: "Ticket-first feature naming: resolve the Jira ticket, then name the branch and spec folder by the developer's team convention — a deterministic, non-blocking before_specify step."
-argument-hint: "Optional: a mentioned ticket key, then the feature description, e.g. IJT-42 invoice export"
+description: "Ticket-first feature naming: resolve the Jira ticket, then name the branch and spec folder by the developer's team convention — a deterministic, non-blocking before_specify step. Also resolves --parent/--story designators to seed the specification from existing Jira issues (027)."
+argument-hint: "Optional: a mentioned ticket key, or --parent/--story designators, then the feature description, e.g. IJT-42 invoice export"
 ---
 
 # /speckit.jira.feature
@@ -122,12 +122,50 @@ restore the bridge, reinstall the extension with
 ## Flags
 
 - `TICKET-KEY` — optional positional: a mentioned ticket, validated before use.
+- `--parent <designator>` — 027: at most once. A key, a browser URL, or free
+  text (may contain spaces). A key or URL adopts an existing parent-role
+  issue; free text is never resolved against Jira and is always the title of
+  a parent to create.
+- `--story <designator>` — 027: repeatable. A key or a browser URL naming a
+  story-role issue. **Argv order is normative** (FR-054) — it fixes both the
+  order the drafted user stories must be pinned in and the order the seed
+  material below lists them.
 - `--use-team <id>` — the answer to the cross-team closed confirmation;
   catalogue ids only; per-feature effect, the personal file stays untouched.
 - `--json` — emit the canonical machine-readable result.
 - `--dry-run` — predict the ticket action (`would-attach` / `would-create`)
   and compute the names with zero Jira writes.
 - `--help` — usage; exits `0`.
+
+## Seeding from named issues (027) — the mandatory follow-up
+
+When you invoke this command with **any** `--parent` or `--story`
+designator, a **second, non-optional step follows once `spec.md` exists**:
+you MUST invoke `/speckit.jira.seed` before you consider this feature's
+creation complete. This command's own read never writes to Jira — moment 1
+(this command) parses and resolves the designators, refuses on anything
+malformed, and hands you seed material and a provenance mapping; it never
+binds or creates anything. Moment 2 (`/speckit.jira.seed`) is what asks the
+operator to confirm and performs the writes.
+
+- **With designators, and Jira unreachable** ⇒ this command exits non-zero
+  (`EXIT_FAILCLOSED`) rather than falling back to `{active:false}`. Proceeding
+  without a reliable read would create exactly the duplicate issues this
+  feature exists to prevent. Relay the failure; do not retry into a
+  successful-looking fallback.
+- **With no designator at all** ⇒ nothing here changes: the ordinary
+  fallback behaviour of the section above applies untouched, and there is no
+  follow-up step.
+- **Forgetting the follow-up is recoverable, never silently destructive**:
+  moment 1 already recorded a seeded-not-bound state (the folder and
+  `spec.md` exist, nothing was written to Jira). A later invocation of
+  `/speckit.jira.seed` against the same feature resumes exactly where you
+  left off. But do not rely on that recovery — invoke it in the same turn
+  you finish drafting `spec.md`, as `/speckit.jira.seed`'s own definition
+  states.
+
+See `/speckit.jira.seed` for the pinning-marker drafting rules the seed
+material obliges you to follow.
 
 ## Exit codes
 

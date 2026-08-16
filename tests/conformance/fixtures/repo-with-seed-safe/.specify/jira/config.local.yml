@@ -1,0 +1,35 @@
+resolved_ids:
+  SAFE:
+    style: company_managed
+    issue_types:
+      - logical_name: "Capability"
+        id: "10000"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Feature"
+        id: "10001"
+        hierarchy_level: "0"
+        subtask: false
+    child_type:
+      logical_name: "Feature"
+      id: "10001"
+      source: derived
+    parent_type:
+      logical_name: "Capability"
+      id: "10000"
+      source: derived
+    required_fields:
+      "10000":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "10001":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "10001": true
+    priorities:
+      Highest: "1"
+      Medium: "3"
+      Low: "4"
+    statuses:
+      To Do: "10000"

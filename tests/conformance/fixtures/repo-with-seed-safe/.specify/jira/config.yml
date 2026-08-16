@@ -1,0 +1,23 @@
+# T160 [027] — FR-014's non-default hierarchy fixture for the conformance
+# corpus (SAFe-shaped roles: Capability/Feature), a sibling of
+# repo-with-seed-teams whose own hierarchy block is the default Epic/Story.
+projects:
+  - key: SAFE
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    hierarchy:
+      specification: Capability
+      story: Feature
+    halted_statuses:
+      - Done
+routing_default: SAFE
+teams:
+  - id: safe
+    project: SAFE
+    folder_prefix: "safe-"
+    branch_pattern: "safe-<ID>/<FEATURE_NAME>"
+privacy:
+  allowlist: []

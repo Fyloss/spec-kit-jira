@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-15
+
+### Added
+
+- **Seed a specification from existing Jira issues** (`specs/027-seed-spec-from-jira/`).
+  `/speckit.jira.feature` accepts repeatable `--parent`/`--story` designators —
+  a key, a full issue URL, or (for the specification role only) free text — and
+  resolves the whole set in one bulk read before anything is named, handing the
+  drafting agent each issue's own summary, description, status, and current
+  parent. A new agent-invoked command, `/speckit.jira.seed` — declared in
+  `extension.yml`'s `provides.commands` and bound to no lifecycle hook, since a
+  confirmation prompt cannot live in one — validates the drafted `spec.md`'s
+  pinning markers, renders the write plan and provenance report, and only after
+  an explicit `--confirm` binds each named story, adopts or creates the named
+  parent, and re-parents a story only onto the parent the operator designated.
+  Declining, or running unattended, leaves a **seeded-not-bound** state: the
+  draft and the recorded designator set persist, nothing is written to Jira,
+  and re-invoking resumes at the same gate. A resume re-reads Jira and
+  re-evaluates every refusal class, but never re-drafts `spec.md`; a different
+  designator set than the one recorded refuses `REF-RESEED`. A partially
+  completed `--confirm` run resumes from exactly what it finished, per issue,
+  never retried into a duplicate.
+- **Fourteen new refusal classes**, each zero-write, each naming the offending
+  designator or marker with a copy-pasteable remediation:
+  `REF-DESIGNATOR`, `REF-HOST`, `REF-DUPLICATE`, `REF-EXISTS`,
+  `REF-UNRESOLVED`, `REF-ROLE`, `REF-ROUTING`, `REF-MULTIPROJECT`,
+  `REF-TERMINAL`, `REF-CLAIMED`, `REF-THIN`, `REF-DECOMP`, `REF-DRAFT-EDIT`,
+  and `REF-RESEED`.
+- **Re-parenting disclosure.** A named story already parented under a
+  different issue than the one the operator designated is moved only on
+  explicit confirmation, with a write-plan line rendered `! ` in column 1 —
+  the only line that starts there — naming the current parent's key, summary,
+  and status, and the number of named stories it will lose (stated even when
+  it is one). When no specification-role designator is named at all, an
+  already-parented story is disclosed instead — a **scatter note**, in both
+  the provenance report and the run's warnings, at exit `0` and zero writes.
+- The one-way-read guarantee (FR-009/FR-010) now extends explicitly to this
+  feature: the human-authored content that seeded `spec.md` is never read
+  again to rewrite it, on the seeding run or on any later reconcile — proven
+  by a dedicated regression against a full reconcile with every named issue's
+  content rewritten in Jira between seeding and reconciling.
+
+### Fixed
+
+- `ticket_create`'s identity stamp now records the summary it sent, so a later
+  reconcile compares against the recorded value rather than reverting a
+  human's rename — a gap this feature's own parent-creation path exposed and
+  closed for every caller of `ticket_create`, not only this feature's own.
+- (PowerShell) `Resolve-JiraDesignatorSet` threw `PropertyNotFoundException`
+  under `Set-StrictMode` when the specification-role designator was free text
+  (no `.key` at all) — a divergence bash's forgiving `jq .key` never hit,
+  first exposed by this feature's own free-text parent-creation path.
+- (PowerShell) An empty JSON array round-tripped through the platform's own
+  `ConvertFrom-Json`/`ConvertTo-Json` collapsed to `null` rather than staying
+  `[]` — bash's `jq` has no such collapse. `Invoke-JiraSeed`'s
+  `confirmation_required` payload is now built by direct concatenation of
+  already-canonical JSON fragments, sidestepping the round-trip entirely.
+
+### Notes
+
+- The double-run live-zero-churn assertion this feature adds — the identity
+  stamp on an adopted issue, the parent-link write, and the parent create —
+  is Bash-only (`tests/live/test_live_zero_churn.bats`). There is no
+  PowerShell live twin in this repository yet; the asymmetry is recorded here
+  rather than silently left uncovered.
+
 ## [0.17.0] - 2026-08-15
 
 ### Added

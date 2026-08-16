@@ -1,0 +1,16 @@
+{
+  "name": "us027-no-designators-untouched",
+  "description": "US5/C-1 (027): an invocation with neither --parent nor --story is byte-identical to the pre-027 release — same stdout, exit code, and request sequence as us3-feature-create.",
+  "mock": {
+    "projects": { "IJT": "team", "WEX": "team" },
+    "createdKey": "IJT-123"
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-teams",
+  "argv": ["feature", "--json", "invoice export"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_PLAN_CONTEXT": "{\"story_type_id\":\"10201\",\"priority_ids\":{\"P1\":\"1\",\"P2\":\"2\",\"P3\":\"3\"},\"estimation_field_id\":null}"
+  }
+}

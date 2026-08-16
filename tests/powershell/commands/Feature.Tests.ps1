@@ -142,6 +142,29 @@ Describe 'Feature command' {
         @($r.Err -split "`n" | Where-Object { $_ -match '^WARNING:' }).Count | Should -Be 1
     }
 
+    # --- 027 US5: C-1/C-6 — the ordinary run is untouched -------------------
+
+    It 'C-1: an invocation with neither designator flag is byte-identical to the current release' {
+        Select-Team 'ijt'
+        Start-TestMock '{"projects":{"IJT":"team"},"createdKey":"IJT-123"}'
+        $r = Invoke-FeatureCaptured @('feature', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $r.Out.Trim() | Should -Be '{"active":true,"branch_name":"ijt-123/invoice-export","override_used":false,"short_name":"ijt-invoice-export","team":"ijt","ticket":{"action":"created","key":"IJT-123","number":"123"},"warnings":[]}'
+        $calls = @(Get-JiraMockCallLog -Mock $M | Where-Object { $_ })
+        $calls[0] | Should -Match 'POST /rest/api/3/issue'
+        $calls[1] | Should -Match 'PUT /rest/api/3/issue/IJT-123/properties/spec-kit-jira'
+    }
+
+    It 'C-6: Jira unreachable, no designators, still {active:false} + exactly one warning, exit 0' {
+        Select-Team 'ijt'
+        $env:SPEC_KIT_JIRA_BASE_URL = ''
+        $r = Invoke-FeatureCaptured @('feature', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $obj = $r.Out.Trim() | ConvertFrom-Json
+        $obj.active | Should -BeFalse
+        @($obj.warnings).Count | Should -Be 1
+    }
+
     It 'stays fail-closed on a mentioned-key read failure (exit 2)' {
         Select-Team 'ijt'
         Start-TestMock '{"projects":{"IJT":"team"}}'

@@ -18,6 +18,10 @@ Export-ModuleMember -Function Invoke-JiraConfig
 function Invoke-JiraReconcile { param([string[]] $Arguments) [Console]::Out.WriteLine("reconcile-ran"); return 0 }
 Export-ModuleMember -Function Invoke-JiraReconcile
 '@
+    Set-Content -LiteralPath (Join-Path $script:StubDir 'Seed.psm1') -Value @'
+function Invoke-JiraSeed { param([string[]] $Arguments) [Console]::Out.WriteLine("seed-ran"); return 0 }
+Export-ModuleMember -Function Invoke-JiraSeed
+'@
     function Invoke-Entry {
         param([string[]] $EntryArgs, [hashtable] $Env = @{})
         $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -87,5 +91,11 @@ Describe 'Dispatcher' {
     It 'a routed but unbuilt command is a usage error (exit 1)' {
         $r = Invoke-Entry -EntryArgs @('mention')
         $r.ExitCode | Should -Be 1
+    }
+
+    It 'routes seed to its Invoke-JiraSeed entry (T005, 027)' {
+        $r = Invoke-Entry -EntryArgs @('seed')
+        $r.ExitCode | Should -Be 0
+        $r.StdOut | Should -Match 'seed-ran'
     }
 }

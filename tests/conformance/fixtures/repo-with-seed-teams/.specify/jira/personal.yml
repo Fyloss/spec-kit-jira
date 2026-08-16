@@ -1,0 +1,4 @@
+# Personal team selection (gitignored in a real clone; committed here only
+# as a conformance fixture). Selects the ijt team from the committed
+# catalogue.
+team: ijt

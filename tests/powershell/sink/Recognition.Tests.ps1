@@ -363,3 +363,20 @@ Describe 'Privacy: diagnostics name no host, token, or account id' {
         $r.Json | Should -Not -BeLike '*127.0.0.1*'
     }
 }
+
+Describe 'T105a [027]: FR-011 regression — origin:human classifies exactly like origin:bridge' {
+    AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
+
+    It 'an origin:human marker (a seeded story) is recognised exactly as an origin:bridge one' {
+        $cfg = New-JiraRecognitionSeedConfig '{"origin":"human","repo":"acme/app","spec_slug":"001-billing","story":"1111111111111111","role":"story"}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $stories = '[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"COMP-1"}}]'
+        $r = Invoke-JiraRecognitionRun -StoriesJson $stories -SpecRefJson $script:SpecRef -ProjectKey 'COMP' -SpecPath 'spec.md'
+        $r.ExitCode | Should -Be 0
+        $out = $r.Json | ConvertFrom-Json
+        $out.bound.'1111111111111111'.key | Should -Be 'COMP-1'
+        @($out.new).Count | Should -Be 0
+        @($out.blocked).Count | Should -Be 0
+    }
+}

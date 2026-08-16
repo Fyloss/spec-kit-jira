@@ -33,8 +33,8 @@ BeforeAll {
 }
 
 Describe 'The fallback block (FR-030)' {
-    It 'appears VERBATIM in each of the three command documents' {
-        $script:Docs.Count | Should -Be 3
+    It 'appears VERBATIM in each of the four command documents' {
+        $script:Docs.Count | Should -Be 4
         foreach ($doc in $script:Docs) {
             $text = (Get-Content -Raw -LiteralPath $doc.FullName) -replace "`r`n", "`n"
             if (-not $text.Contains($script:Block)) {

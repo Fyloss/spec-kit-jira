@@ -179,6 +179,28 @@ boot() {
   [ "$(jq -r '.warnings | length' <<< "${summary}")" -eq 1 ]
 }
 
+# --- 027 US5: C-1/C-6 — the ordinary run is untouched -----------------------
+
+@test "C-1: an invocation with neither designator flag is byte-identical to the current release" {
+  select_team ijt
+  boot '{"projects":{"IJT":"team"},"createdKey":"IJT-123"}'
+  run cmd_feature feature --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"active":true,"branch_name":"ijt-123/invoice-export","override_used":false,"short_name":"ijt-invoice-export","team":"ijt","ticket":{"action":"created","key":"IJT-123","number":"123"},"warnings":[]}' ]
+  [ "$(mock_calls)" = "$(printf 'POST /rest/api/3/issue\nPUT /rest/api/3/issue/IJT-123/properties/spec-kit-jira')" ]
+}
+
+@test "C-6: Jira unreachable, no designators, still {active:false} + exactly one warning, exit 0" {
+  select_team ijt
+  unset SPEC_KIT_JIRA_BASE_URL
+  run cmd_feature feature --json "invoice export"
+  [ "$status" -eq 0 ]
+  local summary
+  summary="$(printf '%s\n' "$output" | grep -v '^WARNING:')"
+  [ "$(jq -r '.active' <<< "${summary}")" = "false" ]
+  [ "$(jq -r '.warnings | length' <<< "${summary}")" -eq 1 ]
+}
+
 @test "a mentioned-key read failure stays fail-closed (exit 2, never fallback)" {
   select_team ijt
   boot '{"projects":{"IJT":"team"}}'

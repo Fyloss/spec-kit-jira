@@ -105,6 +105,10 @@ if ($cfg.ContainsKey('issues')) {
             issuelinks  = if ($seed.ContainsKey('issuelinks')) { $seed.issuelinks } else { @() }
             parent      = if ($seed.ContainsKey('parent')) { $seed.parent } else { $null }
             issuetype   = if ($seed.ContainsKey('issuetype')) { $seed.issuetype } else { $null }
+            project     = if ($seed.ContainsKey('project')) { $seed.project } else { $null }
+            assignee    = if ($seed.ContainsKey('assignee')) { $seed.assignee } else { $null }
+            reporter    = if ($seed.ContainsKey('reporter')) { $seed.reporter } else { $null }
+            labels      = if ($seed.ContainsKey('labels')) { $seed.labels } else { @() }
         }
         if ($seed.ContainsKey('flagged') -and $seed.flagged) {
             $fields['Flagged'] = @(@{ value = 'Impediment' })
@@ -294,6 +298,15 @@ function Get-IssueBulkfetch {
 
         $issue = $script:Issues[$matchKey]
         $flds = $issue.fields.Clone()
+        # 027 research R5: Jira Cloud embeds a reduced parent representation
+        # (fields.summary/status) inline on the `parent` field of a child
+        # issue, at no extra request.
+        if ($flds.ContainsKey('parent') -and $flds.parent -and $flds.parent.ContainsKey('key') -and $script:Issues.ContainsKey($flds.parent.key)) {
+            $pFields = $script:Issues[$flds.parent.key].fields
+            $enrichedParent = $flds.parent.Clone()
+            $enrichedParent['fields'] = @{ summary = $pFields.summary; status = $pFields.status }
+            $flds['parent'] = $enrichedParent
+        }
         if ($wantSubtasks) {
             $subtasks = @()
             foreach ($ck in $script:Issues.Keys) {
@@ -408,6 +421,7 @@ function Resolve-Route {
                     parent      = if ($suppliedFields.ContainsKey('parent')) { $suppliedFields.parent } else { $null }
                     issuetype   = if ($suppliedFields.ContainsKey('issuetype')) { $suppliedFields.issuetype } else { $null }
                     labels      = if ($suppliedFields.ContainsKey('labels')) { @($suppliedFields.labels) } else { @() }
+                    project     = if ($suppliedFields.ContainsKey('project')) { $suppliedFields.project } else { @{ key = $projKey } }
                 }
                 $script:Issues[$key] = @{ fields = $fields; properties = @{} }
                 return @{ status = 201; body = "{`"id`":`"99001`",`"key`":`"$key`",`"self`":`"/rest/api/3/issue/99001`"}" }

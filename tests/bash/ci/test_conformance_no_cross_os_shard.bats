@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (161)" {
+@test "the conformance corpus has exactly the recorded scenario count (188)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -106,8 +106,42 @@ setup() {
   # 023 Phase 14 (convergence) adds one: us023-story-advances-prose (T181) —
   # the us023-story-advances headline move run WITHOUT --json, proving
   # counts.transitioned reaches the default prose report too (160 -> 161).
+  # 027 (US5, T069) adds one: us027-no-designators-untouched — the C-1
+  # regression pin proving an invocation with neither --parent nor --story
+  # is byte-identical to the pre-027 release (161 -> 162).
+  # 027 (US1, T089) adds two: us027-three-url-forms, us027-bind-stories —
+  # the MVP end to end: designator resolution and two-moment binding
+  # (162 -> 164).
+  # 027 (US3, T098) adds one: us027-adopt-existing-parent — a named parent
+  # is bound, never created, alongside two named stories (164 -> 165).
+  # 027 (US6, T106) adds one: us027-human-content-preserved — feature, seed
+  # --confirm, then a full reconcile: every human-authored byte survives
+  # above the managed boundary marker (165 -> 166).
+  # 027 (US7, T119) adds two: us027-decline-resume — decline, then a resume
+  # with no flags resupplied confirms cleanly; us027-draft-edit-refused — a
+  # decline, an operator edit that deletes the pinned marker, then a resume
+  # refuses REF-DRAFT-EDIT (166 -> 168).
+  # 027 (US4, T124) adds one: us027-parent-only — a single parent-role
+  # designator, no pinning constraint, both drafted user stories created
+  # under it on the following reconcile (168 -> 169).
+  # 027 (US2, T139) adds three: us027-create-parent — the feature's only two
+  # irreversible writes, a free-text parent create plus story binds;
+  # us027-reparent-disclosure — the "! reparent" line naming the current
+  # parent and child-loss count; us027-scatter-note — no parent designated,
+  # an already-parented story discloses without writing (169 -> 172).
+  # 027 (Polish, T151) adds fourteen: us027-refuse-{designator,host,
+  # unresolved,routing,role,claimed,terminal,multiproject,duplicate,thin,
+  # decomp,draft-edit,reseed,exists} — one per refusal class of
+  # contracts/seed-cli-contract.md §8, closing FR-039's per-class obligation
+  # and SC-006's "14 of 14" (172 -> 186).
+  # 027 (Convergence, T160) adds one: us027-safe-hierarchy — FR-014's
+  # non-default hierarchy (SAFe-shaped roles: Capability/Feature) binding a
+  # parent and a story, proven byte-identical across ports (186 -> 187).
+  # 027 (Convergence, T161) adds one: us027-team-managed — FR-014's "identical
+  # for team-managed and company-managed" binding a parent and a story on a
+  # team_managed project, proven byte-identical across ports (187 -> 188).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 161 ]
+  [ "${count}" -eq 188 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

@@ -19,6 +19,10 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../engine/Naming.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Ticket.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/Designator.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/Adoption.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../lib/SeedState.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/PrivacyGuard.psm1') -Force
 
 function Get-FeatProp {
     # StrictMode-safe optional property read: $null when the property is absent.
@@ -29,6 +33,318 @@ function Get-FeatProp {
         if ($p) { return $p.Value }
     }
     return $null
+}
+
+function Get-JiraFeatDesignatorNumberSource {
+    <#
+    .SYNOPSIS
+      FR-059/research R9: which key supplies the naming engine's number.
+      Mirror of _feat_designator_number_source. Naming.psm1 gains zero
+      lines — this selects WHICH key is handed to the existing
+      Get-JiraNamingTicketNumber. Returns $null for shape 5 (free-text
+      parent, no stories) — not a refusal, the ordinary description-derived
+      naming applies unchanged.
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()] [string] $ParentJson = '', [string] $StoriesJson = '[]')
+
+    if ($ParentJson) {
+        $parent = $ParentJson | ConvertFrom-Json -Depth 20
+        $form = Get-FeatProp $parent 'form'
+        if ($form -eq 'key' -or $form -eq 'url') {
+            return [string](Get-FeatProp $parent 'key')
+        }
+    }
+    $stories = @($StoriesJson | ConvertFrom-Json -Depth 20)
+    $storyOnly = @($stories | Where-Object { (Get-FeatProp $_ 'role') -eq 'story' } | Sort-Object { [int](Get-FeatProp $_ 'position') })
+    if ($storyOnly.Count -gt 0) {
+        return [string](Get-FeatProp $storyOnly[0] 'key')
+    }
+    return $null
+}
+
+function Get-JiraFeatResolvedSlug {
+    <#
+    .SYNOPSIS
+      FR-059: the resolved slug. Mirror of _feat_resolved_slug. Shapes 1-4
+      derive the slug from the resolved KEY via the existing
+      Get-JiraFeatureSlug (ticket-first folder naming); shape 5 and the
+      no-designator case fall through to the ordinary description-derived
+      slug, unchanged (C-1).
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()] [string] $ParentJson = '', [string] $StoriesJson = '[]', [string] $Description)
+    $key = Get-JiraFeatDesignatorNumberSource -ParentJson $ParentJson -StoriesJson $StoriesJson
+    if ($key) { return (Get-JiraFeatureSlug -Description $key) }
+    return (Get-JiraFeatureSlug -Description $Description)
+}
+
+function Get-JiraFeatDeclaredTypeFor {
+    # The committed projects[].hierarchy.<Role> issue-type name, or empty.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $Role, [Parameter(Mandatory)] [string] $ProjectKey, [Parameter(Mandatory)] $Merged)
+    $projects = @((Get-FeatProp $Merged 'projects') | Where-Object { $null -ne $_ })
+    $p = $projects | Where-Object { [string](Get-FeatProp $_ 'key') -ceq $ProjectKey } | Select-Object -First 1
+    if (-not $p) { return '' }
+    $h = Get-FeatProp $p 'hierarchy'
+    if (-not $h) { return '' }
+    $v = Get-FeatProp $h $Role
+    if ($null -eq $v) { return '' }
+    return [string]$v
+}
+
+function Get-JiraFeatHaltedCsvFor {
+    # The committed projects[].halted_statuses as a comma-separated list.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $ProjectKey, [Parameter(Mandatory)] $Merged)
+    $projects = @((Get-FeatProp $Merged 'projects') | Where-Object { $null -ne $_ })
+    $p = $projects | Where-Object { [string](Get-FeatProp $_ 'key') -ceq $ProjectKey } | Select-Object -First 1
+    if (-not $p) { return '' }
+    $hs = @(Get-FeatProp $p 'halted_statuses')
+    return (($hs | Where-Object { $_ }) -join ',')
+}
+
+function Get-JiraFeatRefMessage {
+    # Compose message + remediation for a moment-1 refusal class not already
+    # carrying one. Text mirrors spec.md's FR-036 table verbatim.
+    param([string] $Code, [string] $Detail)
+    switch ($Code) {
+        'REF-DESIGNATOR' { return "${Code}: ${Detail} — paste the issue key or the browser URL of the issue; or, for a parent to create, type its title" }
+        'REF-HOST' { return "${Code}: ${Detail} — paste a URL from the configured site, or correct the site base URL in the configuration" }
+        'REF-DUPLICATE' { return "${Code}: ${Detail} — remove the duplicate designator" }
+        'REF-MULTIPROJECT' { return "${Code}: ${Detail} — name issues from one project per specification" }
+        'REF-EXISTS' { return "${Code}: ${Detail} — retro-seeding is out of scope; create a new specification" }
+        default { return "${Code}: ${Detail}" }
+    }
+}
+
+function Invoke-JiraFeatSeedFromDesignator {
+    <#
+    .SYNOPSIS
+      Moment 1's designator path (027, contract seed-cli-contract.md §3,
+      research R1). Zero Jira mutations. Mirror of
+      _feat_seed_from_designators. Writes via Write-FeatResult and returns
+      the exit code.
+    #>
+    [CmdletBinding()]
+    param(
+        [bool] $Json, [bool] $DryRun, [string] $Description, [string] $EffId, [string] $EffProject,
+        [string] $Prefix, [string] $Pattern, [bool] $OverrideUsed, [Parameter(Mandatory)] $Merged,
+        [bool] $ParentSeen, [AllowEmptyString()] [string] $ParentRaw, [AllowEmptyString()] [string] $StoriesJoined
+    )
+    $baseUrl = if ($env:SPEC_KIT_JIRA_BASE_URL) { $env:SPEC_KIT_JIRA_BASE_URL } else { '' }
+
+    # --- §3 steps 1-2: parse + classify, REF-DESIGNATOR / REF-HOST -----------
+    $classified = [System.Collections.Generic.List[object]]::new()
+    if ($ParentSeen) {
+        $classified.Add((Resolve-JiraDesignator -Role 'specification' -Raw $ParentRaw -BaseUrl $baseUrl | ConvertFrom-Json -Depth 100))
+    }
+    $storyRaws = @()
+    if ($StoriesJoined) {
+        $us = [char]0x1F
+        $storyRaws = @($StoriesJoined.Split($us))
+    }
+    foreach ($raw in $storyRaws) {
+        $classified.Add((Resolve-JiraDesignator -Role 'story' -Raw $raw -BaseUrl $baseUrl | ConvertFrom-Json -Depth 100))
+    }
+
+    $refusing = @($classified | Where-Object { $_.PSObject.Properties.Name -contains 'refuse' })
+    if ($refusing.Count -gt 0) {
+        foreach ($r in $refusing) {
+            $code = [string]$r.refuse
+            $detail = "designator `"$($r.raw)`" did not resolve"
+            [Console]::Error.WriteLine("feature: $(Get-JiraFeatRefMessage -Code $code -Detail $detail)")
+        }
+        return (Get-JiraExitCode 'config')
+    }
+
+    # --- §3 step 3: de-duplicate -----------------------------------------------
+    $allJson = ConvertTo-JiraJsonValue $classified
+    $dedupe = Resolve-JiraDesignatorSet -Items $allJson | ConvertFrom-Json -Depth 100
+    if (-not [bool]$dedupe.ok) {
+        $dups = ($dedupe.duplicates -join ', ')
+        [Console]::Error.WriteLine("feature: $(Get-JiraFeatRefMessage -Code 'REF-DUPLICATE' -Detail "issue(s) named more than once: $dups")")
+        return (Get-JiraExitCode 'config')
+    }
+    $designators = @($dedupe.designators)
+    $designatorsJson = ConvertTo-JiraJsonValue $designators
+    $parentObj = $designators | Where-Object { (Get-FeatProp $_ 'role') -eq 'specification' } | Select-Object -First 1
+    $parentJson = if ($parentObj) { ConvertTo-JiraJsonValue $parentObj } else { '' }
+    $storiesArr = @($designators | Where-Object { (Get-FeatProp $_ 'role') -eq 'story' } | Sort-Object { [int](Get-FeatProp $_ 'position') })
+    $storiesJson = ConvertTo-JiraJsonValue $storiesArr
+
+    # --- resolved slug / short-name (FR-059) ----------------------------------
+    $bareSlug = Get-JiraFeatResolvedSlug -ParentJson $parentJson -StoriesJson $storiesJson -Description $Description
+    $shortName = Get-JiraShortName -FolderPrefix $Prefix -Slug $bareSlug
+    $synthSpecPath = "specs/$shortName/spec.md"
+
+    # --- §3 step 4: folder exists? -> REF-EXISTS ------------------------------
+    if (Test-Path -LiteralPath "specs/$shortName" -PathType Container) {
+        [Console]::Error.WriteLine("feature: $(Get-JiraFeatRefMessage -Code 'REF-EXISTS' -Detail "the specification folder specs/$shortName already exists")")
+        return (Get-JiraExitCode 'config')
+    }
+
+    # --- §3 step 5: one bulkfetch ----------------------------------------------
+    $pkey = ''
+    if ($parentObj) {
+        $pform = Get-FeatProp $parentObj 'form'
+        if ($pform -eq 'key' -or $pform -eq 'url') { $pkey = [string](Get-FeatProp $parentObj 'key') }
+    }
+    $keys = [System.Collections.Generic.List[string]]::new()
+    if ($pkey) { $keys.Add($pkey) }
+    foreach ($s in $storiesArr) { $keys.Add([string](Get-FeatProp $s 'key')) }
+
+    if ($keys.Count -gt 0) {
+        $loadRc = Invoke-JiraAdoptionLoad -Keys $keys.ToArray()
+        if ([int]$loadRc -ne 0) {
+            [Console]::Error.WriteLine('feature: an unreliable read occurred while resolving the named issues — designators were supplied, so the run refuses rather than proceeding without them (FR-038)')
+            return (Get-JiraExitCode 'fail_closed')
+        }
+    }
+
+    # --- §3 steps 6-12: per-key and set-wide refusal classes, aggregated -----
+    # spec_ref.spec_slug prefers SPEC_KIT_JIRA_SPEC_SLUG (the host's own
+    # numbered feature id) — never the resolved short_name, which is this
+    # extension's OWN ticket-based folder name and a different identifier
+    # entirely (matches the existing ticket-create path further below).
+    $repo = if ($env:SPEC_KIT_JIRA_REPO) { $env:SPEC_KIT_JIRA_REPO } else { 'local/repo' }
+    $specSlug = if ($env:SPEC_KIT_JIRA_SPEC_SLUG) { $env:SPEC_KIT_JIRA_SPEC_SLUG } else { 'spec' }
+    $specRef = ConvertTo-JiraJsonValue ([ordered]@{ repo = $repo; spec_slug = $specSlug })
+    $evalResults = [System.Collections.Generic.List[object]]::new()
+    if ($pkey) {
+        $ptype = Get-JiraFeatDeclaredTypeFor -Role 'specification' -ProjectKey $EffProject -Merged $Merged
+        $pterm = Get-JiraFeatHaltedCsvFor -ProjectKey $EffProject -Merged $Merged
+        $evalResults.Add((Test-JiraAdoptionEvaluate -RoutedProject $EffProject -Role 'specification' -Key $pkey -DeclaredType $ptype -TerminalStatusesCsv $pterm -SpecRefJson $specRef | ConvertFrom-Json -Depth 100))
+    }
+    $stype = Get-JiraFeatDeclaredTypeFor -Role 'story' -ProjectKey $EffProject -Merged $Merged
+    $sterm = Get-JiraFeatHaltedCsvFor -ProjectKey $EffProject -Merged $Merged
+    foreach ($s in $storiesArr) {
+        $skey = [string](Get-FeatProp $s 'key')
+        $evalResults.Add((Test-JiraAdoptionEvaluate -RoutedProject $EffProject -Role 'story' -Key $skey -DeclaredType $stype -TerminalStatusesCsv $sterm -SpecRefJson $specRef | ConvertFrom-Json -Depth 100))
+    }
+
+    $storyKeysJson = ConvertTo-JiraJsonValue (@($storiesArr | ForEach-Object { [string](Get-FeatProp $_ 'key') }))
+    $mp = Get-JiraAdoptionMultiprojectViolation -StoryKeysJson $storyKeysJson | ConvertFrom-Json -Depth 100
+    if (@($mp).Count -gt 0) {
+        $msg = Get-JiraFeatRefMessage -Code 'REF-MULTIPROJECT' -Detail "named story-role issues span more than one project: $(@($mp) -join ', ')"
+        $evalResults.Add(([pscustomobject][ordered]@{ code = 'REF-MULTIPROJECT'; key = ''; message = $msg }))
+    }
+
+    $evalJson = ConvertTo-JiraJsonValue $evalResults
+    $refusals = @(Get-JiraAdoptionAggregateRefusal -Items $evalJson | ConvertFrom-Json -Depth 100)
+    if ($refusals.Count -gt 0) {
+        foreach ($r in $refusals) {
+            [Console]::Error.WriteLine("feature: $($r.code): $($r.message)")
+        }
+        return (Get-JiraExitCode 'config')
+    }
+
+    # --- naming (FR-059/R9): the SAME key feeds Get-JiraTicketNumber ---------
+    $desigKey = Get-JiraFeatDesignatorNumberSource -ParentJson $parentJson -StoriesJson $storiesJson
+    $number = ''
+    $branchName = ''
+    if ($desigKey) {
+        $number = Get-JiraTicketNumber -Key $desigKey
+        $branchName = Expand-JiraBranchPattern -Pattern $Pattern -Id $number -FeatureName $bareSlug
+    }
+
+    # --- §3 step 15 (material) precedes 13-14 (record): FR-065 requires the
+    # scan to run "before it is handed to the drafting agent", and a BLOCK is
+    # zero writes of any kind, so the seed record must not be written before
+    # the scan clears.
+    function Get-FeatMaterialParent {
+        param($EntryFields)
+        $p = Get-FeatProp $EntryFields 'parent'
+        if (-not $p) { return $null }
+        $pf = Get-FeatProp $p 'fields'
+        return [ordered]@{
+            key     = [string](Get-FeatProp $p 'key')
+            summary = [string](Get-FeatProp $pf 'summary')
+            status  = [string](Get-FeatProp (Get-FeatProp $pf 'status') 'name')
+        }
+    }
+
+    $material = [System.Collections.Generic.List[object]]::new()
+    if ($pkey) {
+        $pentry = Get-JiraAdoption -Key $pkey | ConvertFrom-Json -Depth 100
+        $pfields = Get-FeatProp $pentry 'fields'
+        $material.Add([ordered]@{
+            role        = 'specification'; key = $pkey
+            summary     = [string](Get-FeatProp $pfields 'summary')
+            description = Get-JiraAdoptionDescriptionText (Get-FeatProp $pfields 'description')
+            status      = [string](Get-FeatProp (Get-FeatProp $pfields 'status') 'name')
+            parent      = (Get-FeatMaterialParent $pfields)
+        })
+    }
+    foreach ($s in $storiesArr) {
+        $skey2 = [string](Get-FeatProp $s 'key')
+        $sentry = Get-JiraAdoption -Key $skey2 | ConvertFrom-Json -Depth 100
+        $sfields = Get-FeatProp $sentry 'fields'
+        $material.Add([ordered]@{
+            role        = 'story'; key = $skey2
+            summary     = [string](Get-FeatProp $sfields 'summary')
+            description = Get-JiraAdoptionDescriptionText (Get-FeatProp $sfields 'description')
+            status      = [string](Get-FeatProp (Get-FeatProp $sfields 'status') 'name')
+            parent      = (Get-FeatMaterialParent $sfields)
+        })
+    }
+    $materialContent = ConvertTo-JiraJsonValue $material
+
+    # --- FR-065: the two-tier pre-write privacy guard, over the seed
+    # material, before it is handed to the drafting agent.
+    $allowlist = if ($env:SPEC_KIT_JIRA_ALLOWLIST) { $env:SPEC_KIT_JIRA_ALLOWLIST } else { '[]' }
+    $blockRc = Test-JiraPrivacyBlock -Payload $materialContent -KnownCoordinatesJson '[]' -AllowlistJson $allowlist
+    if ([int]$blockRc -ne 0) { return [int]$blockRc }
+
+    # --- §3 steps 13-14: slug + seed record -----------------------------------
+    # The material path is DETERMINISTIC (a sibling of the seed record,
+    # under the same state directory) rather than a fresh temp path: a
+    # random OS temp path in the emitted JSON would never be byte-identical
+    # across a conformance run's two ports (NFR-1/Constitution VI).
+    $seedMaterialPath = ''
+    if (-not $DryRun) {
+        # routing: the routed project, the declared types/terminal statuses
+        # moment 1 already resolved from config.yml, and the RESOLVED
+        # numeric type ids from config.local.yml (parent_type.id/
+        # child_type.id) — recorded so a resume (FR-062) can re-evaluate
+        # every refusal class from Jira alone, and so a free-text parent
+        # create (FR-023) has the type id it needs, without moment 2 ever
+        # opening config.yml/personal.yml/config.local.yml itself.
+        $localCfg = Get-CfgLocalObject
+        $resolvedIds = if ($localCfg.Contains('resolved_ids')) { $localCfg['resolved_ids'] } else { $null }
+        $localBinding = if ($resolvedIds -and $resolvedIds.Contains($EffProject)) { $resolvedIds[$EffProject] } else { $null }
+        $parentTypeId = if ($localBinding -and $localBinding.Contains('parent_type') -and $localBinding['parent_type'].Contains('id')) { [string]$localBinding['parent_type']['id'] } else { '' }
+        $childTypeId = if ($localBinding -and $localBinding.Contains('child_type') -and $localBinding['child_type'].Contains('id')) { [string]$localBinding['child_type']['id'] } else { '' }
+        $routingJson = ConvertTo-JiraJsonValue ([ordered]@{
+                project                     = $EffProject
+                declared_type_specification = (Get-JiraFeatDeclaredTypeFor -Role 'specification' -ProjectKey $EffProject -Merged $Merged)
+                declared_type_story         = (Get-JiraFeatDeclaredTypeFor -Role 'story' -ProjectKey $EffProject -Merged $Merged)
+                terminal_statuses_csv       = (Get-JiraFeatHaltedCsvFor -ProjectKey $EffProject -Merged $Merged)
+                parent_type_id              = $parentTypeId
+                child_type_id               = $childTypeId
+            })
+        $doc = New-JiraSeedStateDocument -Slug $shortName -DesignatorsJson $designatorsJson -PlanDigest '' -RoutingJson $routingJson -PlanSnapshotJson '[]'
+        Save-JiraSeedState -SpecPath $synthSpecPath -DocumentJson $doc
+        $configDir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
+        $seedMaterialPath = Join-Path $configDir "state/$shortName.seed-material.json"
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($seedMaterialPath, $materialContent, $utf8NoBom)
+    }
+
+    $ticketKeyOut = if ($desigKey) { $desigKey } else { $null }
+    $numOut = if ($desigKey) { $number } else { $null }
+    $branchOut = if ($desigKey) { $branchName } else { $null }
+    $action = if ($desigKey) { 'adopted' } else { 'none' }
+    $materialOut = if ($seedMaterialPath) { $seedMaterialPath } else { $null }
+
+    $payload = ConvertTo-JiraJsonValue ([ordered]@{
+        active = $true; team = $EffId
+        ticket = [ordered]@{ key = $ticketKeyOut; number = $numOut; action = $action }
+        branch_name = $branchOut; short_name = $shortName; override_used = $OverrideUsed; warnings = @()
+        seed_material = $materialOut
+    })
+    Write-FeatResult -Payload $payload -Json $Json
+    return 0
 }
 
 function Write-FeatResult {
@@ -113,6 +429,9 @@ function Invoke-JiraFeature {
     $dryRun = $state['dry_run'] -eq 'true'
     $useTeam = if ($state.ContainsKey('use_team')) { $state['use_team'] } else { '' }
     $argsLine = if ($state.ContainsKey('args')) { $state['args'] } else { '' }
+    $parentSeen = $state['parent_seen'] -eq 'true'
+    $parentRaw = if ($state.ContainsKey('parent')) { $state['parent'] } else { '' }
+    $storiesJoined = if ($state.ContainsKey('stories')) { $state['stories'] } else { '' }
 
     $dir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
 
@@ -204,6 +523,15 @@ function Invoke-JiraFeature {
 
     $slug = Get-JiraFeatureSlug -Description $desc
 
+    # (027, US1/US3): designators supplied ⇒ moment 1's seed-from-Jira path
+    # takes over ticket resolution and naming entirely. Byte-identical to
+    # the release below when neither flag is supplied (C-1, US5).
+    if ($parentSeen -or $storiesJoined) {
+        return (Invoke-JiraFeatSeedFromDesignator -Json $json -DryRun $dryRun -Description $desc -EffId $effId `
+                -EffProject $effProject -Prefix $prefix -Pattern $pattern -OverrideUsed $overrideUsed -Merged $merged `
+                -ParentSeen $parentSeen -ParentRaw $parentRaw -StoriesJoined $storiesJoined)
+    }
+
     # (5) Ticket resolution BEFORE naming.
     if (-not [string]::IsNullOrEmpty($ticketKey)) {
         # Mentioned key: validate (read). A fail-closed read never falls back.
@@ -286,4 +614,5 @@ function Invoke-JiraFeature {
     return 0
 }
 
-Export-ModuleMember -Function Invoke-JiraFeature
+Export-ModuleMember -Function Invoke-JiraFeature, Get-JiraFeatDesignatorNumberSource, Get-JiraFeatResolvedSlug, `
+    Invoke-JiraFeatSeedFromDesignator

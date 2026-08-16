@@ -215,3 +215,15 @@ zero-churn guarantee as any other settled ticket.
   absence of errors.
 - A forced reinstall preserves the team config and re-registers the seven events
   without duplicating them.
+- `/speckit.jira.seed` is a **command**, not one of the seven hook events above
+  — a confirmation prompt cannot live in a lifecycle hook, so it does not
+  appear in `.specify/extensions.yml`'s `hooks:` block. Confirm it is
+  reachable instead by checking `provides.commands` in the extension's own
+  manifest, or simply invoking it directly:
+
+  ```sh
+  bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh seed --help
+  ```
+
+  See the README's "Seeding a specification from existing Jira issues" for
+  the ceremony itself.

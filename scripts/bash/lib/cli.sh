@@ -84,10 +84,12 @@ cli_parse() {
   local -a positional=() styles=() enable_hooks=() child_types=() issue_types=()
   local -a field_defaults=() field_values=()
   local -a task_mirrors=()
+  local parent_seen=false parent="" confirm=false
+  local -a stories=()
 
   while (($#)); do
     case "$1" in
-      config | reconcile | mention | feature)
+      config | reconcile | mention | feature | seed)
         if [[ -z "${command}" ]]; then command="$1"; else positional+=("$1"); fi
         ;;
       --dry-run) dry_run=true ;;
@@ -221,6 +223,40 @@ cli_parse() {
           enable_hooks+=("$1")
         fi
         ;;
+      --parent)
+        # 027, contract seed-cli-contract.md §2: at most once — key, URL, or
+        # free text (may contain spaces). `parent_seen` is recorded
+        # separately from `parent` because FR-055 requires a blank value and
+        # an absent flag to differ — and it is also what makes the
+        # at-most-once check below correct for a blank first value, which a
+        # `-n "${parent}"` test would wave through.
+        if [[ "${parent_seen}" == true ]]; then
+          error="--parent may be supplied at most once (--parent <designator>)"
+        elif [[ $# -lt 2 ]]; then
+          error="--parent requires a value (--parent <designator>)"
+        else
+          shift
+          parent_seen=true
+          parent="$1"
+        fi
+        ;;
+      --story)
+        # 027, contract seed-cli-contract.md §2: repeatable, argv order is
+        # normative (FR-054). \x1f-joined, not space-joined — a free-text
+        # value never occurs here, but the shared accumulator shape is kept
+        # for consistency with --parent's stream.
+        if [[ $# -lt 2 ]]; then
+          error="--story requires a value (--story <designator>)"
+        else
+          shift
+          stories+=("$1")
+        fi
+        ;;
+      --confirm)
+        # 027, contract seed-cli-contract.md §2: `seed` only, at most once —
+        # passes the confirmation gate.
+        confirm=true
+        ;;
       --on-drift=*)
         on_drift="${1#*=}"
         if [[ "${on_drift}" != abort && "${on_drift}" != proceed ]]; then
@@ -281,6 +317,14 @@ cli_parse() {
     IFS=' '
     printf '%s' "${task_mirrors[*]-}"
   )"
+  # \x1f-joined (027, contract seed-cli-contract.md §2): a --story value is
+  # never expected to carry a space, but the accumulator uses the same
+  # separator as --parent's stream for a single shared idiom.
+  local stories_joined
+  stories_joined="$(
+    IFS=$'\x1f'
+    printf '%s' "${stories[*]-}"
+  )"
 
   printf 'command=%s\n' "${command}"
   printf 'dry_run=%s\n' "${dry_run}"
@@ -297,6 +341,10 @@ cli_parse() {
   printf 'field_defaults=%s\n' "${field_defaults_joined}"
   printf 'field_values=%s\n' "${field_values_joined}"
   printf 'task_mirrors=%s\n' "${task_mirrors_joined}"
+  printf 'parent_seen=%s\n' "${parent_seen}"
+  printf 'parent=%s\n' "${parent}"
+  printf 'stories=%s\n' "${stories_joined}"
+  printf 'confirm=%s\n' "${confirm}"
   printf 'accept_defaults=%s\n' "${accept_defaults}"
   printf 'args=%s\n' "${args_joined}"
   printf 'exit=%s\n' "${EXIT_OK}"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # T007 [026] — the derivation of contracts/surface-derivation.md §2 yields
-# exactly the installable surface: 87 files, containing the manifest, both
-# ports' entry points and all three command documents, and nothing under any
+# exactly the installable surface: 98 files, containing the manifest, both
+# ports' entry points and all four command documents, and nothing under any
 # development-only directory.
 
 setup() {
@@ -10,14 +10,14 @@ setup() {
   source "${ROOT}/packaging/lib/surface.sh"
 }
 
-@test "the derived surface has exactly 87 members (quickstart.md step 1)" {
+@test "the derived surface has exactly 98 members (quickstart.md step 1)" {
   run packaging_derive_surface
   [ "$status" -eq 0 ]
   count="$(printf '%s\n' "$output" | grep -c .)"
-  [ "${count}" -eq 87 ]
+  [ "${count}" -eq 98 ]
 }
 
-@test "the derived surface contains the manifest, both entry points and the three command documents" {
+@test "the derived surface contains the manifest, both entry points and the four command documents" {
   run packaging_derive_surface
   [ "$status" -eq 0 ]
   [[ "$output" == *$'\nextension.yml'* || "$output" == 'extension.yml'* ]]
@@ -27,6 +27,7 @@ setup() {
   grep -qxF 'commands/speckit.jira.config.md' <<< "$output"
   grep -qxF 'commands/speckit.jira.feature.md' <<< "$output"
   grep -qxF 'commands/speckit.jira.reconcile.md' <<< "$output"
+  grep -qxF 'commands/speckit.jira.seed.md' <<< "$output"
 }
 
 @test "the derived surface contains nothing under a development-only directory" {
@@ -52,10 +53,10 @@ setup() {
   # reading them under the caller's locale; under en_US.UTF-8 that mismatch
   # makes `comm` treat both inputs as unsorted and it silently stops
   # excluding anything, so the derived surface becomes every tracked file
-  # instead of the 87-file surface (SC-004, C2.1).
+  # instead of the 98-file surface (SC-004, C2.1).
   if ! locale -a 2> /dev/null | grep -qxF 'en_US.UTF-8'; then
     skip "en_US.UTF-8 locale is not installed on this host"
   fi
   count="$(LC_ALL=en_US.UTF-8 bash -c "source '${ROOT}/packaging/lib/surface.sh'; packaging_derive_surface | grep -c .")"
-  [ "${count}" -eq 87 ]
+  [ "${count}" -eq 98 ]
 }

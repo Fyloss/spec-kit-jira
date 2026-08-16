@@ -187,3 +187,116 @@ teardown() {
   [ "$(cat "${JIRA_CONFIG_DIR}/config.local.yml")" = "${before_cfg}" ]
   [ "$(cat "${SPEC_KIT_JIRA_EXTENSIONS_YML}")" = "${before_hooks}" ]
 }
+
+@test "027: seeding from real issues, then a second reconcile, issues zero writes of every write kind this feature adds" {
+  require_live
+  # shellcheck source=/dev/null
+  source "${CMD_DIR}/reconcile.sh"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/bash/lib/seed_state.sh"
+  # shellcheck source=/dev/null
+  source "${CMD_DIR}/seed.sh"
+  export JIRA_CONFIG_DIR="${WORK}/.specify/jira"
+  mkdir -p "${JIRA_CONFIG_DIR}"
+  export SPEC_KIT_JIRA_REPO="live/scratch"
+  export SPEC_KIT_JIRA_SPEC_SLUG="live-seed-source"
+
+  # (1) Materialise a REAL parent + story to seed from, via the
+  # already-proven reconcile path (SC-001 above) — a fresh specification,
+  # never seeded itself.
+  local source_spec="${WORK}/source-spec.md"
+  printf '%s\n' \
+    '# Feature Specification: Live Seed Source' '' 'The issue-content this test seeds from.' '' \
+    '### User Story 1 - The seeded story (Priority: P1)' '' \
+    '- **Given** a user' '- **When** they act' '- **Then** it works' \
+    > "${source_spec}"
+  local materialised
+  materialised="$(cmd_reconcile reconcile --json "${source_spec}")"
+  [ "$(jq -r '.counts.created' <<< "${materialised}")" -eq 2 ]
+  local source_parent_key source_story_key
+  source_parent_key="$(grep -oE 'speckit-jira spec=[0-9a-f]{16} ticket=[A-Z][A-Z0-9_]*-[1-9][0-9]*' "${source_spec}" | grep -oE '[A-Z][A-Z0-9_]*-[1-9][0-9]*')"
+  source_story_key="$(grep -oE 'speckit-jira story=[0-9a-f]{16} ticket=[A-Z][A-Z0-9_]*-[1-9][0-9]*' "${source_spec}" | grep -oE '[A-Z][A-Z0-9_]*-[1-9][0-9]*')"
+  [ -n "${source_parent_key}" ]
+  [ -n "${source_story_key}" ]
+
+  # (2) Seed a SECOND, unrelated specification by adopting that real parent
+  # and story — proving the identity-stamp and parent-link write kinds
+  # against a real instance, not the mock.
+  local seed_spec="${WORK}/seed-spec.md"
+  local designators
+  designators="$(jq -cn --arg p "${source_parent_key}" --arg s "${source_story_key}" \
+    '[{role:"specification",form:"key",key:$p,raw:$p,position:0},{role:"story",form:"key",key:$s,raw:$s,position:0}]')"
+  local routing
+  routing="$(jq -cn --arg proj "${SPEC_KIT_JIRA_PROJECT_KEY}" '{project:$proj, declared_type_specification:"", declared_type_story:"", terminal_statuses_csv:""}')"
+  local doc
+  doc="$(seed_state_compose "live-seed-spec" "${designators}" "" "${routing}" "[]")"
+  seed_state_write "${seed_spec}" "${doc}"
+  printf '%s\n\n### User Story 1 - The seeded story (Priority: P1)\n<!-- speckit-jira pin=%s -->\n\nSeeded body.\n' \
+    "# Feature" "${source_story_key}" > "${seed_spec}"
+
+  local bound
+  bound="$(cmd_seed seed "${seed_spec}" --confirm --json)"
+  [ "$(jq -r '.bindings | length' <<< "${bound}")" -eq 2 ]
+  [ "$(jq -r '[.bindings[] | select(.role=="parent")][0].origin' <<< "${bound}")" = "human" ]
+
+  # (3) A second reconcile of this now-bound, unchanged specification issues
+  # ZERO writes of every kind — the identity stamp and the parent-link both
+  # already exist and are recognised, not re-applied.
+  run cmd_reconcile reconcile --json "${seed_spec}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.counts.created' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.actions | length' <<< "$output")" -eq 0 ]
+}
+
+@test "027: creating a parent from free text, then a second reconcile, issues zero writes" {
+  require_live
+  # shellcheck source=/dev/null
+  source "${CMD_DIR}/reconcile.sh"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/bash/lib/seed_state.sh"
+  # shellcheck source=/dev/null
+  source "${CMD_DIR}/seed.sh"
+  export JIRA_CONFIG_DIR="${WORK}/.specify/jira"
+  mkdir -p "${JIRA_CONFIG_DIR}"
+  export SPEC_KIT_JIRA_REPO="live/scratch"
+  export SPEC_KIT_JIRA_SPEC_SLUG="live-create-parent"
+
+  local create_spec="${WORK}/create-parent-spec.md"
+  local designators
+  designators="$(jq -cn '[{role:"specification",form:"free_text",raw:"Live seed parent-create",text:"Live seed parent-create",position:0}]')"
+  # The type id must be resolved for real against the scratch project's own
+  # config.local.yml in a live run — SPEC_KIT_JIRA_PROJECT_KEY alone is not
+  # enough for a CREATE, only for reconcile's routing override. A real run
+  # of this test needs /speckit.jira.config to have bound the scratch
+  # project first, and its resolved specification-role type id read from
+  # config.local.yml here rather than hand-supplied.
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/bash/lib/config.sh"
+  local ptid
+  ptid="$(jq -r --arg k "${SPEC_KIT_JIRA_PROJECT_KEY}" '.resolved_ids[$k].parent_type.id // empty' \
+    <<< "$(_cfg_local_json "${JIRA_CONFIG_DIR}" 2> /dev/null)" 2> /dev/null)"
+  [ -n "${ptid}" ] || skip "config.local.yml not bound for ${SPEC_KIT_JIRA_PROJECT_KEY} — run /speckit.jira.config against the scratch project first"
+  local routing
+  routing="$(jq -cn --arg proj "${SPEC_KIT_JIRA_PROJECT_KEY}" --arg ptid "${ptid}" \
+    '{project:$proj, declared_type_specification:"", declared_type_story:"", terminal_statuses_csv:"", parent_type_id:$ptid}')"
+  local doc
+  doc="$(seed_state_compose "live-create-parent" "${designators}" "" "${routing}" "[]")"
+  seed_state_write "${create_spec}" "${doc}"
+  printf '# Feature\n\nA brand-new parent, created from free text.\n' > "${create_spec}"
+
+  local bound
+  bound="$(cmd_seed seed "${create_spec}" --confirm --json)"
+  [ "$(jq -r '.bindings | length' <<< "${bound}")" -eq 1 ]
+  [ "$(jq -r '.bindings[0].origin' <<< "${bound}")" = "bridge" ]
+  local created_key
+  created_key="$(jq -r '.bindings[0].key' <<< "${bound}")"
+  [ -n "${created_key}" ]
+
+  # A second reconcile of this now-bound specification issues zero writes —
+  # the created parent's identity and content are recognised, not re-created.
+  run cmd_reconcile reconcile --json "${create_spec}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.counts.created' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
+}

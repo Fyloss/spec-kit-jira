@@ -263,3 +263,82 @@ the identifier assignment all run identically in both modes; only the HTTP
 calls and the on-disk marker write are suppressed. A test for each write
 operation runs `--dry-run` and then the real run against the same state and
 asserts the two action sets are identical.
+
+## Seeding from named issues — the pinning marker and the seeded-not-bound state (027)
+
+Seeding a specification from existing Jira issues is the one deliberate,
+narrowly-scoped exception to "the filesystem is written first, Jira read
+second": the operator names issues whose human-authored content becomes
+`spec.md`'s draft. Everything after the draft exists follows the same
+safety model as the rest of the mirror — write locally first, stamp Jira
+immediately after, never batch.
+
+### The pinning marker — an intention, not yet a binding
+
+While drafting, the agent places a **pinning marker** immediately after each
+named user story's heading:
+
+```markdown
+<!-- speckit-jira pin=PROJ-142 -->
+```
+
+Unlike the story marker above, a pinning marker carries no identifier of its
+own — it names the designated key directly, because nothing has been created
+or stamped yet. It expresses only the agent's *intention* to bind that story
+to that issue; `speckit.jira.seed` validates it deterministically (one marker
+per designated key, one designated key per marker, in designator order) before
+any Jira interaction, and only replaces it with the real story marker **after**
+the operator has confirmed the write plan.
+
+### The seeded-not-bound state — the record that makes a decline safe
+
+```mermaid
+stateDiagram-v2
+    [*] --> absent: no designators supplied — the ordinary ceremony
+    absent --> seeded_not_bound: moment 1 records designators + bindings:[]<br/>zero Jira mutations
+    seeded_not_bound --> seeded_not_bound: decline, or an unattended run —<br/>the record is rewritten with the freshly rendered plan_digest,<br/>so a LATER resume can show what changed
+    seeded_not_bound --> bound: --confirm — each item stamped and recorded<br/>immediately, never batched; the record is then deleted
+    seeded_not_bound --> seeded_not_bound: a refusal on resume (REF-DRAFT-EDIT,<br/>REF-TERMINAL, REF-ROUTING, ...) leaves the state untouched
+
+    note right of seeded_not_bound
+        Recorded explicitly — never inferred from
+        "pins present, no identity", which is also
+        what a crash mid-draft looks like.
+    end note
+```
+
+The record's absence is exactly as informative as its presence:
+
+| On disk | State |
+| --- | --- |
+| Record present, pins present, no identity marker | Seeded-not-bound — resume at the gate |
+| No record, folder present, no identity marker | Crashed mid-draft — `REF-EXISTS`, fail closed |
+| No record, identity marker present | Bound — ordinary reconcile territory from here on |
+
+A **partial** `--confirm` run follows the same stamp-then-record discipline
+the story marker already established: a story whose marker has already become
+`story=ID ticket=KEY` is excluded from re-validation and re-binding on the
+next invocation, exactly as a partially-created ticket is recognised and
+skipped elsewhere in the mirror. Creating a **free-text** parent uses the same
+`creating` fail-closed window as any other created ticket (see the state
+diagram above) — the marker is written before the POST, so an interruption
+between the two is visible on the next invocation rather than silently
+retried into a duplicate.
+
+### The re-parenting disclosure
+
+Re-parenting — moving a named story off a parent the operator did not
+designate — is the one write in this feature that changes an artifact the
+operator did not name. Its write-plan line is rendered with a literal `! `
+in column 1, the only line that starts there, so it cannot be skimmed past:
+
+```
+  adopt      PROJ-11  story          Accept a partial payment
+! reparent   PROJ-11  from PROJ-99 "Q3 payments" [In Progress] - loses 2 children
+```
+
+It fires only when the operator designated a parent (an existing one to
+adopt, or a free-text one to create) — never in a run that left the
+specification role undesignated. In that case, a named story already sitting
+under some other parent is disclosed, not moved: a **scatter note**, in both
+the provenance report and the run's warnings, at exit `0` and zero writes.
