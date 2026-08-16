@@ -211,7 +211,9 @@ jira_request() {
       break
     fi
 
+    # shellcheck disable=SC2034 # read by identity.sh/plan_apply.sh/recognition.sh, sourced into this same process (see the declarations above)
     JIRA_LAST_STATUS="${http_code}"
+    # shellcheck disable=SC2034 # same as JIRA_LAST_STATUS above
     JIRA_LAST_ERROR_BODY="$(cat "${respfile}" 2> /dev/null)"
     case "${http_code}" in
       2*)
