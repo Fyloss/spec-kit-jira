@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (188)" {
+@test "the conformance corpus has exactly the recorded scenario count (190)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -140,8 +140,12 @@ setup() {
   # 027 (Convergence, T161) adds one: us027-team-managed — FR-014's "identical
   # for team-managed and company-managed" binding a parent and a story on a
   # team_managed project, proven byte-identical across ports (187 -> 188).
+  # 028 adds two: us028-template-form-ac (T016, FR-017/SC-007's two-run
+  # cross-port proof for the template's own emphasised single-line and
+  # wrapped Given/When/Then forms) and us028-template-form-ac-dry-run (T028,
+  # FR-019's dry-run sibling) (188 -> 190).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 188 ]
+  [ "${count}" -eq 190 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

@@ -26,6 +26,11 @@ source "${_parse_dir}/spec_marker.sh" # the parent identifier's grammar (Phase 5
 # shellcheck source=/dev/null
 source "${_parse_dir}/markdown.sh" # the Markdown subset tokenizer (016, contracts/markdown-subset.md)
 
+# The emphasis-wrapper token (contract clause-recognition.md §1): optional,
+# and shared by every recogniser in this file so there is one definition to
+# keep symmetric rather than a copy per recogniser.
+_PARSE_KW_WRAP='(\*\*|__|\*|_)?'
+
 # _parse_strip_marker_lines — remove every speckit-jira marker attempt line
 # (story= or spec=, valid or malformed — contract "Reading rules" #2) from
 # the document on stdin, so it never lands in a title, description,
@@ -218,6 +223,51 @@ parse_description_blocks() {
   jq -cn --argjson b "${kept}" '{blocks:$b}' | json_canonical
 }
 
+# _parse_ac_opens_kw <marker-stripped-trimmed-line> — true when the line
+# begins with an (optionally wrapped) Given/When/Then/And/But keyword
+# (contract §3 conditions 1 and 4 share this one check).
+_parse_ac_opens_kw() {
+  [[ "$1" =~ ^${_PARSE_KW_WRAP}([Gg]iven|[Ww]hen|[Tt]hen|[Aa]nd|[Bb]ut)${_PARSE_KW_WRAP}[[:space:]] ]]
+}
+
+# _parse_ac_join_continuations <doc> — contract §3: join an indented
+# continuation line into the logical (scenario) line above it, before any
+# clause classification runs. A raw line joins exactly when all five
+# conditions hold; a blank line always ends the current logical line. Pure
+# bash string operations — no external process (FR-021, research §R7). On
+# input with no continuation lines this is the identity function.
+_parse_ac_join_continuations() {
+  local doc="$1" line
+  local -a out=()
+  local buf="" buf_active=0 prev_opened=0
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    local t; t="$(_parse_trim "${line}")"
+    if [[ -z "${t}" ]]; then
+      ((buf_active)) && out+=("${buf}")
+      buf=""; buf_active=0; prev_opened=0
+      continue
+    fi
+    local stripped; stripped="$(_parse_strip_marker "${t}")"
+    local opens_kw=0; _parse_ac_opens_kw "${stripped}" && opens_kw=1
+    local is_list_or_heading=0
+    [[ "${t}" =~ ^([-*]|[0-9]+\.)[[:space:]] || "${t}" =~ ^# ]] && is_list_or_heading=1
+    local has_leading_ws=0
+    [[ "${line}" =~ ^[[:space:]] ]] && has_leading_ws=1
+
+    if ((buf_active)) && ((prev_opened)) && ((has_leading_ws)) && ((! opens_kw)) && ((! is_list_or_heading)); then
+      buf="${buf} ${t}"
+    else
+      ((buf_active)) && out+=("${buf}")
+      buf="${line}"
+      buf_active=1
+      prev_opened=${opens_kw}
+    fi
+  done <<< "${doc}"
+  ((buf_active)) && out+=("${buf}")
+  printf '%s\n' "${out[@]}"
+}
+
 # parse_acceptance_criteria — extract Given/When/Then scenarios (FR 015) as a
 # JSON array of {given[],when[],then[]}, each clause an inline sequence
 # (data-model.md §3, feature 016 — this replaces the crude global asterisk
@@ -228,6 +278,7 @@ parse_description_blocks() {
 parse_acceptance_criteria() {
   local doc line
   doc="$(cat)"
+  doc="$(_parse_ac_join_continuations "${doc}")"
 
   local -a scenario_json=()
   local -a given_items=() when_items=() then_items=()
@@ -271,23 +322,30 @@ parse_acceptance_criteria() {
     # first-keyword split. The regex lives in a variable (the reliable way to
     # feed ERE to bash =~). Tolerates an emphasised keyword ("**Given**") the
     # same way the one-clause-per-line branch below does.
-    if [[ "${t}" =~ [Gg]iven(\*\*|__|\*|_)?[[:space:]] ]] && [[ "${t}" =~ [Ww]hen(\*\*|__|\*|_)?[[:space:]] ]] && [[ "${t}" =~ [Tt]hen(\*\*|__|\*|_)?[[:space:]] ]]; then
+    if [[ "${t}" =~ ${_PARSE_KW_WRAP}[Gg]iven${_PARSE_KW_WRAP}[[:space:]] ]] && [[ "${t}" =~ ${_PARSE_KW_WRAP}[Ww]hen${_PARSE_KW_WRAP}[[:space:]] ]] && [[ "${t}" =~ ${_PARSE_KW_WRAP}[Tt]hen${_PARSE_KW_WRAP}[[:space:]] ]]; then
       _parse_ac_flush
-      local rest gv wv tv
-      local trip_re='[Gg]iven(\*\*|__|\*|_)?[[:space:]]+(.+)[,;][[:space:]]*[Ww]hen(\*\*|__|\*|_)?[[:space:]]+(.+)[,;][[:space:]]*[Tt]hen(\*\*|__|\*|_)?[[:space:]]+(.+)$'
+      local gv wv tv
+      # T1, delimited (contract §2): wrapper optional on BOTH sides of every
+      # keyword (§1's symmetry). Group indices: wrap-before, wrap-after,
+      # content — per keyword, so content lands at 3, 6, 9.
+      local trip_re="${_PARSE_KW_WRAP}[Gg]iven${_PARSE_KW_WRAP}[[:space:]]+(.+)[,;][[:space:]]*${_PARSE_KW_WRAP}[Ww]hen${_PARSE_KW_WRAP}[[:space:]]+(.+)[,;][[:space:]]*${_PARSE_KW_WRAP}[Tt]hen${_PARSE_KW_WRAP}[[:space:]]+(.+)$"
+      # T2, delimiter-free (contract §2): same symmetry, whitespace-separated,
+      # greedy — the last When wins (research §R3), matching the PowerShell port.
+      local pair_re="${_PARSE_KW_WRAP}[Gg]iven${_PARSE_KW_WRAP}[[:space:]]+(.+)[[:space:]]+${_PARSE_KW_WRAP}[Ww]hen${_PARSE_KW_WRAP}[[:space:]]+(.+)[[:space:]]+${_PARSE_KW_WRAP}[Tt]hen${_PARSE_KW_WRAP}[[:space:]]+(.+)$"
       if [[ "${t}" =~ ${trip_re} ]]; then
-        gv="${BASH_REMATCH[2]}"
-        wv="${BASH_REMATCH[4]}"
-        tv="${BASH_REMATCH[6]}"
+        gv="${BASH_REMATCH[3]}"
+        wv="${BASH_REMATCH[6]}"
+        tv="${BASH_REMATCH[9]}"
+      elif [[ "${t}" =~ ${pair_re} ]]; then
+        gv="${BASH_REMATCH[3]}"
+        wv="${BASH_REMATCH[6]}"
+        tv="${BASH_REMATCH[9]}"
       else
-        # Delimiter-free fallback: unadorned keywords only (the comma/
-        # semicolon form above is the one the corpus and contract exercise
-        # with an emphasised keyword).
-        rest="${t#*[Gg]iven }"
-        gv="${rest%%[Ww]hen *}"
-        rest="${rest#*[Ww]hen }"
-        wv="${rest%%[Tt]hen *}"
-        tv="${rest#*[Tt]hen }"
+        # T3, fail closed (contract §2): neither pattern matched — emit
+        # nothing. No glob-strip fallback survives here (research §R2); a
+        # glob strip that fails to match returns its input unchanged, which
+        # is the whole cause of the threefold repetition this replaces.
+        continue
       fi
       given_items=("$(markdown_tokenize_inline "$(_parse_trim "${gv}")")")
       when_items=("$(markdown_tokenize_inline "$(_parse_trim "${wv}")")")
@@ -301,15 +359,14 @@ parse_acceptance_criteria() {
     # crude global asterisk strip this replaces, everything else in the
     # clause (including a `**user**` further along) reaches the tokenizer
     # with its markdown intact.
-    local kw_wrap='(\*\*|__|\*|_)?'
-    if [[ "${t}" =~ ^${kw_wrap}[Gg]iven${kw_wrap}[[:space:]]+(.+)$ ]]; then
+    if [[ "${t}" =~ ^${_PARSE_KW_WRAP}[Gg]iven${_PARSE_KW_WRAP}[[:space:]]+(.+)$ ]]; then
       ((${#then_items[@]} > 0)) && _parse_ac_flush
       given_items+=("$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")"); last="g"
-    elif [[ "${t}" =~ ^${kw_wrap}[Ww]hen${kw_wrap}[[:space:]]+(.+)$ ]]; then
+    elif [[ "${t}" =~ ^${_PARSE_KW_WRAP}[Ww]hen${_PARSE_KW_WRAP}[[:space:]]+(.+)$ ]]; then
       when_items+=("$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")"); last="w"
-    elif [[ "${t}" =~ ^${kw_wrap}[Tt]hen${kw_wrap}[[:space:]]+(.+)$ ]]; then
+    elif [[ "${t}" =~ ^${_PARSE_KW_WRAP}[Tt]hen${_PARSE_KW_WRAP}[[:space:]]+(.+)$ ]]; then
       then_items+=("$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")"); last="t"
-    elif [[ "${t}" =~ ^${kw_wrap}([Aa]nd|[Bb]ut)${kw_wrap}[[:space:]]+(.+)$ ]]; then
+    elif [[ "${t}" =~ ^${_PARSE_KW_WRAP}([Aa]nd|[Bb]ut)${_PARSE_KW_WRAP}[[:space:]]+(.+)$ ]]; then
       local v; v="$(_parse_trim "${BASH_REMATCH[4]}")"
       case "${last}" in
         g) given_items+=("$(markdown_tokenize_inline "${v}")") ;;

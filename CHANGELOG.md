@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A scenario written the spec-kit template's own way —
+  `1. **Given** …, **When** …, **Then** …` on one line — reached the ticket as
+  three copies of the whole unsplit line, each opening with a stuttered
+  `Given **Given** …`/`When **When** …`/`Then **Then** …` keyword. The
+  clause recogniser accepted the emphasis wrapper (`**`/`__`/`*`/`_`) only
+  *after* each keyword and never *before* it, and only on the one-clause-
+  per-line path; the single-line triple recogniser's delimiter-free fallback
+  then fell back to a glob strip that silently returns its input unchanged
+  when it fails to match, assigning the entire line to `given`, `when`, and
+  `then` alike. The two ports diverged on the same input: the bash port
+  triplicated the line, the PowerShell port dropped the scenario and
+  returned an empty panel — a live Constitution VI divergence, since no
+  existing conformance fixture exercised the template's own default form.
+  Fixed identically in both ports: the wrapper is now optional on both sides
+  of every keyword, and a line that cannot be split cleanly emits no
+  scenario rather than guessing (fail-closed). A scenario wrapped across
+  several indented lines — the form every specification in this repository
+  actually uses — is now also read as one scenario instead of an empty
+  panel. The renderer (`_adf_gherkin_panel` and its PowerShell twin) was not
+  touched; the stutter was entirely a parser defect.
+
 ## [0.18.0] - 2026-08-15
 
 ### Added
