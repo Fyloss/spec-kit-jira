@@ -119,19 +119,19 @@ mindmap
         P1 P2 P3 priority
         declared estimation
       markdown
-        Markdown subset -> neutral blocks and spans
+        Markdown subset → neutral blocks and spans
         source-format knowledge, not Jira knowledge
-        no Atlassian identifiers (Gate #2)
+        no Atlassian identifiers — Gate 2
       interchange
         schema validation before any write
       story_marker
         durable story identifier
         byte-preserving splice into spec.md
       task_marker
-        durable task identifier (012)
+        durable task identifier — 012
         byte-preserving splice into tasks.md
       tasks_parse
-        neutral tasks.md reader (012)
+        neutral tasks.md reader — 012
         checkbox, reference, story attribution
         never a Jira identifier, never a sub-task type
       drift
@@ -140,7 +140,7 @@ mindmap
         zero-churn diff
       managed_section
         marker-delimited byte splice
-        ownership decision — self, other or unknown, opaque to the sink (019)
+        ownership decision — self, other or unknown, opaque to the sink, 019
       naming
         slug and branch pattern and short name
     sink
@@ -154,11 +154,11 @@ mindmap
         entity-property identity marker
       recognition
         reads recorded tickets back by key
-        consults the prefetch map first (021), falls back to its own GET unchanged
-      prefetch (021)
-        one POST bulkfetch, up to 100 keys, key -> issue map
+        consults the 021 prefetch map first, falls back to its own GET unchanged
+      prefetch — 021
+        one POST bulkfetch, up to 100 keys, key → issue map
         can only remove individual reads, never change an outcome
-      transitions (023)
+      transitions — 023
         one GET per due ticket, available moves by destination NAME
         resolve: move, ambiguous, gated, or unreachable — never invented
       ticket
@@ -175,9 +175,9 @@ mindmap
       credentials
       output canonical JSON
       prereq
-      timing (021)
+      timing — 021
         phase marks, request counter, clock strategy
-      run_state (021)
+      run_state — 021
         compose, compare, record the run-state document
     hooks
       register_hooks reader

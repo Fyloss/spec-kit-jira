@@ -149,7 +149,7 @@ sequenceDiagram
     M2->>M2: validate pins (REF-DECOMP / REF-DRAFT-EDIT)
     M2-->>Agent: write plan + provenance (confirmation_required)
     Note over M2,Jira: zero mutations — the gate
-    Agent->>Agent: relay the plan; ask the operator
+    Agent->>Agent: relay the plan, then ask the operator
     Agent->>M2: seed spec.md --confirm --json
     M2->>Jira: bind / create / re-parent, per-item, stamp-then-record
     M2-->>Agent: bindings
