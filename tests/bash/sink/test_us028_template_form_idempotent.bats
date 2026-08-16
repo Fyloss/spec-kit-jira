@@ -28,7 +28,7 @@ setup() {
   export JIRA_EMAIL="user@example.com"
   export JIRA_API_TOKEN="RAWSECRETXYZ"
   export JIRA_NO_SLEEP=1
-  export SPEC_KIT_JIRA_ID_SOURCE="aaaaaaaaaaaaaaaa 1111111111111111 2222222222222222"
+  export SPEC_KIT_JIRA_ID_SOURCE="aaaaaaaaaaaaaaaa 1111111111111111 2222222222222222 3333333333333333 4444444444444444"
   unset SPEC_KIT_JIRA_PLAN_CONTEXT SPEC_KIT_JIRA_LIFECYCLE SPEC_KIT_JIRA_HOOK_CONTEXT
 }
 
@@ -42,7 +42,7 @@ teardown() {
 
   run cmd_reconcile reconcile "${SPEC}" --json
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.counts.created' <<< "$output")" -eq 3 ]
+  [ "$(jq -r '.counts.created' <<< "$output")" -eq 5 ]
 
   run cmd_reconcile reconcile "${SPEC}" --json
   [ "$status" -eq 0 ]

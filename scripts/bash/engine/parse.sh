@@ -299,8 +299,24 @@ parse_acceptance_criteria() {
   # array, joined ONCE at the very end (below) — never a `. + [$v]` jq
   # re-parse-and-append per scenario, the same O(n) spawns / O(n²) data
   # pattern T026/T030 fixed elsewhere.
+  #
+  # 029, T035, fail closed (FR-005, FR-022, US4 AC3): a scenario is emitted
+  # only when it reaches a Then AND both given and when are non-empty.
+  # Refusing an incomplete Given/When on a bare `_parse_trim` is not enough:
+  # the trigger measured across this repository's own specs (59/554
+  # scenarios, 22/24 files) is a wrap that lands the continuation just
+  # before **Then** — the continuation line itself opens with a keyword
+  # (contract §3 condition 4 correctly refuses to join it), so the triple
+  # detector never fires and L1/L2's rest-capture (no early stop at an
+  # embedded keyword) swallows the next clause's own keyword and text
+  # whole, leaving the bucket that keyword belongs to empty. The
+  # unconditional flush below is what stops that swallowed state from then
+  # bleeding into an UNRELATED following scenario: without it, a new Given
+  # arriving while the prior (incomplete) scenario's given/when arrays are
+  # non-empty but then is still empty silently appends onto them instead of
+  # starting fresh, merging two authored scenarios into one.
   _parse_ac_flush() {
-    if ((${#then_items[@]} > 0)); then
+    if ((${#then_items[@]} > 0)) && ((${#given_items[@]} > 0)) && ((${#when_items[@]} > 0)); then
       local g w t
       g="$(_parse_ac_join "${given_items[@]}")"
       w="$(_parse_ac_join "${when_items[@]}")"
@@ -360,7 +376,11 @@ parse_acceptance_criteria() {
     # clause (including a `**user**` further along) reaches the tokenizer
     # with its markdown intact.
     if [[ "${t}" =~ ^${_PARSE_KW_WRAP}[Gg]iven${_PARSE_KW_WRAP}[[:space:]]+(.+)$ ]]; then
-      ((${#then_items[@]} > 0)) && _parse_ac_flush
+      # 029, T035: flush unconditionally, not only when a Then was reached —
+      # an incomplete prior scenario (given/when populated, then still
+      # empty because its own Then was swallowed into a rest-capture) must
+      # be discarded here, never merged into the new one about to start.
+      (( ${#given_items[@]} > 0 || ${#when_items[@]} > 0 || ${#then_items[@]} > 0 )) && _parse_ac_flush
       given_items+=("$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")"); last="g"
     elif [[ "${t}" =~ ^${_PARSE_KW_WRAP}[Ww]hen${_PARSE_KW_WRAP}[[:space:]]+(.+)$ ]]; then
       when_items+=("$(markdown_tokenize_inline "$(_parse_trim "${BASH_REMATCH[3]}")")"); last="w"

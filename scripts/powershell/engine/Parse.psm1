@@ -276,8 +276,24 @@ function Get-JiraParsedAcceptance {
     # stay a one-element ARRAY, or given/when/then's per-clause value
     # collapses from `[[{...}]]` to `[{...}]`.
 
+    # 029, T035, fail closed (FR-005, FR-022, US4 AC3): a scenario is emitted
+    # only when it reaches a Then AND both given and when are non-empty.
+    # Refusing an incomplete Given/When on a bare Trim() is not enough: the
+    # trigger measured across this repository's own specs (59/554
+    # scenarios, 22/24 files) is a wrap that lands the continuation just
+    # before **Then** — the continuation line itself opens with a keyword
+    # (contract §3 condition 4 correctly refuses to join it), so the triple
+    # detector never fires and the L1/L2 rest-capture (no early stop at an
+    # embedded keyword) swallows the next clause's own keyword and text
+    # whole, leaving the bucket that keyword belongs to empty. The
+    # unconditional flush at the Given opener is what stops that swallowed
+    # state from then bleeding into an UNRELATED following scenario:
+    # without it, a new Given arriving while the prior (incomplete)
+    # scenario's given/when lists are non-empty but then is still empty
+    # silently appends onto them instead of starting fresh, merging two
+    # authored scenarios into one.
     $flush = {
-        if ($then.Count -gt 0) {
+        if ($then.Count -gt 0 -and $given.Count -gt 0 -and $when.Count -gt 0) {
             $blocks.Add([ordered]@{
                     given = [System.Collections.Generic.List[object]]::new($given)
                     when  = [System.Collections.Generic.List[object]]::new($when)
@@ -333,7 +349,10 @@ function Get-JiraParsedAcceptance {
         $tm = [regex]::Match($t, "^${kwWrap}[Tt]hen${kwWrap}\s+(.+)$")
         $am = [regex]::Match($t, "^${kwWrap}([Aa]nd|[Bb]ut)${kwWrap}\s+(.+)$")
         if ($gm.Success) {
-            if ($then.Count -gt 0) { & $flush }
+            # 029, T035: flush unconditionally, not only when a Then was
+            # reached — an incomplete prior scenario must be discarded
+            # here, never merged into the new one about to start.
+            if ($given.Count -gt 0 -or $when.Count -gt 0 -or $then.Count -gt 0) { & $flush }
             $given.Add(@(& $tok $gm.Groups[3].Value.Trim())); $script:acLast = 'g'
         }
         elseif ($wm.Success) {

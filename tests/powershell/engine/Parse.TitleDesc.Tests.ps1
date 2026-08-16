@@ -109,6 +109,20 @@ Describe 'Get-JiraParsedAcceptance' {
         "$g $w $t" | Should -Be 'a user they click it opens'
     }
 
+    It 'US1 AC4: single-asterisk emphasis (*Given*) is read exactly as the bold form is' {
+        $a = Get-JiraParsedAcceptance -Text '*Given* a user, *When* they click, *Then* it opens' | ConvertFrom-Json
+        $a[0].given[0][0].text | Should -Be 'a user'
+        $a[0].when[0][0].text | Should -Be 'they click'
+        $a[0].then[0][0].text | Should -Be 'it opens'
+    }
+
+    It 'US1 AC4: single-underscore emphasis (_Given_) is read exactly as the bold form is' {
+        $a = Get-JiraParsedAcceptance -Text '_Given_ a user, _When_ they click, _Then_ it opens' | ConvertFrom-Json
+        $a[0].given[0][0].text | Should -Be 'a user'
+        $a[0].when[0][0].text | Should -Be 'they click'
+        $a[0].then[0][0].text | Should -Be 'it opens'
+    }
+
     It 'contract §4 row 6: emphasis inside a clause body survives as marks, wrapper around the keyword does not' {
         $a = Get-JiraParsedAcceptance -Text '__Given__ a **bold** thing, __When__ x, __Then__ y' | ConvertFrom-Json
         $givenText = ($a[0].given[0] | ForEach-Object { $_.text }) -join ''
@@ -252,6 +266,32 @@ Describe 'Get-JiraParsedAcceptance' {
         $a[0].given[0][0].text | Should -Be 'a user arrives on the Homepage'
         ($a | ConvertTo-Json -Depth 20) | Should -Not -Match 'Why this priority'
         ($a | ConvertTo-Json -Depth 20) | Should -Not -Match 'Independent Test'
+    }
+
+    # --- 029 Convergence T035: a wrap landing just before Then never merges
+    # or mis-assigns a clause (FR-005, FR-022, US4 AC3) ---------------------
+
+    It 'T035: a scenario wrapped just before Then emits nothing rather than a clause with an empty When (real shape from 023 spec.md:193-194)' {
+        $text = "2. **Given** the same specification, **When** the same event fires twice with nothing changed in between,`n" +
+        "   **Then** the second run performs zero moves and zero writes."
+        Get-JiraParsedAcceptance -Text $text | Should -Be '[]'
+    }
+
+    It 'T035: an incomplete scenario wrapped the same way never merges into the NEXT scenario (real shape from 007 spec.md:125-129)' {
+        $text = "1. **Given** a shared fixture whose keys include non-ASCII characters and common punctuation,`n" +
+        "   **When** the suite runs, **Then** each implementation is asserted against the fixture's`n" +
+        "   expected content, not merely against the other implementation's output.`n" +
+        "2. **Given** the fix applied to only one implementation, **When** the shared suite runs on both,`n" +
+        "   **Then** the suite fails."
+        $result = Get-JiraParsedAcceptance -Text $text
+        $result | Should -Be '[]'
+        $result | Should -Not -Match 'the fix applied'
+    }
+
+    It 'T035: a scenario that completes normally is unaffected by the unconditional flush' {
+        $a = Get-JiraParsedAcceptance -Text "- **Given** a signed-in user`n- **When** they open the board`n- **Then** widgets load" | ConvertFrom-Json
+        @($a).Count | Should -Be 1
+        $a[0].given[0][0].text | Should -Be 'a signed-in user'
     }
 }
 

@@ -29,6 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   actually uses — is now also read as one scenario instead of an empty
   panel. The renderer (`_adf_gherkin_panel` and its PowerShell twin) was not
   touched; the stutter was entirely a parser defect.
+- A scenario wrapped just before its own `**Then**` — a wrap the previous
+  fix correctly refuses to join into one logical line, since the
+  continuation itself opens with a keyword — reached the ticket either with
+  an empty `When` clause carrying a stray `**When**` swallowed into `Given`,
+  or, when a well-formed scenario followed it, silently merged into that
+  next scenario's clauses, collapsing two authored scenarios into one.
+  Measured across this repository's own specifications: 59 of 554 emitted
+  scenarios (10.6%) carried an empty `given` or `when`, in 22 of 24
+  specification files. Both ports now refuse to emit a scenario unless
+  `given`, `when` and `then` are all non-empty, and discard an incomplete
+  scenario's state before a new `Given` starts rather than merging into it.
 
 ## [0.18.0] - 2026-08-15
 

@@ -151,6 +151,22 @@ setup() {
   [ "${g} ${w} ${t}" = "a user they click it opens" ]
 }
 
+@test "US1 AC4: single-asterisk emphasis (*Given*) is read exactly as the bold form is" {
+  run bash -c "printf '%s\n' '*Given* a user, *When* they click, *Then* it opens' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "a user" ]
+  [ "$(jq -r '.[0].when[0][0].text' <<< "$output")" = "they click" ]
+  [ "$(jq -r '.[0].then[0][0].text' <<< "$output")" = "it opens" ]
+}
+
+@test "US1 AC4: single-underscore emphasis (_Given_) is read exactly as the bold form is" {
+  run bash -c "printf '%s\n' '_Given_ a user, _When_ they click, _Then_ it opens' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "a user" ]
+  [ "$(jq -r '.[0].when[0][0].text' <<< "$output")" = "they click" ]
+  [ "$(jq -r '.[0].then[0][0].text' <<< "$output")" = "it opens" ]
+}
+
 @test "contract §4 row 6: emphasis inside a clause body survives as marks, wrapper around the keyword does not" {
   run bash -c "printf '%s\n' '__Given__ a **bold** thing, __When__ x, __Then__ y' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
   [ "$status" -eq 0 ]
@@ -362,6 +378,42 @@ setup() {
 }
 
 # --- Cross-port parity (NFR-1) ---------------------------------------------
+
+# --- 029 Convergence T035: a wrap landing just before Then never merges or
+# mis-assigns a clause (FR-005, FR-022, US4 AC3) --------------------------
+
+@test "T035: a scenario wrapped just before Then emits nothing rather than a clause with an empty When (real shape from 023 spec.md:193-194)" {
+  run bash -c "printf '%s\n' \
+    '2. **Given** the same specification, **When** the same event fires twice with nothing changed in between,' \
+    '   **Then** the second run performs zero moves and zero writes.' \
+    | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+}
+
+@test "T035: an incomplete scenario wrapped the same way never merges into the NEXT scenario (real shape from 007 spec.md:125-129)" {
+  run bash -c "printf '%s\n' \
+    '1. **Given** a shared fixture whose keys include non-ASCII characters and common punctuation,' \
+    '   **When** the suite runs, **Then** each implementation is asserted against the fixture'\''s' \
+    '   expected content, not merely against the other implementation'\''s output.' \
+    '2. **Given** the fix applied to only one implementation, **When** the shared suite runs on both,' \
+    '   **Then** the suite fails.' \
+    | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  # Both scenarios are malformed by the same wrap shape, so both are
+  # refused — the defect this pins is the SILENT MERGE (item 2's clauses
+  # bleeding into item 1's), not the individual mis-split, which T035's
+  # sibling test above already covers.
+  [ "$output" = "[]" ]
+  [[ "$(jq -c '.' <<< "$output" 2>/dev/null || echo '$output')" != *"the fix applied"* ]]
+}
+
+@test "T035: a scenario that completes normally is unaffected by the unconditional flush" {
+  run bash -c "printf '%s\n' '- **Given** a signed-in user' '- **When** they open the board' '- **Then** widgets load' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "a signed-in user" ]
+}
 
 @test "the PowerShell port parses identically (title, description, gherkin)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
