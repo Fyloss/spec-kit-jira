@@ -9,13 +9,18 @@
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
   CMD_DIR="${ROOT}/scripts/bash/commands"
+  LIB_DIR="${ROOT}/scripts/bash/lib"
   MOCK="${ROOT}/tests/conformance/mock-jira"
   # shellcheck source=/dev/null
   source "${MOCK}/lib.sh"
   # shellcheck source=/dev/null
   source "${ROOT}/tests/bash/helpers/seed_fixture.bash"
   # shellcheck source=/dev/null
+  source "${LIB_DIR}/seed_state.sh"
+  # shellcheck source=/dev/null
   source "${CMD_DIR}/feature.sh"
+  # shellcheck source=/dev/null
+  source "${CMD_DIR}/seed.sh"
   export JIRA_EMAIL="user@example.com"
   export JIRA_API_TOKEN="RAWSECRETXYZ"
   export JIRA_NO_SLEEP=1
@@ -66,4 +71,34 @@ _priv_seed_issue() {
   run cmd_feature feature --json --story PROJ-11 "invoice export"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.active' <<< "$output")" = "true" ]
+}
+
+# --- T158: FR-065 tier 2 — the scan over spec.md before the first Jira
+# mutation, on the seed.sh (moment 2) binding path. -------------------------
+
+@test "T158: a known coordinate in spec.md as it now stands BLOCKs seed --confirm, exit 9, zero writes" {
+  FEATURE_DIR="${WORK}/specs/001-add-payment-webhooks"
+  mkdir -p "${FEATURE_DIR}"
+  SPEC="${FEATURE_DIR}/spec.md"
+  # A poisoned body — as if the operator pasted a credential into spec.md
+  # after the drafting agent wrote it, before confirming the gate.
+  printf '# Feature\n\n### User Story 1 - A (Priority: P1)\n<!-- speckit-jira pin=PROJ-11 -->\n\nSee token ATATTxxxxSECRETxxxx for access.\n' > "${SPEC}"
+  local doc
+  doc="$(seed_state_compose "add-payment-webhooks" '[{"role":"story","form":"key","key":"PROJ-11","raw":"PROJ-11","position":0}]' "")"
+  seed_state_write "${SPEC}" "${doc}"
+
+  local cfg
+  cfg="$(mktemp)"
+  printf '{}' > "${cfg}"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_seed seed "${SPEC}" --confirm --json
+  [ "$status" -eq 9 ]
+  [ -z "$(mock_calls)" ]
+  # Zero writes: the pinning marker is still `pin=`, never consumed, and the
+  # seed record survives (a BLOCK is not a binding).
+  grep -q 'pin=PROJ-11' "${SPEC}"
+  run seed_state_read "${SPEC}"
+  [ "$status" -eq 0 ]
 }

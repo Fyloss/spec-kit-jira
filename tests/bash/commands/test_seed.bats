@@ -383,3 +383,126 @@ _write_seed_record() {
   [ "$(mock_calls | grep -c '^POST /rest/api/3/issue$')" -eq 2 ]
   [ -z "$(mock_calls | grep '^POST /rest/api/3/issue$' | grep -i 'COMP-1')" ]
 }
+
+# --- T159 (FR-042): partial-run reporting on a mid-run write failure --------
+
+@test "T159: a fault on the second identity write reports the completed binding and the outstanding key" {
+  printf '# Feature\n\n### User Story 1 - A (Priority: P1)\n<!-- speckit-jira pin=PROJ-11 -->\n\nBody one.\n\n### User Story 2 - B (Priority: P1)\n<!-- speckit-jira pin=PROJ-12 -->\n\nBody two.\n' > "${SPEC}"
+  local doc
+  doc="$(seed_state_compose "add-payment-webhooks" '[{"role":"story","form":"key","key":"PROJ-11","raw":"PROJ-11","position":0},{"role":"story","form":"key","key":"PROJ-12","raw":"PROJ-12","position":1}]' "")"
+  seed_state_write "${SPEC}" "${doc}"
+
+  local cfg
+  cfg="$(mock_write_config '{"faults":{"issue/PROJ-12/properties/spec-kit-jira":{"status":500}}}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_seed seed "${SPEC}" --confirm --json
+  [ "$status" -ne 0 ]
+  [ "$(jq -r '.bindings | length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.bindings[0].key' <<< "$output")" = "PROJ-11" ]
+  [ "$(jq -r '.remaining | length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.remaining[0]' <<< "$output")" = "PROJ-12" ]
+
+  # PROJ-11's binding is not rolled back — no roll-back write of any kind,
+  # never a refusal on the current invocation's own effects (Principle I).
+  [ "$(mock_calls | grep -c 'PUT /rest/api/3/issue/PROJ-11/properties/spec-kit-jira')" -eq 1 ]
+  grep -qE '<!-- speckit-jira story=[0-9a-f]{16} ticket=PROJ-11 -->' "${SPEC}"
+}
+
+# --- T161 (FR-014): a team-managed project binds identically to company-managed ---
+
+@test "T161: binding a parent and a story is identical on a team-managed project" {
+  printf '# Feature\n\n### User Story 1 - A (Priority: P1)\n<!-- speckit-jira pin=TEAM-11 -->\n\nBody one.\n' > "${SPEC}"
+  local doc
+  doc="$(seed_state_compose "add-payment-webhooks" '[{"role":"specification","form":"key","key":"TEAM-1","raw":"TEAM-1","position":0},{"role":"story","form":"key","key":"TEAM-11","raw":"TEAM-11","position":0}]' "")"
+  seed_state_write "${SPEC}" "${doc}"
+
+  # No branch on `style` exists on the bind path (grepped clean); the point
+  # of this test is proving that holds even when the config declares the
+  # project team_managed, not company_managed like every other seed fixture.
+  {
+    printf 'resolved_ids:\n'
+    printf '  TEAM:\n'
+    printf '    style: team_managed\n'
+    printf '    issue_types:\n'
+    printf '      - logical_name: "Epic"\n'
+    printf '        id: "10000"\n'
+    printf '        hierarchy_level: "1"\n'
+    printf '        subtask: false\n'
+    printf '      - logical_name: "Story"\n'
+    printf '        id: "10001"\n'
+    printf '        hierarchy_level: "0"\n'
+    printf '        subtask: false\n'
+    printf '    child_type:\n'
+    printf '      logical_name: "Story"\n'
+    printf '      id: "10001"\n'
+    printf '      source: derived\n'
+    printf '    parent_type:\n'
+    printf '      logical_name: "Epic"\n'
+    printf '      id: "10000"\n'
+    printf '      source: derived\n'
+    printf '    required_fields:\n'
+    printf '      "10000":\n'
+    printf '        - logical_name: "Summary"\n'
+    printf '          field_id: "summary"\n'
+    printf '      "10001":\n'
+    printf '        - logical_name: "Summary"\n'
+    printf '          field_id: "summary"\n'
+    printf '    parent_link_available:\n'
+    printf '      "10001": true\n'
+  } > "${JIRA_CONFIG_DIR}/config.local.yml"
+  {
+    printf 'projects:\n'
+    printf '  - key: TEAM\n'
+    printf '    style: team_managed\n'
+    printf 'routing_default: TEAM\n'
+  } > "${JIRA_CONFIG_DIR}/config.yml"
+
+  local cfg
+  cfg="$(mock_write_config '{"issues":{"TEAM-1":{"summary":"Payment webhooks rollout","description":"Epic body","issuetype":{"name":"Epic"},"project":{"key":"TEAM"}},"TEAM-11":{"summary":"S","description":"D","issuetype":{"name":"Story"},"project":{"key":"TEAM"}}}}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_seed seed "${SPEC}" --confirm --json
+  [ "$status" -eq 0 ]
+  [ "$(jq '.bindings | length' <<< "$output")" -eq 2 ]
+  grep -qE '<!-- speckit-jira spec=[0-9a-f]{16} ticket=TEAM-1 -->' "${SPEC}"
+  grep -qE '<!-- speckit-jira story=[0-9a-f]{16} ticket=TEAM-11 -->' "${SPEC}"
+}
+
+# --- T162 (FR-060): a resume never re-derives the recorded slug -------------
+
+@test "T162: editing the feature description on disk between decline and resume never changes the recorded slug" {
+  local doc
+  doc="$(seed_state_compose "original-recorded-slug" '[{"role":"story","form":"key","key":"PROJ-11","raw":"PROJ-11","position":0}]' "")"
+  seed_state_write "${SPEC}" "${doc}"
+
+  # A resume re-reads Jira to re-render the plan (FR-062) even without
+  # --confirm, so the mock must be up for both gate reaches below.
+  local cfg
+  cfg="$(mock_write_config '{"issues":{"PROJ-11":{"summary":"S","description":"D"}}}')"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  # First gate reach ("decline"): no --confirm, zero Jira writes, the record
+  # is rewritten with a freshly rendered plan (FR-064) — the slug must
+  # survive unchanged (FR-060).
+  run cmd_seed seed "${SPEC}" --json
+  [ "$status" -eq 0 ]
+  local record
+  record="$(seed_state_read "${SPEC}")"
+  [ "$(jq -r '.slug' <<< "${record}")" = "original-recorded-slug" ]
+
+  # The operator edits the feature description on disk — prose only, the
+  # pinning marker untouched — between declining and resuming.
+  printf '# Feature\n\n### User Story 1 - A (Priority: P1)\n<!-- speckit-jira pin=PROJ-11 -->\n\nA completely rewritten body, nothing like the original words.\n' > "${SPEC}"
+
+  # Resume: no flags resupplied, same designator set recorded. Were the slug
+  # re-derived from this new text instead of read from the record, it would
+  # differ from "original-recorded-slug" here.
+  run cmd_seed seed "${SPEC}" --json
+  [ "$status" -eq 0 ]
+  record="$(seed_state_read "${SPEC}")"
+  [ "$(jq -r '.slug' <<< "${record}")" = "original-recorded-slug" ]
+}

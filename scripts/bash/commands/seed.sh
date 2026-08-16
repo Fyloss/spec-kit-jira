@@ -42,6 +42,8 @@ source "${_cmd_seed_dir}/../sink/jira/adoption.sh"
 source "${_cmd_seed_dir}/../sink/jira/ticket.sh"
 # shellcheck source=/dev/null
 source "${_cmd_seed_dir}/../sink/jira/client.sh"
+# shellcheck source=/dev/null
+source "${_cmd_seed_dir}/../sink/jira/privacy_guard.sh"
 
 # _seed_emit <json> <json-flag> — print the canonical result.
 _seed_emit() {
@@ -71,6 +73,26 @@ _seed_render_prose() {
     [[ -z "${line}" ]] && continue
     printf 'Warning: %s\n' "${line}"
   done <<< "$(jq -r '.warnings[]? // empty' <<< "${payload}")"
+}
+
+# _seed_partial_report <bindings> <mode> <target-key> <free-text> <remaining-story-keys>
+# — FR-042 (T159): the report of exactly which bindings completed and which
+# did not, for the failure path of a `--confirm` run. `bindings` is the
+# in-memory array grown ONLY on a successful write, so "remaining" is
+# everything else this run intended to bind: the parent designator, when
+# `mode` names one and no parent binding is in `bindings` yet, plus every
+# story key in `remaining_story_keys` not already in `bindings`.
+_seed_partial_report() {
+  local bindings="$1" mode="$2" target_key="$3" free_text="$4" rem_keys="$5"
+  local parent_desig=""
+  if [[ "${mode}" != "none" ]] && [[ "$(jq -r '[.[] | select(.role=="parent")] | length' <<< "${bindings}")" == "0" ]]; then
+    if [[ "${mode}" == "create" ]]; then parent_desig="${free_text}"; else parent_desig="${target_key}"; fi
+  fi
+  jq -cn --argjson b "${bindings}" --argjson rem "${rem_keys}" --arg p "${parent_desig}" '
+    ($b | map(select(.role=="story") | .key)) as $done |
+    { bindings: $b,
+      remaining: (([$p] | map(select(length > 0))) + ($rem - $done)) }
+  '
 }
 
 # _seed_designator_keys <seed-record-json> — the ordered array of designated
@@ -594,6 +616,12 @@ cmd_seed() {
     return 0
   fi
 
+  # --- FR-065 (T158): the two-tier pre-write privacy guard, over spec.md as
+  # it now stands, again before the first Jira mutation — the tier-1 scan in
+  # feature.sh covers the seed material before drafting; this is the second
+  # required pass. A BLOCK is zero writes of any kind, local or Jira.
+  privacy_guard_scan "${spec_content}" "[]" "${SPEC_KIT_JIRA_ALLOWLIST:-[]}" || return $?
+
   # --confirm: bind every remaining named story (FR-057), adopt or create
   # the parent (FR-022/FR-023), and place/re-parent as designated (FR-025/
   # FR-026) — never when mode is "none" (FR-024, T133's scoping).
@@ -621,7 +649,12 @@ cmd_seed() {
     spec_content="$(printf '%s' "${assigned}" | spec_marker_record_ticket "${sm_id}" "${pkey}"; printf x)"
     spec_content="${spec_content%x}"
     marker_splice_write_file "${spec_file}" "${spec_content}" > /dev/null
-    identity_write "${pkey}" "${spec_ref}" "human" "" "parent" "" || return $?
+    local rc=0
+    identity_write "${pkey}" "${spec_ref}" "human" "" "parent" "" || rc=$?
+    if ((rc != 0)); then
+      _seed_emit "$(_seed_partial_report "${bindings}" "${mode}" "${pkey}" "${free_text}" "${remaining_story_keys}" | json_canonical)" "${json}"
+      return "${rc}"
+    fi
     bindings="$(jq -c --arg k "${pkey}" '. + [{key:$k, role:"parent", origin:"human"}]' <<< "${bindings}")"
     target_key="${pkey}"
   elif [[ "${mode}" == "create" ]]; then
@@ -642,7 +675,10 @@ cmd_seed() {
     local routed_project; routed_project="$(jq -r '.project // ""' <<< "${routing}")"
     local created rc=0
     created="$(ticket_create "${routed_project}" "${free_text}" "${ptid}" '[]' '[]' "${spec_ref}" "parent")" || rc=$?
-    ((rc != 0)) && return "${rc}"
+    if ((rc != 0)); then
+      _seed_emit "$(_seed_partial_report "${bindings}" "${mode}" "${target_key}" "${free_text}" "${remaining_story_keys}" | json_canonical)" "${json}"
+      return "${rc}"
+    fi
     local new_key; new_key="$(jq -r '.key' <<< "${created}")"
 
     spec_content="$(printf '%s' "${spec_content}" | spec_marker_record_ticket "${sm_id}" "${new_key}"; printf x)"
@@ -669,7 +705,10 @@ cmd_seed() {
         local place_body place_rc=0
         place_body="$(jq -cn --arg k "${target_key}" '{fields:{parent:{key:$k}}}')"
         jira_request PUT "${SPEC_KIT_JIRA_BASE_URL:-}/rest/api/3/issue/${key}" "${place_body}" > /dev/null || place_rc=$?
-        ((place_rc != 0)) && return "${place_rc}"
+        if ((place_rc != 0)); then
+          _seed_emit "$(_seed_partial_report "${bindings}" "${mode}" "${target_key}" "${free_text}" "${remaining_story_keys}" | json_canonical)" "${json}"
+          return "${place_rc}"
+        fi
       fi
     fi
 
@@ -681,7 +720,12 @@ cmd_seed() {
     spec_content="$(pin_marker_consume "${spec_content}" "${key}" "${replacement}" "${nl}"; printf x)"
     spec_content="${spec_content%x}"
     marker_splice_write_file "${spec_file}" "${spec_content}" > /dev/null
-    identity_write "${key}" "${spec_ref}" "human" "${sid}" "story" "" || return $?
+    local story_rc=0
+    identity_write "${key}" "${spec_ref}" "human" "${sid}" "story" "" || story_rc=$?
+    if ((story_rc != 0)); then
+      _seed_emit "$(_seed_partial_report "${bindings}" "${mode}" "${target_key}" "${free_text}" "${remaining_story_keys}" | json_canonical)" "${json}"
+      return "${story_rc}"
+    fi
     bindings="$(jq -c --arg k "${key}" '. + [{key:$k, role:"story", origin:"human"}]' <<< "${bindings}")"
   done
 

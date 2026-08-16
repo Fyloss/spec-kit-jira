@@ -25,6 +25,7 @@ Import-Module (Join-Path $PSScriptRoot '../sink/jira/Designator.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Adoption.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Ticket.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Client.psm1')    # No -Force — see project memory: powershell-import-force-clobbers-caller-scope
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/PrivacyGuard.psm1') -Force
 
 function Write-JiraSeedResult {
     param([string] $Payload, [bool] $Json)
@@ -56,6 +57,38 @@ function Get-JiraSeedParentDesignator {
     param([Parameter(Mandatory)] [string] $RecordJson)
     $rec = $RecordJson | ConvertFrom-Json -Depth 100
     return (@($rec.designators | Where-Object { $_.role -eq 'specification' }) | Select-Object -First 1)
+}
+
+function Get-JiraSeedPartialReport {
+    <#
+    .SYNOPSIS
+      FR-042 (T159): the report of exactly which bindings completed and
+      which did not, for the failure path of a --confirm run. `Bindings` is
+      grown ONLY on a successful write, so "remaining" is everything else
+      this run intended to bind: the parent designator, when `Mode` names
+      one and no parent binding is in `Bindings` yet, plus every story key
+      in `RemainingStoryKeysJson` not already in `Bindings`. Mirror of
+      _seed_partial_report.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Bindings,
+        [Parameter(Mandatory)] [string] $Mode,
+        [string] $TargetKey = '',
+        [string] $FreeText = '',
+        [Parameter(Mandatory)] [string] $RemainingStoryKeysJson
+    )
+    $bindingsArr = @($Bindings)
+    $doneStories = @($bindingsArr | Where-Object { $_.role -eq 'story' } | ForEach-Object { [string]$_.key })
+    $parentDesig = ''
+    if ($Mode -ne 'none' -and (@($bindingsArr | Where-Object { $_.role -eq 'parent' })).Count -eq 0) {
+        $parentDesig = if ($Mode -eq 'create') { $FreeText } else { $TargetKey }
+    }
+    $remKeys = @($RemainingStoryKeysJson | ConvertFrom-Json -Depth 100)
+    $remaining = [System.Collections.Generic.List[object]]::new()
+    if ($parentDesig) { $remaining.Add($parentDesig) }
+    foreach ($k in $remKeys) { if ($doneStories -notcontains [string]$k) { $remaining.Add([string]$k) } }
+    return (ConvertTo-JiraJsonValue ([ordered]@{ bindings = $bindingsArr; remaining = $remaining }))
 }
 
 function Get-JiraSeedRefMessage {
@@ -475,10 +508,16 @@ function Invoke-JiraSeed {
         $specSlug = if ($env:SPEC_KIT_JIRA_SPEC_SLUG) { $env:SPEC_KIT_JIRA_SPEC_SLUG } else { 'spec' }
         $specRef = ConvertTo-JiraJsonValue ([ordered]@{ repo = $repo; spec_slug = $specSlug })
         $routing = $routingJson | ConvertFrom-Json -Depth 100
-        $routedProject = if ($routing.PSObject.Properties.Name -contains 'project') { [string]$routing.project } else { '' }
-        $dts = if ($routing.PSObject.Properties.Name -contains 'declared_type_specification') { [string]$routing.declared_type_specification } else { '' }
-        $dtst = if ($routing.PSObject.Properties.Name -contains 'declared_type_story') { [string]$routing.declared_type_story } else { '' }
-        $term = if ($routing.PSObject.Properties.Name -contains 'terminal_statuses_csv') { [string]$routing.terminal_statuses_csv } else { '' }
+        # Indexer access (not `.PSObject.Properties.Name -contains`, T162
+        # investigation): under Set-StrictMode, `.Name` on an ENUMERATED-EMPTY
+        # PSCustomObject (routing = '{}', a legitimate resume state when no
+        # project config was ever resolved) throws "property 'Name' cannot be
+        # found" — the indexer form returns $null instead, safely, on the same
+        # input.
+        $routedProject = if ($routing.PSObject.Properties['project']) { [string]$routing.project } else { '' }
+        $dts = if ($routing.PSObject.Properties['declared_type_specification']) { [string]$routing.declared_type_specification } else { '' }
+        $dtst = if ($routing.PSObject.Properties['declared_type_story']) { [string]$routing.declared_type_story } else { '' }
+        $term = if ($routing.PSObject.Properties['terminal_statuses_csv']) { [string]$routing.terminal_statuses_csv } else { '' }
 
         $evalResults = [System.Collections.Generic.List[object]]::new()
         if ($pkey) {
@@ -619,6 +658,15 @@ function Invoke-JiraSeed {
         return 0
     }
 
+    # --- FR-065 (T158): the two-tier pre-write privacy guard, over
+    # spec.md as it now stands, again before the first Jira mutation —
+    # the tier-1 scan in Feature.psm1 covers the seed material before
+    # drafting; this is the second required pass. A BLOCK is zero writes
+    # of any kind, local or Jira.
+    $allowlistJson = if ($env:SPEC_KIT_JIRA_ALLOWLIST) { $env:SPEC_KIT_JIRA_ALLOWLIST } else { '[]' }
+    $blockRc2 = Test-JiraPrivacyBlock -Payload $specContent -KnownCoordinatesJson '[]' -AllowlistJson $allowlistJson
+    if ([int]$blockRc2 -ne 0) { return [int]$blockRc2 }
+
     # --confirm: bind every remaining named story (FR-057), adopt or create
     # the parent (FR-022/FR-023), and place/re-parent as designated
     # (FR-025/FR-026) — never when mode is "none" (FR-024, T133's scoping).
@@ -643,7 +691,11 @@ function Invoke-JiraSeed {
         $specContent = Set-JiraSpecMarkerRecordTicket -Text $assigned -Id ([string]$smInfo.id) -Key $pkey
         Write-JiraMarkerSpliceFile -Path $specFile -NewContent $specContent | Out-Null
         $rc2 = Set-JiraIdentity -IssueKey $pkey -SpecRefJson $specRef -Origin 'human' -Story '' -Role 'parent' -Summary ''
-        if ([int]$rc2 -ne 0) { return [int]$rc2 }
+        if ([int]$rc2 -ne 0) {
+            $report = Get-JiraSeedPartialReport -Bindings $bindings -Mode $mode -TargetKey $pkey -FreeText $freeText -RemainingStoryKeysJson $remainingStoryKeys
+            Write-JiraSeedResult -Payload $report -Json $json
+            return [int]$rc2
+        }
         $bindings.Add([ordered]@{ key = $pkey; role = 'parent'; origin = 'human' })
         $targetKey = $pkey
     }
@@ -662,7 +714,11 @@ function Invoke-JiraSeed {
         $ptid = [string]$routingObj.parent_type_id
         $routedProject2 = if ($routingObj.PSObject.Properties.Name -contains 'project') { [string]$routingObj.project } else { '' }
         $created = New-JiraTicket -ProjectKey $routedProject2 -Summary $freeText -StoryTypeId $ptid -SpecRefJson $specRef -Role 'parent'
-        if ($created.ExitCode -ne 0) { return [int]$created.ExitCode }
+        if ($created.ExitCode -ne 0) {
+            $report = Get-JiraSeedPartialReport -Bindings $bindings -Mode $mode -TargetKey $targetKey -FreeText $freeText -RemainingStoryKeysJson $remainingStoryKeys
+            Write-JiraSeedResult -Payload $report -Json $json
+            return [int]$created.ExitCode
+        }
         $newKey = [string](($created.Json | ConvertFrom-Json -Depth 100).key)
 
         $specContent = Set-JiraSpecMarkerRecordTicket -Text $specContent -Id $smId -Key $newKey
@@ -686,7 +742,11 @@ function Invoke-JiraSeed {
             if ($curParent -ne $targetKey) {
                 $placeBody = (@{ fields = @{ parent = @{ key = $targetKey } } } | ConvertTo-Json -Depth 10 -Compress)
                 $placeResult = Invoke-JiraRequest -Method PUT -Url "$($env:SPEC_KIT_JIRA_BASE_URL)/rest/api/3/issue/$keyStr" -Body $placeBody
-                if ([int]$placeResult.ExitCode -ne 0) { return [int]$placeResult.ExitCode }
+                if ([int]$placeResult.ExitCode -ne 0) {
+                    $report = Get-JiraSeedPartialReport -Bindings $bindings -Mode $mode -TargetKey $targetKey -FreeText $freeText -RemainingStoryKeysJson $remainingStoryKeys
+                    Write-JiraSeedResult -Payload $report -Json $json
+                    return [int]$placeResult.ExitCode
+                }
             }
         }
 
@@ -698,7 +758,11 @@ function Invoke-JiraSeed {
         $specContent = ConvertTo-JiraPinMarkerConsumed -Content $specContent -Key $keyStr -ReplacementLine $replacement -Nl $nl
         Write-JiraMarkerSpliceFile -Path $specFile -NewContent $specContent | Out-Null
         $rc = Set-JiraIdentity -IssueKey $keyStr -SpecRefJson $specRef -Origin 'human' -Story $sid -Role 'story' -Summary ''
-        if ([int]$rc -ne 0) { return [int]$rc }
+        if ([int]$rc -ne 0) {
+            $report = Get-JiraSeedPartialReport -Bindings $bindings -Mode $mode -TargetKey $targetKey -FreeText $freeText -RemainingStoryKeysJson $remainingStoryKeys
+            Write-JiraSeedResult -Payload $report -Json $json
+            return [int]$rc
+        }
         $bindings.Add([ordered]@{ key = $keyStr; role = 'story'; origin = 'human' })
     }
 

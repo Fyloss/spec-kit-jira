@@ -70,18 +70,26 @@ _jira_curl_path() {
   fi
 }
 
-# HTTP status of the most recent request (0 = network-level failure). Exported so
-# sink callers (plan_apply, discovery) can read it for diagnostics; the mapped
-# exit code remains the return value.
+# HTTP status of the most recent request (0 = network-level failure). A plain
+# shell variable, NOT exported: every reader (plan_apply, identity,
+# recognition) is a function sourced into this SAME bash process, and a
+# `$( … )` subshell already inherits every shell variable regardless of
+# export status — export only matters across an execve() boundary. `export`
+# was removed here (T161 investigation) because the response body it sits
+# beside is response-sized and unbounded: once 027's bulkfetch responses
+# started carrying full issue descriptions, an exported JIRA_LAST_ERROR_BODY
+# pushed the process environment past Linux's MAX_ARG_STRLEN (128 KiB) on the
+# very next execve of ANY external command — cat, rm, jq, mktemp alike —
+# invisible on macOS, which enforces no such per-argument/environment cap.
 JIRA_LAST_STATUS=0
-export JIRA_LAST_STATUS
 
 # Raw response body of the most recent request, success or failure (011,
 # contract §3.7, FR-019). Never printed to a human directly — a caller
 # translates it (ticket_field_rejection_message) before it reaches the run
-# summary, so the raw API body itself never leaks into output.
+# summary, so the raw API body itself never leaks into output. NOT exported
+# — see JIRA_LAST_STATUS above; this is the variable whose size actually
+# triggered the Linux argv/environment overflow.
 JIRA_LAST_ERROR_BODY=''
-export JIRA_LAST_ERROR_BODY
 
 # Total curl attempts issued so far, including retries (contracts/timing-report.md
 # §5). NOT exported. A caller that invokes jira_request via `$( … )` (discovery.sh,

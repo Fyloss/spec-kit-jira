@@ -331,3 +331,140 @@ routing_default: COMP
         ($calls -eq 'POST /rest/api/3/issue').Count | Should -Be 2
     }
 }
+
+Describe 'T159 (FR-042): partial-run reporting on a mid-run write failure' {
+    AfterEach {
+        if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null }
+    }
+
+    It 'a fault on the second identity write reports the completed binding and the outstanding key' {
+        $spec = New-SeedWork
+        Set-Content -NoNewline -LiteralPath $spec -Value "# Feature`n`n### User Story 1 - A (Priority: P1)`n<!-- speckit-jira pin=PROJ-11 -->`n`nBody one.`n`n### User Story 2 - B (Priority: P1)`n<!-- speckit-jira pin=PROJ-12 -->`n`nBody two.`n"
+        $doc = New-JiraSeedStateDocument -Slug 'add-payment-webhooks' -DesignatorsJson '[{"role":"story","form":"key","key":"PROJ-11","raw":"PROJ-11","position":0},{"role":"story","form":"key","key":"PROJ-12","raw":"PROJ-12","position":1}]' -PlanDigest ''
+        Save-JiraSeedState -SpecPath $spec -DocumentJson $doc
+
+        Start-SeedMock '{"faults":{"issue/PROJ-12/properties/spec-kit-jira":{"status":500}}}'
+
+        $sw = [System.IO.StringWriter]::new()
+        $orig = [Console]::Out
+        [Console]::SetOut($sw)
+        try { $rc = Invoke-JiraSeed -Arguments @($spec, '--confirm', '--json') }
+        finally { [Console]::SetOut($orig) }
+        $rc | Should -Not -Be 0
+        $out = $sw.ToString() | ConvertFrom-Json
+        @($out.bindings).Count | Should -Be 1
+        $out.bindings[0].key | Should -Be 'PROJ-11'
+        @($out.remaining).Count | Should -Be 1
+        $out.remaining[0] | Should -Be 'PROJ-12'
+
+        $calls = @(Get-JiraMockCallLog -Mock $M | Where-Object { $_ })
+        (@($calls | Where-Object { $_ -eq 'PUT /rest/api/3/issue/PROJ-11/properties/spec-kit-jira' })).Count | Should -Be 1
+        (Get-Content -Raw -LiteralPath $spec) | Should -Match '<!-- speckit-jira story=[0-9a-f]{16} ticket=PROJ-11 -->'
+    }
+}
+
+Describe 'T161 (FR-014): a team-managed project binds identically to company-managed' {
+    AfterEach {
+        if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null }
+    }
+
+    It 'binds a parent and a story under a team_managed project' {
+        $spec = New-SeedWork
+        Set-Content -NoNewline -LiteralPath $spec -Value "# Feature`n`n### User Story 1 - A (Priority: P1)`n<!-- speckit-jira pin=TEAM-11 -->`n`nBody one.`n"
+        $doc = New-JiraSeedStateDocument -Slug 'add-payment-webhooks' -DesignatorsJson '[{"role":"specification","form":"key","key":"TEAM-1","raw":"TEAM-1","position":0},{"role":"story","form":"key","key":"TEAM-11","raw":"TEAM-11","position":0}]' -PlanDigest ''
+        Save-JiraSeedState -SpecPath $spec -DocumentJson $doc
+
+        # No branch on `style` exists on the bind path (grepped clean); the
+        # point of this test is proving that holds even when the config
+        # declares the project team_managed, not company_managed like every
+        # other seed fixture.
+        $localYaml = @"
+resolved_ids:
+  TEAM:
+    style: team_managed
+    issue_types:
+      - logical_name: "Epic"
+        id: "10000"
+        hierarchy_level: "1"
+        subtask: false
+      - logical_name: "Story"
+        id: "10001"
+        hierarchy_level: "0"
+        subtask: false
+    child_type:
+      logical_name: "Story"
+      id: "10001"
+      source: derived
+    parent_type:
+      logical_name: "Epic"
+      id: "10000"
+      source: derived
+    required_fields:
+      "10000":
+        - logical_name: "Summary"
+          field_id: "summary"
+      "10001":
+        - logical_name: "Summary"
+          field_id: "summary"
+    parent_link_available:
+      "10001": true
+"@
+        Set-Content -NoNewline -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml') -Value $localYaml
+        Set-Content -NoNewline -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -Value "projects:`n  - key: TEAM`n    style: team_managed`nrouting_default: TEAM`n"
+
+        $issues = @{
+            'TEAM-1'  = @{ summary = 'Payment webhooks rollout'; description = 'Epic body'; issuetype = @{ name = 'Epic' }; project = @{ key = 'TEAM' } }
+            'TEAM-11' = @{ summary = 'S'; description = 'D'; issuetype = @{ name = 'Story' }; project = @{ key = 'TEAM' } }
+        }
+        Start-SeedMock (@{ issues = $issues } | ConvertTo-Json -Depth 20 -Compress)
+
+        $sw = [System.IO.StringWriter]::new()
+        $orig = [Console]::Out
+        [Console]::SetOut($sw)
+        try { $rc = Invoke-JiraSeed -Arguments @($spec, '--confirm', '--json') }
+        finally { [Console]::SetOut($orig) }
+        $rc | Should -Be 0
+        $out = $sw.ToString() | ConvertFrom-Json
+        @($out.bindings).Count | Should -Be 2
+        $text = Get-Content -Raw -LiteralPath $spec
+        $text | Should -Match '<!-- speckit-jira spec=[0-9a-f]{16} ticket=TEAM-1 -->'
+        $text | Should -Match '<!-- speckit-jira story=[0-9a-f]{16} ticket=TEAM-11 -->'
+    }
+}
+
+Describe 'T162 (FR-060): a resume never re-derives the recorded slug' {
+    AfterEach {
+        if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null }
+    }
+
+    It 'editing the feature description on disk between decline and resume never changes the recorded slug' {
+        $spec = New-SeedWork
+        $doc = New-JiraSeedStateDocument -Slug 'original-recorded-slug' -DesignatorsJson '[{"role":"story","form":"key","key":"PROJ-11","raw":"PROJ-11","position":0}]' -PlanDigest ''
+        Save-JiraSeedState -SpecPath $spec -DocumentJson $doc
+
+        # A resume re-reads Jira to re-render the plan (FR-062) even without
+        # --confirm, so the mock must be up for both gate reaches below.
+        Start-SeedMock (@{ issues = @{ 'PROJ-11' = @{ summary = 'S'; description = 'D' } } } | ConvertTo-Json -Depth 20 -Compress)
+        $statePath = Get-JiraSeedStatePath -SpecPath $spec
+
+        # First gate reach ("decline"): no --confirm, zero Jira writes, the
+        # record is rewritten with a freshly rendered plan (FR-064) — the
+        # slug must survive unchanged (FR-060).
+        $rc = Invoke-JiraSeed -Arguments @($spec, '--json')
+        $rc | Should -Be 0
+        $record = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+        $record.slug | Should -Be 'original-recorded-slug'
+
+        # The operator edits the feature description on disk — prose only,
+        # the pinning marker untouched — between declining and resuming.
+        Set-Content -NoNewline -LiteralPath $spec -Value "# Feature`n`n### User Story 1 - A (Priority: P1)`n<!-- speckit-jira pin=PROJ-11 -->`n`nA completely rewritten body, nothing like the original words.`n"
+
+        # Resume: no flags resupplied, same designator set recorded. Were
+        # the slug re-derived from this new text instead of read from the
+        # record, it would differ from 'original-recorded-slug' here.
+        $rc = Invoke-JiraSeed -Arguments @($spec, '--json')
+        $rc | Should -Be 0
+        $record = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+        $record.slug | Should -Be 'original-recorded-slug'
+    }
+}

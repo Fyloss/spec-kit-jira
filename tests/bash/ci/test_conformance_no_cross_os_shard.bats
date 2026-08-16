@@ -13,7 +13,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (186)" {
+@test "the conformance corpus has exactly the recorded scenario count (188)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -134,8 +134,14 @@ setup() {
   # decomp,draft-edit,reseed,exists} — one per refusal class of
   # contracts/seed-cli-contract.md §8, closing FR-039's per-class obligation
   # and SC-006's "14 of 14" (172 -> 186).
+  # 027 (Convergence, T160) adds one: us027-safe-hierarchy — FR-014's
+  # non-default hierarchy (SAFe-shaped roles: Capability/Feature) binding a
+  # parent and a story, proven byte-identical across ports (186 -> 187).
+  # 027 (Convergence, T161) adds one: us027-team-managed — FR-014's "identical
+  # for team-managed and company-managed" binding a parent and a story on a
+  # team_managed project, proven byte-identical across ports (187 -> 188).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 186 ]
+  [ "${count}" -eq 188 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

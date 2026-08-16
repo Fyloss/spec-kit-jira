@@ -1,0 +1,19 @@
+# T161 [027] — FR-014's team-managed-style fixture for the conformance
+# corpus (bind path parity between company_managed and team_managed), a
+# sibling of repo-with-seed-teams whose own project is company_managed.
+projects:
+  - key: TEAM
+    style: team_managed
+    hierarchy:
+      specification: Epic
+      story: Story
+    halted_statuses:
+      - Done
+routing_default: TEAM
+teams:
+  - id: team
+    project: TEAM
+    folder_prefix: "team-"
+    branch_pattern: "team-<ID>/<FEATURE_NAME>"
+privacy:
+  allowlist: []

@@ -1,0 +1,28 @@
+{
+  "name": "us027-safe-hierarchy",
+  "description": "T160 (FR-014): a non-default hierarchy (SAFe-shaped roles: Capability/Feature, not Epic/Story) binds a parent and a story identically across ports.",
+  "mock": {
+    "issues": {
+      "SAFE-1": {"summary": "Payments capability", "description": "Capability body", "status": {"name": "To Do", "statusCategory": {"key": "new"}}, "issuetype": {"id": "10000", "name": "Capability"}, "project": {"key": "SAFE"}},
+      "SAFE-11": {"summary": "Accept a partial payment", "description": "Feature body", "status": {"name": "To Do", "statusCategory": {"key": "new"}}, "issuetype": {"id": "10001", "name": "Feature"}, "project": {"key": "SAFE"}}
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-seed-safe",
+  "runs": [
+    {"argv": ["feature", "--json", "--parent", "SAFE-1", "--story", "SAFE-11", "invoice export"]},
+    {
+      "before": {
+        "write": {
+          "specs/safe-1/spec.md": "# Feature\n\n## Overview\n\nCapability body.\n\n### User Story 1 - A (Priority: P1)\n<!-- speckit-jira pin=SAFE-11 -->\n\nBody one.\n"
+        }
+      },
+      "argv": ["seed", "specs/safe-1/spec.md", "--confirm", "--json"]
+    }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_ID_SOURCE": "1111111111111111 2222222222222222"
+  }
+}

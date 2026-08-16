@@ -78,3 +78,20 @@ teardown() {
   [ "$output" = "0" ]
   rm -f "${trace}"
 }
+
+# --- T161 investigation: JIRA_LAST_STATUS/JIRA_LAST_ERROR_BODY must never be
+# exported — a Linux-only argv/environment overflow (docs/11-process-budget.md,
+# MAX_ARG_STRLEN). export was needed by nothing: every reader is a function
+# sourced into this same shell, and a $( … ) subshell already sees every shell
+# variable regardless of export status. --------------------------------------
+
+@test "JIRA_LAST_STATUS is a plain shell variable, never exported" {
+  run declare -p JIRA_LAST_STATUS
+  [[ "$output" != "declare -x"* ]]
+}
+
+@test "JIRA_LAST_ERROR_BODY is a plain shell variable, never exported" {
+  run declare -p JIRA_LAST_ERROR_BODY
+  [[ "$output" != "declare -x"* ]]
+}
+

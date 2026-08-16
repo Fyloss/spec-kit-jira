@@ -428,3 +428,20 @@ and dogfooded.**
   - **T149** — Principle II's live double-run assertion, which must be extended in the same change that adds a write kind. Bash only — there is no PowerShell live twin, and that asymmetry belongs in the CHANGELOG.
   - **T150, T151, T152** — FR-039's per-class conformance obligation and SC-006's "14 of 14", plus the general form of C-3. They sit in Phase 10 because the corpus cannot be complete until the last refusal class lands in Phase 9; each class keeps its own unit test in its own phase.
 - Task IDs were renumbered when those ten were inserted. Unlike FR numbers — cited from the contracts and the plan — task IDs are referenced only inside this file, and a list meant to be executed in order must have an execution order that matches its ID order.
+
+---
+
+## Phase 11: Convergence
+
+Appended by `/speckit-converge` on 2026-08-16, after Phases 1–10 were
+implemented. Each item is a gap between an artifact's stated intent and the
+code as it now stands — assessed from `spec.md`, `plan.md`, `tasks.md`, and
+the constitution, with no reference to git history. Ordered CRITICAL/HIGH
+first. Per Constitution XIII, each task's failing test comes before its
+implementation, in the same task.
+
+- [X] T158 Wire the two-tier privacy guard over `spec.md` **before the first Jira mutation** — every path, including adopt and story-bind, not only the create path `ticket_create` already covers — in `scripts/bash/commands/seed.sh` and `scripts/powershell/commands/Seed.psm1`, with a failing test per port first (BLOCK-tier match ⇒ dedicated block exit code and zero writes local or Jira; WARN-tier reported and non-blocking; allowlisted link silent) in `tests/bash/commands/test_seed_privacy.bats` and `tests/powershell/commands/Seed.Privacy.Tests.ps1`, whose three existing cases exercise `cmd_feature` only, per FR-065 and Constitution IX (partial — CRITICAL). T078 recorded this half as deferred to the then-unbuilt binding path and it was never completed.
+- [X] T159 Report which bindings completed and which did not when a `--confirm` run fails part-way: emit the accumulated `bindings` plus the outstanding set on the failure path instead of returning ahead of the emit (`seed.sh:624,645,672,684`; `Seed.psm1:646,665,689,701`), failing test per port first, per FR-042 (partial). Both ports are symmetrically wrong, so the conformance corpus cannot surface this — the per-port tests are the only proof.
+- [X] T160 Add a 027 **conformance fixture** declaring a non-default hierarchy (renamed types / SAFe-shaped roles) and one scenario binding through it, so role-name resolution is proven byte-identical across ports, per FR-014 and Constitution VII (partial). The SAFe fixture built by T004 lives in the unit-test helpers, which FR-046/SC-010 do not reach; update the scenario count in `tests/bash/ci/test_conformance_no_cross_os_shard.bats` in the same change.
+- [X] T161 Exercise a **team-managed** project on the bind path — fixture and at least one test per port — per FR-014's "identical for team-managed and company-managed" (missing). Every 027 fixture, test, and scenario is currently `company_managed`.
+- [ ] T162 Add the FR-060 regression test per port: feature with designators, decline at the gate, edit the feature description on disk, resume — the recorded slug governs and the resume addresses the same folder, the slug never re-derived from the edited text (partial).

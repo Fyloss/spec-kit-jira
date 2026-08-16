@@ -5,6 +5,8 @@
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
     Import-Module (Join-Path $Root 'scripts/powershell/commands/Feature.psm1') -Force
+    Import-Module (Join-Path $Root 'scripts/powershell/commands/Seed.psm1') -Force
+    Import-Module (Join-Path $Root 'scripts/powershell/lib/SeedState.psm1') -Force
     Import-Module (Join-Path $Root 'tests/conformance/mock-jira/Mock.psm1') -Force
     $env:JIRA_EMAIL = 'user@example.com'
     $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
@@ -79,5 +81,43 @@ Describe 'FR-065 privacy guard over seeded content' {
         $r = Invoke-FeatureCaptured3 @('feature', '--json', '--story', 'PROJ-11', 'invoice export')
         $r.ExitCode | Should -Be 0
         ($r.Out.Trim() | ConvertFrom-Json).active | Should -BeTrue
+    }
+}
+
+Describe 'T158: FR-065 tier 2 — the scan over spec.md on the Invoke-JiraSeed binding path' {
+    BeforeEach {
+        $script:Work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+        New-Item -ItemType Directory -Path (Join-Path $Work '.specify/jira') -Force | Out-Null
+        $env:JIRA_CONFIG_DIR = Join-Path $Work '.specify/jira'
+        $script:M = $null
+        Remove-Item -LiteralPath 'Env:\SPEC_KIT_JIRA_ALLOWLIST' -ErrorAction SilentlyContinue
+    }
+    AfterEach {
+        if ($M) { Stop-JiraMock -Mock $M; $script:M = $null }
+        Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath 'Env:\JIRA_CONFIG_DIR' -ErrorAction SilentlyContinue
+    }
+
+    It 'a known coordinate in spec.md as it now stands BLOCKs seed --confirm, exit 9, zero writes' {
+        $featureDir = Join-Path $Work 'specs/001-add-payment-webhooks'
+        New-Item -ItemType Directory -Path $featureDir -Force | Out-Null
+        $spec = Join-Path $featureDir 'spec.md'
+        # A poisoned body — as if the operator pasted a credential into
+        # spec.md after the drafting agent wrote it, before confirming.
+        Set-Content -NoNewline -LiteralPath $spec -Value "# Feature`n`n### User Story 1 - A (Priority: P1)`n<!-- speckit-jira pin=PROJ-11 -->`n`nSee token ATATTxxxxSECRETxxxx for access.`n"
+        $doc = New-JiraSeedStateDocument -Slug 'add-payment-webhooks' -DesignatorsJson '[{"role":"story","form":"key","key":"PROJ-11","raw":"PROJ-11","position":0}]' -PlanDigest ''
+        Save-JiraSeedState -SpecPath $spec -DocumentJson $doc
+
+        $cfg = Write-JiraMockConfig -Json '{}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $M.BaseUrl
+
+        $rc = Invoke-JiraSeed -Arguments @($spec, '--confirm', '--json')
+        $rc | Should -Be 9
+        @(Get-JiraMockCallLog -Mock $M | Where-Object { $_ }).Count | Should -Be 0
+        # Zero writes: the pinning marker is still `pin=`, never consumed,
+        # and the seed record survives (a BLOCK is not a binding).
+        (Get-Content -Raw -LiteralPath $spec) | Should -Match 'pin=PROJ-11'
+        Read-JiraSeedState -SpecPath $spec | Should -Not -BeNullOrEmpty
     }
 }
