@@ -168,6 +168,26 @@ setup() {
   [ "$(jq -r '.key' <<< "$output")" = "PROJ-123" ]
 }
 
+@test "D10: a free-text parent with a trailing CR emits the trimmed title, raw untouched" {
+  # §7: "a designator arriving with a trailing CR is trimmed". `text` becomes
+  # the created parent's Jira summary (ticket_create's second argument), so
+  # the CR must not survive into it. `raw` keeps the operator's exact bytes
+  # for diagnostics — the two fields answer different questions.
+  run designator_classify specification $'Payment webhooks rollout\r' "${BASE}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.form' <<< "$output")" = "free_text" ]
+  [ "$(jq -r '.text' <<< "$output")" = "Payment webhooks rollout" ]
+  [ "$(jq -r '.raw' <<< "$output")" = $'Payment webhooks rollout\r' ]
+}
+
+@test "D10: a free-text parent padded with spaces emits the trimmed title" {
+  # The same guard that decides non-blank also strips surrounding spaces, so
+  # a padded title must reach Jira trimmed for the same reason a CR does.
+  run designator_classify specification "   Payment webhooks rollout   " "${BASE}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.text' <<< "$output")" = "Payment webhooks rollout" ]
+}
+
 @test "D10: a browse URL with a trailing CR reduces identically" {
   run designator_classify story $'https://acme.atlassian.net/browse/PROJ-123\r' "${BASE}"
   [ "$status" -eq 0 ]

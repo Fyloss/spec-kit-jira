@@ -51,4 +51,21 @@ Describe 'Designator CLI flags' {
         $out = Invoke-JiraCliParse -Arguments @('seed', '--story', 'PROJ-11')
         $out | Should -Match 'parent_seen=false'
     }
+
+    # §2 cardinality: --parent is "at most once". A second one silently
+    # overwriting the first changes which parent is adopted or CREATED — an
+    # irreversible write (US2) — from a typo the operator never sees.
+
+    It 'a second --parent is a usage error, never a silent overwrite' {
+        $out = Invoke-JiraCliParse -Arguments @('seed', '--parent', 'PROJ-1', '--parent', 'PROJ-2', '--story', 'PROJ-11')
+        $out | Should -Match 'exit=1'
+        $out | Should -Match 'at most once'
+        $out | Should -Not -Match 'parent=PROJ-2'
+    }
+
+    It 'a second --parent is refused even when the first value was blank (FR-055)' {
+        $out = Invoke-JiraCliParse -Arguments @('seed', '--parent', '', '--parent', 'PROJ-2')
+        $out | Should -Match 'exit=1'
+        $out | Should -Match 'at most once'
+    }
 }

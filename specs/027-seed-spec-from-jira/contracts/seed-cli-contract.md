@@ -54,6 +54,21 @@ confirm=true|false
 `parent_seen` is separate from `parent` **because FR-055 requires a blank value
 and an absent flag to differ**. A parser that drops empties collapses them.
 
+"At most once" is **enforced**, not merely documented: a second `--parent` is a
+usage error (`exit=1`,
+`error=--parent may be supplied at most once (--parent <designator>)`), never a
+silent overwrite of the first value. Silently keeping the last one lets a typo
+or a mis-ordered flag change which parent is adopted or **created** — an
+irreversible write (US2) — with nothing shown to the operator. The check reads
+`parent_seen`, not whether `parent` is non-empty, so that `--parent "" --parent
+X` is caught too; a truthiness test on the value would wave the blank first
+occurrence through and reintroduce exactly the FR-055 collapse the field exists
+to prevent.
+
+*Both ports shipped the comment citing this cardinality while the code enforced
+nothing; corrected 2026-08-16 after a PR review comment, with the error string
+pinned byte-identical across ports.*
+
 ### Unchanged
 
 The leading positional single mentioned key keeps today's exact behaviour

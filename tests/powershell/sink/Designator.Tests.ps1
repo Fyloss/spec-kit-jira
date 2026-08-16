@@ -119,6 +119,21 @@ Describe 'Windows (§7, D10)' {
         $r = Resolve-JiraDesignator -Role story -Raw "$script:Base/browse/PROJ-123`r" -BaseUrl $script:Base | ConvertFrom-Json
         $r.key | Should -Be 'PROJ-123'
     }
+
+    It 'D10: a free-text parent with a trailing CR emits the trimmed title, raw untouched' {
+        # §7: "a designator arriving with a trailing CR is trimmed". `text`
+        # becomes the created parent's Jira summary, so the CR must not
+        # survive into it; `raw` keeps the operator's exact bytes.
+        $r = Resolve-JiraDesignator -Role specification -Raw "Payment webhooks rollout`r" -BaseUrl $script:Base | ConvertFrom-Json
+        $r.form | Should -Be 'free_text'
+        $r.text | Should -Be 'Payment webhooks rollout'
+        $r.raw | Should -Be "Payment webhooks rollout`r"
+    }
+
+    It 'D10: a free-text parent padded with spaces emits the trimmed title' {
+        $r = Resolve-JiraDesignator -Role specification -Raw '   Payment webhooks rollout   ' -BaseUrl $script:Base | ConvertFrom-Json
+        $r.text | Should -Be 'Payment webhooks rollout'
+    }
 }
 
 Describe 'a key-form designator with no configured base URL' {

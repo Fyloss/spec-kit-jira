@@ -227,8 +227,12 @@ cli_parse() {
         # 027, contract seed-cli-contract.md §2: at most once — key, URL, or
         # free text (may contain spaces). `parent_seen` is recorded
         # separately from `parent` because FR-055 requires a blank value and
-        # an absent flag to differ.
-        if [[ $# -lt 2 ]]; then
+        # an absent flag to differ — and it is also what makes the
+        # at-most-once check below correct for a blank first value, which a
+        # `-n "${parent}"` test would wave through.
+        if [[ "${parent_seen}" == true ]]; then
+          error="--parent may be supplied at most once (--parent <designator>)"
+        elif [[ $# -lt 2 ]]; then
           error="--parent requires a value (--parent <designator>)"
         else
           shift

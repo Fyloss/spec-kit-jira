@@ -195,7 +195,17 @@ designator_classify() {
     local trimmed
     trimmed="$(_desig_trim "$(_desig_strip_cr "${raw}")")"
     if [[ -n "${trimmed}" ]]; then
-      jq -cn --arg r "${role}" --arg raw "${raw}" --arg t "${raw}" \
+      # `text` is the TRIMMED value, `raw` the operator's exact bytes — the
+      # two fields answer different questions and must not be conflated.
+      # `text` becomes the created parent's Jira summary (ticket_create's
+      # second argument), so a pasted trailing CR or padding would otherwise
+      # be written into the board; `raw` is what a refusal quotes back, and
+      # trimming it would misreport what was typed. Emitting the SAME
+      # expression the non-blank guard above already computes is what keeps
+      # the two coherent: a value is accepted and titled by one rule, never
+      # accepted by one and titled by another (contract §7, "a designator
+      # arriving with a trailing CR is trimmed").
+      jq -cn --arg r "${role}" --arg raw "${raw}" --arg t "${trimmed}" \
         '{role:$r, raw:$raw, form:"free_text", text:$t}' | json_canonical
       return 0
     fi

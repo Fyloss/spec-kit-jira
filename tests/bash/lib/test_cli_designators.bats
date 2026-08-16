@@ -54,3 +54,22 @@ setup() {
   run cli_parse seed --story PROJ-11
   [[ "$output" == *"parent_seen=false"* ]]
 }
+
+# --- §2 cardinality: --parent is "at most once" ------------------------------
+# A second --parent silently overwriting the first changes which parent is
+# adopted or CREATED — an irreversible write (US2) — from a typo the operator
+# never sees. The contract's own cardinality column is the rule; the parser
+# only cited it in a comment until now.
+
+@test "a second --parent is a usage error, never a silent overwrite" {
+  run cli_parse seed --parent PROJ-1 --parent PROJ-2 --story PROJ-11
+  [[ "$output" == *"exit=1"* ]]
+  [[ "$output" == *"at most once"* ]]
+  [[ "$output" != *"parent=PROJ-2"* ]]
+}
+
+@test "a second --parent is refused even when the first value was blank (FR-055)" {
+  run cli_parse seed --parent "" --parent PROJ-2
+  [[ "$output" == *"exit=1"* ]]
+  [[ "$output" == *"at most once"* ]]
+}

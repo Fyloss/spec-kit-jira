@@ -143,7 +143,17 @@ function Resolve-JiraDesignator {
     if ($Role -eq 'specification') {
         $trimmed = $Raw.TrimEnd("`r").Trim()
         if ($trimmed) {
-            return (ConvertTo-JiraJsonValue ([ordered]@{ role = $Role; raw = $Raw; form = 'free_text'; text = $Raw }))
+            # `text` is the TRIMMED value, `raw` the operator's exact bytes —
+            # the two fields answer different questions and must not be
+            # conflated. `text` becomes the created parent's Jira summary, so
+            # a pasted trailing CR or padding would otherwise be written into
+            # the board; `raw` is what a refusal quotes back, and trimming it
+            # would misreport what was typed. Emitting the SAME expression the
+            # non-blank guard above already computes is what keeps the two
+            # coherent: a value is accepted and titled by one rule, never
+            # accepted by one and titled by another (contract §7, "a
+            # designator arriving with a trailing CR is trimmed").
+            return (ConvertTo-JiraJsonValue ([ordered]@{ role = $Role; raw = $Raw; form = 'free_text'; text = $trimmed }))
         }
     }
 

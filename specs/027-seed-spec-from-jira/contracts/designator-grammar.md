@@ -102,6 +102,41 @@ Legal only for `role = specification`.
 The parse state MUST carry `parent_seen` separately from `parent`. Collapsing a
 blank value into "absent" is the specific defect FR-055 exists to forbid.
 
+### `text` is trimmed, `raw` is not
+
+A `free_text` entry emits **both** fields, and they answer different questions:
+
+| Field | Value | Consumed by |
+| --- | --- | --- |
+| `raw` | the operator's exact bytes, untouched | refusal messages quoting back what was typed |
+| `text` | the trimmed title | the created parent's Jira **summary** (`ticket_create`) |
+
+`text` MUST be the *same expression the non-blank guard above already computes*
+— strip a trailing CR (§7), then strip leading and trailing whitespace — never
+the raw value. Two reasons, in order of weight:
+
+1. **It is written to the board.** `text` reaches `ticket_create` as the summary
+   of an issue this ceremony **creates** — one of the feature's only two
+   irreversible writes (US2). A title pasted with a trailing CR, or padded by a
+   copy-paste, would be persisted to Jira that way and cannot be un-created.
+2. **Accept and title must obey one rule.** Deciding non-blank by the trimmed
+   value while titling by the raw one lets a designator be *accepted* under one
+   normalisation and *written* under another. Emitting the guard's own result
+   makes that class of disagreement unrepresentable.
+
+Only the ends are trimmed: internal spacing is the operator's, and is preserved
+(`"  Multi  word  title \r"` → `"Multi  word  title"`).
+
+*Decision recorded 2026-08-16, prompted by a PR review comment that proposed
+stripping the CR **in the PowerShell port only**. That patch is rejected as
+filed: both ports emitted the untrimmed raw, so changing one alone would have
+traded a Jira-data defect for a cross-port divergence (NFR-1, Constitution VI) —
+and, because no corpus scenario passes a CR-bearing designator, one the
+conformance corpus would not have caught. The review also saw only the CR; the
+same guard strips padding, so `--parent "  Title  "` had the identical defect.
+Both ports changed together, with a test per port pinning `text` trimmed and
+`raw` intact.*
+
 ---
 
 ## §6 Order and de-duplication (FR-008, FR-054)

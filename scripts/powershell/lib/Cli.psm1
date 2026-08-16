@@ -283,8 +283,14 @@ function Invoke-JiraCliParse {
                 # 027, contract seed-cli-contract.md §2: at most once — key,
                 # URL, or free text (may contain spaces). ParentSeen is
                 # recorded separately from Parent because FR-055 requires a
-                # blank value and an absent flag to differ.
-                if ($idx + 1 -ge $Arguments.Count) {
+                # blank value and an absent flag to differ — and it is also
+                # what makes the at-most-once check below correct for a blank
+                # first value, which a truthiness test on $parent would wave
+                # through.
+                if ($parentSeen -eq 'true') {
+                    $parseError = '--parent may be supplied at most once (--parent <designator>)'
+                }
+                elseif ($idx + 1 -ge $Arguments.Count) {
                     $parseError = '--parent requires a value (--parent <designator>)'
                 }
                 else {
