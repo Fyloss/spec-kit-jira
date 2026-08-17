@@ -104,6 +104,249 @@ setup() {
   [ "$output" = "[]" ]
 }
 
+# --- 028: the template's own single-line emphasised triple (contract §4) ---
+# clause-recognition.md §4 rows 1, 2, 5, 6, 9 plus rule T3. Every row asserts
+# clause DISJOINTNESS (§6 invariant 1) — not merely non-emptiness — and for
+# FR-011, that concatenating the three clause texts reproduces the source
+# line minus its keywords, wrappers and clause delimiters: a truncation at
+# either end fails the join comparison rather than passing as "disjoint".
+
+@test "contract §4 row 1: emphasised delimited triple yields three disjoint clauses" {
+  run bash -c "printf '%s\n' '**Given** a user arrives on the Homepage, **When** they click Login, **Then** the login form appears.' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<< "$output")" -eq 1 ]
+  g="$(jq -r '.[0].given[0][0].text' <<< "$output")"
+  w="$(jq -r '.[0].when[0][0].text' <<< "$output")"
+  t="$(jq -r '.[0].then[0][0].text' <<< "$output")"
+  [ "$g" = "a user arrives on the Homepage" ]
+  [ "$w" = "they click Login" ]
+  [ "$t" = "the login form appears." ]
+  # Anchored at the start (word-boundary, not a bare substring match) — a
+  # clause legitimately containing "when" or "then" mid-body (FR-007) must
+  # not fail this check (Copilot review).
+  [[ ! "$g" =~ ^(Given|When|Then)([^[:alpha:]]|$) ]]
+  [[ ! "$w" =~ ^(Given|When|Then)([^[:alpha:]]|$) ]]
+  [[ ! "$t" =~ ^(Given|When|Then)([^[:alpha:]]|$) ]]
+  [ "${g}, ${w}, ${t}" = "a user arrives on the Homepage, they click Login, the login form appears." ]
+}
+
+@test "contract §4 row 2: plain delimited triple yields three disjoint clauses" {
+  run bash -c "printf '%s\n' 'Given a user arrives on the Homepage, When they click Login, Then the login form appears.' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  g="$(jq -r '.[0].given[0][0].text' <<< "$output")"
+  w="$(jq -r '.[0].when[0][0].text' <<< "$output")"
+  t="$(jq -r '.[0].then[0][0].text' <<< "$output")"
+  [ "$g" = "a user arrives on the Homepage" ]
+  [ "$w" = "they click Login" ]
+  [ "$t" = "the login form appears." ]
+  [ "${g}, ${w}, ${t}" = "a user arrives on the Homepage, they click Login, the login form appears." ]
+}
+
+@test "contract §4 row 5: emphasised delimiter-free triple yields three disjoint clauses" {
+  run bash -c "printf '%s\n' '**Given** a user **When** they click **Then** it opens' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  g="$(jq -r '.[0].given[0][0].text' <<< "$output")"
+  w="$(jq -r '.[0].when[0][0].text' <<< "$output")"
+  t="$(jq -r '.[0].then[0][0].text' <<< "$output")"
+  [ "$g" = "a user" ]
+  [ "$w" = "they click" ]
+  [ "$t" = "it opens" ]
+  [ "${g} ${w} ${t}" = "a user they click it opens" ]
+}
+
+@test "US1 AC4: single-asterisk emphasis (*Given*) is read exactly as the bold form is" {
+  run bash -c "printf '%s\n' '*Given* a user, *When* they click, *Then* it opens' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "a user" ]
+  [ "$(jq -r '.[0].when[0][0].text' <<< "$output")" = "they click" ]
+  [ "$(jq -r '.[0].then[0][0].text' <<< "$output")" = "it opens" ]
+}
+
+@test "US1 AC4: single-underscore emphasis (_Given_) is read exactly as the bold form is" {
+  run bash -c "printf '%s\n' '_Given_ a user, _When_ they click, _Then_ it opens' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "a user" ]
+  [ "$(jq -r '.[0].when[0][0].text' <<< "$output")" = "they click" ]
+  [ "$(jq -r '.[0].then[0][0].text' <<< "$output")" = "it opens" ]
+}
+
+@test "contract §4 row 6: emphasis inside a clause body survives as marks, wrapper around the keyword does not" {
+  run bash -c "printf '%s\n' '__Given__ a **bold** thing, __When__ x, __Then__ y' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  given_text="$(jq -r '[.[0].given[0][].text] | join("")' <<< "$output")"
+  [ "$given_text" = "a bold thing" ]
+  [ "$(jq -r '[.[0].given[0][] | select(.text=="bold")] | .[0].marks[0].kind' <<< "$output")" = "bold" ]
+  [ "$(jq -r '.[0].when[0][0].text' <<< "$output")" = "x" ]
+  [ "$(jq -r '.[0].then[0][0].text' <<< "$output")" = "y" ]
+  # the wrapper around Given/When/Then never reaches a clause's own text
+  [[ "$(jq -r '[.[0].given[0][].text, .[0].when[0][0].text, .[0].then[0][0].text] | join("")' <<< "$output")" != *"__"* ]]
+}
+
+@test "contract §4 row 9: the greedy delimiter-free split pins the last When" {
+  run bash -c "printf '%s\n' 'Given a When b When c Then d' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  g="$(jq -r '.[0].given[0][0].text' <<< "$output")"
+  w="$(jq -r '.[0].when[0][0].text' <<< "$output")"
+  t="$(jq -r '.[0].then[0][0].text' <<< "$output")"
+  [ "$g" = "a When b" ]
+  [ "$w" = "c" ]
+  [ "$t" = "d" ]
+  [ "${g} ${w} ${t}" = "a When b c d" ]
+}
+
+@test "contract §2 rule T3: keywords present but out of grammar order emit nothing (fail closed)" {
+  run bash -c "printf '%s\n' 'Then it opens, When they click, Given a user' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+}
+
+# --- 028 US2: no clause body ever repeats its own keyword (contract §6 invariant 2) ---
+
+@test "US2: no clause body opens with a keyword, on the per-line, delimited and delimiter-free forms" {
+  run bash -c "printf '%s\n' '- **Given** a signed-in user' '- **When** they open the board' '- **Then** widgets load' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [[ "$(jq -r '.[0].given[0][0].text' <<< "$output")" != Given* ]]
+  [[ "$(jq -r '.[0].when[0][0].text' <<< "$output")" != When* ]]
+  [[ "$(jq -r '.[0].then[0][0].text' <<< "$output")" != Then* ]]
+
+  run bash -c "printf '%s\n' '**Given** a user arrives on the Homepage, **When** they click Login, **Then** the login form appears.' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [[ "$(jq -r '.[0].given[0][0].text' <<< "$output")" != Given* ]]
+  [[ "$(jq -r '.[0].when[0][0].text' <<< "$output")" != When* ]]
+  [[ "$(jq -r '.[0].then[0][0].text' <<< "$output")" != Then* ]]
+
+  run bash -c "printf '%s\n' '**Given** a user **When** they click **Then** it opens' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [[ "$(jq -r '.[0].given[0][0].text' <<< "$output")" != Given* ]]
+  [[ "$(jq -r '.[0].when[0][0].text' <<< "$output")" != When* ]]
+  [[ "$(jq -r '.[0].then[0][0].text' <<< "$output")" != Then* ]]
+}
+
+@test "US2: an emphasised And/But continuation joins the correct bucket without repeating a keyword" {
+  run bash -c "printf '%s\n' '- **Given** a signed-in user' '- **And** an active session' '- **When** they open the board' '- **But** the network is slow' '- **Then** widgets load' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq '.[0].given | length' <<< "$output")" -eq 2 ]
+  [ "$(jq -r '.[0].given[1][0].text' <<< "$output")" = "an active session" ]
+  [ "$(jq '.[0].when | length' <<< "$output")" -eq 2 ]
+  [ "$(jq -r '.[0].when[1][0].text' <<< "$output")" = "the network is slow" ]
+  [[ "$(jq -r '.[0].given[1][0].text' <<< "$output")" != And* ]]
+  [[ "$(jq -r '.[0].when[1][0].text' <<< "$output")" != But* ]]
+}
+
+@test "US2: a clause body containing the word 'then' survives unsplit (FR-007)" {
+  run bash -c "printf '%s\n' 'Given the report only loads then only if cached, When they refresh, Then it reloads' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "the report only loads then only if cached" ]
+  [ "$(jq -r '.[0].when[0][0].text' <<< "$output")" = "they refresh" ]
+  [ "$(jq -r '.[0].then[0][0].text' <<< "$output")" = "it reloads" ]
+}
+
+@test "US2: a one-sided emphasis wrapper never reaches the clause body" {
+  run bash -c "printf '%s\n' '**Given a user, When they click, Then it opens' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "a user" ]
+  [[ "$(jq -r '.[0].given[0][0].text' <<< "$output")" != *"*"* ]]
+
+  run bash -c "printf '%s\n' 'Given** a user, When they click, Then it opens' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "a user" ]
+  [[ "$(jq -r '.[0].given[0][0].text' <<< "$output")" != *"*"* ]]
+}
+
+@test "US2: a mixed emphasis form on one line yields one scenario with all three clauses correct (contract §5)" {
+  run bash -c "printf '%s\n' '**Given** a user, When they click, **Then** it opens' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "a user" ]
+  [ "$(jq -r '.[0].when[0][0].text' <<< "$output")" = "they click" ]
+  [ "$(jq -r '.[0].then[0][0].text' <<< "$output")" = "it opens" ]
+}
+
+# --- 028 US4: a scenario wrapped across several lines is read whole (contract §3) ---
+
+@test "US4: a scenario wrapped inside a clause, followed by a second scenario, is read whole" {
+  run bash -c "printf '%s\n' \
+    '1. **Given** a user who has been sitting on the homepage for a' \
+    '   very long while without any interaction at all, **When** they' \
+    '   finally click the Login button, **Then** the login form appears' \
+    '   on the screen right away.' \
+    '2. **Given** another scenario, **When** something else happens, **Then** it also works.' \
+    | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<< "$output")" -eq 2 ]
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "a user who has been sitting on the homepage for a very long while without any interaction at all" ]
+  [ "$(jq -r '.[0].when[0][0].text' <<< "$output")" = "they finally click the Login button" ]
+  [ "$(jq -r '.[0].then[0][0].text' <<< "$output")" = "the login form appears on the screen right away." ]
+  [ "$(jq -r '.[1].given[0][0].text' <<< "$output")" = "another scenario" ]
+  [ "$(jq -r '.[1].when[0][0].text' <<< "$output")" = "something else happens" ]
+  [ "$(jq -r '.[1].then[0][0].text' <<< "$output")" = "it also works." ]
+}
+
+@test "US4: the existing per-line form passes through the join pre-pass unchanged (§3 identity invariant)" {
+  run bash -c "printf '%s\n' '- **Given** a signed-in user' '- **When** they open the board' '- **Then** widgets load' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "a signed-in user" ]
+  [ "$(jq -r '.[0].when[0][0].text' <<< "$output")" = "they open the board" ]
+  [ "$(jq -r '.[0].then[0][0].text' <<< "$output")" = "widgets load" ]
+}
+
+@test "US4: an unindented prose line immediately after a scenario is not joined" {
+  run bash -c "printf '%s\n' 'Given a user, When they click, Then it opens' 'This is unrelated prose that happens to follow immediately.' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.[0].then[0][0].text' <<< "$output")" = "it opens" ]
+  [[ "$(jq -c '.' <<< "$output")" != *"unrelated prose"* ]]
+}
+
+@test "US4, FR-022: a scenario wrapped at a clause boundary emits nothing (pinned, not fixed — real shape from 019 spec.md:93-95)" {
+  run bash -c "printf '%s\n' \
+    '1. **Given** a parent whose recorded origin is the mirror'\''s own and whose description carries no boundary,' \
+    '   **When** \`plan.md\`'\''s summary changes and reconcile is run, **Then** the parent'\''s description carries the' \
+    '   new summary exactly once and no part of the previous one.' \
+    | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+}
+
+# --- 028 US5: text that is not a scenario is still not turned into one ---
+
+@test "US5, FR-012: prose containing given/when/then mid-sentence yields no clause" {
+  run bash -c "printf '%s\n' 'The system checks whether login was given, when it happened, and then updates the log.' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+}
+
+@test "US5, FR-014: an absent or empty acceptance-scenario section yields [] with no warning" {
+  run bash -c "printf '%s\n' '**Acceptance Scenarios**:' '' 'Nothing here yet.' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  # $output merges stdout and stderr (default `run` behaviour) — exactly "[]"
+  # proves no warning text was printed alongside the empty array.
+  [ "$output" = "[]" ]
+}
+
+@test "US5, FR-013: a scenario that never reaches a Then is not emitted" {
+  run bash -c "printf '%s\n' '- **Given** a user' '- **When** they act' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+}
+
+@test "US5/US4: a story section mixing prose (Why this priority / Independent Test) with scenarios joins no prose into a clause" {
+  run bash -c "printf '%s\n' \
+    '### User Story 1 - Homepage login (Priority: P1)' \
+    '' \
+    'As a visitor, I want to sign in from the homepage.' \
+    '' \
+    '**Why this priority**: This is the primary entry point for every returning user.' \
+    '' \
+    '**Independent Test**: Can be fully tested by visiting the homepage and signing in.' \
+    '' \
+    '**Acceptance Scenarios**:' \
+    '' \
+    '1. **Given** a user arrives on the Homepage, **When** they click Login, **Then** the login form appears.' \
+    | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "a user arrives on the Homepage" ]
+  [[ "$(jq -c '.' <<< "$output")" != *"Why this priority"* ]]
+  [[ "$(jq -c '.' <<< "$output")" != *"Independent Test"* ]]
+}
+
 # --- Design extraction (FR-016) --------------------------------------------
 
 @test "extracts a Figma link and UX guidance for the Design section" {
@@ -139,10 +382,49 @@ setup() {
 
 # --- Cross-port parity (NFR-1) ---------------------------------------------
 
+# --- 029 Convergence T035: a wrap landing just before Then never merges or
+# mis-assigns a clause (FR-005, FR-022, US4 AC3) --------------------------
+
+@test "T035: a scenario wrapped just before Then emits nothing rather than a clause with an empty When (real shape from 023 spec.md:193-194)" {
+  run bash -c "printf '%s\n' \
+    '2. **Given** the same specification, **When** the same event fires twice with nothing changed in between,' \
+    '   **Then** the second run performs zero moves and zero writes.' \
+    | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+}
+
+@test "T035: an incomplete scenario wrapped the same way never merges into the NEXT scenario (real shape from 007 spec.md:125-129)" {
+  run bash -c "printf '%s\n' \
+    '1. **Given** a shared fixture whose keys include non-ASCII characters and common punctuation,' \
+    '   **When** the suite runs, **Then** each implementation is asserted against the fixture'\''s' \
+    '   expected content, not merely against the other implementation'\''s output.' \
+    '2. **Given** the fix applied to only one implementation, **When** the shared suite runs on both,' \
+    '   **Then** the suite fails.' \
+    | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  # Both scenarios are malformed by the same wrap shape, so both are
+  # refused — the defect this pins is the SILENT MERGE (item 2's clauses
+  # bleeding into item 1's), not the individual mis-split, which T035's
+  # sibling test above already covers.
+  [ "$output" = "[]" ]
+  [[ "$(jq -c '.' <<< "$output" 2>/dev/null || echo '$output')" != *"the fix applied"* ]]
+}
+
+@test "T035: a scenario that completes normally is unaffected by the unconditional flush" {
+  run bash -c "printf '%s\n' '- **Given** a signed-in user' '- **When** they open the board' '- **Then** widgets load' | { source '${ENGINE_DIR}/parse.sh'; parse_acceptance_criteria; }"
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<< "$output")" -eq 1 ]
+  [ "$(jq -r '.[0].given[0][0].text' <<< "$output")" = "a signed-in user" ]
+}
+
 @test "the PowerShell port parses identically (title, description, gherkin)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local spec
-  spec="$(printf '%s\n' '# Feature Specification: Rich Tickets' '' 'We need a reconcile bridge.' '' '### User Story 1 - The story (Priority: P2)' '- **Given** a user' '- **When** they act' '- **Then** it works')"
+  # 028: the per-line form AND the spec-kit template's own emphasised
+  # single-line triple, in the same document — the corpus gap that let the
+  # two ports diverge on the template's own default output.
+  spec="$(printf '%s\n' '# Feature Specification: Rich Tickets' '' 'We need a reconcile bridge.' '' '### User Story 1 - The story (Priority: P2)' '- **Given** a user' '- **When** they act' '- **Then** it works' '' '### User Story 2 - The template form (Priority: P2)' '1. **Given** a visitor, **When** they act, **Then** it works too')"
 
   local bt bd bg
   bt="$(printf '%s' "${spec}" | parse_title 001-rich-tickets)"

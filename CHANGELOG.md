@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-08-17
+
+### Fixed
+
+- A scenario written the spec-kit template's own way —
+  `1. **Given** …, **When** …, **Then** …` on one line — reached the ticket as
+  three copies of the whole unsplit line, each opening with a stuttered
+  `Given **Given** …`/`When **When** …`/`Then **Then** …` keyword. The
+  clause recogniser accepted the emphasis wrapper (`**`/`__`/`*`/`_`) only
+  *after* each keyword and never *before* it, and only on the one-clause-
+  per-line path; the single-line triple recogniser's delimiter-free fallback
+  then fell back to a glob strip that silently returns its input unchanged
+  when it fails to match, assigning the entire line to `given`, `when`, and
+  `then` alike. The two ports diverged on the same input: the bash port
+  triplicated the line, the PowerShell port dropped the scenario and
+  returned an empty panel — a live Constitution VI divergence, since no
+  existing conformance fixture exercised the template's own default form.
+  Fixed identically in both ports: the wrapper is now optional on both sides
+  of every keyword, and a line that cannot be split cleanly emits no
+  scenario rather than guessing (fail-closed). A scenario wrapped across
+  several indented lines — the form every specification in this repository
+  actually uses — is now also read as one scenario instead of an empty
+  panel. The renderer (`_adf_gherkin_panel` and its PowerShell twin) was not
+  touched; the stutter was entirely a parser defect.
+- A scenario wrapped just before its own `**Then**` — a wrap the previous
+  fix correctly refuses to join into one logical line, since the
+  continuation itself opens with a keyword — reached the ticket either with
+  an empty `When` clause carrying a stray `**When**` swallowed into `Given`,
+  or, when a well-formed scenario followed it, silently merged into that
+  next scenario's clauses, collapsing two authored scenarios into one.
+  Measured across this repository's own specifications: 59 of 554 emitted
+  scenarios (10.6%) carried an empty `given` or `when`, in 22 of 24
+  specification files. Both ports now refuse to emit a scenario unless
+  `given`, `when` and `then` are all non-empty, and discard an incomplete
+  scenario's state before a new `Given` starts rather than merging into it.
+
+- The test harness gave a starting PowerShell mock exactly 10 seconds to bind
+  its socket and write its readiness file. Feature 009 measured that cold
+  start at 0.5–1.0s locally, but a contended CI runner is an order of
+  magnitude slower, so the ceiling was close enough to fire: when it did, the
+  harness reddened whichever unrelated test had called `mock_start` next —
+  on one run `test_config_child_type.bats`'s "the PowerShell port resolves the
+  child type identically (NFR-1)", a message that reads like a port
+  divergence although the assertion never ran. The budget only ever bounded a
+  *live* child (a mock that exits is detected separately and immediately), so
+  it is now 60 seconds in both ports, costing a genuine failure nothing. Both
+  ports read the value from a named constant and interpolate it into the
+  failure message, and a new guard fails if the two drift apart or if the
+  reported budget stops matching the enforced one.
+
 ## [0.18.0] - 2026-08-15
 
 ### Added
@@ -997,7 +1047,9 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.18.0...v0.18.1
+[0.18.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.14.0...v0.15.0

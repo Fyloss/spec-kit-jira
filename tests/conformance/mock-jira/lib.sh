@@ -19,6 +19,17 @@
 
 _MOCK_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Seconds a *live* pwsh mock may take to bind its socket and write the ready
+# file. 009 measured the cold start at 0.5-1.0s locally, but a contended CI
+# runner is an order of magnitude slower, and the original 10s ceiling was
+# close enough to that to fire: it reddened whichever unrelated test called
+# `mock_start` next, reporting a port divergence whose assertion had never
+# run. A dead mock is caught separately and immediately by the `kill -0`
+# below, so raising this ceiling costs a genuine failure nothing. Keep in
+# step with $mockReadyTimeoutSeconds in Mock.psm1 (NFR-1) — a bats guard
+# fails if the two drift apart.
+_MOCK_READY_TIMEOUT_S=60
+
 # Startup failures are otherwise mute: the mock's own diagnostics now land in
 # files rather than on the caller's stderr, so quote them here.
 mock_died() {
@@ -126,13 +137,13 @@ _mock_start_pwsh() {
   pwsh "${args[@]}" < /dev/null > "${MOCK_TMPDIR}/mock.out" 2> "${MOCK_TMPDIR}/mock.err" 3>&- &
   MOCK_PID=$!
 
-  local i=0
-  while [ ! -s "${ready}" ] && [ "${i}" -lt 200 ]; do
+  local i=0 max=$((_MOCK_READY_TIMEOUT_S * 20))
+  while [ ! -s "${ready}" ] && [ "${i}" -lt "${max}" ]; do
     kill -0 "${MOCK_PID}" 2> /dev/null || { mock_died "exited before ready"; return 1; }
     sleep 0.05
     i=$((i + 1))
   done
-  [ -s "${ready}" ] || { mock_died "failed to become ready within 10s"; return 1; }
+  [ -s "${ready}" ] || { mock_died "failed to become ready within ${_MOCK_READY_TIMEOUT_S}s"; return 1; }
 
   MOCK_PORT="$(cat "${ready}")"
   MOCK_BASE_URL="http://127.0.0.1:${MOCK_PORT}"

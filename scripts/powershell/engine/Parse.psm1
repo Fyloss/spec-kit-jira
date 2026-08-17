@@ -17,6 +17,11 @@ Import-Module (Join-Path $PSScriptRoot 'SpecMarker.psm1') -Force # Get-JiraSpecM
 Import-Module (Join-Path $PSScriptRoot 'StoryMarker.psm1') -Force -Global # the durable identifier's grammar (Phase 2)
 Import-Module (Join-Path $PSScriptRoot 'Markdown.psm1') -Force # the Markdown subset tokenizer (016, contracts/markdown-subset.md)
 
+# The emphasis-wrapper token (contract clause-recognition.md §1): optional,
+# and shared by every recogniser in this file so there is one definition to
+# keep symmetric rather than a copy per recogniser.
+$script:JiraParseKwWrap = '(\*\*|__|\*|_)?'
+
 function Remove-JiraParseMarkerLines {
     <#
     .SYNOPSIS
@@ -192,6 +197,59 @@ function Get-JiraParsedDescription {
     return (ConvertTo-JiraJsonValue ([ordered]@{ blocks = $kept }))
 }
 
+function Test-JiraParseAcOpensKw {
+    <#
+    .SYNOPSIS
+      True when the (marker-stripped, trimmed) line begins with an
+      optionally-wrapped Given/When/Then/And/But keyword (contract §3
+      conditions 1 and 4 share this one check). Mirror of _parse_ac_opens_kw.
+    #>
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
+    return [regex]::IsMatch($Text, "^$($script:JiraParseKwWrap)(Given|When|Then|And|But)$($script:JiraParseKwWrap)\s", 'IgnoreCase')
+}
+
+function Join-JiraParseAcContinuation {
+    <#
+    .SYNOPSIS
+      Contract §3: join an indented continuation line into the logical
+      (scenario) line above it, before any clause classification runs. A raw
+      line joins exactly when all five conditions hold; a blank line always
+      ends the current logical line. On input with no continuation lines
+      this is the identity function. Mirror of _parse_ac_join_continuations.
+    #>
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
+    $lines = Split-JiraParseLine $Text
+    $out = [System.Collections.Generic.List[string]]::new()
+    $buf = ''
+    $bufActive = $false
+    $prevOpened = $false
+
+    foreach ($line in $lines) {
+        $t = $line.Trim()
+        if ([string]::IsNullOrEmpty($t)) {
+            if ($bufActive) { [void]$out.Add($buf) }
+            $buf = ''; $bufActive = $false; $prevOpened = $false
+            continue
+        }
+        $stripped = Remove-JiraParseMarker $t
+        $opensKw = Test-JiraParseAcOpensKw $stripped
+        $isListOrHeading = ($t -match '^([-*]|\d+\.)\s') -or ($t -match '^#')
+        $hasLeadingWs = $line -match '^\s'
+
+        if ($bufActive -and $prevOpened -and $hasLeadingWs -and (-not $opensKw) -and (-not $isListOrHeading)) {
+            $buf = "$buf $t"
+        }
+        else {
+            if ($bufActive) { [void]$out.Add($buf) }
+            $buf = $line
+            $bufActive = $true
+            $prevOpened = $opensKw
+        }
+    }
+    if ($bufActive) { [void]$out.Add($buf) }
+    return ($out -join "`n")
+}
+
 function Get-JiraParsedAcceptance {
     <#
     .SYNOPSIS
@@ -202,6 +260,7 @@ function Get-JiraParsedAcceptance {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
+    $Text = Join-JiraParseAcContinuation $Text
     $lines = Split-JiraParseLine $Text
 
     $blocks = [System.Collections.Generic.List[object]]::new()
@@ -217,8 +276,24 @@ function Get-JiraParsedAcceptance {
     # stay a one-element ARRAY, or given/when/then's per-clause value
     # collapses from `[[{...}]]` to `[{...}]`.
 
+    # 029, T035, fail closed (FR-005, FR-022, US4 AC3): a scenario is emitted
+    # only when it reaches a Then AND both given and when are non-empty.
+    # Refusing an incomplete Given/When on a bare Trim() is not enough: the
+    # trigger measured across this repository's own specs (59/554
+    # scenarios, 22/24 files) is a wrap that lands the continuation just
+    # before **Then** — the continuation line itself opens with a keyword
+    # (contract §3 condition 4 correctly refuses to join it), so the triple
+    # detector never fires and the L1/L2 rest-capture (no early stop at an
+    # embedded keyword) swallows the next clause's own keyword and text
+    # whole, leaving the bucket that keyword belongs to empty. The
+    # unconditional flush at the Given opener is what stops that swallowed
+    # state from then bleeding into an UNRELATED following scenario:
+    # without it, a new Given arriving while the prior (incomplete)
+    # scenario's given/when lists are non-empty but then is still empty
+    # silently appends onto them instead of starting fresh, merging two
+    # authored scenarios into one.
     $flush = {
-        if ($then.Count -gt 0) {
+        if ($then.Count -gt 0 -and $given.Count -gt 0 -and $when.Count -gt 0) {
             $blocks.Add([ordered]@{
                     given = [System.Collections.Generic.List[object]]::new($given)
                     when  = [System.Collections.Generic.List[object]]::new($when)
@@ -231,31 +306,39 @@ function Get-JiraParsedAcceptance {
     # A keyword is often itself emphasised ("**Given** ..."). The wrapper is
     # matched and discarded only immediately around the keyword — everything
     # else in the clause reaches the tokenizer with its markdown intact.
-    $kwWrap = '(\*\*|__|\*|_)?'
+    $kwWrap = $script:JiraParseKwWrap
 
     foreach ($line in $lines) {
         $t = $line.Trim()
         $t = (Remove-JiraParseMarker $t).Trim()
         if ([string]::IsNullOrEmpty($t)) { continue }
 
-        if (($t -cmatch "[Gg]iven$kwWrap\s") -and ($t -cmatch "[Ww]hen$kwWrap\s") -and ($t -cmatch "[Tt]hen$kwWrap\s")) {
+        if (($t -cmatch "$kwWrap[Gg]iven$kwWrap\s") -and ($t -cmatch "$kwWrap[Ww]hen$kwWrap\s") -and ($t -cmatch "$kwWrap[Tt]hen$kwWrap\s")) {
             & $flush
-            # Prefer explicit clause boundaries (", When" / ", Then") so a Given
-            # clause that itself contains the word "when" survives intact; only a
-            # delimiter-free line falls back to the (unadorned-keyword) first-split.
-            $m = [regex]::Match($t, "[Gg]iven$kwWrap\s+(.+)[,;]\s*[Ww]hen$kwWrap\s+(.+)[,;]\s*[Tt]hen$kwWrap\s+(.+)$")
+            # T1, delimited (contract §2): wrapper optional on BOTH sides of
+            # every keyword. Prefer explicit clause boundaries (", When" /
+            # ", Then") so a Given clause that itself contains the word
+            # "when" survives intact; only a delimiter-free line falls back
+            # to T2.
+            $m = [regex]::Match($t, "$kwWrap[Gg]iven$kwWrap\s+(.+)[,;]\s*$kwWrap[Ww]hen$kwWrap\s+(.+)[,;]\s*$kwWrap[Tt]hen$kwWrap\s+(.+)$")
             if ($m.Success) {
-                $given.Add(@(& $tok $m.Groups[2].Value.Trim()))
-                $when.Add(@(& $tok $m.Groups[4].Value.Trim()))
-                $then.Add(@(& $tok $m.Groups[6].Value.Trim()))
+                $given.Add(@(& $tok $m.Groups[3].Value.Trim()))
+                $when.Add(@(& $tok $m.Groups[6].Value.Trim()))
+                $then.Add(@(& $tok $m.Groups[9].Value.Trim()))
             }
             else {
-                $m2 = [regex]::Match($t, '[Gg]iven\s+(.*?)\s+[Ww]hen\s+(.*?)\s+[Tt]hen\s+(.+)')
+                # T2, delimiter-free (contract §2): same symmetry, greedy —
+                # POSIX ERE (the bash port) has no lazy quantifier, so both
+                # ports use the greedy form and split at the LAST When
+                # (research §R3), not the first.
+                $m2 = [regex]::Match($t, "$kwWrap[Gg]iven$kwWrap\s+(.+)\s+$kwWrap[Ww]hen$kwWrap\s+(.+)\s+$kwWrap[Tt]hen$kwWrap\s+(.+)$")
                 if ($m2.Success) {
-                    $given.Add(@(& $tok $m2.Groups[1].Value.Trim()))
-                    $when.Add(@(& $tok $m2.Groups[2].Value.Trim()))
-                    $then.Add(@(& $tok $m2.Groups[3].Value.Trim()))
+                    $given.Add(@(& $tok $m2.Groups[3].Value.Trim()))
+                    $when.Add(@(& $tok $m2.Groups[6].Value.Trim()))
+                    $then.Add(@(& $tok $m2.Groups[9].Value.Trim()))
                 }
+                # T3, fail closed (contract §2): neither matched — emit
+                # nothing rather than guess.
             }
             & $flush
             continue
@@ -266,7 +349,10 @@ function Get-JiraParsedAcceptance {
         $tm = [regex]::Match($t, "^${kwWrap}[Tt]hen${kwWrap}\s+(.+)$")
         $am = [regex]::Match($t, "^${kwWrap}([Aa]nd|[Bb]ut)${kwWrap}\s+(.+)$")
         if ($gm.Success) {
-            if ($then.Count -gt 0) { & $flush }
+            # 029, T035: flush unconditionally, not only when a Then was
+            # reached — an incomplete prior scenario must be discarded
+            # here, never merged into the new one about to start.
+            if ($given.Count -gt 0 -or $when.Count -gt 0 -or $then.Count -gt 0) { & $flush }
             $given.Add(@(& $tok $gm.Groups[3].Value.Trim())); $script:acLast = 'g'
         }
         elseif ($wm.Success) {
