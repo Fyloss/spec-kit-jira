@@ -37,6 +37,15 @@ flowchart LR
     R -->|"mirrors spec.md"| Out2["Jira tickets"]
 ```
 
+**`before_specify` does not always name the feature (029).** A ticket
+mentioned with no designator and no prior answer returns a closed reuse
+question instead: exit `0`, and deliberately **no** `branch_name` and **no**
+`short_name` in the result, not even as `null` — a caller that reads the
+result and just proceeds has nothing to proceed with. That is new for any
+reader who assumed this hook always produces a name; see
+`docs/06-feature-naming.md` for the full decision flow and
+`commands/speckit.jira.feature.md` for the ceremony that answers it.
+
 ## Installation — who writes what
 
 ```mermaid

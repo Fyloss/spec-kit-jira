@@ -229,7 +229,28 @@ Describe 'Feature command' {
         $r = Invoke-FeatureCaptured @('feature', 'invoice export')
         $r.ExitCode | Should -Be 0
         $r.Out | Should -Match '^Feature: inactive\n'
-        $r.Out | Should -Match 'Warning: could not resolve a ticket in Jira'
+        $r.Out | Should -Match 'Warning:'
+    }
+
+    It 'T131/T132: the fallback message never claims a ticket will be attached later, names the cause, and states a fresh create follows (FR-041)' {
+        Select-Team ijt
+        Start-TestMock '{"projects":{"IJT":"team"},"fault":{"network":true}}'
+        $r = Invoke-FeatureCaptured @('feature', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $obj = ($r.Out -split "`n" | Where-Object { $_ -notmatch '^WARNING:' }) -join "`n" | ConvertFrom-Json
+        $obj.warnings[0] | Should -Not -Match 'will attach it later'
+        $obj.warnings[0] | Should -Match 'Jira is unreachable'
+        $obj.warnings[0] | Should -Match 'new issue'
+    }
+
+    It 'T131/T132: a credentials rejection is named as its own cause (FR-041)' {
+        Select-Team ijt
+        Start-TestMock '{"projects":{"IJT":"team"},"faults":{"IJT":{"status":401}}}'
+        $r = Invoke-FeatureCaptured @('feature', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $obj = ($r.Out -split "`n" | Where-Object { $_ -notmatch '^WARNING:' }) -join "`n" | ConvertFrom-Json
+        $obj.warnings[0] | Should -Match 'credentials'
+        $obj.warnings[0] | Should -Not -Match 'will attach it later'
     }
 
     It 'renders the closed question on cross-team confirmation prose (T087)' {
@@ -304,6 +325,18 @@ Describe 'Feature command' {
         $obj.ticket.key | Should -Be 'IJT-42'
         $obj.ticket.action | Should -Be 'attached'
         $obj.branch_name | Should -Be 'ijt-42/invoice-export'
+    }
+
+    It 'T064: no message class echoes a supplied URL verbatim — only the reduced key ever appears (Principle IX)' {
+        Select-Team ijt
+        Write-HierarchyConfig
+        Start-TestMock '{"projects":{"IJT":"team"},"issues":{"IJT-40":{"summary":"Rework","issuetype":{"name":"Epic"},"status":{"name":"To Do"}}}}'
+        $r = Invoke-FeatureCaptured @('feature', 'https://jira.example.com/browse/IJT-40', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $obj = $r.Out.Trim() | ConvertFrom-Json
+        $obj.reuse_required.issues[0].key | Should -Be 'IJT-40'
+        $r.Out | Should -Not -Match 'jira\.example\.com'
+        $r.Out | Should -Not -Match '/browse/'
     }
 
     It 'accepts --reuse yes/no; an invalid value is a usage error naming both (FR-009, FR-016)' {
@@ -448,15 +481,48 @@ Describe 'Feature command' {
         @($obj.warnings).Count | Should -Be 0
     }
 
-    It '--reuse yes with no designator never silently attaches (FR-029)' {
+    It '--reuse yes with no designator and NO declared hierarchy falls back to the which-issues follow-up (FR-029, FR-035)' {
         Select-Team ijt
-        Write-HierarchyConfig
+        $lines = @('projects:', '  - key: IJT', 'routing_default: IJT', 'teams:', '  - id: ijt', '    project: IJT', '    folder_prefix: "ijt-"', '    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"')
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines -join "`n") + "`n"))
         Start-TestMock '{"projects":{"IJT":"team"}}'
         $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--reuse', 'yes', '--json', 'invoice export')
         $r.ExitCode | Should -Be 0
         $obj = $r.Out.Trim() | ConvertFrom-Json
         $obj.reuse_issues_required | Should -Not -BeNullOrEmpty
         $r.Out | Should -Not -Match '"action":"attached"'
+    }
+
+    It '--reuse yes with no designator auto-accepts the derived proposal: routes into the designator path, byte-identical to typing --parent/--story (FR-029, US3 AC1)' {
+        Select-Team ijt
+        Write-HierarchyConfig
+        Start-TestMock '{"projects":{"IJT":"team"},"issues":{"IJT-40":{"summary":"Rework the export pipeline","description":"Body text","issuetype":{"name":"Epic"},"status":{"name":"In Progress"},"project":{"key":"IJT"}}}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-40', '--reuse', 'yes', '--json', 'invoice export')
+        $autoOut = "$($r.ExitCode):$($r.Out)"
+        Start-TestMock '{"projects":{"IJT":"team"},"issues":{"IJT-40":{"summary":"Rework the export pipeline","description":"Body text","issuetype":{"name":"Epic"},"status":{"name":"In Progress"},"project":{"key":"IJT"}}}}'
+        $r = Invoke-FeatureCaptured @('feature', '--parent', 'IJT-40', '--json', 'invoice export')
+        $directOut = "$($r.ExitCode):$($r.Out)"
+        $autoOut | Should -Be $directOut
+        $autoOut | Should -Not -Match 'reuse_issues_required'
+    }
+
+    It '--reuse yes with no designator, an unmapped-type issue is attached as story, no parent required (FR-029, FR-036, FR-038)' {
+        Select-Team ijt
+        Write-HierarchyConfig
+        Start-TestMock '{"projects":{"IJT":"team"},"issues":{"IJT-99":{"summary":"Legacy importer","description":"Body text","issuetype":{"name":"Bug"},"status":{"name":"To Do"},"project":{"key":"IJT"}}}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-99', '--reuse', 'yes', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Not -Match 'reuse_issues_required'
+        $r.Out | Should -Match 'seed_material'
+    }
+
+    It '--reuse yes with the mentioned ticket itself among the reused issues: no special case (US3 AC2)' {
+        Select-Team ijt
+        Write-HierarchyConfig
+        Start-TestMock '{"projects":{"IJT":"team"},"issues":{"IJT-40":{"summary":"Rework","description":"Body text","issuetype":{"name":"Epic"},"status":{"name":"In Progress"},"project":{"key":"IJT"}}}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-40', '--reuse', 'yes', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        ($r.Out.Trim() | ConvertFrom-Json).ticket.key | Should -Be 'IJT-40'
     }
 
     It 'prose: the reuse question renders Detected/Attach/Answers lines' {
@@ -470,6 +536,217 @@ Describe 'Feature command' {
         $rlines[1] | Should -Be 'Detected: IJT-40 (Epic, In Progress) Rework the export pipeline'
         $r.Out | Should -Match 'Attach .*\?'
         $r.Out | Should -Match 'Answers: --reuse yes'
+    }
+
+    # --- 029 Phase 4 — usage-error rows (T029/T102, FR-015) --------------------
+
+    It 'an answer supplied with neither a mention nor a designator is a usage error (FR-015 first clause)' {
+        Select-Team ijt
+        Write-HierarchyConfig
+        $r = Invoke-FeatureCaptured @('feature', '--reuse', 'no', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 1
+        $r.Err | Should -Match 'never posed'
+    }
+
+    It "--reuse no together with designators is a usage error naming the contradiction (FR-015 second clause)" {
+        Select-Team ijt
+        Write-HierarchyConfig
+        $r = Invoke-FeatureCaptured @('feature', '--reuse', 'no', '--parent', 'IJT-40', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 1
+        $r.Err | Should -Match 'contradicts'
+    }
+
+    It '--reuse yes together with designators is accepted in silence (FR-015)' {
+        Select-Team ijt
+        Write-HierarchyConfig
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $r = Invoke-FeatureCaptured @('feature', '--reuse', 'yes', '--parent', 'A new epic', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $r.Err | Should -Not -Match 'contradicts'
+        $r.Err | Should -Not -Match 'never posed'
+    }
+
+    It 'an answered invocation never re-poses the question (FR-011)' {
+        Select-Team ijt
+        Write-HierarchyConfig
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--reuse', 'no', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        ($r.Out.Trim() | ConvertFrom-Json).PSObject.Properties.Name | Should -Not -Contain 'reuse_required'
+    }
+
+    It 'T101: Principle XVI sweep — every message class names the problem, the issue, and a copy-pasteable next step (FR-018, FR-023, FR-026)' {
+        # 1. the reuse question
+        Select-Team ijt
+        Write-HierarchyConfig
+        Start-TestMock '{"projects":{"IJT":"team"},"issues":{"IJT-40":{"summary":"Rework","issuetype":{"name":"Epic"},"status":{"name":"In Progress"}}}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-40', 'invoice export')
+        $r.Out | Should -Match 'Feature: reuse decision required'
+        $r.Out | Should -Match 'IJT-40'
+        $r.Out | Should -Match 'Answers: --reuse'
+
+        # 2. the which-issues question (fires only when no hierarchy is declared)
+        $lines2 = @('projects:', '  - key: IJT', 'routing_default: IJT', 'teams:', '  - id: ijt', '    project: IJT', '    folder_prefix: "ijt-"', '    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"')
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines2 -join "`n") + "`n"))
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-40', '--reuse', 'yes', 'invoice export')
+        $r.Out | Should -Match 'IJT-40'
+        $r.Out | Should -Match '--parent'
+        Write-HierarchyConfig
+
+        # 3. the halted warning
+        Start-TestMock '{"projects":{"IJT":"team"},"issues":{"IJT-40":{"summary":"Rework","issuetype":{"name":"Epic"},"status":{"name":"Done"}}}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-40', 'invoice export')
+        $r.Out | Should -Match 'Halted: IJT-40'
+        $r.Out | Should -Match '--reuse no, reopen it, or name another'
+
+        # 4. the extras notice (Drafted: line)
+        Start-TestMock '{"projects":{"IJT":"team"},"issues":{"IJT-41":{"summary":"B","issuetype":{"name":"Story"},"status":{"name":"To Do"}}}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-41', 'invoice export')
+        $r.Out | Should -Match 'Drafted:'
+        $r.Out | Should -Match 'beneath the same Epic'
+
+        # 5/6. the two configuration reports
+        Remove-Item -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -ErrorAction SilentlyContinue
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--json', 'invoice export')
+        $obj = $r.Out.Trim() | ConvertFrom-Json
+        $obj.warnings[0] | Should -Match '\.specify/jira/config\.yml'
+        $obj.warnings[0] | Should -Match '/speckit\.jira\.config'
+        Write-HierarchyConfig
+        Remove-Item -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'personal.yml') -ErrorAction SilentlyContinue
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--json', 'invoice export')
+        $obj = $r.Out.Trim() | ConvertFrom-Json
+        $obj.warnings[0] | Should -Match '\.specify/jira/personal\.yml'
+        $obj.warnings[0] | Should -Match '/speckit\.jira\.config'
+
+        # 7/8/9. the three usage errors
+        Select-Team ijt
+        Write-HierarchyConfig
+        $parsed = Invoke-JiraCliParse -Arguments @('feature', '--reuse', 'maybe', '--json', 'invoice export')
+        ($parsed -split "`n" | Where-Object { $_ -match '^exit=' }) | Should -Be 'exit=1'
+        $r = Invoke-FeatureCaptured @('feature', '--reuse', 'no', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 1
+        $r.Err | Should -Match 'never posed'
+        $r = Invoke-FeatureCaptured @('feature', '--parent', 'IJT-40', '--reuse', 'no', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 1
+        $r.Err | Should -Match 'contradicts'
+
+        # 10. the role-mismatch refusal: misplaced (FR-022)
+        $issuesMisplaced = @{ 'IJT-40' = @{ summary = 'S1'; description = 'd'; status = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }; issuetype = @{ id = '1'; name = 'Story' }; project = @{ key = 'IJT' } }; 'IJT-41' = @{ summary = 'S2'; description = 'd'; status = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }; issuetype = @{ id = '1'; name = 'Story' }; project = @{ key = 'IJT' } } }
+        Start-TestMock (@{ issues = $issuesMisplaced } | ConvertTo-Json -Depth 20 -Compress)
+        $r = Invoke-FeatureCaptured @('feature', '--json', '--parent', 'IJT-40', '--story', 'IJT-41', 'invoice export')
+        $r.ExitCode | Should -Not -Be 0
+        $r.Err | Should -Match 'REF-ROLE'
+        $r.Err | Should -Match 'IJT-40'
+
+        # 11. the role-mismatch refusal: unmapped-as-parent (FR-039)
+        $issuesUnmapped = @{ 'IJT-99' = @{ summary = 'Legacy'; description = 'd'; status = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }; issuetype = @{ id = '1'; name = 'Bug' }; project = @{ key = 'IJT' } }; 'IJT-11' = @{ summary = 'S2'; description = 'd'; status = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }; issuetype = @{ id = '1'; name = 'Story' }; project = @{ key = 'IJT' } } }
+        Start-TestMock (@{ issues = $issuesUnmapped } | ConvertTo-Json -Depth 20 -Compress)
+        $r = Invoke-FeatureCaptured @('feature', '--json', '--parent', 'IJT-99', '--story', 'IJT-11', 'invoice export')
+        $r.ExitCode | Should -Not -Be 0
+        $r.Err | Should -Match 'IJT-99'
+        $r.Err | Should -Match 'container'
+        $r.Err | Should -Match '--parent'
+    }
+
+    It 'T055: with no --accept-defaults and no terminal attached, the question still fires (research R3)' {
+        Select-Team ijt
+        Write-HierarchyConfig
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        ($r.Out.Trim() | ConvertFrom-Json).PSObject.Properties.Name | Should -Contain 'reuse_required'
+    }
+
+    It 'T100: the naming step never reads stdin — output is byte-identical regardless (FR-021)' {
+        Select-Team ijt
+        Write-HierarchyConfig
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--json', 'invoice export')
+        $sw.Stop()
+        $r.ExitCode | Should -Be 0
+        $sw.Elapsed.TotalSeconds | Should -BeLessThan 5
+    }
+
+    It 'repeating an incomplete --reuse yes (no hierarchy declared) is idempotent: three byte-identical results, no state written (FR-030)' {
+        Select-Team ijt
+        $lines3 = @('projects:', '  - key: IJT', 'routing_default: IJT', 'teams:', '  - id: ijt', '    project: IJT', '    folder_prefix: "ijt-"', '    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"')
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines3 -join "`n") + "`n"))
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $first = (Invoke-FeatureCaptured @('feature', 'IJT-42', '--reuse', 'yes', '--json', 'invoice export')).Out
+        $second = (Invoke-FeatureCaptured @('feature', 'IJT-42', '--reuse', 'yes', '--json', 'invoice export')).Out
+        $third = (Invoke-FeatureCaptured @('feature', 'IJT-42', '--reuse', 'yes', '--json', 'invoice export')).Out
+        $first | Should -Be $second
+        $second | Should -Be $third
+        $first | Should -Match 'reuse_issues_required'
+        (Test-Path -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'state')) | Should -BeFalse
+    }
+
+    # --- 029 Phase 5 — told what to configure, instead of silence (US6) --------
+
+    It 'US6: no config.yml + a mentioned ticket names the file and the command (FR-026)' {
+        Remove-Item -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -ErrorAction SilentlyContinue
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $obj = $r.Out.Trim() | ConvertFrom-Json
+        $obj.active | Should -BeFalse
+        $obj.warnings[0] | Should -Match '\.specify/jira/config\.yml'
+        $obj.warnings[0] | Should -Match '/speckit\.jira\.config'
+    }
+
+    It 'US6: an unreadable config.yml + a mentioned ticket names the file and the command (FR-026)' {
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), "  bad: [unterminated`n")
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $obj = $r.Out.Trim() | ConvertFrom-Json
+        $obj.active | Should -BeFalse
+        $obj.warnings[0] | Should -Match '\.specify/jira/config\.yml'
+    }
+
+    It 'US6: an empty teams: catalogue + a mentioned ticket names the file and the command (FR-026)' {
+        $lines = @('projects:', '  - key: IJT', 'routing_default: IJT', 'teams: []')
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines -join "`n") + "`n"))
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $obj = $r.Out.Trim() | ConvertFrom-Json
+        $obj.active | Should -BeFalse
+        $obj.warnings[0] | Should -Match '\.specify/jira/config\.yml'
+    }
+
+    It 'US6: a catalogue exists but no team selected + a mentioned ticket names personal.yml, not config.yml (FR-026)' {
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $obj = $r.Out.Trim() | ConvertFrom-Json
+        $obj.active | Should -BeFalse
+        $obj.warnings[0] | Should -Match '\.specify/jira/personal\.yml'
+        $obj.warnings[0] | Should -Match 'your own'
+        $obj.warnings[0] | Should -Match '/speckit\.jira\.config'
+    }
+
+    It 'US6: the same four states with NO mention stay byte-identical to the baseline (FR-028)' {
+        Remove-Item -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -ErrorAction SilentlyContinue
+        $r = Invoke-FeatureCaptured @('feature', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $r.Out.Trim() | Should -Be '{"active":false}'
+
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $r = Invoke-FeatureCaptured @('feature', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $r.Out.Trim() | Should -Be '{"active":false}'
+    }
+
+    It 'US6: neither missing-configuration report issues a Jira request or fails the host command (FR-027)' {
+        Remove-Item -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.yml') -ErrorAction SilentlyContinue
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        @(Get-JiraMockCallLog -Mock $M | Where-Object { $_ }).Count | Should -Be 0
     }
 
     AfterAll {

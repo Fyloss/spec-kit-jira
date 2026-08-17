@@ -345,6 +345,48 @@ _feat_ref_message() {
   esac
 }
 
+# _feat_designator_role_evaluate <role> <key> <own-type> <other-type>
+# <routed-project> <terminal-csv> <spec-ref-json> — 029, contract
+# feature-question-contract.md, R11 (FR-022/FR-036/FR-039): adoption_evaluate
+# collapses "type matches neither declared role" and "type matches the OTHER
+# role's declared type" into one REF-ROLE, and R11 requires the two to
+# diverge on the designator path exactly as they do on the auto-detected
+# question. A key whose type equals its OWN role's declared type, or for
+# which no type is declared at all, is unchanged from adoption_evaluate's
+# existing behaviour (still runs REF-ROUTING/REF-TERMINAL/REF-CLAIMED/
+# REF-THIN). A key genuinely misplaced — its type is the OTHER role's
+# declared type — still refuses via adoption_evaluate's own REF-ROLE
+# message, unchanged. Only the third case is new: a type matching NEITHER
+# declared type refuses with FR-039's container wording when designated as
+# the specification/parent role, and is accepted with no type refusal at
+# all when designated as story (R11 — unmapped content needs no parent).
+_feat_designator_role_evaluate() {
+  local role="$1" key="$2" own_type="$3" other_type="$4" routed_project="$5" \
+    terminal_csv="$6" spec_ref="$7"
+  if [[ -z "${own_type}" ]]; then
+    adoption_evaluate "${routed_project}" "${role}" "${key}" "" "${terminal_csv}" "${spec_ref}"
+    return
+  fi
+  local entry actual
+  entry="$(adoption_get "${key}" 2> /dev/null || true)"
+  actual="$(jq -r '.fields.issuetype.name // ""' <<< "${entry}")"
+  if [[ -z "${actual}" || "${actual}" == "${own_type}" ]]; then
+    adoption_evaluate "${routed_project}" "${role}" "${key}" "${own_type}" "${terminal_csv}" "${spec_ref}"
+    return
+  fi
+  if [[ -n "${other_type}" && "${actual}" == "${other_type}" ]]; then
+    adoption_evaluate "${routed_project}" "${role}" "${key}" "${own_type}" "${terminal_csv}" "${spec_ref}"
+    return
+  fi
+  if [[ "${role}" == "specification" ]]; then
+    jq -cn --arg k "${key}" --arg found "${actual}" \
+      '{code:"REF-ROLE", key:$k, message:("issue " + $k + " has type " + $found + ", declared for no role — the specification role is the container, and this feature never changes an existing issue type; supply a title instead of a key: --reuse yes --parent \"<title>\" --story " + $k)}' \
+      | json_canonical
+    return
+  fi
+  adoption_evaluate "${routed_project}" "${role}" "${key}" "" "${terminal_csv}" "${spec_ref}"
+}
+
 # _feat_seed_from_designators <json> <dry-run> <desc> <eff-id> <eff-project>
 # <prefix> <pattern> <override-used> <merged-config-json> <parent-seen>
 # <parent-raw> <stories-joined> — moment 1's designator path (027, contract
@@ -438,21 +480,20 @@ _feat_seed_from_designators() {
   # OWN ticket-based folder name and a different identifier entirely.
   local spec_ref
   spec_ref="$(jq -cn --arg r "${SPEC_KIT_JIRA_REPO:-local/repo}" --arg s "${SPEC_KIT_JIRA_SPEC_SLUG:-spec}" '{repo:$r, spec_slug:$s}')"
+  local ptype stype pterm sterm
+  ptype="$(_feat_declared_type_for specification "${eff_project}" "${merged}")"
+  stype="$(_feat_declared_type_for story "${eff_project}" "${merged}")"
+  pterm="$(_feat_halted_csv_for "${eff_project}" "${merged}")"
+  sterm="$(_feat_halted_csv_for "${eff_project}" "${merged}")"
   local -a eval_results=()
   if [[ -n "${pkey}" ]]; then
-    local ptype pterm
-    ptype="$(_feat_declared_type_for specification "${eff_project}" "${merged}")"
-    pterm="$(_feat_halted_csv_for "${eff_project}" "${merged}")"
-    eval_results+=("$(adoption_evaluate "${eff_project}" specification "${pkey}" "${ptype}" "${pterm}" "${spec_ref}")")
+    eval_results+=("$(_feat_designator_role_evaluate specification "${pkey}" "${ptype}" "${stype}" "${eff_project}" "${pterm}" "${spec_ref}")")
   fi
-  local stype sterm
-  stype="$(_feat_declared_type_for story "${eff_project}" "${merged}")"
-  sterm="$(_feat_halted_csv_for "${eff_project}" "${merged}")"
   n="$(jq 'length' <<< "${stories_json}")"
   for ((i = 0; i < n; i++)); do
     local skey
     skey="$(jq -r ".[${i}].key" <<< "${stories_json}")"
-    eval_results+=("$(adoption_evaluate "${eff_project}" story "${skey}" "${stype}" "${sterm}" "${spec_ref}")")
+    eval_results+=("$(_feat_designator_role_evaluate story "${skey}" "${stype}" "${ptype}" "${eff_project}" "${sterm}" "${spec_ref}")")
   done
   local eval_json
   if ((${#eval_results[@]} > 0)); then
@@ -476,6 +517,13 @@ _feat_seed_from_designators() {
     while IFS= read -r line; do
       printf 'feature: %s\n' "${line}" >&2
     done <<< "$(jq -r '.[] | "\(.code): \(.message)"' <<< "${refusals}")"
+    # 029/T119 (FR-037): the escape every refusal reachable here carries,
+    # composed once by the aggregator and appended once — never duplicated
+    # into each refusal class, which is how the fifth copy ends up
+    # different from the other four.
+    local esc_spec="${ptype:-specification-role issue}" esc_story="${stype:-story-role issue}"
+    printf 'feature: decline, and the extension creates a new %s plus one %s per drafted user story\n' \
+      "${esc_spec}" "${esc_story}" >&2
     return "$(cli_exit_code config)"
   fi
 
@@ -656,22 +704,77 @@ cmd_feature() {
     return "${exit_code}"
   fi
 
+  # 029, contract mention-grammar.md §1-§3: the mention evaluation is a pure
+  # string operation on argv alone, needing no configuration — it moves to
+  # the top of cmd_feature (before the four early pass-through exits, R4) so
+  # both the usage-error gate below and the missing-configuration report
+  # (US6) can consult it without a second detection pass.
+  local -a words=()
+  read -ra words <<< "${args}"
+  local mentions_json
+  mentions_json="$(_feat_detect_mentions "${words[@]}")"
+  local has_mention="false"
+  [[ "$(jq 'length' <<< "${mentions_json}")" -gt 0 ]] && has_mention="true"
+  local ticket_key="" desc=""
+  if [[ "${has_mention}" == "true" ]]; then
+    ticket_key="$(jq -r '.[0].key' <<< "${mentions_json}")"
+    desc="${words[*]:1}"
+  else
+    desc="${words[*]}"
+  fi
+
+  # 029, contract feature-question-contract.md §2 rows 2-3 (FR-015): decided
+  # from argv alone, before any configuration read or Jira request — an
+  # unconfigured repository or an unreadable key must never mask a
+  # mis-scripted invocation. Row 1 (an invalid --reuse value) already exited
+  # inside cli_parse, above.
+  local has_designator="false"
+  [[ "${parent_seen}" == "true" || -n "${stories}" ]] && has_designator="true"
+  if [[ -n "${reuse}" && "${has_mention}" != "true" && "${has_designator}" != "true" ]]; then
+    printf 'feature: --reuse %s answers a question that was never posed — no ticket is mentioned and no designator is supplied\n' "${reuse}" >&2
+    return "$(cli_exit_code usage)"
+  fi
+  if [[ "${reuse}" == "no" && "${has_designator}" == "true" ]]; then
+    printf 'feature: --reuse no contradicts the designators supplied with it — designators name issues to reuse\n' >&2
+    return "$(cli_exit_code usage)"
+  fi
+
   local dir="${JIRA_CONFIG_DIR:-.specify/jira}"
+
+  # 029, contract feature-question-contract.md §5 (FR-026-FR-028, research
+  # R5): a mentioned ticket met with silence is the same defect class one
+  # layer earlier — an operator who named something and got nothing back.
+  # Gated on has_mention so a run naming nothing stays byte-identical to
+  # the current release (FR-028); never issues a Jira request (FR-027).
+  local no_config_msg='no team configuration found — .specify/jira/config.yml is missing, unreadable, or declares no teams; run /speckit.jira.config to create one'
+  local no_selection_msg='no team selected in .specify/jira/personal.yml — that selection is your own and no script writes it for you; run /speckit.jira.config to select one'
 
   # (1) No committed catalogue at all ⇒ pass-through (FR-017).
   if [[ ! -f "${dir}/config.yml" ]]; then
-    _feat_emit '{"active":false}' "${json}"
+    if [[ "${has_mention}" == "true" ]]; then
+      _feat_emit "$(jq -cn --arg w "${no_config_msg}" '{active:false, warnings:[$w]}')" "${json}"
+    else
+      _feat_emit '{"active":false}' "${json}"
+    fi
     return 0
   fi
   local merged
   if ! merged="$(config_load "${dir}" 2> /dev/null)"; then
-    _feat_emit '{"active":false}' "${json}"
+    if [[ "${has_mention}" == "true" ]]; then
+      _feat_emit "$(jq -cn --arg w "${no_config_msg}" '{active:false, warnings:[$w]}')" "${json}"
+    else
+      _feat_emit '{"active":false}' "${json}"
+    fi
     return 0
   fi
   local team_count
   team_count="$(jq -r '(.teams // []) | length' <<< "${merged}")"
   if [[ "${team_count}" -eq 0 ]]; then
-    _feat_emit '{"active":false}' "${json}"
+    if [[ "${has_mention}" == "true" ]]; then
+      _feat_emit "$(jq -cn --arg w "${no_config_msg}" '{active:false, warnings:[$w]}')" "${json}"
+    else
+      _feat_emit '{"active":false}' "${json}"
+    fi
     return 0
   fi
 
@@ -686,7 +789,11 @@ cmd_feature() {
 
   # No selection and no cross-team answer ⇒ pass-through (FR-017).
   if [[ "${p_active}" != "true" && -z "${use_team}" ]]; then
-    _feat_emit '{"active":false}' "${json}"
+    if [[ "${has_mention}" == "true" ]]; then
+      _feat_emit "$(jq -cn --arg w "${no_selection_msg}" '{active:false, warnings:[$w]}')" "${json}"
+    else
+      _feat_emit '{"active":false}' "${json}"
+    fi
     return 0
   fi
 
@@ -705,23 +812,8 @@ cmd_feature() {
     [[ "${override}" != "null" ]] && override_used="true"
   fi
 
-  # (4) Description is required once a team is in play (FR-013 precedes naming).
-  #     The optional leading positional is a mentioned issue key or a
-  #     browser URL reducing to one (029, contract mention-grammar.md §1-§3).
-  #     Naming derives from the leading positional's own detection alone
-  #     (§1 rule 3); any further detected key stays part of the description,
-  #     unchanged from before this feature.
-  local -a words=()
-  read -ra words <<< "${args}"
-  local mentions_json
-  mentions_json="$(_feat_detect_mentions "${words[@]}")"
-  local ticket_key="" desc=""
-  if [[ "$(jq 'length' <<< "${mentions_json}")" -gt 0 ]]; then
-    ticket_key="$(jq -r '.[0].key' <<< "${mentions_json}")"
-    desc="${words[*]:1}"
-  else
-    desc="${words[*]}"
-  fi
+  # (4) Description is required once a team is in play (FR-013 precedes
+  # naming). words/mentions_json/ticket_key/desc are already computed above.
   if [[ -z "${desc}" ]]; then
     printf 'feature: a feature description is required\n' >&2
     return "$(cli_exit_code usage)"
@@ -761,10 +853,15 @@ cmd_feature() {
     # not unattended.
     local about_to_ask="false"
     [[ -z "${reuse}" && "${accept_defaults}" != "true" ]] && about_to_ask="true"
+    # 029/FR-029: "reuse" also needs the wide field set to derive each
+    # detected issue's role — it is a second invocation, not the question
+    # path FR-017 bounds, so the extra field cost here is expected.
+    local wants_wide="${about_to_ask}"
+    [[ "${reuse}" == "yes" ]] && wants_wide="true"
 
     # Mentioned key: validate (read). A fail-closed read never falls back.
     local validated
-    validated="$(ticket_validate "${ticket_key}" "${about_to_ask}")" || return $?
+    validated="$(ticket_validate "${ticket_key}" "${wants_wide}")" || return $?
     local ticket_project ticket_team
     ticket_project="$(jq -r '.project // ""' <<< "${validated}")"
     ticket_team="$(jq -r --arg p "${ticket_project}" '([.teams[] | select(.project == $p) | .id] | first) // ""' <<< "${merged}")"
@@ -800,16 +897,55 @@ cmd_feature() {
       suppressed_warning="the reuse question was suppressed by --accept-defaults; assumed answer: create new"
     fi
 
-    # (029, FR-029/FR-030) — "reuse" with no designator is the operator
-    # accepting the question's own proposal. Full auto-routing into the
-    # designator path from the derived roles is Phase 4 work (US2); until it
-    # lands, this returns the which-issues follow-up unconditionally rather
-    # than risk silently duplicating the mentioned ticket by falling through
-    # to the create-new path a "reuse" answer never meant.
+    # (029, FR-029/FR-030/FR-038) — "reuse" with no designator is the
+    # operator accepting the question's own proposal: every detected issue,
+    # in the role already derived. Auto-routes into 027's designator path
+    # with synthesized --parent/--story equivalents, so the result is
+    # byte-identical to typing them (US3 AC1). Falls back to the
+    # which-issues follow-up in exactly one case — no role could be derived
+    # at all, because the routed project declares no hierarchy (FR-035): a
+    # proposal holding story-role issues and no specification-role one is
+    # NOT that case (FR-038) and still routes, with no parent.
     if [[ "${reuse}" == "yes" ]]; then
-      _feat_emit "$(jq -cn --arg tk "${ticket_key}" \
-        '{active:true, reuse_issues_required:{issues:[{key:$tk}], declines_to:{specification:null,story:null}, reason:"designators required"}}' | json_canonical)" "${json}"
-      return 0
+      local q_payload rc=0
+      q_payload="$(_feat_compose_reuse_question "${mentions_json}" "${validated}" "${eff_project}" "${merged}")" || rc=$?
+      ((rc != 0)) && return "${rc}"
+
+      local no_hierarchy="false"
+      if [[ "$(jq -r '.reuse_required.declines_to.specification' <<< "${q_payload}")" == "null" \
+        && "$(jq -r '.reuse_required.declines_to.story' <<< "${q_payload}")" == "null" ]]; then
+        no_hierarchy="true"
+      fi
+
+      if [[ "${no_hierarchy}" == "true" ]]; then
+        _feat_emit "$(jq -cn --arg tk "${ticket_key}" \
+          '{active:true, reuse_issues_required:{issues:[{key:$tk}], declines_to:{specification:null,story:null}, reason:"designators required"}}' | json_canonical)" "${json}"
+        return 0
+      fi
+
+      # First specification-role issue wins the parent slot; every other
+      # detected issue (including any further specification-role match)
+      # becomes a story-role designator — never silently dropped.
+      local auto_parent="" auto_stories="" n_q i_q
+      n_q="$(jq '.reuse_required.issues | length' <<< "${q_payload}")"
+      for ((i_q = 0; i_q < n_q; i_q++)); do
+        local role_q key_q
+        role_q="$(jq -r ".reuse_required.issues[${i_q}].role" <<< "${q_payload}")"
+        key_q="$(jq -r ".reuse_required.issues[${i_q}].key" <<< "${q_payload}")"
+        if [[ "${role_q}" == "specification" && -z "${auto_parent}" ]]; then
+          auto_parent="${key_q}"
+        else
+          [[ -n "${auto_stories}" ]] && auto_stories+=$'\x1f'
+          auto_stories+="${key_q}"
+        fi
+      done
+
+      local auto_parent_seen="false"
+      [[ -n "${auto_parent}" ]] && auto_parent_seen="true"
+      _feat_seed_from_designators "${json}" "${dry_run}" "${desc}" "${eff_id}" "${eff_project}" \
+        "${prefix}" "${pattern}" "${override_used}" "${merged}" \
+        "${auto_parent_seen}" "${auto_parent}" "${auto_stories}"
+      return $?
     fi
 
     number="$(naming_ticket_number "${ticket_key}")"
@@ -839,18 +975,33 @@ cmd_feature() {
       '{repo:$r, spec_slug:$s}')"
 
     if [[ -z "${typeid}" || -z "${SPEC_KIT_JIRA_BASE_URL:-}" ]]; then
-      _feat_fallback "${json}"
+      _feat_fallback "${json}" 'Jira is not configured for creating a ticket yet'
       return 0
     fi
 
-    # The `|| rc=$?` guard keeps the entry point's errexit from aborting the
-    # ceremony before the FR-016 fallback can run.
-    local created rc=0
-    created="$(ticket_create "${eff_project}" "${desc}" "${typeid}" '[]' '[]' "${spec_ref}")" || rc=$?
+    # Run in the CURRENT shell (stdout to a temp file, not a command
+    # substitution) so JIRA_LAST_STATUS is visible here on failure —
+    # 029/T132 (FR-041) names the cause, and a subshell would hide it
+    # (sink/jira/identity.sh:76-77 records the same hazard).
+    local created rc=0 tmp_created
+    tmp_created="$(mktemp)"
+    ticket_create "${eff_project}" "${desc}" "${typeid}" '[]' '[]' "${spec_ref}" > "${tmp_created}" || rc=$?
+    created="$(cat "${tmp_created}")"
+    rm -f "${tmp_created}"
     if ((rc == 9)); then
       return 9
     elif ((rc != 0)); then
-      _feat_fallback "${json}"
+      local cause
+      if ((rc == "$(cli_exit_code auth)")); then
+        cause='Jira rejected the credentials'
+      elif [[ "${JIRA_LAST_STATUS:-0}" == "0" ]]; then
+        cause='Jira is unreachable'
+      elif [[ "${JIRA_LAST_STATUS:-}" == "404" ]]; then
+        cause='the target project could not be found or is not visible'
+      else
+        cause="Jira returned an error (status ${JIRA_LAST_STATUS:-unknown})"
+      fi
+      _feat_fallback "${json}" "${cause}"
       return 0
     fi
     local created_key
@@ -881,11 +1032,16 @@ cmd_feature() {
   return 0
 }
 
-# _feat_fallback <json-flag> — the FR-016 non-blocking fallback: {active:false}
-# plus exactly one warning; one WARNING: line on stderr; exit 0.
+# _feat_fallback <json-flag> <cause> — the FR-016 non-blocking fallback:
+# {active:false} plus exactly one warning; one WARNING: line on stderr;
+# exit 0. 029/T132 (FR-041): the shipped text claimed reconciliation "will
+# attach it later" — false, since a create that never happened has nothing
+# to attach; the following reconcile creates a fresh issue instead. <cause>
+# is composed by the caller from the exit code the failed call already
+# returned, never invented here.
 _feat_fallback() {
-  local json="$1"
-  local msg="could not resolve a ticket in Jira — proceeding without one (reconciliation will attach it later)"
+  local json="$1" cause="$2"
+  local msg="${cause} — proceeding without a ticket; the next reconcile creates a new issue for this specification"
   printf 'WARNING: %s\n' "${msg}" >&2
   _feat_emit "$(jq -cn --arg w "${msg}" '{active:false, warnings:[$w]}' | json_canonical)" "${json}"
 }

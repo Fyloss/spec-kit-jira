@@ -210,3 +210,71 @@ _desig_boot_three_stories() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.ticket.key' <<< "$output")" = "PROJ-1" ]
 }
+
+# --- 029 T112/T118 (US8): unmapped vs misplaced on the designator path -----
+
+@test "T118: a --story issue matching NEITHER declared type is accepted, never refused (FR-036, R11)" {
+  local issues="{"
+  issues+="$(_desig_seed_issue "PROJ-1" "Payment webhooks rollout" "Epic body" "To Do" "new" "Epic" "PROJ")"
+  issues+=",$(_desig_seed_issue "PROJ-99" "Legacy importer" "Bug body" "To Do" "new" "Bug" "PROJ")"
+  issues+="}"
+  local cfg
+  cfg="$(mock_write_config "{\"issues\":${issues}}")"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_feature feature --json --parent PROJ-1 --story PROJ-99 "invoice export"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"REF-ROLE"* ]]
+}
+
+@test "T118: a --story issue matching the OTHER role's declared type refuses, naming both types (FR-022)" {
+  local issues="{"
+  issues+="$(_desig_seed_issue "PROJ-1" "Payment webhooks rollout" "Epic body" "To Do" "new" "Epic" "PROJ")"
+  issues+=",$(_desig_seed_issue "PROJ-2" "Another epic" "Epic body" "To Do" "new" "Epic" "PROJ")"
+  issues+="}"
+  local cfg
+  cfg="$(mock_write_config "{\"issues\":${issues}}")"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_feature feature --json --parent PROJ-1 --story PROJ-2 "invoice export"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"REF-ROLE"* ]]
+  [[ "$output" == *"PROJ-2"* ]]
+  [[ "$output" == *"Epic"* ]]
+  [[ "$output" == *"Story"* ]]
+}
+
+@test "T115/T119: every refusal on the reuse path carries the decline-and-create-fresh escape (FR-037)" {
+  local issues="{"
+  issues+="$(_desig_seed_issue "PROJ-1" "Payment webhooks rollout" "Epic body" "To Do" "new" "Story" "PROJ")"
+  issues+=",$(_desig_seed_issue "PROJ-11" "Accept a partial payment" "Story one body" "To Do" "new" "Story" "PROJ")"
+  issues+="}"
+  local cfg
+  cfg="$(mock_write_config "{\"issues\":${issues}}")"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_feature feature --json --parent PROJ-1 --story PROJ-11 "invoice export"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"decline, and the extension creates a new Epic plus one Story per drafted user story"* ]]
+}
+
+@test "T118: a --parent issue matching NEITHER declared type refuses, naming the container constraint (FR-039)" {
+  local issues="{"
+  issues+="$(_desig_seed_issue "PROJ-99" "Legacy importer" "Bug body" "To Do" "new" "Bug" "PROJ")"
+  issues+=",$(_desig_seed_issue "PROJ-11" "Accept a partial payment" "Story one body" "To Do" "new" "Story" "PROJ")"
+  issues+="}"
+  local cfg
+  cfg="$(mock_write_config "{\"issues\":${issues}}")"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_feature feature --json --parent PROJ-99 --story PROJ-11 "invoice export"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PROJ-99"* ]]
+  [[ "$output" == *"container"* ]]
+  [[ "$output" == *'--parent'* ]]
+  [[ "$output" == *'--story PROJ-99'* ]]
+}

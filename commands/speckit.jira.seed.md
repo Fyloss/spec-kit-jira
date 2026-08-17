@@ -19,6 +19,12 @@ seeded-not-bound state and nothing was written to Jira — but the operator's
 named issues stay unbound until you (or a later invocation of yours) runs
 this command. Do not silently skip it.
 
+**Moment 1 is reached two ways now (029).** The operator either typed
+`--parent`/`--story` from the start, or pasted a bare ticket key and answered
+`speckit.jira.feature`'s reuse question with `yes` — the bridge then derives
+the same designators from the roles it already computed. Both land here
+identically; nothing below distinguishes them.
+
 ## Invoking the bridge — normative
 
 Same repository-relative entry points as every other command in this

@@ -77,6 +77,67 @@ boot() {
   [ "$(jq -r '.active' <<< "$output")" = "false" ]
 }
 
+# --- 029 Phase 5 — told what to configure, instead of silence (US6) --------
+
+@test "US6: no config.yml + a mentioned ticket names the file and the command (FR-026)" {
+  rm -f "${JIRA_CONFIG_DIR}/config.yml"
+  run cmd_feature feature IJT-42 --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "false" ]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *".specify/jira/config.yml"* ]]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"/speckit.jira.config"* ]]
+}
+
+@test "US6: an unreadable config.yml + a mentioned ticket names the file and the command (FR-026)" {
+  printf '  bad: [unterminated\n' > "${JIRA_CONFIG_DIR}/config.yml"
+  run cmd_feature feature IJT-42 --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "false" ]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *".specify/jira/config.yml"* ]]
+}
+
+@test "US6: an empty teams: catalogue + a mentioned ticket names the file and the command (FR-026)" {
+  { printf 'projects:\n  - key: IJT\nrouting_default: IJT\nteams: []\n'; } > "${JIRA_CONFIG_DIR}/config.yml"
+  run cmd_feature feature IJT-42 --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "false" ]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *".specify/jira/config.yml"* ]]
+}
+
+@test "US6: a catalogue exists but no team selected + a mentioned ticket names personal.yml, not config.yml (FR-026)" {
+  boot '{"projects":{"IJT":"team"}}'
+  run cmd_feature feature IJT-42 --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "false" ]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *".specify/jira/personal.yml"* ]]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"your own"* ]]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"/speckit.jira.config"* ]]
+}
+
+@test "US6: the same four states with NO mention stay byte-identical to the baseline (FR-028)" {
+  rm -f "${JIRA_CONFIG_DIR}/config.yml"
+  run cmd_feature feature --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"active":false}' ]
+
+  boot '{"projects":{"IJT":"team"}}'
+  run cmd_feature feature --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"active":false}' ]
+}
+
+@test "US6: neither missing-configuration report issues a Jira request or fails the host command (FR-027)" {
+  rm -f "${JIRA_CONFIG_DIR}/config.yml"
+  run cmd_feature feature IJT-42 --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ -z "$(mock_calls)" ]
+
+  boot '{"projects":{"IJT":"team"}}'
+  run cmd_feature feature IJT-42 --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ -z "$(mock_calls)" ]
+}
+
 @test "a missing description is a usage error (exit 1)" {
   select_team ijt
   run cmd_feature feature --json
@@ -284,8 +345,111 @@ boot() {
   run cmd_feature feature "invoice export"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Feature: inactive"* ]]
-  [[ "$output" == *"Warning: could not resolve a ticket in Jira"* ]]
+  [[ "$output" == *"Warning:"* ]]
   [[ "$output" != *"Command: null"* ]]
+}
+
+@test "T101: Principle XVI sweep — every message class this feature adds names the problem, the issue, and a copy-pasteable next step (FR-018, FR-023, FR-026)" {
+  # 1. the reuse question
+  select_team ijt
+  write_hierarchy_config
+  boot "{\"projects\":{\"IJT\":\"team\"},\"issues\":{\"IJT-40\":{\"summary\":\"Rework\",\"issuetype\":{\"name\":\"Epic\"},\"status\":{\"name\":\"In Progress\"}}}}"
+  run cmd_feature feature IJT-40 "invoice export"
+  [[ "$output" == *"Feature: reuse decision required"* ]]
+  [[ "$output" == *"IJT-40"* ]]
+  [[ "$output" == *"Answers: --reuse"* ]]
+
+  # 2. the which-issues question (fires only when no hierarchy is declared)
+  {
+    printf 'projects:\n  - key: IJT\n'
+    printf 'routing_default: IJT\nteams:\n  - id: ijt\n    project: IJT\n    folder_prefix: "ijt-"\n    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"\n'
+  } > "${JIRA_CONFIG_DIR}/config.yml"
+  boot '{"projects":{"IJT":"team"}}'
+  run cmd_feature feature IJT-40 --reuse yes "invoice export"
+  [[ "$output" == *"IJT-40"* ]]
+  [[ "$output" == *"Answers:"* ]]
+  [[ "$output" == *"--parent"* ]]
+  write_hierarchy_config
+
+  # 3. the halted warning
+  boot "{\"projects\":{\"IJT\":\"team\"},\"issues\":{\"IJT-40\":{\"summary\":\"Rework\",\"issuetype\":{\"name\":\"Epic\"},\"status\":{\"name\":\"Done\"}}}}"
+  run cmd_feature feature IJT-40 "invoice export"
+  [[ "$output" == *"Halted: IJT-40"* ]]
+  [[ "$output" == *"--reuse no, reopen it, or name another"* ]]
+
+  # 4. the extras notice (Drafted: line)
+  boot "{\"projects\":{\"IJT\":\"team\"},\"issues\":{\"IJT-41\":{\"summary\":\"B\",\"issuetype\":{\"name\":\"Story\"},\"status\":{\"name\":\"To Do\"}}}}"
+  run cmd_feature feature IJT-41 "invoice export"
+  [[ "$output" == *"Drafted:"* ]]
+  [[ "$output" == *"beneath the same Epic"* ]]
+
+  # 5/6. the two configuration reports
+  rm -f "${JIRA_CONFIG_DIR}/config.yml"
+  run cmd_feature feature IJT-42 --json "invoice export"
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *".specify/jira/config.yml"* ]]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"/speckit.jira.config"* ]]
+  write_hierarchy_config
+  rm -f "${JIRA_CONFIG_DIR}/personal.yml"
+  boot '{"projects":{"IJT":"team"}}'
+  run cmd_feature feature IJT-42 --json "invoice export"
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *".specify/jira/personal.yml"* ]]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"/speckit.jira.config"* ]]
+
+  # 7/8/9. the three usage errors
+  select_team ijt
+  write_hierarchy_config
+  run cli_parse feature --reuse maybe --json "invoice export"
+  [[ "$(grep '^exit=' <<< "$output")" = "exit=1" ]]
+  run cmd_feature feature --reuse no --json "invoice export"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"never posed"* ]]
+  run cmd_feature feature --parent IJT-40 --reuse no --json "invoice export"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"contradicts"* ]]
+
+  # 10. the role-mismatch refusal: misplaced (FR-022)
+  local issues_misplaced='{"IJT-40":{"summary":"S1","description":"d","status":{"name":"To Do","statusCategory":{"key":"new"}},"issuetype":{"id":"1","name":"Story"},"project":{"key":"IJT"}},"IJT-41":{"summary":"S2","description":"d","status":{"name":"To Do","statusCategory":{"key":"new"}},"issuetype":{"id":"1","name":"Story"},"project":{"key":"IJT"}}}'
+  boot "{\"issues\":${issues_misplaced}}"
+  run cmd_feature feature --json --parent IJT-40 --story IJT-41 "invoice export"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"REF-ROLE"* ]]
+  [[ "$output" == *"IJT-40"* ]]
+
+  # 11. the role-mismatch refusal: unmapped-as-parent (FR-039)
+  local issues_unmapped='{"IJT-99":{"summary":"Legacy","description":"d","status":{"name":"To Do","statusCategory":{"key":"new"}},"issuetype":{"id":"1","name":"Bug"},"project":{"key":"IJT"}},"IJT-11":{"summary":"S2","description":"d","status":{"name":"To Do","statusCategory":{"key":"new"}},"issuetype":{"id":"1","name":"Story"},"project":{"key":"IJT"}}}'
+  boot "{\"issues\":${issues_unmapped}}"
+  run cmd_feature feature --json --parent IJT-99 --story IJT-11 "invoice export"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"IJT-99"* ]]
+  [[ "$output" == *"container"* ]]
+  [[ "$output" == *"--parent"* ]]
+}
+
+@test "T131/T132: the fallback message never claims a ticket will be attached later, names the cause, and states a fresh create follows (FR-041)" {
+  select_team ijt
+  boot '{"projects":{"IJT":"team"},"fault":{"network":true}}'
+  run cmd_feature feature --json "invoice export"
+  [ "$status" -eq 0 ]
+  local summary
+  summary="$(printf '%s\n' "$output" | grep -v '^WARNING:')"
+  local warning
+  warning="$(jq -r '.warnings[0]' <<< "${summary}")"
+  [[ "${warning}" != *"will attach it later"* ]]
+  [[ "${warning}" == *"Jira is unreachable"* ]]
+  [[ "${warning}" == *"new issue"* ]]
+}
+
+@test "T131/T132: a credentials rejection is named as its own cause (FR-041)" {
+  select_team ijt
+  boot '{"projects":{"IJT":"team"},"faults":{"IJT":{"status":401}}}'
+  run cmd_feature feature --json "invoice export"
+  [ "$status" -eq 0 ]
+  local summary
+  summary="$(printf '%s\n' "$output" | grep -v '^WARNING:')"
+  local warning
+  warning="$(jq -r '.warnings[0]' <<< "${summary}")"
+  [[ "${warning}" == *"credentials"* ]]
+  [[ "${warning}" != *"will attach it later"* ]]
 }
 
 @test "prose: cross-team confirmation renders the closed question (T087)" {
@@ -370,6 +534,17 @@ boot() {
   [ "$(jq -r '.ticket.key' <<< "$output")" = "IJT-42" ]
   [ "$(jq -r '.ticket.action' <<< "$output")" = "attached" ]
   [ "$(jq -r '.branch_name' <<< "$output")" = "ijt-42/invoice-export" ]
+}
+
+@test "T064: no message class echoes a supplied URL verbatim — only the reduced key ever appears (Principle IX)" {
+  select_team ijt
+  write_hierarchy_config
+  boot "{\"projects\":{\"IJT\":\"team\"},\"issues\":{\"IJT-40\":{\"summary\":\"Rework\",\"issuetype\":{\"name\":\"Epic\"},\"status\":{\"name\":\"To Do\"}}}}"
+  run cmd_feature feature "https://jira.example.com/browse/IJT-40" --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.reuse_required.issues[0].key' <<< "$output")" = "IJT-40" ]
+  [[ "$output" != *"jira.example.com"* ]]
+  [[ "$output" != *"/browse/"* ]]
 }
 
 @test "--reuse yes/no are accepted; an invalid value is a usage error naming both (FR-009, FR-016)" {
@@ -536,15 +711,129 @@ write_hierarchy_config() {
   mock_calls | grep -q 'GET /rest/api/3/issue/IJT-42?fields=project$'
 }
 
-@test "--reuse yes with no designator never silently attaches — returns a follow-up, not the created/attached shape (FR-029)" {
+@test "--reuse yes with no designator and NO declared hierarchy falls back to the which-issues follow-up (FR-029, FR-035)" {
   select_team ijt
-  write_hierarchy_config
+  {
+    printf 'projects:\n  - key: IJT\n'
+    printf 'routing_default: IJT\nteams:\n  - id: ijt\n    project: IJT\n    folder_prefix: "ijt-"\n    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"\n'
+  } > "${JIRA_CONFIG_DIR}/config.yml"
   boot '{"projects":{"IJT":"team"}}'
   run cmd_feature feature IJT-42 --reuse yes --json "invoice export"
   [ "$status" -eq 0 ]
   [ "$(jq -r 'has("reuse_issues_required")' <<< "$output")" = "true" ]
   [[ "$output" != *'"action":"attached"'* ]]
   ! mock_calls | grep -qE 'POST|PUT'
+}
+
+@test "--reuse yes with no designator auto-accepts the derived proposal: routes into the designator path, byte-identical to typing --parent/--story (FR-029, US3 AC1)" {
+  select_team ijt
+  write_hierarchy_config
+  boot "{\"projects\":{\"IJT\":\"team\"},\"issues\":{\"IJT-40\":{\"summary\":\"Rework the export pipeline\",\"description\":\"Body text\",\"issuetype\":{\"name\":\"Epic\"},\"status\":{\"name\":\"In Progress\"},\"project\":{\"key\":\"IJT\"}}}}"
+  run cmd_feature feature IJT-40 --reuse yes --json "invoice export"
+  local auto_out="$status:$output"
+  boot "{\"projects\":{\"IJT\":\"team\"},\"issues\":{\"IJT-40\":{\"summary\":\"Rework the export pipeline\",\"description\":\"Body text\",\"issuetype\":{\"name\":\"Epic\"},\"status\":{\"name\":\"In Progress\"},\"project\":{\"key\":\"IJT\"}}}}"
+  run cmd_feature feature --parent IJT-40 --json "invoice export"
+  local direct_out="$status:$output"
+  [ "$auto_out" = "$direct_out" ]
+  [ "$(jq -r 'has("reuse_issues_required")' <<< "${auto_out#*:}")" != "true" ]
+  ! mock_calls | grep -qE 'POST /rest/api/3/issue$|PUT'
+}
+
+@test "--reuse yes with no designator, an unmapped-type issue is attached as story, no parent required (FR-029, FR-036, FR-038)" {
+  select_team ijt
+  write_hierarchy_config
+  boot "{\"projects\":{\"IJT\":\"team\"},\"issues\":{\"IJT-99\":{\"summary\":\"Legacy importer\",\"description\":\"Body text\",\"issuetype\":{\"name\":\"Bug\"},\"status\":{\"name\":\"To Do\"},\"project\":{\"key\":\"IJT\"}}}}"
+  run cmd_feature feature IJT-99 --reuse yes --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("reuse_issues_required")' <<< "$output")" != "true" ]
+  [ "$(jq -r 'has("seed_material")' <<< "$output")" = "true" ]
+  ! mock_calls | grep -qE 'POST /rest/api/3/issue$|PUT'
+}
+
+@test "--reuse yes with the mentioned ticket itself among the reused issues: no special case, no double resolution (US3 AC2)" {
+  select_team ijt
+  write_hierarchy_config
+  boot "{\"projects\":{\"IJT\":\"team\"},\"issues\":{\"IJT-40\":{\"summary\":\"Rework\",\"description\":\"Body text\",\"issuetype\":{\"name\":\"Epic\"},\"status\":{\"name\":\"In Progress\"},\"project\":{\"key\":\"IJT\"}}}}"
+  run cmd_feature feature IJT-40 --reuse yes --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.ticket.key' <<< "$output")" = "IJT-40" ]
+}
+
+# --- 029 Phase 4 — usage-error rows (T029/T102, FR-015) --------------------
+
+@test "an answer supplied with neither a mention nor a designator is a usage error (FR-015 first clause)" {
+  select_team ijt
+  write_hierarchy_config
+  run cmd_feature feature --reuse no --json "invoice export"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"never posed"* ]]
+}
+
+@test "--reuse no together with designators is a usage error naming the contradiction (FR-015 second clause)" {
+  select_team ijt
+  write_hierarchy_config
+  run cmd_feature feature --reuse no --parent IJT-40 --json "invoice export"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"contradicts"* ]]
+}
+
+@test "--reuse yes together with designators is accepted in silence — redundancy is not an error (FR-015)" {
+  select_team ijt
+  write_hierarchy_config
+  boot '{"projects":{"IJT":"team"}}'
+  run cmd_feature feature --reuse yes --parent "A new epic" --json "invoice export"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"contradicts"* ]]
+  [[ "$output" != *"never posed"* ]]
+}
+
+@test "an answered invocation never re-poses the question (FR-011)" {
+  select_team ijt
+  write_hierarchy_config
+  boot '{"projects":{"IJT":"team"}}'
+  run cmd_feature feature IJT-42 --reuse no --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("reuse_required")' <<< "$output")" != "true" ]
+}
+
+@test "T055: with no --accept-defaults and no terminal attached, the question still fires — no TTY probe suppresses it (research R3)" {
+  select_team ijt
+  write_hierarchy_config
+  boot '{"projects":{"IJT":"team"}}'
+  run cmd_feature feature IJT-42 --json "invoice export" < /dev/null
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("reuse_required")' <<< "$output")" = "true" ]
+}
+
+@test "T100: the naming step never reads stdin — held open or closed, output is byte-identical (FR-021)" {
+  select_team ijt
+  write_hierarchy_config
+  boot '{"projects":{"IJT":"team"}}'
+  run cmd_feature feature IJT-42 --json "invoice export" < /dev/null
+  local closed_status="$status" closed_out="$output"
+
+  run cmd_feature feature IJT-42 --json "invoice export" < <(sleep 5 && printf 'unrelated\n')
+  [ "$status" -eq "$closed_status" ]
+  [ "$output" = "$closed_out" ]
+}
+
+@test "repeating an incomplete --reuse yes (no hierarchy declared) is idempotent: three byte-identical results, no state written (FR-030)" {
+  select_team ijt
+  {
+    printf 'projects:\n  - key: IJT\n'
+    printf 'routing_default: IJT\nteams:\n  - id: ijt\n    project: IJT\n    folder_prefix: "ijt-"\n    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"\n'
+  } > "${JIRA_CONFIG_DIR}/config.yml"
+  boot '{"projects":{"IJT":"team"}}'
+  run cmd_feature feature IJT-42 --reuse yes --json "invoice export"
+  local first="$output"
+  run cmd_feature feature IJT-42 --reuse yes --json "invoice export"
+  local second="$output"
+  run cmd_feature feature IJT-42 --reuse yes --json "invoice export"
+  local third="$output"
+  [ "$first" = "$second" ]
+  [ "$second" = "$third" ]
+  [ "$(jq -r 'has("reuse_issues_required")' <<< "$first")" = "true" ]
+  [ ! -d "${JIRA_CONFIG_DIR}/state" ]
 }
 
 @test "prose: the reuse question renders Detected/Attach/Answers lines" {

@@ -366,7 +366,27 @@ mapping it finds, and deleting the key restores the no-movement behaviour.
 
 When the work already exists on your board — an epic and its stories, written
 by a human before spec-kit ever entered the picture — you do not have to
-re-describe it from scratch. Name the issues when you start the feature:
+re-describe it from scratch. Paste the keys (or the browser links) when you
+start the feature:
+
+```sh
+specify /speckit.specify PROJ-1 PROJ-11 PROJ-12 "add payment webhooks"
+```
+
+The bridge reads each one back and asks a single closed question: it names
+every detected issue by key, summary, type and status, states the role it
+would be attached in (in your own project's type names — an Epic, a Story,
+whatever your hierarchy calls them, never an internal label), and offers two
+answers — reuse them, or create new issues instead. A type your hierarchy
+doesn't map to any role — a Bug, say — is proposed in the story role rather
+than refused; it just needs no parent. Answer `yes` and the bridge routes
+straight into the seeding flow below, deriving `--parent`/`--story` from the
+roles it already computed — no need to type them yourself. Answer `no` and it
+proceeds exactly as if nothing had been named.
+
+**Naming designators directly skips the question.** If you already know which
+issue plays which role — or the parent doesn't exist yet — supply them
+up front and the question is never asked:
 
 ```sh
 specify /speckit.specify --parent PROJ-1 --story PROJ-11 --story PROJ-12 "add payment webhooks"
@@ -375,11 +395,11 @@ specify /speckit.specify --parent PROJ-1 --story PROJ-11 --story PROJ-12 "add pa
 A key, a full issue URL, or the browser board link all resolve the same way.
 A specification-role designator you type as free text — not a key, not a
 URL — is never looked up: it is always the title of a new parent, created only
-once you confirm (see below). This is the one way to tell the bridge "this is
-an existing issue" apart from "this does not exist yet": name an existing
-parent by key or URL to adopt it; type a title to create one.
+once you confirm (see below). Naming an existing parent by key or URL adopts
+it; typing a title creates one — this is how the bridge tells "this is an
+existing issue" apart from "this does not exist yet" on the designator path.
 
-The agent then drafts `spec.md` from those issues' own summaries and
+Either route lands in the same place. The agent then drafts `spec.md` from those issues' own summaries and
 descriptions — their words are the draft, not a paraphrase of it — and marks
 which user story came from which issue. Nothing has been written to Jira yet.
 Once you are ready to bind it, the agent runs:

@@ -191,4 +191,56 @@ Describe 'Invoke-JiraFeatSeedFromDesignator (T070)' {
         $r.ExitCode | Should -Be 0
         ($r.Out.Trim() | ConvertFrom-Json).ticket.key | Should -Be 'PROJ-1'
     }
+
+    # --- 029 T112/T118 (US8): unmapped vs misplaced on the designator path -----
+
+    It 'T118: a --story issue matching NEITHER declared type is accepted, never refused (FR-036, R11)' {
+        $issues = @{
+            'PROJ-1'  = @{ summary = 'Payment webhooks rollout'; description = 'Epic body'; status = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }; issuetype = @{ id = '10001'; name = 'Epic' }; project = @{ key = 'PROJ' } }
+            'PROJ-99' = @{ summary = 'Legacy importer'; description = 'Bug body'; status = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }; issuetype = @{ id = '10001'; name = 'Bug' }; project = @{ key = 'PROJ' } }
+        }
+        Start-TestMock (@{ issues = $issues } | ConvertTo-Json -Depth 20 -Compress)
+        $r = Invoke-FeatureCaptured2 @('feature', '--json', '--parent', 'PROJ-1', '--story', 'PROJ-99', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Not -Match 'REF-ROLE'
+    }
+
+    It "T118: a --story issue matching the OTHER role's declared type refuses, naming both types (FR-022)" {
+        $issues = @{
+            'PROJ-1' = @{ summary = 'Payment webhooks rollout'; description = 'Epic body'; status = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }; issuetype = @{ id = '10001'; name = 'Epic' }; project = @{ key = 'PROJ' } }
+            'PROJ-2' = @{ summary = 'Another epic'; description = 'Epic body'; status = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }; issuetype = @{ id = '10001'; name = 'Epic' }; project = @{ key = 'PROJ' } }
+        }
+        Start-TestMock (@{ issues = $issues } | ConvertTo-Json -Depth 20 -Compress)
+        $r = Invoke-FeatureCaptured2 @('feature', '--json', '--parent', 'PROJ-1', '--story', 'PROJ-2', 'invoice export')
+        $r.ExitCode | Should -Not -Be 0
+        $r.Err | Should -Match 'REF-ROLE'
+        $r.Err | Should -Match 'PROJ-2'
+        $r.Err | Should -Match 'Epic'
+        $r.Err | Should -Match 'Story'
+    }
+
+    It 'T115/T119: every refusal on the reuse path carries the decline-and-create-fresh escape (FR-037)' {
+        $issues = @{
+            'PROJ-1'  = @{ summary = 'Payment webhooks rollout'; description = 'Epic body'; status = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }; issuetype = @{ id = '10001'; name = 'Story' }; project = @{ key = 'PROJ' } }
+            'PROJ-11' = @{ summary = 'Accept a partial payment'; description = 'Story one body'; status = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }; issuetype = @{ id = '10001'; name = 'Story' }; project = @{ key = 'PROJ' } }
+        }
+        Start-TestMock (@{ issues = $issues } | ConvertTo-Json -Depth 20 -Compress)
+        $r = Invoke-FeatureCaptured2 @('feature', '--json', '--parent', 'PROJ-1', '--story', 'PROJ-11', 'invoice export')
+        $r.ExitCode | Should -Not -Be 0
+        $r.Err | Should -Match 'decline, and the extension creates a new Epic plus one Story per drafted user story'
+    }
+
+    It "T118: a --parent issue matching NEITHER declared type refuses, naming the container constraint (FR-039)" {
+        $issues = @{
+            'PROJ-99' = @{ summary = 'Legacy importer'; description = 'Bug body'; status = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }; issuetype = @{ id = '10001'; name = 'Bug' }; project = @{ key = 'PROJ' } }
+            'PROJ-11' = @{ summary = 'Accept a partial payment'; description = 'Story one body'; status = @{ name = 'To Do'; statusCategory = @{ key = 'new' } }; issuetype = @{ id = '10001'; name = 'Story' }; project = @{ key = 'PROJ' } }
+        }
+        Start-TestMock (@{ issues = $issues } | ConvertTo-Json -Depth 20 -Compress)
+        $r = Invoke-FeatureCaptured2 @('feature', '--json', '--parent', 'PROJ-99', '--story', 'PROJ-11', 'invoice export')
+        $r.ExitCode | Should -Not -Be 0
+        $r.Err | Should -Match 'PROJ-99'
+        $r.Err | Should -Match 'container'
+        $r.Err | Should -Match '--parent'
+        $r.Err | Should -Match '--story PROJ-99'
+    }
 }

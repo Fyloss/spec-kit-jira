@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `speckit.jira.feature` named a feature from a mentioned Jira ticket and
+  proceeded silently — the ticket was never bound, and the following
+  reconcile created a duplicate parent alongside it. A mentioned ticket with
+  no designator now returns a closed reuse question instead: it names every
+  detected issue by key, summary, type and status, states the role it would
+  be attached in using the project's own configured type names, and offers
+  exactly two answers. `--reuse yes` reuses them — deriving the same
+  `--parent`/`--story` designators 027's seeding flow already accepts, from
+  the roles the question already computed, with no further round-trip when a
+  role is derivable — and `--reuse no` creates new issues exactly as before.
+  A type the configured hierarchy maps to no role (a Bug, say) is proposed in
+  the story role rather than refused, and needs no parent. A pasted browser
+  URL is now recognised as a mention, not only a bare key, and every further
+  key-shaped token in the request is detected too. A repository with no
+  applicable team configuration now says so, naming the file to fix and the
+  command that fixes it, instead of returning silently inactive. The
+  non-blocking fallback message no longer claims a ticket "will attach it
+  later" when nothing was ever bound; it names the real cause (credentials
+  rejected, Jira unreachable, an error status) and states that the next
+  reconcile creates a new issue instead. An unattended caller
+  (`--accept-defaults`) is never asked and states that the question was
+  suppressed. Byte-identical to the current release on every path that names
+  nothing.
+
 ## [0.18.1] - 2026-08-17
 
 ### Fixed

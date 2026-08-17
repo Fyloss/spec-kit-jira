@@ -295,6 +295,10 @@ the operator has confirmed the write plan.
 ```mermaid
 stateDiagram-v2
     [*] --> absent: no designators supplied — the ordinary ceremony
+    [*] --> question_pending: a ticket is mentioned,<br/>no designator, no answer (029)<br/>reuse question returned — nothing named,<br/>nothing written, exit 0
+    question_pending --> question_pending: repeating the same incomplete<br/>answer — zero writes, no state (FR-030)
+    question_pending --> absent: --reuse no — proceeds exactly<br/>as the ordinary ceremony from here
+    question_pending --> seeded_not_bound: --reuse yes — routes into the<br/>designator path below with the<br/>roles the question already derived
     absent --> seeded_not_bound: moment 1 records designators + bindings:[]<br/>zero Jira mutations
     seeded_not_bound --> seeded_not_bound: decline, or an unattended run —<br/>the record is rewritten with the freshly rendered plan_digest,<br/>so a LATER resume can show what changed
     seeded_not_bound --> bound: --confirm — each item stamped and recorded<br/>immediately, never batched; the record is then deleted
@@ -304,6 +308,12 @@ stateDiagram-v2
         Recorded explicitly — never inferred from
         "pins present, no identity", which is also
         what a crash mid-draft looks like.
+    end note
+
+    note right of question_pending
+        Never persisted (029, FR-004/FR-030): the
+        question is recomputed from Jira on every
+        invocation, not read back from a record.
     end note
 ```
 

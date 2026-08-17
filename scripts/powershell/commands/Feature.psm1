@@ -313,6 +313,56 @@ function Get-JiraFeatRefMessage {
     }
 }
 
+function Test-JiraFeatDesignatorRoleEvaluate {
+    <#
+    .SYNOPSIS
+      029, T118 (FR-022/FR-036/FR-039, research R11): mirror of bash's
+      _feat_designator_role_evaluate. Test-JiraAdoptionEvaluate collapses
+      "type matches neither declared role" and "type matches the OTHER
+      role's declared type" into one REF-ROLE; R11 requires the two to
+      diverge on the designator path exactly as they do on the
+      auto-detected question. A key whose type equals its own role's
+      declared type, or for which no type is declared, is unchanged. A
+      genuinely misplaced key — type equals the OTHER role's declared type
+      — still refuses via Test-JiraAdoptionEvaluate's own REF-ROLE message,
+      unchanged. Only a type matching NEITHER declared type is new: it
+      refuses with FR-039's container wording for the specification/parent
+      role, and is accepted with no type refusal for story (R11 — unmapped
+      content needs no parent).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Role,
+        [Parameter(Mandatory)] [string] $Key,
+        [AllowEmptyString()] [string] $OwnType = '',
+        [AllowEmptyString()] [string] $OtherType = '',
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $RoutedProject,
+        [AllowEmptyString()] [string] $TerminalStatusesCsv = '',
+        [AllowEmptyString()] [string] $SpecRefJson = ''
+    )
+    if (-not $OwnType) {
+        return (Test-JiraAdoptionEvaluate -RoutedProject $RoutedProject -Role $Role -Key $Key -DeclaredType '' -TerminalStatusesCsv $TerminalStatusesCsv -SpecRefJson $SpecRefJson)
+    }
+    $entry = Get-JiraAdoption -Key $Key
+    $actual = ''
+    if ($entry) {
+        $e = $entry | ConvertFrom-Json -Depth 100
+        $itype = $e.fields.issuetype.name
+        if ($itype) { $actual = [string]$itype }
+    }
+    if (-not $actual -or $actual -eq $OwnType) {
+        return (Test-JiraAdoptionEvaluate -RoutedProject $RoutedProject -Role $Role -Key $Key -DeclaredType $OwnType -TerminalStatusesCsv $TerminalStatusesCsv -SpecRefJson $SpecRefJson)
+    }
+    if ($OtherType -and $actual -eq $OtherType) {
+        return (Test-JiraAdoptionEvaluate -RoutedProject $RoutedProject -Role $Role -Key $Key -DeclaredType $OwnType -TerminalStatusesCsv $TerminalStatusesCsv -SpecRefJson $SpecRefJson)
+    }
+    if ($Role -eq 'specification') {
+        $msg = "issue $Key has type $actual, declared for no role — the specification role is the container, and this feature never changes an existing issue type; supply a title instead of a key: --reuse yes --parent `"<title>`" --story $Key"
+        return (ConvertTo-JiraJsonValue ([ordered]@{ code = 'REF-ROLE'; key = $Key; message = $msg }))
+    }
+    return (Test-JiraAdoptionEvaluate -RoutedProject $RoutedProject -Role $Role -Key $Key -DeclaredType '' -TerminalStatusesCsv $TerminalStatusesCsv -SpecRefJson $SpecRefJson)
+}
+
 function Invoke-JiraFeatSeedFromDesignator {
     <#
     .SYNOPSIS
@@ -405,17 +455,17 @@ function Invoke-JiraFeatSeedFromDesignator {
     $repo = if ($env:SPEC_KIT_JIRA_REPO) { $env:SPEC_KIT_JIRA_REPO } else { 'local/repo' }
     $specSlug = if ($env:SPEC_KIT_JIRA_SPEC_SLUG) { $env:SPEC_KIT_JIRA_SPEC_SLUG } else { 'spec' }
     $specRef = ConvertTo-JiraJsonValue ([ordered]@{ repo = $repo; spec_slug = $specSlug })
+    $ptype = Get-JiraFeatDeclaredTypeFor -Role 'specification' -ProjectKey $EffProject -Merged $Merged
+    $stype = Get-JiraFeatDeclaredTypeFor -Role 'story' -ProjectKey $EffProject -Merged $Merged
+    $pterm = Get-JiraFeatHaltedCsvFor -ProjectKey $EffProject -Merged $Merged
+    $sterm = Get-JiraFeatHaltedCsvFor -ProjectKey $EffProject -Merged $Merged
     $evalResults = [System.Collections.Generic.List[object]]::new()
     if ($pkey) {
-        $ptype = Get-JiraFeatDeclaredTypeFor -Role 'specification' -ProjectKey $EffProject -Merged $Merged
-        $pterm = Get-JiraFeatHaltedCsvFor -ProjectKey $EffProject -Merged $Merged
-        $evalResults.Add((Test-JiraAdoptionEvaluate -RoutedProject $EffProject -Role 'specification' -Key $pkey -DeclaredType $ptype -TerminalStatusesCsv $pterm -SpecRefJson $specRef | ConvertFrom-Json -Depth 100))
+        $evalResults.Add((Test-JiraFeatDesignatorRoleEvaluate -Role 'specification' -Key $pkey -OwnType $ptype -OtherType $stype -RoutedProject $EffProject -TerminalStatusesCsv $pterm -SpecRefJson $specRef | ConvertFrom-Json -Depth 100))
     }
-    $stype = Get-JiraFeatDeclaredTypeFor -Role 'story' -ProjectKey $EffProject -Merged $Merged
-    $sterm = Get-JiraFeatHaltedCsvFor -ProjectKey $EffProject -Merged $Merged
     foreach ($s in $storiesArr) {
         $skey = [string](Get-FeatProp $s 'key')
-        $evalResults.Add((Test-JiraAdoptionEvaluate -RoutedProject $EffProject -Role 'story' -Key $skey -DeclaredType $stype -TerminalStatusesCsv $sterm -SpecRefJson $specRef | ConvertFrom-Json -Depth 100))
+        $evalResults.Add((Test-JiraFeatDesignatorRoleEvaluate -Role 'story' -Key $skey -OwnType $stype -OtherType $ptype -RoutedProject $EffProject -TerminalStatusesCsv $sterm -SpecRefJson $specRef | ConvertFrom-Json -Depth 100))
     }
 
     $storyKeysJson = ConvertTo-JiraJsonValue (@($storiesArr | ForEach-Object { [string](Get-FeatProp $_ 'key') }))
@@ -431,6 +481,12 @@ function Invoke-JiraFeatSeedFromDesignator {
         foreach ($r in $refusals) {
             [Console]::Error.WriteLine("feature: $($r.code): $($r.message)")
         }
+        # 029/T119 (FR-037): the escape every refusal reachable here
+        # carries, composed once by the aggregator and appended once —
+        # never duplicated into each refusal class.
+        $escSpec = if ($ptype) { $ptype } else { 'specification-role issue' }
+        $escStory = if ($stype) { $stype } else { 'story-role issue' }
+        [Console]::Error.WriteLine("feature: decline, and the extension creates a new $escSpec plus one $escStory per drafted user story")
         return (Get-JiraExitCode 'config')
     }
 
@@ -595,10 +651,15 @@ function ConvertTo-JiraFeatureProse {
 }
 
 function Write-FeatFallback {
-    # The FR-016 non-blocking fallback: {active:false} plus exactly one warning;
-    # one WARNING: line on stderr; exit 0. Mirror of _feat_fallback.
-    param([bool] $Json)
-    $msg = 'could not resolve a ticket in Jira — proceeding without one (reconciliation will attach it later)'
+    # The FR-016 non-blocking fallback: {active:false} plus exactly one
+    # warning; one WARNING: line on stderr; exit 0. Mirror of _feat_fallback.
+    # 029/T132 (FR-041): the shipped text claimed reconciliation "will
+    # attach it later" — false, since a create that never happened has
+    # nothing to attach; the following reconcile creates a fresh issue
+    # instead. $Cause is composed by the caller from the exit code the
+    # failed call already returned, never invented here.
+    param([bool] $Json, [string] $Cause)
+    $msg = "$Cause — proceeding without a ticket; the next reconcile creates a new issue for this specification"
     [Console]::Error.WriteLine("WARNING: $msg")
     $payload = ConvertTo-JiraJsonValue ([ordered]@{ active = $false; warnings = @($msg) })
     Write-FeatResult -Payload $payload -Json $Json
@@ -630,12 +691,61 @@ function Invoke-JiraFeature {
     $parentSeen = $state['parent_seen'] -eq 'true'
     $parentRaw = if ($state.ContainsKey('parent')) { $state['parent'] } else { '' }
     $storiesJoined = if ($state.ContainsKey('stories')) { $state['stories'] } else { '' }
+    $reuse = if ($state.ContainsKey('reuse')) { $state['reuse'] } else { '' }
+    $acceptDefaults = $state['accept_defaults'] -eq 'true'
+
+    # 029, contract mention-grammar.md §1-§3: the mention evaluation is a pure
+    # string operation on argv alone, needing no configuration — it moves to
+    # the top of Invoke-JiraFeature (before the four early pass-through
+    # exits, R4) so both the usage-error gate below and the
+    # missing-configuration report (US6) can consult it without a second
+    # detection pass.
+    $words = @($argsLine -split ' ' | Where-Object { $_ -ne '' })
+    $mentions = @(Get-JiraFeatDetectMentions -Words $words)
+    $hasMention = $mentions.Count -gt 0
+    $ticketKey = ''
+    $desc = ''
+    if ($hasMention) {
+        $ticketKey = [string] $mentions[0].key
+        $desc = ($words | Select-Object -Skip 1) -join ' '
+    }
+    else {
+        $desc = $words -join ' '
+    }
+
+    # 029, contract feature-question-contract.md §2 rows 2-3 (FR-015): decided
+    # from argv alone, before any configuration read or Jira request — an
+    # unconfigured repository or an unreadable key must never mask a
+    # mis-scripted invocation. Row 1 (an invalid --reuse value) already
+    # exited inside Invoke-JiraCliParse, above.
+    $hasDesignator = $parentSeen -or (-not [string]::IsNullOrEmpty($storiesJoined))
+    if (-not [string]::IsNullOrEmpty($reuse) -and -not $hasMention -and -not $hasDesignator) {
+        [Console]::Error.WriteLine("feature: --reuse $reuse answers a question that was never posed — no ticket is mentioned and no designator is supplied")
+        return (Get-JiraExitCode 'usage')
+    }
+    if ($reuse -eq 'no' -and $hasDesignator) {
+        [Console]::Error.WriteLine('feature: --reuse no contradicts the designators supplied with it — designators name issues to reuse')
+        return (Get-JiraExitCode 'usage')
+    }
 
     $dir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
 
+    # 029, contract feature-question-contract.md §5 (FR-026-FR-028, research
+    # R5): a mentioned ticket met with silence is the same defect class one
+    # layer earlier. Gated on $hasMention so a run naming nothing stays
+    # byte-identical to the current release (FR-028); never issues a Jira
+    # request (FR-027).
+    $noConfigMsg = 'no team configuration found — .specify/jira/config.yml is missing, unreadable, or declares no teams; run /speckit.jira.config to create one'
+    $noSelectionMsg = 'no team selected in .specify/jira/personal.yml — that selection is your own and no script writes it for you; run /speckit.jira.config to select one'
+
     # (1) No committed catalogue at all ⇒ pass-through (FR-017).
     if (-not (Test-Path -LiteralPath (Join-Path $dir 'config.yml'))) {
-        Write-FeatResult -Payload '{"active":false}' -Json $json
+        if ($hasMention) {
+            Write-FeatResult -Payload (ConvertTo-JiraJsonValue ([ordered]@{ active = $false; warnings = @($noConfigMsg) })) -Json $json
+        }
+        else {
+            Write-FeatResult -Payload '{"active":false}' -Json $json
+        }
         return 0
     }
     # The Bash twin silences this load's stderr (2>/dev/null): a failed read is
@@ -646,13 +756,23 @@ function Invoke-JiraFeature {
     try { $cfg = Import-JiraConfig -ConfigDir $dir }
     finally { [Console]::SetError($origErr) }
     if ($cfg.ExitCode -ne 0) {
-        Write-FeatResult -Payload '{"active":false}' -Json $json
+        if ($hasMention) {
+            Write-FeatResult -Payload (ConvertTo-JiraJsonValue ([ordered]@{ active = $false; warnings = @($noConfigMsg) })) -Json $json
+        }
+        else {
+            Write-FeatResult -Payload '{"active":false}' -Json $json
+        }
         return 0
     }
     $merged = $cfg.Json | ConvertFrom-Json -Depth 100
     $teams = @((Get-FeatProp $merged 'teams') | Where-Object { $null -ne $_ })
     if ($teams.Count -eq 0) {
-        Write-FeatResult -Payload '{"active":false}' -Json $json
+        if ($hasMention) {
+            Write-FeatResult -Payload (ConvertTo-JiraJsonValue ([ordered]@{ active = $false; warnings = @($noConfigMsg) })) -Json $json
+        }
+        else {
+            Write-FeatResult -Payload '{"active":false}' -Json $json
+        }
         return 0
     }
 
@@ -667,7 +787,12 @@ function Invoke-JiraFeature {
 
     # No selection and no cross-team answer ⇒ pass-through (FR-017).
     if (-not $pActive -and [string]::IsNullOrEmpty($useTeam)) {
-        Write-FeatResult -Payload '{"active":false}' -Json $json
+        if ($hasMention) {
+            Write-FeatResult -Payload (ConvertTo-JiraJsonValue ([ordered]@{ active = $false; warnings = @($noSelectionMsg) })) -Json $json
+        }
+        else {
+            Write-FeatResult -Payload '{"active":false}' -Json $json
+        }
         return 0
     }
 
@@ -688,23 +813,8 @@ function Invoke-JiraFeature {
         if ($null -ne $override) { $overrideUsed = $true }
     }
 
-    # (4) Description is required once a team is in play (FR-013 precedes naming).
-    # The optional leading positional is a mentioned issue key or a browser
-    # URL reducing to one (029, contract mention-grammar.md §1-§3). Naming
-    # derives from the leading positional's own detection alone (§1 rule 3);
-    # any further detected key stays part of the description, unchanged
-    # from before this feature.
-    $words = @($argsLine -split ' ' | Where-Object { $_ -ne '' })
-    $mentions = @(Get-JiraFeatDetectMentions -Words $words)
-    $ticketKey = ''
-    $desc = ''
-    if ($mentions.Count -gt 0) {
-        $ticketKey = [string] $mentions[0].key
-        $desc = ($words | Select-Object -Skip 1) -join ' '
-    }
-    else {
-        $desc = $words -join ' '
-    }
+    # (4) Description is required once a team is in play (FR-013 precedes
+    # naming). $words/$mentions/$ticketKey/$desc are already computed above.
     if ([string]::IsNullOrEmpty($desc)) {
         [Console]::Error.WriteLine('feature: a feature description is required')
         return (Get-JiraExitCode 'usage')
@@ -749,9 +859,13 @@ function Invoke-JiraFeature {
         $reuseState = if ($state.ContainsKey('reuse')) { $state['reuse'] } else { '' }
         $acceptDefaultsState = $state['accept_defaults'] -eq 'true'
         $aboutToAsk = [string]::IsNullOrEmpty($reuseState) -and (-not $acceptDefaultsState)
+        # 029/FR-029: "reuse" also needs the wide field set to derive each
+        # detected issue's role — it is a second invocation, not the
+        # question path FR-017 bounds.
+        $wantsWide = $aboutToAsk -or ($reuseState -eq 'yes')
 
         # Mentioned key: validate (read). A fail-closed read never falls back.
-        $validated = Confirm-JiraTicket -Key $ticketKey -Wide $aboutToAsk
+        $validated = Confirm-JiraTicket -Key $ticketKey -Wide $wantsWide
         if ($validated.ExitCode -ne 0) { return [int] $validated.ExitCode }
         $vObj = $validated.Json | ConvertFrom-Json -Depth 100
         $ticketProject = [string](Get-FeatProp $vObj 'project')
@@ -792,24 +906,57 @@ function Invoke-JiraFeature {
             $suppressedWarning = 'the reuse question was suppressed by --accept-defaults; assumed answer: create new'
         }
 
-        # (029, FR-029/FR-030) — "reuse" with no designator is the operator
-        # accepting the question's own proposal. Full auto-routing into the
-        # designator path from the derived roles is Phase 4 work (US2);
-        # until it lands, this returns the which-issues follow-up
-        # unconditionally rather than risk silently duplicating the
-        # mentioned ticket by falling through to the create-new path a
-        # "reuse" answer never meant.
+        # (029, FR-029/FR-030/FR-038) — "reuse" with no designator is the
+        # operator accepting the question's own proposal: every detected
+        # issue, in the role already derived. Auto-routes into 027's
+        # designator path with synthesized --parent/--story equivalents, so
+        # the result is byte-identical to typing them (US3 AC1). Falls back
+        # to the which-issues follow-up in exactly one case — no role could
+        # be derived at all, because the routed project declares no
+        # hierarchy (FR-035): a proposal holding story-role issues and no
+        # specification-role one is NOT that case (FR-038) and still
+        # routes, with no parent.
         if ($reuseState -eq 'yes') {
-            $payload = ConvertTo-JiraJsonValue ([ordered]@{
-                    active = $true
-                    reuse_issues_required = [ordered]@{
-                        issues      = @([ordered]@{ key = $ticketKey })
-                        declines_to = [ordered]@{ specification = $null; story = $null }
-                        reason      = 'designators required'
-                    }
-                })
-            Write-FeatResult -Payload $payload -Json $json
-            return 0
+            $qResult2 = Invoke-JiraFeatComposeReuseQuestion -Mentions $mentions -PrimaryWideJson $validated.Json -EffProject $effProject -Merged $merged
+            if ([int]$qResult2.ExitCode -ne 0) { return [int] $qResult2.ExitCode }
+            $qObj = $qResult2.Json | ConvertFrom-Json -Depth 100
+
+            $noHierarchy = ($null -eq $qObj.reuse_required.declines_to.specification) -and ($null -eq $qObj.reuse_required.declines_to.story)
+
+            if ($noHierarchy) {
+                $payload = ConvertTo-JiraJsonValue ([ordered]@{
+                        active = $true
+                        reuse_issues_required = [ordered]@{
+                            issues      = @([ordered]@{ key = $ticketKey })
+                            declines_to = [ordered]@{ specification = $null; story = $null }
+                            reason      = 'designators required'
+                        }
+                    })
+                Write-FeatResult -Payload $payload -Json $json
+                return 0
+            }
+
+            # First specification-role issue wins the parent slot; every
+            # other detected issue (including any further
+            # specification-role match) becomes a story-role designator —
+            # never silently dropped.
+            $autoParent = ''
+            $autoStoriesList = [System.Collections.Generic.List[string]]::new()
+            foreach ($qi in @($qObj.reuse_required.issues)) {
+                if ($qi.role -eq 'specification' -and [string]::IsNullOrEmpty($autoParent)) {
+                    $autoParent = [string]$qi.key
+                }
+                else {
+                    $autoStoriesList.Add([string]$qi.key)
+                }
+            }
+            $us = [char]0x1F
+            $autoStories = ($autoStoriesList -join $us)
+            $autoParentSeen = -not [string]::IsNullOrEmpty($autoParent)
+
+            return (Invoke-JiraFeatSeedFromDesignator -Json $json -DryRun $dryRun -Description $desc -EffId $effId `
+                    -EffProject $effProject -Prefix $prefix -Pattern $pattern -OverrideUsed $overrideUsed -Merged $merged `
+                    -ParentSeen $autoParentSeen -ParentRaw $autoParent -StoriesJoined $autoStories)
         }
 
         $number = Get-JiraTicketNumber -Key $ticketKey
@@ -840,14 +987,27 @@ function Invoke-JiraFeature {
         $specRef = '{"repo":' + (ConvertTo-JiraJsonString $repo) + ',"spec_slug":' + (ConvertTo-JiraJsonString $slugRef) + '}'
 
         if ([string]::IsNullOrEmpty($typeId) -or [string]::IsNullOrEmpty($env:SPEC_KIT_JIRA_BASE_URL)) {
-            Write-FeatFallback -Json $json
+            Write-FeatFallback -Json $json -Cause 'Jira is not configured for creating a ticket yet'
             return 0
         }
 
         $created = New-JiraTicket -ProjectKey $effProject -Summary $desc -StoryTypeId $typeId -SpecRefJson $specRef
         if ($created.ExitCode -eq 9) { return 9 }
         if ($created.ExitCode -ne 0) {
-            Write-FeatFallback -Json $json
+            $cause = ''
+            if ($created.ExitCode -eq (Get-JiraExitCode 'auth')) {
+                $cause = 'Jira rejected the credentials'
+            }
+            elseif ($created.Status -eq 0 -or $null -eq $created.Status) {
+                $cause = 'Jira is unreachable'
+            }
+            elseif ($created.Status -eq 404) {
+                $cause = 'the target project could not be found or is not visible'
+            }
+            else {
+                $cause = "Jira returned an error (status $($created.Status))"
+            }
+            Write-FeatFallback -Json $json -Cause $cause
             return 0
         }
         $createdKey = [string]((($created.Json) | ConvertFrom-Json -Depth 100).key)

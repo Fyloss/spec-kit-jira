@@ -148,8 +148,31 @@ setup() {
   # question itself, bare key), us29-feature-reuse-question-url (the same
   # via a /browse/ URL, mention-grammar §4), and us29-feature-reuse-no
   # (FR-010's byte-identical answered path) (190 -> 193).
+  # 029 (Phase 4-7, per-row conformance, T034/T058/T099) adds seven more
+  # contract §2 rows this count fell behind on: us29-feature-reuse-invalid
+  # (row 1), us29-feature-reuse-unposed (row 2),
+  # us29-feature-reuse-no-contradicts-designator (row 3),
+  # us29-feature-unresolvable-mention (row 6),
+  # us29-feature-accept-defaults-suppresses (row 8),
+  # us29-feature-reuse-yes-auto-accept (row 9/US3 AC1), and
+  # us29-feature-reuse-yes-no-issues (row 11) (193 -> 200).
+  # 029 (Phase 9, T068's per-row audit) closes the last two rows the sweep
+  # found unrepresented — a per-command unit test is not the same obligation
+  # as a cross-port byte-equality scenario: us29-feature-mention-with-designator
+  # (row 7, mention plus designator together — the designator path wins, no
+  # question) and us29-feature-designator-reuse-yes-silent (row 5, a
+  # designator-only run with the redundant --reuse yes, accepted in silence)
+  # (200 -> 202).
+  # 029 (Phase 9, T105/SC-002) adds the headline outcome's own multi-run
+  # proof — us29-sc002-reuse-chain: question, --reuse yes auto-accept,
+  # seed --confirm, reconcile --dry-run, asserting zero duplicate parents
+  # across both ports (202 -> 203).
+  # 029 (Phase 9, T120) adds the one proposal shape the audit still lacked:
+  # us29-feature-reuse-question-mixed-roles — three detected issues in one
+  # question, mixed roles (specification, story, unmapped story), one
+  # bulkfetch (203 -> 204).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 193 ]
+  [ "${count}" -eq 204 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

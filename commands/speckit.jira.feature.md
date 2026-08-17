@@ -1,7 +1,7 @@
 ---
 name: "speckit.jira.feature"
-description: "Ticket-first feature naming: resolve the Jira ticket, then name the branch and spec folder by the developer's team convention — a deterministic, non-blocking before_specify step. Also resolves --parent/--story designators to seed the specification from existing Jira issues (027)."
-argument-hint: "Optional: a mentioned ticket key, or --parent/--story designators, then the feature description, e.g. IJT-42 invoice export"
+description: "Ticket-first feature naming: resolve the Jira ticket, then name the branch and spec folder by the developer's team convention — a deterministic, non-blocking before_specify step. A mentioned ticket with no designator returns a closed reuse question instead of naming silently (029). Also resolves --parent/--story designators to seed the specification from existing Jira issues (027)."
+argument-hint: "Optional: a mentioned ticket key (leading positional — load-bearing), or --parent/--story designators, or --reuse yes|no answering a prior question, then the feature description, e.g. IJT-42 invoice export"
 ---
 
 # /speckit.jira.feature
@@ -65,23 +65,35 @@ restore the bridge, reinstall the extension with
 
 ## Ordered ceremony
 
-1. **Run the deterministic command** by its repository-relative path:
+1. **Run the deterministic command** by its repository-relative path. The
+   mentioned ticket, if any, MUST be the **leading positional** — that is what
+   computes the branch and folder name (mention-grammar §1); every other
+   detected key stays part of the description:
 
    ```text
-   bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh feature [TICKET-KEY] [--use-team <id>] [--json] [--dry-run] <description>
+   bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh feature [TICKET-KEY] [--use-team <id>] [--reuse yes|no] [--json] [--dry-run] <description>
    ```
 
    On Windows:
 
    ```text
-   .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 feature [TICKET-KEY] [--use-team <id>] [--json] [--dry-run] <description>
+   .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 feature [TICKET-KEY] [--use-team <id>] [--reuse yes|no] [--json] [--dry-run] <description>
    ```
 
 2. **`{"active": false}`** ⇒ proceed **exactly as today**: drive the host
    specify flow unchanged, with the same short name it would have computed
-   without this extension. When the output carries a warning (Jira unreachable
-   or a create refused — FR-016), relay that single warning verbatim and still
-   proceed; reconciliation attaches the ticket later.
+   without this extension. When the output carries a warning, relay that
+   single warning verbatim and still proceed. Two different warnings can
+   appear here, and both are non-blocking:
+   - Jira unreachable, or a create refused (FR-016) — the message names the
+     cause (credentials rejected / Jira unreachable / an error status) and
+     states that the next reconcile creates a new issue. It never claims a
+     ticket will be attached later — there is none to attach.
+   - No team configuration applies, but a ticket **was** mentioned (FR-026) —
+     the message names the file to fix (`.specify/jira/config.yml` or the
+     human-owned `.specify/jira/personal.yml`) and the `/speckit.jira.config`
+     command that fixes it. A run naming nothing never sees this warning
+     (FR-028).
 
 3. **`confirmation_required`** ⇒ ask the closed question and nothing else: the
    mentioned ticket belongs to `ticket_team` (or to no catalogue team) while
@@ -92,7 +104,37 @@ restore the bridge, reinstall the extension with
    - **stop** — end the ceremony without creating the feature.
    Unattended callers treat `confirmation_required` as a stop.
 
-4. **Nominal output** (`active: true` with `branch_name`/`short_name`) ⇒ drive
+4. **`reuse_required` or `reuse_issues_required`** ⇒ ask the closed question
+   and nothing else, immediately after the cross-team question and in that
+   fixed order — the two are never merged into one round-trip (FR-025). This
+   is the question the reported incident's fix is built around: **a mentioned
+   ticket names the feature; it does not bind it**, and this step is what
+   stops that fact from passing silently.
+
+   - **`reuse_required`** names each detected issue by key, summary, type and
+     status, together with the role it would be attached in (in the
+     project's own type names — never `specification`/`story`). State both
+     answers exactly:
+     - **`--reuse yes`** — reuse them: re-invoke with the mentioned ticket and
+       `--reuse yes`, no designators needed. The extension itself derives
+       `--parent`/`--story` from the roles it already computed.
+     - **`--reuse no`** — create new: re-invoke with `--reuse no` and proceed
+       with step 5 exactly as if no ticket had been mentioned.
+     A halted-status warning or an unmapped-type note attached to one issue
+     changes nothing about which answer to give; relay it verbatim.
+   - **`reuse_issues_required`** is the narrower follow-up, reached only when
+     `--reuse yes` was answered but no role could be derived at all (the
+     routed project declares no hierarchy). Supply `--parent <key|title>` and
+     one `--story <key>` per issue to reuse in the same re-invocation. It
+     performs zero writes and records no state, so answering it incompletely
+     costs nothing and may be repeated.
+   - Either answer that resolves to **reuse** routes into the seeding flow
+     below (`Seeding from named issues`) — **do not proceed to step 5**, and
+     do not treat `attached`/`created` as reachable from this branch.
+   - Unattended callers (`--accept-defaults`) never see this question: it is
+     suppressed and treated as `--reuse no`, and the result states so.
+
+5. **Nominal output** (`active: true` with `branch_name`/`short_name`) ⇒ drive
    the host flow with the computed names:
    1. `create-new-feature.sh --short-name "<short_name>"` — the flat spec
       folder component; the team `folder_prefix` is already applied and never
@@ -102,30 +144,6 @@ restore the bridge, reinstall the extension with
       the spec directory name).
    3. Report `override_used` and the ticket action (`attached` / `created` /
       `would-attach` / `would-create`) in the feature-creation output.
-
-> **A mentioned ticket names the feature; it does not bind it.** `attached`
-> means this command validated the key and derived the branch and folder from
-> it — nothing more. No marker is written into `spec.md` (it does not even
-> exist yet at `before_specify`), so the following `reconcile` sees an unbound
-> specification and creates a **new** parent plus one issue per drafted user
-> story, *alongside* the mentioned ticket rather than in it. That is by design:
-> the bridge never adopts a ticket it did not create unless the operator names
-> it as a designator.
->
-> **State it before step 4.1**, while nothing has been created yet — the
-> answer changes what you run next:
->
-> - the operator is happy with new issues alongside the mentioned ticket ⇒
->   proceed with step 4 unchanged;
-> - the operator wanted that existing issue reused ⇒ **do not create the
->   feature**. Re-invoke this command with `--parent`/`--story` instead, and
->   follow with `/speckit.jira.seed`.
->
-> Those flags are honoured at **this** invocation only. Once the feature has
-> been created without them, `/speckit.jira.seed` refuses `REF-EXISTS`
-> (retro-seeding is out of scope) and the only paths left are a brand-new
-> specification or a link made by hand in Jira. Raising it one step too late
-> costs the operator the whole feature folder.
 
 ## Behaviour rules (normative)
 
@@ -145,11 +163,23 @@ restore the bridge, reinstall the extension with
 
 ## Flags
 
-- `TICKET-KEY` — optional positional: a mentioned ticket, validated before use.
+- `TICKET-KEY` — optional **leading positional**: a mentioned ticket,
+  validated before use. A pasted browser URL that reduces to a key works
+  identically. Every further key-shaped token in the request is detected too
+  and named in the reuse question, one line each — but only when the leading
+  positional is itself a mention; an ordinary leading word closes the gate
+  and nothing is detected, however many keys follow it.
+- `--reuse <yes|no>` — 029: the answer to the reuse question. `no` proceeds
+  exactly as if nothing had been mentioned. `yes` reuses the detected
+  issues in the roles the question already computed; absent, and a ticket
+  was mentioned with no designator, the question is asked. Supplying it
+  without a mention and without `--parent`/`--story` is a usage error, and so
+  is `--reuse no` alongside designators (they contradict).
 - `--parent <designator>` — 027: at most once. A key, a browser URL, or free
   text (may contain spaces). A key or URL adopts an existing parent-role
   issue; free text is never resolved against Jira and is always the title of
-  a parent to create.
+  a parent to create. Supplying it suppresses the reuse question entirely
+  (FR-006) — the operator has already answered it.
 - `--story <designator>` — 027: repeatable. A key or a browser URL naming a
   story-role issue. **Argv order is normative** (FR-054) — it fixes both the
   order the drafted user stories must be pinned in and the order the seed
@@ -162,6 +192,12 @@ restore the bridge, reinstall the extension with
 - `--help` — usage; exits `0`.
 
 ## Seeding from named issues (027) — the mandatory follow-up
+
+**Reached two ways now.** The operator either types `--parent`/`--story`
+designators from the start, or — the ordinary route since 029 — answers the
+reuse question (step 4 above) with `yes`, which supplies the same designators
+on your behalf from the roles already computed. Both land here identically;
+nothing below distinguishes them.
 
 When you invoke this command with **any** `--parent` or `--story`
 designator, a **second, non-optional step follows once `spec.md` exists**:
@@ -193,7 +229,10 @@ material obliges you to follow.
 
 ## Exit codes
 
-`0` success, pass-through, fallback, or `confirmation_required` · `1` usage ·
-`2` fail-closed read on a mentioned key (never for auto-create — that path
-falls back) · `3` auth on a mentioned-key read · `4` personal-file/catalogue
-refusal · `9` privacy BLOCK on the create payload. Identical on both ports.
+`0` success, pass-through, fallback, or a question (`confirmation_required`,
+`reuse_required`, `reuse_issues_required`) · `1` usage, including an
+unanswerable `--reuse` (029, contract §2 rows 1–3) · `2` fail-closed read on a
+mentioned key (never for auto-create — that path falls back) · `3` auth on a
+mentioned-key read · `4` personal-file/catalogue refusal or a role-mismatch
+refusal on the reuse path · `9` privacy BLOCK on the create payload. Identical
+on both ports.

@@ -242,8 +242,10 @@ function New-JiraTicket {
 
     # (2) The create write. A failure propagates its transport exit code
     #     (non-blocking fallback lives in the command layer, never here).
+    #     Status rides along on failure so the caller can name the cause
+    #     (029/T132, FR-041) without a second request.
     $r = Invoke-JiraRequest -Method POST -Url "$base/rest/api/3/issue" -Body $body
-    if ($r.ExitCode -ne 0) { return [pscustomobject]@{ ExitCode = [int] $r.ExitCode; Json = '' } }
+    if ($r.ExitCode -ne 0) { return [pscustomobject]@{ ExitCode = [int] $r.ExitCode; Json = ''; Status = [int] $r.Status } }
     $key = [string] (($r.Body | ConvertFrom-Json -Depth 100).key)
 
     # (3) Identity stamp — the created ticket is a bridge-created artifact.
