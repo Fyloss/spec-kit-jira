@@ -493,14 +493,31 @@ function Resolve-Route {
         '^/rest/api/3/issue/[^/]+$' {
             $ikey = ($Path -split '/')[-1]
             if ($Method -eq 'GET') {
-                # Mentioned-ticket validation (fields=project): the issue's project
-                # is its key prefix; an unconfigured project is a 404 (fail-closed).
-                if ($Query -match '(^|&)fields=project(&|$)') {
+                # Mentioned-ticket validation (fields=project or, 029 contract
+                # feature-question-contract.md §7, the wider
+                # fields=project,summary,issuetype,status): the issue's project
+                # is its key prefix; an unconfigured project is a 404
+                # (fail-closed) either way. This branch is used for BOTH field
+                # sets — never falls through to the seeded-issue lookup below,
+                # whose unseeded fallback is a fixed fixture keyed on no
+                # particular issue. A key seeded via $script:Issues answers
+                # with its real summary/type/status; an unseeded key gets a
+                # deterministic synthesized placeholder.
+                if ($Query -match '(^|&)fields=project(&|$)' -or $Query -match '(^|&)fields=project,summary,issuetype,status(&|$)') {
+                    $wide = $Query -match '(^|&)fields=project,summary,issuetype,status(&|$)'
                     $pkey = ($ikey -split '-')[0]
-                    if ($Projects.ContainsKey($pkey)) {
+                    if (-not $Projects.ContainsKey($pkey)) {
+                        return @{ status = 404; body = '{"errorMessages":["not found"],"errors":{}}' }
+                    }
+                    if (-not $wide) {
                         return @{ status = 200; body = "{`"key`":`"$ikey`",`"fields`":{`"project`":{`"key`":`"$pkey`"}}}" }
                     }
-                    return @{ status = 404; body = '{"errorMessages":["not found"],"errors":{}}' }
+                    $seededFields = if ($script:Issues.ContainsKey($ikey)) { $script:Issues[$ikey].fields } else { @{} }
+                    $summary = if ($seededFields.ContainsKey('summary') -and $seededFields.summary) { $seededFields.summary } else { "Synthetic issue $ikey" }
+                    $issuetype = if ($seededFields.ContainsKey('issuetype') -and $seededFields.issuetype) { $seededFields.issuetype } else { @{ name = 'Task' } }
+                    $status = if ($seededFields.ContainsKey('status') -and $seededFields.status) { $seededFields.status } else { @{ name = 'To Do'; statusCategory = @{ key = 'new' } } }
+                    $wideResp = @{ key = $ikey; fields = @{ project = @{ key = $pkey }; summary = $summary; issuetype = $issuetype; status = $status } }
+                    return @{ status = 200; body = ($wideResp | ConvertTo-Json -Depth 20 -Compress) }
                 }
                 if ($script:Issues.ContainsKey($ikey)) {
                     $issue = $script:Issues[$ikey]

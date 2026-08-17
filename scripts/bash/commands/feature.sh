@@ -95,6 +95,240 @@ _feat_halted_csv_for() {
     '([.projects[]? | select(.key == $k)][0].halted_statuses // []) | join(",")' <<< "${merged}"
 }
 
+# _feat_reduce_mention <raw> — 029, contract mention-grammar.md §1-§3: does
+# <raw> reduce to a Jira issue key, either directly (the shape already used
+# at commands/feature.sh:474) or via a browser URL (reusing
+# designator_reduce_url_candidate — never a second reduction implementation,
+# per the contract's own "reuse is normative, not advisory"). Prints the
+# reduced key and returns 0 on a match; prints nothing and returns 1
+# otherwise.
+_feat_reduce_mention() {
+  local raw="$1"
+  if [[ "${raw}" =~ ^[A-Z][A-Z0-9_]+-[0-9]+$ ]]; then
+    printf '%s' "${raw}"
+    return 0
+  fi
+  if [[ "${raw}" == *"://"* ]]; then
+    local candidate
+    if candidate="$(designator_reduce_url_candidate "${raw}")" \
+      && [[ "${candidate}" =~ ^[A-Z][A-Z0-9_]+-[0-9]+$ ]]; then
+      printf '%s' "${candidate}"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+# _feat_detect_mentions <word...> — 029, contract mention-grammar.md §1-§3:
+# the gate + scan. Prints a JSON array of {"raw":..,"key":..} in argv order.
+# The gate (§1 rule 1): if the LEADING positional does not itself reduce to
+# a key, prints "[]" — no further token is examined, and the run stays
+# byte-identical to the current release. Once the gate is open, every
+# remaining token that reduces to a key is detected too (§1 rule 2); the
+# leading positional's own detection is always first, so naming derives from
+# it alone regardless of what follows (§1 rule 3). No external process is
+# spawned per word (docs/11-process-budget.md) — one jq call composes the
+# whole result.
+_feat_detect_mentions() {
+  local -a words=("$@")
+  if [[ ${#words[@]} -eq 0 ]]; then
+    printf '[]'
+    return 0
+  fi
+  _feat_reduce_mention "${words[0]}" > /dev/null || {
+    printf '[]'
+    return 0
+  }
+  # Every reduction above is pure bash (no spawn); the whole scan is
+  # therefore composed into ONE jq call, never one per detected token
+  # (docs/11-process-budget.md's spirit, even off the reconcile path).
+  local pairs="" w key
+  for w in "${words[@]}"; do
+    if key="$(_feat_reduce_mention "${w}")"; then
+      pairs+="${w}"$'\x1f'"${key}"$'\x1e'
+    fi
+  done
+  jq -cn --arg pairs "${pairs}" '
+    ($pairs | rtrimstr("") | split("")) as $entries
+    | [$entries[] | split("") | {raw: .[0], key: .[1]}]
+  '
+}
+
+# _feat_compose_reuse_question <mentions-json> <primary-wide-json> <eff-project>
+# <merged-config-json> — 029, contract feature-question-contract.md §3/§3.1:
+# compose the reuse_required payload (FR-001-FR-005, FR-025, FR-031,
+# FR-033-FR-036, FR-040). mentions-json is _feat_detect_mentions' output
+# (>=1 entries, gate already open); primary-wide-json is ticket_validate's
+# WIDE result for mentions_json[0] — already read by the caller, no request
+# here. Every issue beyond the first is resolved via adoption_load/
+# adoption_get, the SAME bulk-read the designator path already uses — at
+# most one further request regardless of count (FR-017, FR-034). Fails
+# closed (propagating the exit code) if that bulk read is unreliable —
+# consistent with Constitution III's default read posture. Prints the
+# canonical JSON payload and returns 0 on success.
+_feat_compose_reuse_question() {
+  local mentions_json="$1" primary_json="$2" eff_project="$3" merged="$4"
+  local n
+  n="$(jq 'length' <<< "${mentions_json}")"
+
+  local -a extra_keys=()
+  local i
+  for ((i = 1; i < n; i++)); do
+    extra_keys+=("$(jq -r ".[${i}].key" <<< "${mentions_json}")")
+  done
+  if ((${#extra_keys[@]} > 0)); then
+    adoption_load "${extra_keys[@]}" || return "$(cli_exit_code fail_closed)"
+  fi
+
+  local spec_type story_type halted_csv
+  spec_type="$(_feat_declared_type_for specification "${eff_project}" "${merged}")"
+  story_type="$(_feat_declared_type_for story "${eff_project}" "${merged}")"
+  halted_csv="$(_feat_halted_csv_for "${eff_project}" "${merged}")"
+  local no_hierarchy="false"
+  [[ -z "${spec_type}" && -z "${story_type}" ]] && no_hierarchy="true"
+
+  local entries_file
+  entries_file="$(mktemp)"
+  for ((i = 0; i < n; i++)); do
+    local key summary type status
+    if ((i == 0)); then
+      key="$(jq -r '.key' <<< "${primary_json}")"
+      summary="$(jq -r '.summary // ""' <<< "${primary_json}")"
+      type="$(jq -r '.type // ""' <<< "${primary_json}")"
+      status="$(jq -r '.status // ""' <<< "${primary_json}")"
+    else
+      key="$(jq -r ".[${i}].key" <<< "${mentions_json}")"
+      local entry
+      if ! entry="$(adoption_get "${key}")"; then
+        rm -f "${entries_file}"
+        return "$(cli_exit_code fail_closed)"
+      fi
+      summary="$(jq -r '.fields.summary // ""' <<< "${entry}")"
+      type="$(jq -r '.fields.issuetype.name // ""' <<< "${entry}")"
+      status="$(jq -r '.fields.status.name // ""' <<< "${entry}")"
+    fi
+
+    # Role derivation (FR-035/FR-036, R11 — the unmapped/misplaced split's
+    # third case: matching neither declared type is not a mistake, it is
+    # proposed in the story role and needs no parent).
+    local role="null" unmapped="false"
+    if [[ "${no_hierarchy}" != "true" ]]; then
+      if [[ -n "${spec_type}" && "${type}" == "${spec_type}" ]]; then
+        role='"specification"'
+      elif [[ -n "${story_type}" && "${type}" == "${story_type}" ]]; then
+        role='"story"'
+      else
+        role='"story"'
+        unmapped="true"
+      fi
+    fi
+
+    local halted="false"
+    if [[ -n "${halted_csv}" && -n "${status}" ]]; then
+      local -a halted_list
+      IFS=',' read -ra halted_list <<< "${halted_csv}"
+      local hs
+      for hs in "${halted_list[@]}"; do
+        [[ "${hs}" == "${status}" ]] && { halted="true"; break; }
+      done
+    fi
+
+    jq -cn --arg k "${key}" --arg s "${summary}" --arg t "${type}" --arg st "${status}" \
+      --argjson role "${role}" --argjson um "${unmapped}" --argjson h "${halted}" \
+      '{key:$k, summary:$s, type:$t, status:$st, role:$role, unmapped:$um, halted:$h}' >> "${entries_file}"
+  done
+
+  local issues_json
+  issues_json="$(jq -sc '.' "${entries_file}")"
+  rm -f "${entries_file}"
+
+  local declines_json
+  if [[ "${no_hierarchy}" == "true" ]]; then
+    declines_json='{"specification":null,"story":null}'
+  else
+    declines_json="$(jq -cn --arg s "${spec_type}" --arg t "${story_type}" \
+      '{specification: (if $s=="" then null else $s end), story: (if $t=="" then null else $t end)}')"
+  fi
+
+  jq -cn --argjson issues "${issues_json}" --argjson declines "${declines_json}" \
+    '{active:true, reuse_required:{issues:$issues, declines_to:$declines}}' | json_canonical
+}
+
+# _feat_render_reuse_prose <payload> — 029: the prose form of a reuse_required
+# (or reuse_issues_required) payload, pinned to the same content the JSON
+# shape carries. Every line is its own printf (never a multi-line jq -r),
+# which is what keeps Windows' CRLF-emitting jq build out of this path
+# (docs/10-windows-portability.md, T022).
+_feat_render_reuse_prose() {
+  local payload="$1" key
+  key="reuse_required"
+  jq -e 'has("reuse_required")' <<< "${payload}" > /dev/null 2>&1 || key="reuse_issues_required"
+  local q
+  q="$(jq -c ".${key}" <<< "${payload}")"
+
+  printf 'Feature: reuse decision required\n'
+  local n i
+  n="$(jq '.issues | length' <<< "${q}")"
+  for ((i = 0; i < n; i++)); do
+    printf 'Detected: %s (%s, %s) %s\n' \
+      "$(jq -r ".issues[${i}].key" <<< "${q}")" \
+      "$(jq -r ".issues[${i}].type // \"\"" <<< "${q}")" \
+      "$(jq -r ".issues[${i}].status // \"\"" <<< "${q}")" \
+      "$(jq -r ".issues[${i}].summary // \"\"" <<< "${q}")"
+  done
+
+  local spec_type story_type
+  spec_type="$(jq -r '.declines_to.specification // ""' <<< "${q}")"
+  story_type="$(jq -r '.declines_to.story // ""' <<< "${q}")"
+
+  if [[ -z "${spec_type}" && -z "${story_type}" ]]; then
+    if [[ "$(jq -r '.reason // ""' <<< "${q}")" == "designators required" ]]; then
+      printf 'Missing: which issues to reuse — this run cannot derive it without designators\n'
+    else
+      printf 'Missing: this project declares no hierarchy, so no placement can be proposed\n'
+    fi
+    printf 'Answers: re-invoke with --parent <key|title> and one --story <key> per issue to reuse\n'
+  else
+    local clause="" spec_keys="" story_keys=""
+    for ((i = 0; i < n; i++)); do
+      local role
+      role="$(jq -r ".issues[${i}].role" <<< "${q}")"
+      if [[ "${role}" == "specification" ]]; then
+        [[ -n "${spec_keys}" ]] && spec_keys+=", "
+        spec_keys+="$(jq -r ".issues[${i}].key" <<< "${q}")"
+      elif [[ "${role}" == "story" ]]; then
+        [[ -n "${story_keys}" ]] && story_keys+=", "
+        story_keys+="$(jq -r ".issues[${i}].key" <<< "${q}")"
+      fi
+    done
+    [[ -n "${spec_keys}" ]] && clause="${spec_keys} as the ${spec_type} of this specification"
+    if [[ -n "${story_keys}" ]]; then
+      [[ -n "${clause}" ]] && clause+=", and "
+      clause+="${story_keys} as a ${story_type} beneath it"
+    fi
+    printf 'Attach %s?\n' "${clause}"
+    printf 'Source: the detected issues'\'' content is what spec.md will be written from\n'
+    printf 'Answers: --reuse yes attaches them as proposed · --reuse no creates a new %s, plus one %s per drafted user story\n' \
+      "${spec_type:-Epic}" "${story_type:-Story}"
+  fi
+
+  for ((i = 0; i < n; i++)); do
+    if [[ "$(jq -r ".issues[${i}].unmapped" <<< "${q}")" == "true" ]]; then
+      printf 'Unmapped: %s is a %s, a type this project declares for no role — proposed as a Story; it needs no Epic, and --reuse yes --parent <key|title> gives it one\n' \
+        "$(jq -r ".issues[${i}].key" <<< "${q}")" "$(jq -r ".issues[${i}].type" <<< "${q}")"
+    fi
+  done
+  for ((i = 0; i < n; i++)); do
+    if [[ "$(jq -r ".issues[${i}].halted" <<< "${q}")" == "true" ]]; then
+      printf 'Halted: %s is in %s, halted — --reuse yes would be refused (REF-TERMINAL); answer --reuse no, reopen it, or name another\n' \
+        "$(jq -r ".issues[${i}].key" <<< "${q}")" "$(jq -r ".issues[${i}].status" <<< "${q}")"
+    fi
+  done
+  if jq -e '[.issues[] | select(.role=="story")] | length > 0' <<< "${q}" > /dev/null; then
+    printf 'Drafted: user stories drafted beyond these become new Stories beneath the same Epic — named issues are reused, never duplicated\n'
+  fi
+}
+
 # _feat_ref_message <code> <detail> — compose the message + remediation for
 # a moment-1 refusal class not already carrying one (designator.sh and
 # adoption_dedupe/multiproject return only a code; adoption_evaluate already
@@ -371,6 +605,9 @@ _feat_render_prose() {
   local payload="$1"
   if [[ "$(jq -r '.active' <<< "${payload}")" != "true" ]]; then
     printf 'Feature: inactive\n'
+  elif [[ "$(jq -r 'has("reuse_required") or has("reuse_issues_required")' <<< "${payload}")" == "true" ]]; then
+    _feat_render_reuse_prose "${payload}"
+    return
   elif [[ "$(jq -r 'has("confirmation_required")' <<< "${payload}")" == "true" ]]; then
     printf 'Feature: confirmation required\n'
     printf 'Ticket: %s (team: %s)\n' \
@@ -397,13 +634,15 @@ _feat_render_prose() {
 # returns the exit code.
 cmd_feature() {
   local parsed json="false" dry_run="false" args="" use_team="" exit_code="0" error=""
-  local parent_seen="false" parent="" stories=""
+  local parent_seen="false" parent="" stories="" reuse="" accept_defaults="false"
   parsed="$(cli_parse "$@")"
   while IFS='=' read -r key value; do
     case "${key}" in
       json) json="${value}" ;;
       dry_run) dry_run="${value}" ;;
       use_team) use_team="${value}" ;;
+      reuse) reuse="${value}" ;;
+      accept_defaults) accept_defaults="${value}" ;;
       args) args="${value}" ;;
       exit) exit_code="${value}" ;;
       error) error="${value}" ;;
@@ -467,12 +706,18 @@ cmd_feature() {
   fi
 
   # (4) Description is required once a team is in play (FR-013 precedes naming).
-  #     The optional leading positional is a mentioned issue key.
+  #     The optional leading positional is a mentioned issue key or a
+  #     browser URL reducing to one (029, contract mention-grammar.md §1-§3).
+  #     Naming derives from the leading positional's own detection alone
+  #     (§1 rule 3); any further detected key stays part of the description,
+  #     unchanged from before this feature.
   local -a words=()
   read -ra words <<< "${args}"
+  local mentions_json
+  mentions_json="$(_feat_detect_mentions "${words[@]}")"
   local ticket_key="" desc=""
-  if [[ ${#words[@]} -gt 0 && "${words[0]}" =~ ^[A-Z][A-Z0-9_]+-[0-9]+$ ]]; then
-    ticket_key="${words[0]}"
+  if [[ "$(jq 'length' <<< "${mentions_json}")" -gt 0 ]]; then
+    ticket_key="$(jq -r '.[0].key' <<< "${mentions_json}")"
     desc="${words[*]:1}"
   else
     desc="${words[*]}"
@@ -510,9 +755,16 @@ cmd_feature() {
   # (5) Ticket resolution BEFORE naming.
   local number action ticket_key_out
   if [[ -n "${ticket_key}" ]]; then
+    # 029: known from argv and the loaded configuration alone, before the
+    # read (contract §7) — mention present (guaranteed here), no designator
+    # (guaranteed: the designator branch above already returned), no answer,
+    # not unattended.
+    local about_to_ask="false"
+    [[ -z "${reuse}" && "${accept_defaults}" != "true" ]] && about_to_ask="true"
+
     # Mentioned key: validate (read). A fail-closed read never falls back.
     local validated
-    validated="$(ticket_validate "${ticket_key}")" || return $?
+    validated="$(ticket_validate "${ticket_key}" "${about_to_ask}")" || return $?
     local ticket_project ticket_team
     ticket_project="$(jq -r '.project // ""' <<< "${validated}")"
     ticket_team="$(jq -r --arg p "${ticket_project}" '([.teams[] | select(.project == $p) | .id] | first) // ""' <<< "${merged}")"
@@ -526,6 +778,38 @@ cmd_feature() {
           '{active:true, confirmation_required:{ticket:$tk, ticket_team:$tt, selected_team:$st}}' | json_canonical)" "${json}"
         return 0
       fi
+    fi
+
+    # (029, FR-025/R6) — the reuse question, immediately after the cross-team
+    # question and before naming. Zero writes either way, so --dry-run
+    # predicts it by definition (FR-020): the question never performs
+    # anything to begin with.
+    if [[ "${about_to_ask}" == "true" ]]; then
+      local q_payload rc=0
+      q_payload="$(_feat_compose_reuse_question "${mentions_json}" "${validated}" "${eff_project}" "${merged}")" || rc=$?
+      ((rc != 0)) && return "${rc}"
+      _feat_emit "${q_payload}" "${json}"
+      return 0
+    fi
+
+    # (029, FR-013/FR-014) — an unattended run is never asked; it proceeds
+    # exactly as "create new" would, and states that the question was
+    # suppressed and which answer was assumed.
+    local suppressed_warning=""
+    if [[ -z "${reuse}" && "${accept_defaults}" == "true" ]]; then
+      suppressed_warning="the reuse question was suppressed by --accept-defaults; assumed answer: create new"
+    fi
+
+    # (029, FR-029/FR-030) — "reuse" with no designator is the operator
+    # accepting the question's own proposal. Full auto-routing into the
+    # designator path from the derived roles is Phase 4 work (US2); until it
+    # lands, this returns the which-issues follow-up unconditionally rather
+    # than risk silently duplicating the mentioned ticket by falling through
+    # to the create-new path a "reuse" answer never meant.
+    if [[ "${reuse}" == "yes" ]]; then
+      _feat_emit "$(jq -cn --arg tk "${ticket_key}" \
+        '{active:true, reuse_issues_required:{issues:[{key:$tk}], declines_to:{specification:null,story:null}, reason:"designators required"}}' | json_canonical)" "${json}"
+      return 0
     fi
 
     number="$(naming_ticket_number "${ticket_key}")"
@@ -581,10 +865,19 @@ cmd_feature() {
   branch_name="$(naming_expand_pattern "${pattern}" "${number}" "${slug}")"
   short_name="$(naming_short_name "${prefix}" "${slug}")"
 
+  # 029, FR-014: an unattended run's suppressed question is stated here, not
+  # silently applied — the only warning this path can carry beyond the
+  # existing empty array.
+  local warnings_json='[]'
+  if [[ -n "${suppressed_warning:-}" ]]; then
+    warnings_json="$(jq -cn --arg w "${suppressed_warning}" '[$w]')"
+  fi
+
   _feat_emit "$(jq -cn --arg t "${eff_id}" --argjson tk "${ticket_key_out}" --arg num "${number}" \
     --arg act "${action}" --arg bn "${branch_name}" --arg sn "${short_name}" --argjson ou "${override_used}" \
+    --argjson w "${warnings_json}" \
     '{active:true, team:$t, ticket:{key:$tk, number:$num, action:$act},
-      branch_name:$bn, short_name:$sn, override_used:$ou, warnings:[]}' | json_canonical)" "${json}"
+      branch_name:$bn, short_name:$sn, override_used:$ou, warnings:$w}' | json_canonical)" "${json}"
   return 0
 }
 

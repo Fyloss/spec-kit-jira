@@ -48,6 +48,30 @@ Describe 'Ticket sink' {
         $r.Json | Should -Be ''
     }
 
+    # --- 029 T081/T082 — the conditional field set (contract §7) ------------
+
+    It 'validates -Wide: fields=project,summary,issuetype,status, and the shape widens additively (FR-003, FR-017)' {
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $r = Confirm-JiraTicket -Key 'IJT-42' -Wide $true
+        $r.ExitCode | Should -Be 0
+        $obj = $r.Json | ConvertFrom-Json
+        $obj.key | Should -Be 'IJT-42'
+        $obj.project | Should -Be 'IJT'
+        $obj.summary | Should -Not -BeNullOrEmpty
+        $obj.type | Should -Not -BeNullOrEmpty
+        $obj.status | Should -Not -BeNullOrEmpty
+        (Get-JiraMockCallLog -Mock $M) -join "`n" | Should -Match 'GET /rest/api/3/issue/IJT-42\?fields=project,summary,issuetype,status'
+    }
+
+    It 'validates without -Wide: fields=project — unchanged, byte for byte (SC-015)' {
+        Start-TestMock '{"projects":{"IJT":"team"}}'
+        $r = Confirm-JiraTicket -Key 'IJT-42'
+        $r.ExitCode | Should -Be 0
+        $obj = $r.Json | ConvertFrom-Json
+        @($obj.PSObject.Properties.Name | Sort-Object) | Should -Be @('key', 'project')
+        (Get-JiraMockCallLog -Mock $M) -join "`n" | Should -Not -Match 'summary'
+    }
+
     It 'New-JiraCreateFieldsBase returns exactly {project,issuetype,summary} (FR-025)' {
         $base = Get-JiraCreateFieldsBase -ProjectKey 'IJT' -Summary 'invoice export' -IssueTypeId '10201'
         $obj = $base | ConvertFrom-Json

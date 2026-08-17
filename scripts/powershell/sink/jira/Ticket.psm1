@@ -28,18 +28,24 @@ Import-Module (Join-Path $PSScriptRoot 'Identity.psm1') -Force
 function Confirm-JiraTicket {
     <#
     .SYNOPSIS
-      Read the mentioned key's project (fields=project). Mirror of
-      ticket_validate. Returns { ExitCode; Json } — Json is the canonical
-      {key, project} document, empty on a fail-closed read.
+      Read the mentioned key. Mirror of ticket_validate. Plain field set
+      (fields=project) by default; the wider set (029, contract
+      feature-question-contract.md §7) only when -Wide is set — the CALLER
+      already knows, from argv and the loaded configuration alone, whether
+      it is about to compose the reuse question (FR-017). Returns
+      { ExitCode; Json } — Json is {key, project} or, on the wide path,
+      additively {key, project, summary, type, status}; empty on a
+      fail-closed read.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] [string] $Key)
+    param([Parameter(Mandatory)] [string] $Key, [bool] $Wide = $false)
     $base = $env:SPEC_KIT_JIRA_BASE_URL
     if ([string]::IsNullOrEmpty($base)) {
         [Console]::Error.WriteLine('ticket: SPEC_KIT_JIRA_BASE_URL is not set')
         return [pscustomobject]@{ ExitCode = (Get-JiraExitCode 'fail_closed'); Json = '' }
     }
-    $r = Invoke-JiraRequest -Method GET -Url "$base/rest/api/3/issue/$Key`?fields=project"
+    $fields = if ($Wide) { 'project,summary,issuetype,status' } else { 'project' }
+    $r = Invoke-JiraRequest -Method GET -Url "$base/rest/api/3/issue/$Key`?fields=$fields"
     if ($r.ExitCode -ne 0) { return [pscustomobject]@{ ExitCode = [int] $r.ExitCode; Json = '' } }
 
     $resp = $r.Body | ConvertFrom-Json -Depth 100
@@ -49,7 +55,19 @@ function Confirm-JiraTicket {
         $resp.fields.project.PSObject.Properties['key']) {
         $project = [string] $resp.fields.project.key
     }
-    $doc = [ordered]@{ key = $Key; project = $project }
+    if (-not $Wide) {
+        $doc = [ordered]@{ key = $Key; project = $project }
+        return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue $doc) }
+    }
+    $summary = $null
+    if ($resp.fields.PSObject.Properties['summary']) { $summary = $resp.fields.summary }
+    $type = $null
+    if ($resp.fields.PSObject.Properties['issuetype'] -and $null -ne $resp.fields.issuetype -and
+        $resp.fields.issuetype.PSObject.Properties['name']) { $type = [string] $resp.fields.issuetype.name }
+    $status = $null
+    if ($resp.fields.PSObject.Properties['status'] -and $null -ne $resp.fields.status -and
+        $resp.fields.status.PSObject.Properties['name']) { $status = [string] $resp.fields.status.name }
+    $doc = [ordered]@{ key = $Key; project = $project; summary = $summary; type = $type; status = $status }
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue $doc) }
 }
 

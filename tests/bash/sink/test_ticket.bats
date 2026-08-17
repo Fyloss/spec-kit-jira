@@ -52,6 +52,61 @@ boot() {
   [ -z "$output" ]
 }
 
+# --- 029 T081/T083 — the conditional field set (contract §7) ----------------
+
+@test "ticket_validate, wide=true: fields=project,summary,issuetype,status, and the shape widens additively (FR-003, FR-017)" {
+  boot '{"projects":{"IJT":"team"}}'
+  run ticket_validate "IJT-42" true
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.key' <<< "$output")" = "IJT-42" ]
+  [ "$(jq -r '.project' <<< "$output")" = "IJT" ]
+  [ "$(jq -r '.summary' <<< "$output")" != "null" ]
+  [ "$(jq -r '.type' <<< "$output")" != "null" ]
+  [ "$(jq -r '.status' <<< "$output")" != "null" ]
+  mock_calls | grep -q 'GET /rest/api/3/issue/IJT-42?fields=project,summary,issuetype,status'
+}
+
+@test "ticket_validate, wide unspecified or false: fields=project — unchanged, byte for byte (SC-015)" {
+  boot '{"projects":{"IJT":"team"}}'
+  run ticket_validate "IJT-42"
+  [ "$status" -eq 0 ]
+  [ "$(jq -cS 'keys' <<< "$output")" = '["key","project"]' ]
+  mock_calls | grep -q 'GET /rest/api/3/issue/IJT-42?fields=project'
+  ! mock_calls | grep -q 'summary'
+}
+
+@test "T083 tripwire: an ANSWERED cmd_feature invocation still uses fields=project — no unconditional widening (FR-010)" {
+  boot '{"projects":{"IJT":"team"}}'
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/bash/commands/feature.sh"
+  mkdir -p "${JIRA_CONFIG_DIR:-/nonexistent}" 2> /dev/null || true
+  export JIRA_CONFIG_DIR="$(mktemp -d)/.specify/jira"
+  mkdir -p "${JIRA_CONFIG_DIR}"
+  {
+    printf 'projects:\n  - key: IJT\nrouting_default: IJT\nteams:\n  - id: ijt\n    project: IJT\n    folder_prefix: "ijt-"\n    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"\n'
+  } > "${JIRA_CONFIG_DIR}/config.yml"
+  printf 'team: ijt\n' > "${JIRA_CONFIG_DIR}/personal.yml"
+  run cmd_feature feature IJT-42 --reuse no --json "invoice export"
+  [ "$status" -eq 0 ]
+  mock_calls | grep -q 'GET /rest/api/3/issue/IJT-42?fields=project$'
+  ! mock_calls | grep -q 'summary'
+}
+
+@test "the reuse question DOES widen the mentioned-key request — the conditional half of the same guarantee" {
+  boot '{"projects":{"IJT":"team"}}'
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/bash/commands/feature.sh"
+  export JIRA_CONFIG_DIR="$(mktemp -d)/.specify/jira"
+  mkdir -p "${JIRA_CONFIG_DIR}"
+  {
+    printf 'projects:\n  - key: IJT\nrouting_default: IJT\nteams:\n  - id: ijt\n    project: IJT\n    folder_prefix: "ijt-"\n    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"\n'
+  } > "${JIRA_CONFIG_DIR}/config.yml"
+  printf 'team: ijt\n' > "${JIRA_CONFIG_DIR}/personal.yml"
+  run cmd_feature feature IJT-42 --json "invoice export"
+  [ "$status" -eq 0 ]
+  mock_calls | grep -q 'GET /rest/api/3/issue/IJT-42?fields=project,summary,issuetype,status$'
+}
+
 @test "jira_create_fields_base returns exactly {project,issuetype,summary} (FR-025)" {
   run jira_create_fields_base "IJT" "invoice export" "10201"
   [ "$status" -eq 0 ]

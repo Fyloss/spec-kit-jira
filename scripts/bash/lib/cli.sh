@@ -80,7 +80,7 @@ cli_field_answers_for() {
 # cli_parse <args...> — parse the command line; print key=value state lines.
 cli_parse() {
   local command="" dry_run=false force=false json=false on_drift=abort
-  local verbose=false help=false error="" use_team="" accept_defaults=false
+  local verbose=false help=false error="" use_team="" accept_defaults=false reuse=""
   local -a positional=() styles=() enable_hooks=() child_types=() issue_types=()
   local -a field_defaults=() field_values=()
   local -a task_mirrors=()
@@ -207,6 +207,22 @@ cli_parse() {
         else
           shift
           use_team="$1"
+        fi
+        ;;
+      --reuse)
+        # 029, contract feature-question-contract.md §1/§6: the answer to the
+        # reuse question. Absent means unanswered — no default may stand in
+        # for it, because a default would answer on the operator's behalf
+        # the one question this feature exists to ask.
+        if [[ $# -lt 2 ]]; then
+          error="--reuse requires a value (--reuse yes|no)"
+        else
+          shift
+          if [[ "$1" == "yes" || "$1" == "no" ]]; then
+            reuse="$1"
+          else
+            error="invalid --reuse value: $1 (expected yes|no)"
+          fi
         fi
         ;;
       --enable-hook)
@@ -337,6 +353,7 @@ cli_parse() {
   printf 'child_types=%s\n' "${child_types_joined}"
   printf 'issue_types=%s\n' "${issue_types_joined}"
   printf 'use_team=%s\n' "${use_team}"
+  printf 'reuse=%s\n' "${reuse}"
   printf 'enable_hooks=%s\n' "${enable_hooks_joined}"
   printf 'field_defaults=%s\n' "${field_defaults_joined}"
   printf 'field_values=%s\n' "${field_values_joined}"

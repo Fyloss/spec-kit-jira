@@ -21,6 +21,12 @@ testResults.xml
 # outright on any developer machine where the gate has been run.
 coverage/
 
+# Golden "before" captures a feature's own test plan records at repo root
+# (e.g. specs/029, T001-T003), gitignored for the same reason as coverage/:
+# they exist only on a machine that has run the capture, and a --dev install
+# would otherwise copy that machine-specific snapshot into the consumer tree.
+.baseline/
+
 # Architecture and vision documentation. It describes how the extension is BUILT
 # — the engine/sink boundary, the twin ports, the Windows probe loop, the
 # roadmap — none of which a consuming repository needs to run the bridge; README

@@ -617,12 +617,34 @@ else
   elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)$ ]]; then
     ikey="${BASH_REMATCH[1]}"
     if [[ "${method}" == "GET" ]]; then
-      if [[ "${query}" =~ (^|\&)fields=project(\&|$) ]]; then
+      # 029, contract feature-question-contract.md §7: the mentioned-key
+      # validation stays in THIS synthetic branch (never falls through to
+      # _shim_issue_get, whose unseeded fallback is a fixed fixture keyed on
+      # no particular issue) for BOTH the narrow and the wide field set, so
+      # the 404 fail-closed path is identical either way. A key seeded via
+      # the run's `.issues` config answers with its real summary/type/status;
+      # an unseeded key gets a deterministic synthesized placeholder — never
+      # the `issue-mentioned` fixture, which is a different key entirely.
+      if [[ "${query}" =~ (^|\&)fields=project(\&|$) || "${query}" =~ (^|\&)fields=project,summary,issuetype,status(\&|$) ]]; then
+        wide="false"
+        [[ "${query}" =~ (^|\&)fields=project,summary,issuetype,status(\&|$) ]] && wide="true"
         pkey="${ikey%%-*}"
         in_projects="$(jq -r --arg pk "${pkey}" '(.projects // {}) | has($pk)' "${MOCK_CONFIG_PATH}")"
         if [[ "${in_projects}" == "true" ]]; then
           RESP_STATUS=200
-          RESP_BODY="{\"key\":\"${ikey}\",\"fields\":{\"project\":{\"key\":\"${pkey}\"}}}"
+          if [[ "${wide}" == "true" ]]; then
+            RESP_BODY="$(jq -c --arg k "${ikey}" --arg pk "${pkey}" '
+              (.issues[$k].fields // {}) as $seeded
+              | {key: $k, fields: {
+                  project: {key: $pk},
+                  summary: ($seeded.summary // "Synthetic issue \($k)"),
+                  issuetype: ($seeded.issuetype // {name: "Task"}),
+                  status: ($seeded.status // {name: "To Do", statusCategory: {key: "new"}})
+                }}
+            ' "${MOCK_STATE_PATH}")"
+          else
+            RESP_BODY="{\"key\":\"${ikey}\",\"fields\":{\"project\":{\"key\":\"${pkey}\"}}}"
+          fi
         else
           RESP_STATUS=404
           RESP_BODY='{"errorMessages":["not found"],"errors":{}}'
