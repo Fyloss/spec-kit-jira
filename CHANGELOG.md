@@ -41,6 +41,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `given`, `when` and `then` are all non-empty, and discard an incomplete
   scenario's state before a new `Given` starts rather than merging into it.
 
+- The test harness gave a starting PowerShell mock exactly 10 seconds to bind
+  its socket and write its readiness file. Feature 009 measured that cold
+  start at 0.5–1.0s locally, but a contended CI runner is an order of
+  magnitude slower, so the ceiling was close enough to fire: when it did, the
+  harness reddened whichever unrelated test had called `mock_start` next —
+  on one run `test_config_child_type.bats`'s "the PowerShell port resolves the
+  child type identically (NFR-1)", a message that reads like a port
+  divergence although the assertion never ran. The budget only ever bounded a
+  *live* child (a mock that exits is detected separately and immediately), so
+  it is now 60 seconds in both ports, costing a genuine failure nothing. Both
+  ports read the value from a named constant and interpolate it into the
+  failure message, and a new guard fails if the two drift apart or if the
+  reported budget stops matching the enforced one.
+
 ## [0.18.0] - 2026-08-15
 
 ### Added

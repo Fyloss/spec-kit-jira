@@ -28,10 +28,14 @@ function Start-JiraMock {
     $pwshPath = (Get-Process -Id $PID).Path
     $proc = Start-Process -FilePath $pwshPath -ArgumentList $argList -PassThru -NoNewWindow
 
-    $deadline = (Get-Date).AddSeconds(10)
+    # Twin of $_MOCK_READY_TIMEOUT_S in lib.sh — see the note there on why a
+    # generous ceiling costs a genuine failure nothing, and keep the two in
+    # step (NFR-1); a bats guard fails if they drift apart.
+    $mockReadyTimeoutSeconds = 60
+    $deadline = (Get-Date).AddSeconds($mockReadyTimeoutSeconds)
     while (-not (Test-Path -LiteralPath $ready) -or (Get-Item -LiteralPath $ready).Length -eq 0) {
         if ($proc.HasExited) { throw 'mock process exited before ready' }
-        if ((Get-Date) -gt $deadline) { throw 'mock failed to become ready' }
+        if ((Get-Date) -gt $deadline) { throw "mock failed to become ready within ${mockReadyTimeoutSeconds}s" }
         Start-Sleep -Milliseconds 50
     }
     $port = (Get-Content -Raw -LiteralPath $ready).Trim()
