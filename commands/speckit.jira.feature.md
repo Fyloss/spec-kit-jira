@@ -103,6 +103,30 @@ restore the bridge, reinstall the extension with
    3. Report `override_used` and the ticket action (`attached` / `created` /
       `would-attach` / `would-create`) in the feature-creation output.
 
+> **A mentioned ticket names the feature; it does not bind it.** `attached`
+> means this command validated the key and derived the branch and folder from
+> it — nothing more. No marker is written into `spec.md` (it does not even
+> exist yet at `before_specify`), so the following `reconcile` sees an unbound
+> specification and creates a **new** parent plus one issue per drafted user
+> story, *alongside* the mentioned ticket rather than in it. That is by design:
+> the bridge never adopts a ticket it did not create unless the operator names
+> it as a designator.
+>
+> **State it before step 4.1**, while nothing has been created yet — the
+> answer changes what you run next:
+>
+> - the operator is happy with new issues alongside the mentioned ticket ⇒
+>   proceed with step 4 unchanged;
+> - the operator wanted that existing issue reused ⇒ **do not create the
+>   feature**. Re-invoke this command with `--parent`/`--story` instead, and
+>   follow with `/speckit.jira.seed`.
+>
+> Those flags are honoured at **this** invocation only. Once the feature has
+> been created without them, `/speckit.jira.seed` refuses `REF-EXISTS`
+> (retro-seeding is out of scope) and the only paths left are a brand-new
+> specification or a link made by hand in Jira. Raising it one step too late
+> costs the operator the whole feature folder.
+
 ## Behaviour rules (normative)
 
 - **Ticket resolution precedes naming** (FR-013): a mentioned key is validated

@@ -38,6 +38,15 @@ Non-blocking by construction: no team selected means `{active:false}`; Jira
 unreachable or a create refused means `{active:false}` plus one warning. The
 host `specify` flow then proceeds exactly as it does today.
 
+The mentioned key is a **naming input, never a binding**. `ticket_validate` is
+read-only and `spec.md` does not exist yet at `before_specify`, so nothing links
+the two: the following `reconcile` finds an unbound specification and creates a
+new parent plus one issue per user story, alongside the mentioned ticket. Seeding
+a specification from an issue that already exists is the designator path below —
+that is the whole reason it exists, and it is chosen **at invocation time**: a
+feature already created from a mentioned key cannot be seeded after the fact
+(`REF-EXISTS`).
+
 ## The naming engine — four pure string operations
 
 ```mermaid
