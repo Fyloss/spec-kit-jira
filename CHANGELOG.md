@@ -7,31 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-18
+
+### ⚠ BREAKING CHANGES
+
+- **A mentioned ticket no longer names the feature on its own.** Naming a
+  ticket with no `--parent`/`--story` designator now returns a question and
+  **deliberately withholds `branch_name` and `short_name`**, so a caller
+  cannot create the branch or the spec folder until the question is answered.
+  That omission is the point — it is what makes the question impossible to
+  skip — but it changes the result shape on a path that previously always
+  carried both names.
+
+  Nothing changes for a run that mentions no ticket, or that already supplies
+  designators. To migrate an automated caller that relied on the old
+  behaviour, pick one:
+
+  - add `--reuse no` — output is byte-identical to the current release from
+    that invocation onward;
+  - add `--accept-defaults` if the caller is unattended — the question is
+    suppressed, `no` is assumed, and the result says so;
+  - or handle the new `reuse_required` / `reuse_issues_required` key, answer
+    with `--reuse yes|no`, and re-invoke.
+
+  Agent-driven callers that follow `commands/speckit.jira.feature.md` need no
+  change: the ceremony there was updated with the question and its answers.
+
+### Added
+
+- **Ask once whether an existing ticket should be reused**
+  (`specs/029-confirm-ticket-reuse/`). A mentioned ticket with no designator
+  now returns a closed question instead of silently naming the feature. The
+  question is a proposal rather than an abstract choice: it names every
+  detected issue by key, summary, type and status, and states the role each
+  would be attached in using the project's **own configured type names**,
+  never an internal label or an Atlassian default. Two answers, no third and
+  no free-form one. It writes nothing, creates nothing, issues no Jira
+  request beyond the resolution the run already performed, and exits `0` —
+  a question is not a failure, and the host command it runs inside completes
+  normally.
+- **`--reuse yes|no`** conveys the answer on a second invocation. `--reuse
+  yes` accepts the proposal and routes straight into 027's seeding flow,
+  deriving the `--parent`/`--story` designators from the roles the question
+  already computed — no extra round-trip, and byte-identical to typing those
+  designators by hand. `--reuse no` proceeds exactly as the previous release
+  did. Absence means unanswered: no default is substituted for the one
+  question this feature exists to ask, and a terminal is never probed, since
+  the bridge runs inside lifecycle hooks and never has one.
+- **A type the configured hierarchy maps to no role is proposed, not
+  refused.** A `Bug` where the project declares Epic and Story is offered in
+  the story role and needs no parent; only an issue carrying the *other*
+  role's declared type refuses, at the question, before any answer. Every
+  refusal reachable on this path also states the escape that always exists —
+  decline, and the extension creates the specification-role issue plus one
+  story-role issue per drafted user story.
+- **A pasted browser URL now counts as naming a ticket**, not only a bare
+  key, and every further key-shaped token in the same request is detected
+  too, in the order it was typed. The leading positional alone still computes
+  the branch and folder names, so reordering the words cannot rename a
+  feature.
+- **Guidance instead of silence when no team configuration applies.** Naming
+  a ticket in a repository whose configuration declares no applicable team
+  now names the file to fix (`.specify/jira/config.yml` or
+  `.specify/jira/personal.yml`) and the command that fixes it. Neither report
+  issues a Jira request nor fails the host command; a run naming nothing
+  keeps the previous release's exact output.
+
 ### Fixed
 
-- `speckit.jira.feature` named a feature from a mentioned Jira ticket and
-  proceeded silently — the ticket was never bound, and the following
-  reconcile created a duplicate parent alongside it. A mentioned ticket with
-  no designator now returns a closed reuse question instead: it names every
-  detected issue by key, summary, type and status, states the role it would
-  be attached in using the project's own configured type names, and offers
-  exactly two answers. `--reuse yes` reuses them — deriving the same
-  `--parent`/`--story` designators 027's seeding flow already accepts, from
-  the roles the question already computed, with no further round-trip when a
-  role is derivable — and `--reuse no` creates new issues exactly as before.
-  A type the configured hierarchy maps to no role (a Bug, say) is proposed in
-  the story role rather than refused, and needs no parent. A pasted browser
-  URL is now recognised as a mention, not only a bare key, and every further
-  key-shaped token in the request is detected too. A repository with no
-  applicable team configuration now says so, naming the file to fix and the
-  command that fixes it, instead of returning silently inactive. The
-  non-blocking fallback message no longer claims a ticket "will attach it
-  later" when nothing was ever bound; it names the real cause (credentials
-  rejected, Jira unreachable, an error status) and states that the next
-  reconcile creates a new issue instead. An unattended caller
-  (`--accept-defaults`) is never asked and states that the question was
-  suppressed. Byte-identical to the current release on every path that names
-  nothing.
+- **A mentioned ticket was named but never bound, so the next reconcile
+  created a duplicate parent beside it.** This is the incident the release is
+  built around: `speckit.jira.feature` wrote no marker for the ticket it had
+  just used to name the feature, leaving nothing for reconcile to recognise.
+  Answering the new question with `--reuse yes` binds the ticket instead, and
+  the reconcile that follows reuses it and creates zero parents.
+- **The non-blocking fallback promised the opposite of what happens.** It
+  claimed reconciliation "will attach it later" when nothing had been bound —
+  reassurance about exactly the defect above. It now names the real cause
+  (credentials rejected, the issue not found or not visible, Jira
+  unreachable, or the error status returned) and states the real outcome:
+  the next reconcile creates a new issue for this specification.
 
 ## [0.18.1] - 2026-08-17
 
@@ -1073,7 +1128,8 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.16.0...v0.17.0
