@@ -123,6 +123,7 @@ function Invoke-JiraCliParse {
     $help = 'false'
     $parseError = ''
     $useTeam = ''
+    $reuse = ''
     $acceptDefaults = 'false'
     $positional = [System.Collections.Generic.List[string]]::new()
     $styles = [System.Collections.Generic.List[string]]::new()
@@ -262,6 +263,21 @@ function Invoke-JiraCliParse {
                 }
                 break
             }
+            '^--reuse$' {
+                # 029, contract feature-question-contract.md §1/§6: the
+                # answer to the reuse question. Absent means unanswered — no
+                # default may stand in for it.
+                if ($idx + 1 -ge $Arguments.Count) {
+                    $parseError = '--reuse requires a value (--reuse yes|no)'
+                }
+                else {
+                    $idx++
+                    $v = $Arguments[$idx]
+                    if ($v -eq 'yes' -or $v -eq 'no') { $reuse = $v }
+                    else { $parseError = "invalid --reuse value: $v (expected yes|no)" }
+                }
+                break
+            }
             '^--enable-hook$' {
                 # The operator's explicit release of a held lifecycle event (003
                 # FR-007, FR-029). Repeatable. It exists because `specify
@@ -349,6 +365,7 @@ function Invoke-JiraCliParse {
         $lines.Add("child_types=$($childTypes -join ' ')")
         $lines.Add("issue_types=$($issueTypes -join ' ')")
         $lines.Add("use_team=$useTeam")
+        $lines.Add("reuse=$reuse")
         $lines.Add("enable_hooks=$($enableHooks -join ' ')")
         # Joined with ASCII Unit Separator (\x1f, not a space — mirror of
         # cli.sh's field_defaults_joined/field_values_joined): a VALUE may

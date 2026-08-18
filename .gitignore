@@ -9,6 +9,11 @@
 coverage.xml
 testResults.xml
 
+# Golden "before" captures recorded from the tree at main to prove a change moved
+# no byte. Regenerated deterministically by the recording task, never committed:
+# a checked-in baseline silently becomes the thing under test.
+/.baseline/
+
 # spec-kit-jira: gitignored personal config, secrets, resolved bindings
 .specify/jira/config.local.yml
 .specify/jira/personal.yml

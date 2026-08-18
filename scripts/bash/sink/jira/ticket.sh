@@ -32,20 +32,36 @@ source "${_ticket_dir}/privacy_guard.sh"
 # shellcheck source=/dev/null
 source "${_ticket_dir}/identity.sh"
 
-# ticket_validate <issue-key> — read the mentioned key's project (fields=project).
-# Prints {key, project} on stdout; a fail-closed read propagates its exit code.
+# ticket_validate <issue-key> [wide] — read the mentioned key. Plain field set
+# (fields=project) by default; the wider set (029, contract
+# feature-question-contract.md §7: fields=project,summary,issuetype,status)
+# only when <wide> is "true" — the CALLER already knows, from argv and the
+# loaded configuration alone, whether it is about to compose the reuse
+# question (FR-017). Exactly one request either way. Prints {key, project} or,
+# on the wide path, additively {key, project, summary, type, status} — project
+# keeps its position and meaning, so the cross-team decision that reads it is
+# untouched. A fail-closed read propagates its exit code.
 ticket_validate() {
-  local key="$1"
+  local key="$1" wide="${2:-false}"
   local base="${SPEC_KIT_JIRA_BASE_URL:-}"
   if [[ -z "${base}" ]]; then
     printf 'ticket: SPEC_KIT_JIRA_BASE_URL is not set\n' >&2
     return "$(cli_exit_code fail_closed)"
   fi
   local api="${base}/rest/api/3"
+  local fields="project"
+  [[ "${wide}" == "true" ]] && fields="project,summary,issuetype,status"
   local resp
-  resp="$(jira_request GET "${api}/issue/${key}?fields=project")" || return $?
-  jq -cn --arg k "${key}" --argjson r "${resp}" \
-    '{key: $k, project: ($r.fields.project.key // null)}' | json_canonical
+  resp="$(jira_request GET "${api}/issue/${key}?fields=${fields}")" || return $?
+  if [[ "${wide}" == "true" ]]; then
+    jq -cn --arg k "${key}" --argjson r "${resp}" \
+      '{key: $k, project: ($r.fields.project.key // null),
+        summary: ($r.fields.summary // null), type: ($r.fields.issuetype.name // null),
+        status: ($r.fields.status.name // null)}' | json_canonical
+  else
+    jq -cn --arg k "${key}" --argjson r "${resp}" \
+      '{key: $k, project: ($r.fields.project.key // null)}' | json_canonical
+  fi
 }
 
 # jira_create_fields_base <project> <summary> <issue-type-id>

@@ -1,0 +1,13 @@
+projects:
+  - key: IJT
+    hierarchy:
+      specification: Epic
+      story: Story
+    halted_statuses:
+      - Done
+routing_default: IJT
+teams:
+  - id: ijt
+    project: IJT
+    folder_prefix: "ijt-"
+    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"

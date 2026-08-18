@@ -36,12 +36,17 @@ parity() {
   [ "$status" -eq 0 ]
 }
 
-@test "attach: mentioned IJT-42 => attached, ijt-42/invoice-export (T050)" {
+@test "attach: mentioned IJT-42 with no --reuse answer now returns the reuse question, not a silent attach (029 FR-001, T050)" {
+  # us3-feature-attach.json (mention IJT-42, no designator, no --reuse) is the
+  # reported-incident scenario itself: this feature's whole point is that it
+  # no longer names the feature silently. The scenario file stays unmodified
+  # (mention-grammar.md §4); this assertion moves with the behaviour it now
+  # legitimately proves.
   bash "${HARNESS}" "${CONF}/scenarios/us3-feature-attach.json" bash "${TMP}/out-bash" > /dev/null
   [ "$(cat "${TMP}/out-bash/exit")" = "0" ]
-  [ "$(jq -r '.ticket.action' "${TMP}/out-bash/stdout")" = "attached" ]
-  [ "$(jq -r '.branch_name' "${TMP}/out-bash/stdout")" = "ijt-42/invoice-export" ]
-  [ "$(jq -r '.short_name' "${TMP}/out-bash/stdout")" = "ijt-invoice-export" ]
+  [ "$(jq -r 'has("reuse_required")' "${TMP}/out-bash/stdout")" = "true" ]
+  [ "$(jq -r 'has("branch_name")' "${TMP}/out-bash/stdout")" = "false" ]
+  [ "$(jq -r 'has("short_name")' "${TMP}/out-bash/stdout")" = "false" ]
 }
 
 @test "attach is byte-identical across ports (FR-020)" {

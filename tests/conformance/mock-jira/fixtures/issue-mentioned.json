@@ -18,6 +18,8 @@
     "priority": { "id": "2", "name": "High" },
     "labels": [ "onboarding", "ux" ],
     "status": { "name": "In Progress", "statusCategory": { "key": "indeterminate" } },
+    "project": { "key": "MENT" },
+    "issuetype": { "name": "Story" },
     "issuelinks": [
       {
         "type": { "name": "Blocks", "inward": "is blocked by", "outward": "blocks" },

@@ -22,21 +22,40 @@ flowchart TD
     Desc -->|"no"| Fail2(["a description is required once a team is in play"])
     Desc -->|"yes"| Ticket
 
-    Ticket{"A mentioned issue key<br/>in the leading positional?"}
-    Ticket -->|"yes"| Validate["ticket_validate — READ-ONLY GET /issue/KEY"]
+    Ticket{"A mentioned issue key<br/>in the leading positional?<br/>(bare key or a browser URL)"}
+    Ticket -->|"yes, no designator, no answer"| Validate["ticket_validate — READ-ONLY GET /issue/KEY<br/>widened to summary/type/status (029)"]
     Ticket -->|"no"| Create["ticket_create — guarded POST /issue<br/>in the team's project, with the resolved story-type id"]
 
-    Validate -->|"fail-closed read"| Warn(["active: false + one warning<br/>a mentioned key never silently falls back"])
-    Create -->|"refused or unreachable"| Warn
+    Validate --> Ask{"reuse question (029)<br/>one line per detected issue,<br/>role derived from the hierarchy"}
+    Ask -->|"--reuse no"| Name
+    Ask -->|"--reuse yes"| Designators["routes into the designator path below,<br/>--parent/--story derived from the computed roles"]
+    Ask -.->|"unattended (--accept-defaults)"| Name
 
-    Validate --> Name
+    Validate -->|"fail-closed read"| Warn(["active: false + one warning<br/>a mentioned key never silently falls back"])
+    Create -->|"refused or unreachable"| Warn2(["active: false + one warning naming the cause —<br/>never claims a ticket will be attached later"])
+
     Create --> Name["Naming — pure engine, zero tracker vocabulary"]
     Name --> Out(["branch name + flat folder short-name"])
 ```
 
 Non-blocking by construction: no team selected means `{active:false}`; Jira
-unreachable or a create refused means `{active:false}` plus one warning. The
-host `specify` flow then proceeds exactly as it does today.
+unreachable or a create refused means `{active:false}` plus one warning naming
+the cause. The host `specify` flow then proceeds exactly as it does today. A
+ticket named in a repository with no applicable team configuration is told so
+— the file to fix and the command that fixes it — rather than met with
+silence (029, FR-026).
+
+**The mentioned key is a naming input, and the operator is asked whether it
+is also a binding (029).** `ticket_validate` is read-only, and answering the
+reuse question with "create new" (or letting it fall through unattended)
+leaves `spec.md` unlinked at `before_specify`: the following `reconcile` finds
+an unbound specification and creates a new parent plus one issue per user
+story, alongside the mentioned ticket — exactly as today, and exactly what
+answering "reuse" avoids. Seeding a specification from an issue that already
+exists is the designator path below, reached either by answering the
+question or by naming `--parent`/`--story` directly, and it is chosen **at
+invocation time**: a feature already created without either cannot be seeded
+after the fact (`REF-EXISTS`).
 
 ## The naming engine — four pure string operations
 
@@ -102,7 +121,12 @@ so it can never quietly become the norm.
 case above: instead of naming (or leaving unnamed) a single ticket, the
 operator can name a whole set of **existing** Jira issues that already carry
 the human intent for this feature, and seed `spec.md` from their content
-rather than draft it from scratch.
+rather than draft it from scratch. **Two ways in (029):** type the flags from
+the start, or paste bare keys and answer the reuse question with `yes` — the
+bridge derives the same flags from the roles it already computed. A type the
+declared hierarchy maps to no role is proposed in the story role rather than
+refused, and needs no parent; a type that collides with the *other* role
+refuses instead, naming both types, before either answer is given.
 
 ```mermaid
 flowchart TD
