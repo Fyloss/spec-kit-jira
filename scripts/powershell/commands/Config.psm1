@@ -133,6 +133,7 @@ function Invoke-JiraConfigDegraded {
       when JIRA_PAT_COMMAND was declared and failed — appended to the detail
       and already printed to stderr by the caller.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'CredReason', Justification = 'Holds a located, human-readable failure reason (C6.4-C6.6), never a token or secret; the name matches the rule''s naming heuristic, not its intent.')]
     [CmdletBinding()]
     param(
         [bool] $Json = $false,

@@ -108,19 +108,31 @@ Describe 'Credentials' {
     Context 'Tokenization and secrecy (C2.1-C2.5)' {
         It 'C2.3: interior whitespace preserved, surrounding whitespace (incl. CR) trimmed' {
             New-Item -ItemType Directory -Path $script:BinDir -Force | Out-Null
-            $prog = Join-Path $script:BinDir 'spaced'
-            Set-Content -LiteralPath $prog -Value "#!/usr/bin/env bash`nprintf '  a b  \r\n'`n" -NoNewline
-            & chmod +x $prog
-            $env:JIRA_PAT_COMMAND = $prog
+            if ($IsWindows) {
+                $ps1 = Join-Path $script:BinDir 'spaced.ps1'
+                Set-Content -LiteralPath $ps1 -Value '[Console]::Out.Write("  a b  " + [char]13 + [char]10)'
+                $env:JIRA_PAT_COMMAND = "powershell -NoProfile -File $ps1"
+            } else {
+                $prog = Join-Path $script:BinDir 'spaced'
+                Set-Content -LiteralPath $prog -Value "#!/usr/bin/env bash`nprintf '  a b  \r\n'`n" -NoNewline
+                & chmod +x $prog
+                $env:JIRA_PAT_COMMAND = $prog
+            }
             Resolve-JiraToken | Should -Be 'a b'
         }
 
         It "C2.4: the command's stderr never contributes to the token's value" {
             New-Item -ItemType Directory -Path $script:BinDir -Force | Out-Null
-            $prog = Join-Path $script:BinDir 'noisy'
-            Set-Content -LiteralPath $prog -Value "#!/usr/bin/env bash`necho leaked-on-stderr >&2`nprintf 'real-token'`n" -NoNewline
-            & chmod +x $prog
-            $env:JIRA_PAT_COMMAND = $prog
+            if ($IsWindows) {
+                $ps1 = Join-Path $script:BinDir 'noisy.ps1'
+                Set-Content -LiteralPath $ps1 -Value "[Console]::Error.WriteLine('leaked-on-stderr'); [Console]::Out.Write('real-token')"
+                $env:JIRA_PAT_COMMAND = "powershell -NoProfile -File $ps1"
+            } else {
+                $prog = Join-Path $script:BinDir 'noisy'
+                Set-Content -LiteralPath $prog -Value "#!/usr/bin/env bash`necho leaked-on-stderr >&2`nprintf 'real-token'`n" -NoNewline
+                & chmod +x $prog
+                $env:JIRA_PAT_COMMAND = $prog
+            }
             Resolve-JiraToken | Should -Be 'real-token'
         }
 
@@ -184,10 +196,16 @@ Describe 'Credentials' {
 
         It "C4.4: a failure report never echoes the command's own stdout" {
             New-Item -ItemType Directory -Path $script:BinDir -Force | Out-Null
-            $prog = Join-Path $script:BinDir 'partial'
-            Set-Content -LiteralPath $prog -Value "#!/usr/bin/env bash`nprintf 'PARTIAL-SECRET-ON-STDOUT'`nexit 1`n" -NoNewline
-            & chmod +x $prog
-            $env:JIRA_PAT_COMMAND = $prog
+            if ($IsWindows) {
+                $ps1 = Join-Path $script:BinDir 'partial.ps1'
+                Set-Content -LiteralPath $ps1 -Value "[Console]::Out.Write('PARTIAL-SECRET-ON-STDOUT'); exit 1"
+                $env:JIRA_PAT_COMMAND = "powershell -NoProfile -File $ps1"
+            } else {
+                $prog = Join-Path $script:BinDir 'partial'
+                Set-Content -LiteralPath $prog -Value "#!/usr/bin/env bash`nprintf 'PARTIAL-SECRET-ON-STDOUT'`nexit 1`n" -NoNewline
+                & chmod +x $prog
+                $env:JIRA_PAT_COMMAND = $prog
+            }
             Resolve-JiraToken | Out-Null
             Get-JiraCredentialLastError | Should -Not -Match 'PARTIAL-SECRET-ON-STDOUT'
         }

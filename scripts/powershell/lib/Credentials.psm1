@@ -54,6 +54,7 @@ function Get-JiraCredentialFromCommand {
       $script:CredLastError to the located reason (never echoing the command's
       own stdout, C4.4) and returns $null.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '', Justification = 'Kill() below races the process''s own exit after the WaitForExit timeout; an exception here means it already exited, which is the outcome being sought, not a fault to report.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $CommandLine)
 
