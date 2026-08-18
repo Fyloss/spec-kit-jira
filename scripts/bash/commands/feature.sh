@@ -314,8 +314,9 @@ _feat_render_reuse_prose() {
 
   for ((i = 0; i < n; i++)); do
     if [[ "$(jq -r ".issues[${i}].unmapped" <<< "${q}")" == "true" ]]; then
-      printf 'Unmapped: %s is a %s, a type this project declares for no role — proposed as a Story; it needs no Epic, and --reuse yes --parent <key|title> gives it one\n' \
-        "$(jq -r ".issues[${i}].key" <<< "${q}")" "$(jq -r ".issues[${i}].type" <<< "${q}")"
+      printf 'Unmapped: %s is a %s, a type this project declares for no role — proposed as a %s; it needs no %s, and --reuse yes --parent <key|title> gives it one\n' \
+        "$(jq -r ".issues[${i}].key" <<< "${q}")" "$(jq -r ".issues[${i}].type" <<< "${q}")" \
+        "${story_type:-Story}" "${spec_type:-Epic}"
     fi
   done
   for ((i = 0; i < n; i++)); do
@@ -325,7 +326,8 @@ _feat_render_reuse_prose() {
     fi
   done
   if jq -e '[.issues[] | select(.role=="story")] | length > 0' <<< "${q}" > /dev/null; then
-    printf 'Drafted: user stories drafted beyond these become new Stories beneath the same Epic — named issues are reused, never duplicated\n'
+    printf 'Drafted: user stories drafted beyond these become new %s issues beneath the same %s — named issues are reused, never duplicated\n' \
+      "${story_type:-Story}" "${spec_type:-Epic}"
   fi
 }
 

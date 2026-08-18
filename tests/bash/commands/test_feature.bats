@@ -280,6 +280,18 @@ boot() {
   ! mock_calls | grep -q 'PUT'
 }
 
+@test "T136: --dry-run with a mentioned key and no answer predicts the question, naming the issue, zero writes (FR-020)" {
+  select_team ijt
+  write_hierarchy_config
+  boot "{\"projects\":{\"IJT\":\"team\"},\"issues\":{\"IJT-40\":{\"summary\":\"Rework the export pipeline\",\"issuetype\":{\"name\":\"Epic\"},\"status\":{\"name\":\"In Progress\"},\"project\":{\"key\":\"IJT\"}}}}"
+  run cmd_feature feature IJT-40 --dry-run --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("reuse_required")' <<< "$output")" = "true" ]
+  [ "$(jq -r '.reuse_required.issues[0].key' <<< "$output")" = "IJT-40" ]
+  [ "$(jq -r 'has("branch_name")' <<< "$output")" != "true" ]
+  ! mock_calls | grep -qE 'POST|PUT'
+}
+
 @test "--dry-run predicts would-create without a POST" {
   select_team ijt
   boot '{"projects":{"IJT":"team"},"createdKey":"IJT-123"}'
@@ -846,4 +858,28 @@ write_hierarchy_config() {
   [[ "${lines[1]}" == "Detected: IJT-40 (Epic, In Progress) Rework the export pipeline" ]]
   [[ "$output" == *"Attach"*"?"* ]]
   [[ "$output" == *"Answers: --reuse yes"* ]]
+}
+
+@test "T134: the Unmapped/Drafted prose lines name the project's own configured types, not the Atlassian defaults (Constitution VII)" {
+  select_team ijt
+  {
+    printf 'projects:\n'
+    printf '  - key: IJT\n'
+    printf '    hierarchy:\n'
+    printf '      specification: Initiative\n'
+    printf '      story: Task\n'
+    printf 'routing_default: IJT\n'
+    printf 'teams:\n'
+    printf '  - id: ijt\n'
+    printf '    project: IJT\n'
+    printf '    folder_prefix: "ijt-"\n'
+    printf '    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"\n'
+  } > "${JIRA_CONFIG_DIR}/config.yml"
+  boot "{\"projects\":{\"IJT\":\"team\"},\"issues\":{\"IJT-40\":{\"summary\":\"Rework the export pipeline\",\"issuetype\":{\"name\":\"Task\"},\"status\":{\"name\":\"To Do\"}},\"IJT-99\":{\"summary\":\"Legacy importer\",\"issuetype\":{\"name\":\"Bug\"},\"status\":{\"name\":\"To Do\"}}}}"
+  run cmd_feature feature IJT-40 IJT-99 "invoice export"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Unmapped: IJT-99 is a Bug, a type this project declares for no role — proposed as a Task; it needs no Initiative, and --reuse yes --parent <key|title> gives it one"* ]]
+  [[ "$output" == *"Drafted: user stories drafted beyond these become new Task issues beneath the same Initiative — named issues are reused, never duplicated"* ]]
+  [[ "$output" != *"Epic"* ]]
+  [[ "$output" != *"a Story"* ]]
 }

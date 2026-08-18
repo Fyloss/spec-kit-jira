@@ -409,3 +409,17 @@ measured proof that nothing else moved.
 
 **Never skip Phase 9.** Every item there is a gate that has been missed before on
 this repository, by this exact command, for the same structural reason.
+
+---
+
+## Phase 11: Convergence
+
+**Purpose**: gaps found by assessing the current code against `spec.md`, `plan.md`, and
+`tasks.md`. Three of the four trace to a task already marked `[X]` whose artifact is not
+in the tree — a per-port unit test was written where the requirement asked for a
+cross-port conformance scenario, or the test was never written at all.
+
+- [X] T134 CRITICAL — replace the hard-coded `Story` and `Epic` literals in the `Unmapped:` and `Drafted:` prose lines with the project's declared specification/story type names, already in hand as `declines_to`, in both ports (`scripts/bash/commands/feature.sh:317,328`, `scripts/powershell/commands/Feature.psm1:287,296`). The adjacent `Answers:` line at `feature.sh:311` already interpolates them, so this is an inconsistency rather than a design choice; a project declaring Initiative/Task is told about Epics and Stories it does not have. Write the failing non-default-hierarchy test first, per Constitution VII (contradicts)
+- [X] T135 Add the conformance scenarios T042 recorded as delivered but which are absent from `tests/conformance/scenarios/`: both configuration-report variants — a mentioned ticket with no usable `config.yml`, and a mentioned ticket with a catalogue but no selection — plus their no-mention counterparts. Every existing `us29-*.json` uses a fixture carrying both a populated `teams:` catalogue and a selection, so no scenario reaches the four early pass-through exits these reports changed per FR-026, FR-027, FR-028 (missing)
+- [X] T136 Add the bats and Pester tests T023/T095 recorded as delivered: `--dry-run` with a mentioned key and no answer returns the question, naming the issue it would ask about, with zero writes. The behaviour is correct today but unguarded — the existing `--dry-run predicts would-attach` test supplies `--reuse no`, which is the answered path, not the prediction FR-020 requires (missing)
+- [X] T137 Complete T120's scenario set: add the story-only proposal — story-role issues and no specification-role issue — asserting the question carries the three parent routes rather than posing a second question, and that the FR-040 arithmetic line states what gets created beyond the named issues. `us29-feature-reuse-question-mixed-roles` covers only the mixed-role and unmapped-`Bug` shapes per FR-038, FR-040 (partial)

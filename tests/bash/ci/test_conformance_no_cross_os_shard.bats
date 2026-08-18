@@ -171,8 +171,21 @@ setup() {
   # us29-feature-reuse-question-mixed-roles — three detected issues in one
   # question, mixed roles (specification, story, unmapped story), one
   # bulkfetch (203 -> 204).
+  # 029 (Phase 11, Convergence, T135) adds the two configuration-report
+  # variants T042 recorded as delivered but which no scenario exercised —
+  # every existing us29-*.json used a fixture carrying both a populated
+  # teams: catalogue and a selection: us29-feature-us6-no-config-mention and
+  # its no-mention counterpart (FR-026/FR-027/FR-028, missing config.yml),
+  # plus us29-feature-us6-noselect-mention (a catalogue with no selection —
+  # its no-mention counterpart was already covered, pre-029, by
+  # us3-feature-no-team.json) (204 -> 207).
+  # 029 (Phase 11, Convergence, T137) completes T120's proposal-shape set
+  # with the one it still lacked: us29-feature-reuse-question-story-only — a
+  # story-role issue and no specification-role issue, proving the first
+  # question carries the three parent routes rather than posing a second one
+  # (FR-038, FR-040) (207 -> 208).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 204 ]
+  [ "${count}" -eq 208 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

@@ -195,6 +195,19 @@ Describe 'Feature command' {
         @(Get-JiraMockCallLog -Mock $M | Where-Object { $_ }).Count | Should -Be 0
     }
 
+    It 'T136: --dry-run with a mentioned key and no answer predicts the question, naming the issue, zero writes (FR-020)' {
+        Select-Team ijt
+        Write-HierarchyConfig
+        Start-TestMock '{"projects":{"IJT":"team"},"issues":{"IJT-40":{"summary":"Rework the export pipeline","issuetype":{"name":"Epic"},"status":{"name":"In Progress"},"project":{"key":"IJT"}}}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-40', '--dry-run', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $obj = $r.Out.Trim() | ConvertFrom-Json
+        ($obj.PSObject.Properties.Name -contains 'reuse_required') | Should -BeTrue
+        $obj.reuse_required.issues[0].key | Should -Be 'IJT-40'
+        ($obj.PSObject.Properties.Name -contains 'branch_name') | Should -BeFalse
+        @(Get-JiraMockCallLog -Mock $M | Where-Object { $_ -match 'POST|PUT' }).Count | Should -Be 0
+    }
+
     It 'applies and reports a personal override (FR-012)' {
         [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'personal.yml'), "team: ijt`noverride:`n  folder_prefix: `"special-`"`n  branch_pattern: `"special-<ID>/<FEATURE_NAME>`"`n")
         Start-TestMock '{"projects":{"IJT":"team"}}'
@@ -536,6 +549,23 @@ Describe 'Feature command' {
         $rlines[1] | Should -Be 'Detected: IJT-40 (Epic, In Progress) Rework the export pipeline'
         $r.Out | Should -Match 'Attach .*\?'
         $r.Out | Should -Match 'Answers: --reuse yes'
+    }
+
+    It 'T134: the Unmapped/Drafted prose lines name the projects own configured types, not the Atlassian defaults (Constitution VII)' {
+        Select-Team ijt
+        $lines = @(
+            'projects:', '  - key: IJT', '    hierarchy:', '      specification: Initiative', '      story: Task',
+            'routing_default: IJT', 'teams:',
+            '  - id: ijt', '    project: IJT', '    folder_prefix: "ijt-"', '    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"'
+        )
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines -join "`n") + "`n"))
+        Start-TestMock '{"projects":{"IJT":"team"},"issues":{"IJT-40":{"summary":"Rework the export pipeline","issuetype":{"name":"Task"},"status":{"name":"To Do"}},"IJT-99":{"summary":"Legacy importer","issuetype":{"name":"Bug"},"status":{"name":"To Do"}}}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-40', 'IJT-99', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Match ([regex]::Escape('Unmapped: IJT-99 is a Bug, a type this project declares for no role — proposed as a Task; it needs no Initiative, and --reuse yes --parent <key|title> gives it one'))
+        $r.Out | Should -Match ([regex]::Escape('Drafted: user stories drafted beyond these become new Task issues beneath the same Initiative — named issues are reused, never duplicated'))
+        $r.Out | Should -Not -Match 'Epic'
+        $r.Out | Should -Not -Match 'a Story'
     }
 
     # --- 029 Phase 4 — usage-error rows (T029/T102, FR-015) --------------------

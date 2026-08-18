@@ -282,9 +282,11 @@ function ConvertTo-JiraFeatureReuseProse {
         $lines.Add("Answers: --reuse yes attaches them as proposed · --reuse no creates a new $specWord, plus one $storyWord per drafted user story")
     }
 
+    $unmappedStoryWord = if ($storyType) { $storyType } else { 'Story' }
+    $unmappedSpecWord = if ($specType) { $specType } else { 'Epic' }
     foreach ($iss in $issues) {
         if ([bool](Get-FeatProp $iss 'unmapped')) {
-            $lines.Add("Unmapped: $([string](Get-FeatProp $iss 'key')) is a $([string](Get-FeatProp $iss 'type')), a type this project declares for no role — proposed as a Story; it needs no Epic, and --reuse yes --parent <key|title> gives it one")
+            $lines.Add("Unmapped: $([string](Get-FeatProp $iss 'key')) is a $([string](Get-FeatProp $iss 'type')), a type this project declares for no role — proposed as a $unmappedStoryWord; it needs no $unmappedSpecWord, and --reuse yes --parent <key|title> gives it one")
         }
     }
     foreach ($iss in $issues) {
@@ -293,7 +295,7 @@ function ConvertTo-JiraFeatureReuseProse {
         }
     }
     if (@($issues | Where-Object { (Get-FeatProp $_ 'role') -eq 'story' }).Count -gt 0) {
-        $lines.Add('Drafted: user stories drafted beyond these become new Stories beneath the same Epic — named issues are reused, never duplicated')
+        $lines.Add("Drafted: user stories drafted beyond these become new $unmappedStoryWord issues beneath the same $unmappedSpecWord — named issues are reused, never duplicated")
     }
 
     return (($lines -join "`n") + "`n")
