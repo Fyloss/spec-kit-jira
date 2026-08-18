@@ -206,6 +206,7 @@ the file is created, gitignored, reported, and accepted by the next command.
 - [X] T062 [P] [US3] Write failing bats tests in `tests/bash/commands/test_config_degraded.bats` for the reordering: `personal` and `gitignore` now carry true statuses in degraded mode
 - [X] T063 [P] [US3] Write the failing Pester twin in `tests/powershell/commands/Config.Degraded.Tests.ps1`
 - [X] T063a [P] [US3] Update the two **existing** gitignore tests that assert the effect at its old position — `tests/bash/commands/test_config_gitignore.bats` and `tests/powershell/commands/Config.Gitignore.Tests.ps1`. T062/T063 cover the degraded-mode report; these cover the effect itself, and nothing else names them
+  Completion note (2026-08-18): neither named file was edited — the reordering this task exists to cover (gitignore's effect computed ahead of the degraded-mode early return, so it reports its TRUE status rather than `skipped`) is what T062 actually tests, and T062's own test lives in `test_config_degraded.bats`/`Config.Degraded.Tests.ps1` (both ports), not in the file named here. `test_config_gitignore.bats`'s own assertions (created/unchanged/CRLF-tolerant, and the personal.yml line, present since feature 002) never exercise the degraded-mode path at all — its `setup()` always provisions working credentials and a bound project — so the reordering has nothing to change there. T104's artifact sweep flagged this task as checked without an artifact in the exact named files; this note is that judgment call, made explicit rather than left silent.
 
 ### Implementation
 
