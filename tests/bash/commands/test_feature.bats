@@ -737,6 +737,46 @@ write_hierarchy_config() {
   ! mock_calls | grep -qE 'POST|PUT'
 }
 
+@test "the which-issues follow-up carries EVERY detected issue, with the same per-issue facts as the question (contract §3.1, FR-034)" {
+  # Regression: the fallback hard-coded issues:[{key:<primary>}], so a request
+  # naming three keys asked "which issues?" while showing only the first — and
+  # showed it stripped of summary/type/status, rendering `Detected: IJT-40 (, )`.
+  # Contract §3.1: "reuse_issues_required carries the identical object", `role`
+  # never absent, `halted` never null.
+  select_team ijt
+  {
+    printf 'projects:\n  - key: IJT\n'
+    printf 'routing_default: IJT\nteams:\n  - id: ijt\n    project: IJT\n    folder_prefix: "ijt-"\n    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"\n'
+  } > "${JIRA_CONFIG_DIR}/config.yml"
+  boot "{\"projects\":{\"IJT\":\"team\"},\"issues\":{\"IJT-40\":{\"summary\":\"A\",\"issuetype\":{\"name\":\"Epic\"},\"status\":{\"name\":\"To Do\"}},\"IJT-41\":{\"summary\":\"B\",\"issuetype\":{\"name\":\"Story\"},\"status\":{\"name\":\"In Progress\"}},\"IJT-99\":{\"summary\":\"C\",\"issuetype\":{\"name\":\"Bug\"},\"status\":{\"name\":\"To Do\"}}}}"
+  run cmd_feature feature IJT-40 IJT-41 IJT-99 --reuse yes --json "invoice export"
+  [ "$status" -eq 0 ]
+  local q
+  q="$(jq -c '.reuse_issues_required' <<< "$output")"
+  # every detected issue, in argv order — not just the leading one
+  [ "$(jq '.issues | length' <<< "${q}")" -eq 3 ]
+  [ "$(jq -r '.issues[0].key' <<< "${q}")" = "IJT-40" ]
+  [ "$(jq -r '.issues[1].key' <<< "${q}")" = "IJT-41" ]
+  [ "$(jq -r '.issues[2].key' <<< "${q}")" = "IJT-99" ]
+  # the identical object: the per-issue facts the reuse question carries
+  [ "$(jq -r '.issues[1].summary' <<< "${q}")" = "B" ]
+  [ "$(jq -r '.issues[1].type' <<< "${q}")" = "Story" ]
+  [ "$(jq -r '.issues[1].status' <<< "${q}")" = "In Progress" ]
+  # role never absent, halted never null (both ports, contract §3.1)
+  [ "$(jq '[.issues[] | has("role")] | all' <<< "${q}")" = "true" ]
+  [ "$(jq '[.issues[] | .halted | type == "boolean"] | all' <<< "${q}")" = "true" ]
+  # no hierarchy declared, so no role could be derived
+  [ "$(jq -r '.issues[0].role' <<< "${q}")" = "null" ]
+  [ "$(jq -r '.declines_to.specification' <<< "${q}")" = "null" ]
+  # the prose names all three, each with its own facts
+  run cmd_feature feature IJT-40 IJT-41 IJT-99 --reuse yes "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^Detected: ' <<< "$output")" -eq 3 ]
+  [[ "$output" == *"Detected: IJT-41 (Story, In Progress) B"* ]]
+  # FR-031 holds on this path too — a question names nothing
+  [ "$(jq -r 'has("branch_name")' <<< "$(cmd_feature feature IJT-40 IJT-41 IJT-99 --reuse yes --json 'invoice export')")" = "false" ]
+}
+
 @test "--reuse yes with no designator auto-accepts the derived proposal: routes into the designator path, byte-identical to typing --parent/--story (FR-029, US3 AC1)" {
   select_team ijt
   write_hierarchy_config
@@ -858,6 +898,36 @@ write_hierarchy_config() {
   [[ "${lines[1]}" == "Detected: IJT-40 (Epic, In Progress) Rework the export pipeline" ]]
   [[ "$output" == *"Attach"*"?"* ]]
   [[ "$output" == *"Answers: --reuse yes"* ]]
+}
+
+@test "prose: both Missing: variants are pinned literally, and the header never varies (contract §3)" {
+  # The contract drifted from the code here once (it named a
+  # 'Feature: reuse targets required' header that no port has ever emitted).
+  # Both Missing: lines are pinned so the next divergence fails a test rather
+  # than only a reading of the contract.
+  select_team ijt
+  {
+    printf 'projects:\n  - key: IJT\n'
+    printf 'routing_default: IJT\nteams:\n  - id: ijt\n    project: IJT\n    folder_prefix: "ijt-"\n    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"\n'
+  } > "${JIRA_CONFIG_DIR}/config.yml"
+  boot "{\"projects\":{\"IJT\":\"team\"},\"issues\":{\"IJT-40\":{\"summary\":\"Rework the export pipeline\",\"issuetype\":{\"name\":\"Epic\"},\"status\":{\"name\":\"To Do\"}}}}"
+
+  # (a) the first question, no hierarchy declared: names what the PROJECT lacks
+  run cmd_feature feature IJT-40 "invoice export"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "Feature: reuse decision required" ]
+  [ "${lines[2]}" = "Missing: this project declares no hierarchy, so no placement can be proposed" ]
+  [ "${lines[3]}" = "Answers: re-invoke with --parent <key|title> and one --story <key> per issue to reuse" ]
+
+  # (b) the which-issues follow-up: names what THIS RUN could not derive
+  run cmd_feature feature IJT-40 --reuse yes "invoice export"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "Feature: reuse decision required" ]
+  [ "${lines[2]}" = "Missing: which issues to reuse — this run cannot derive it without designators" ]
+  [ "${lines[3]}" = "Answers: re-invoke with --parent <key|title> and one --story <key> per issue to reuse" ]
+
+  # the header the contract once claimed exists in neither variant
+  [[ "$output" != *"reuse targets required"* ]]
 }
 
 @test "T134: the Unmapped/Drafted prose lines name the project's own configured types, not the Atlassian defaults (Constitution VII)" {

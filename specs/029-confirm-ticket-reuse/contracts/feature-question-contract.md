@@ -193,14 +193,25 @@ The `Drafted:` line appears whenever at least one issue is proposed in the story
 question, because an operator who thinks the specification will be capped at the issues
 they named will decline a proposal that would have served them.
 
-The which-issues variant (no hierarchy declared, FR-029) replaces the `Attach …?` and
-`Answers:` lines only:
+When no hierarchy is declared, no role can be derived, so the `Attach …?` and
+`Answers:` lines are replaced by a `Missing:`/`Answers:` pair. **The header line is
+`Feature: reuse decision required` in every variant** — one header, so a caller
+matching on it never has to know which question it got; the payload key
+(§3.1) is what distinguishes them, and the `Missing:` line is what names the state:
 
 ```text
-Feature: reuse targets required
-...
+Feature: reuse decision required
+Detected: IJT-40 (Epic, To Do) Rework the export pipeline
 Missing: this project declares no hierarchy, so no placement can be proposed
 Answers: re-invoke with --parent <key|title> and one --story <key> per issue to reuse
+```
+
+The which-issues variant (`reuse_issues_required`, reached from `--reuse yes` with no
+designator, FR-029) is identical but for the `Missing:` line, which states what this
+run could not derive rather than what the project failed to declare:
+
+```text
+Missing: which issues to reuse — this run cannot derive it without designators
 ```
 
 **Exit code**: `0` for both. A question is not a failure, and the host command it

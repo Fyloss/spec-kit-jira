@@ -925,11 +925,18 @@ function Invoke-JiraFeature {
             $noHierarchy = ($null -eq $qObj.reuse_required.declines_to.specification) -and ($null -eq $qObj.reuse_required.declines_to.story)
 
             if ($noHierarchy) {
+                # Contract §3.1: "reuse_issues_required carries the identical
+                # object" — so it is composed FROM the question rather than
+                # rebuilt. Rebuilding it from $ticketKey alone dropped every
+                # issue past the leading one (FR-034) and stripped the survivor
+                # of summary/type/status, which the prose then rendered as
+                # `Detected: IJT-40 (, )`. Mirror of the Bash port's jq merge.
+                $rr = $qObj.reuse_required
                 $payload = ConvertTo-JiraJsonValue ([ordered]@{
                         active = $true
                         reuse_issues_required = [ordered]@{
-                            issues      = @([ordered]@{ key = $ticketKey })
-                            declines_to = [ordered]@{ specification = $null; story = $null }
+                            issues      = @($rr.issues)
+                            declines_to = $rr.declines_to
                             reason      = 'designators required'
                         }
                     })

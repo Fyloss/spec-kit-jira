@@ -506,6 +506,36 @@ Describe 'Feature command' {
         $r.Out | Should -Not -Match '"action":"attached"'
     }
 
+    It 'the which-issues follow-up carries EVERY detected issue, with the same per-issue facts as the question (contract §3.1, FR-034)' {
+        # Regression twin of the bats test: the fallback rebuilt the payload from
+        # the leading key alone, dropping every further detection (FR-034) and
+        # stripping the survivor of summary/type/status.
+        Select-Team ijt
+        $lines = @('projects:', '  - key: IJT', 'routing_default: IJT', 'teams:', '  - id: ijt', '    project: IJT', '    folder_prefix: "ijt-"', '    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"')
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines -join "`n") + "`n"))
+        Start-TestMock '{"projects":{"IJT":"team"},"issues":{"IJT-40":{"summary":"A","issuetype":{"name":"Epic"},"status":{"name":"To Do"}},"IJT-41":{"summary":"B","issuetype":{"name":"Story"},"status":{"name":"In Progress"}},"IJT-99":{"summary":"C","issuetype":{"name":"Bug"},"status":{"name":"To Do"}}}}'
+        $r = Invoke-FeatureCaptured @('feature', 'IJT-40', 'IJT-41', 'IJT-99', '--reuse', 'yes', '--json', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $q = ($r.Out.Trim() | ConvertFrom-Json).reuse_issues_required
+        @($q.issues).Count | Should -Be 3
+        $q.issues[0].key | Should -Be 'IJT-40'
+        $q.issues[1].key | Should -Be 'IJT-41'
+        $q.issues[2].key | Should -Be 'IJT-99'
+        $q.issues[1].summary | Should -Be 'B'
+        $q.issues[1].type | Should -Be 'Story'
+        $q.issues[1].status | Should -Be 'In Progress'
+        foreach ($i in @($q.issues)) {
+            $i.PSObject.Properties.Name | Should -Contain 'role'
+            $i.halted | Should -BeOfType [bool]
+        }
+        $q.issues[0].role | Should -BeNullOrEmpty
+        $q.declines_to.specification | Should -BeNullOrEmpty
+
+        $p = Invoke-FeatureCaptured @('feature', 'IJT-40', 'IJT-41', 'IJT-99', '--reuse', 'yes', 'invoice export')
+        @($p.Out -split "`n" | Where-Object { $_ -match '^Detected: ' }).Count | Should -Be 3
+        $p.Out | Should -Match 'Detected: IJT-41 \(Story, In Progress\) B'
+    }
+
     It '--reuse yes with no designator auto-accepts the derived proposal: routes into the designator path, byte-identical to typing --parent/--story (FR-029, US3 AC1)' {
         Select-Team ijt
         Write-HierarchyConfig
@@ -549,6 +579,33 @@ Describe 'Feature command' {
         $rlines[1] | Should -Be 'Detected: IJT-40 (Epic, In Progress) Rework the export pipeline'
         $r.Out | Should -Match 'Attach .*\?'
         $r.Out | Should -Match 'Answers: --reuse yes'
+    }
+
+    It 'prose: both Missing: variants are pinned literally, and the header never varies (contract §3)' {
+        # Twin of the bats test: the contract once named a
+        # 'Feature: reuse targets required' header no port has ever emitted.
+        Select-Team ijt
+        $cfgLines = @('projects:', '  - key: IJT', 'routing_default: IJT', 'teams:', '  - id: ijt', '    project: IJT', '    folder_prefix: "ijt-"', '    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"')
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($cfgLines -join "`n") + "`n"))
+        Start-TestMock '{"projects":{"IJT":"team"},"issues":{"IJT-40":{"summary":"Rework the export pipeline","issuetype":{"name":"Epic"},"status":{"name":"To Do"}}}}'
+
+        # (a) the first question, no hierarchy declared: names what the PROJECT lacks
+        $a = Invoke-FeatureCaptured @('feature', 'IJT-40', 'invoice export')
+        $a.ExitCode | Should -Be 0
+        $al = $a.Out -split "`n"
+        $al[0] | Should -Be 'Feature: reuse decision required'
+        $al[2] | Should -Be 'Missing: this project declares no hierarchy, so no placement can be proposed'
+        $al[3] | Should -Be 'Answers: re-invoke with --parent <key|title> and one --story <key> per issue to reuse'
+
+        # (b) the which-issues follow-up: names what THIS RUN could not derive
+        $b = Invoke-FeatureCaptured @('feature', 'IJT-40', '--reuse', 'yes', 'invoice export')
+        $b.ExitCode | Should -Be 0
+        $bl = $b.Out -split "`n"
+        $bl[0] | Should -Be 'Feature: reuse decision required'
+        $bl[2] | Should -Be 'Missing: which issues to reuse — this run cannot derive it without designators'
+        $bl[3] | Should -Be 'Answers: re-invoke with --parent <key|title> and one --story <key> per issue to reuse'
+
+        $b.Out | Should -Not -Match 'reuse targets required'
     }
 
     It 'T134: the Unmapped/Drafted prose lines name the projects own configured types, not the Atlassian defaults (Constitution VII)' {

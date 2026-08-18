@@ -920,8 +920,13 @@ cmd_feature() {
       fi
 
       if [[ "${no_hierarchy}" == "true" ]]; then
-        _feat_emit "$(jq -cn --arg tk "${ticket_key}" \
-          '{active:true, reuse_issues_required:{issues:[{key:$tk}], declines_to:{specification:null,story:null}, reason:"designators required"}}' | json_canonical)" "${json}"
+        # Contract §3.1: "reuse_issues_required carries the identical object" —
+        # so it is composed FROM the question rather than rebuilt. Rebuilding it
+        # from ticket_key alone dropped every issue past the leading one (FR-034)
+        # and stripped the survivor of summary/type/status, which the prose then
+        # rendered as `Detected: IJT-40 (, )`.
+        _feat_emit "$(jq -cn --argjson q "${q_payload}" \
+          '{active:true, reuse_issues_required: ($q.reuse_required + {reason:"designators required"})}' | json_canonical)" "${json}"
         return 0
       fi
 

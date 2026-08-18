@@ -1,7 +1,9 @@
 #!/usr/bin/env bats
 # T017d [009, US2] — Mechanical guard for SC-011/FR-018/FR-019: every OS leg of
-# the `unit` job must run Pester in full AND the complete 139-scenario
-# conformance corpus — never a shard of it. Decision 7 permits sharding the
+# the `unit` job must run Pester in full AND the complete conformance corpus —
+# never a shard of it. The corpus size is asserted below and grows with the
+# tree; it is deliberately NOT restated here, because a second copy of the
+# number is a second thing to forget. Decision 7 permits sharding the
 # corpus WITHIN one OS (multiple runners of the SAME os value); it explicitly
 # FORBIDS spreading scenarios ACROSS the three OSes, which would leave no host
 # proving the whole corpus. This is the guard that makes that mistake
@@ -13,7 +15,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (193)" {
+@test "the conformance corpus has exactly the recorded scenario count (209)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -184,8 +186,12 @@ setup() {
   # story-role issue and no specification-role issue, proving the first
   # question carries the three parent routes rather than posing a second one
   # (FR-038, FR-040) (207 -> 208).
+  # 029 (PR review) adds one: us29-feature-reuse-yes-no-issues-multi — the
+  # which-issues follow-up on a THREE-key request, pinning contract §3.1's
+  # "carries the identical object" cross-port after the fallback was found
+  # rebuilding it from the leading key alone (FR-034) (208 -> 209).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 208 ]
+  [ "${count}" -eq 209 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {
