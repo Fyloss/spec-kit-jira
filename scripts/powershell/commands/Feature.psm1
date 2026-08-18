@@ -123,7 +123,7 @@ function Get-JiraFeatReduceMention {
     return $null
 }
 
-function Get-JiraFeatDetectMentions {
+function Get-JiraFeatDetectMention {
     <#
     .SYNOPSIS
       029, contract mention-grammar.md §1-§3: the gate + scan. Mirror of
@@ -152,7 +152,7 @@ function Invoke-JiraFeatComposeReuseQuestion {
       029, contract feature-question-contract.md §3/§3.1: compose the
       reuse_required payload (FR-001-FR-005, FR-025, FR-031, FR-033-FR-036,
       FR-040). Mirror of _feat_compose_reuse_question. -MentionsJson is
-      Get-JiraFeatDetectMentions' output (>=1 entries, gate already open);
+      Get-JiraFeatDetectMention' output (>=1 entries, gate already open);
       -PrimaryWideJson is Confirm-JiraTicket -Wide's result for the first
       mention — already read by the caller, no request here. Every issue
       beyond the first is resolved via Invoke-JiraAdoptionLoad/Get-JiraAdoption
@@ -694,7 +694,6 @@ function Invoke-JiraFeature {
     $parentRaw = if ($state.ContainsKey('parent')) { $state['parent'] } else { '' }
     $storiesJoined = if ($state.ContainsKey('stories')) { $state['stories'] } else { '' }
     $reuse = if ($state.ContainsKey('reuse')) { $state['reuse'] } else { '' }
-    $acceptDefaults = $state['accept_defaults'] -eq 'true'
 
     # 029, contract mention-grammar.md §1-§3: the mention evaluation is a pure
     # string operation on argv alone, needing no configuration — it moves to
@@ -703,7 +702,7 @@ function Invoke-JiraFeature {
     # missing-configuration report (US6) can consult it without a second
     # detection pass.
     $words = @($argsLine -split ' ' | Where-Object { $_ -ne '' })
-    $mentions = @(Get-JiraFeatDetectMentions -Words $words)
+    $mentions = @(Get-JiraFeatDetectMention -Words $words)
     $hasMention = $mentions.Count -gt 0
     $ticketKey = ''
     $desc = ''
@@ -1039,5 +1038,5 @@ function Invoke-JiraFeature {
 }
 
 Export-ModuleMember -Function Invoke-JiraFeature, Get-JiraFeatDesignatorNumberSource, Get-JiraFeatResolvedSlug, `
-    Invoke-JiraFeatSeedFromDesignator, Get-JiraFeatReduceMention, Get-JiraFeatDetectMentions, `
+    Invoke-JiraFeatSeedFromDesignator, Get-JiraFeatReduceMention, Get-JiraFeatDetectMention, `
     Invoke-JiraFeatComposeReuseQuestion, ConvertTo-JiraFeatureReuseProse

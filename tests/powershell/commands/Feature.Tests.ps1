@@ -277,55 +277,55 @@ Describe 'Feature command' {
     # --- 029 T006/T082/T013 — mention grammar, conditional field set, --reuse
 
     It 'detects a bare key at the leading positional' {
-        $mentions = @(Get-JiraFeatDetectMentions -Words @('IJT-42', 'invoice', 'export'))
+        $mentions = @(Get-JiraFeatDetectMention -Words @('IJT-42', 'invoice', 'export'))
         $mentions.Count | Should -Be 1
         $mentions[0].key | Should -Be 'IJT-42'
         $mentions[0].raw | Should -Be 'IJT-42'
     }
 
     It 'detects a /browse/ URL at the leading positional (FR-032)' {
-        $mentions = @(Get-JiraFeatDetectMentions -Words @('https://jira.example.com/browse/IJT-42', 'invoice', 'export'))
+        $mentions = @(Get-JiraFeatDetectMention -Words @('https://jira.example.com/browse/IJT-42', 'invoice', 'export'))
         $mentions.Count | Should -Be 1
         $mentions[0].key | Should -Be 'IJT-42'
     }
 
     It 'detects a selectedIssue= URL at the leading positional (FR-032)' {
-        $mentions = @(Get-JiraFeatDetectMentions -Words @('https://jira.example.com/jira/software/c/projects/IJT/boards/1?selectedIssue=IJT-42', 'invoice'))
+        $mentions = @(Get-JiraFeatDetectMention -Words @('https://jira.example.com/jira/software/c/projects/IJT/boards/1?selectedIssue=IJT-42', 'invoice'))
         $mentions.Count | Should -Be 1
         $mentions[0].key | Should -Be 'IJT-42'
     }
 
     It 'does not treat a URL reducing to nothing key-shaped as a mention' {
-        $mentions = @(Get-JiraFeatDetectMentions -Words @('https://example.com/nothing/here', 'invoice'))
+        $mentions = @(Get-JiraFeatDetectMention -Words @('https://example.com/nothing/here', 'invoice'))
         $mentions.Count | Should -Be 0
     }
 
     It 'closes the gate on an ordinary leading word — nothing further is examined, even a later key (contract §4 last row)' {
-        $mentions = @(Get-JiraFeatDetectMentions -Words @('ticket', 'https://jira.example.com/browse/IJT-2241'))
+        $mentions = @(Get-JiraFeatDetectMention -Words @('ticket', 'https://jira.example.com/browse/IJT-2241'))
         $mentions.Count | Should -Be 0
     }
 
     It 'detects every remaining key-shaped token once the gate is open, in argv order (FR-034)' {
-        $mentions = @(Get-JiraFeatDetectMentions -Words @('IJT-40', 'see', 'IJT-99', 'for', 'background'))
+        $mentions = @(Get-JiraFeatDetectMention -Words @('IJT-40', 'see', 'IJT-99', 'for', 'background'))
         $mentions.Count | Should -Be 2
         $mentions[0].key | Should -Be 'IJT-40'
         $mentions[1].key | Should -Be 'IJT-99'
     }
 
     It 'mixes a key and a link freely once the gate is open, in argv order' {
-        $mentions = @(Get-JiraFeatDetectMentions -Words @('IJT-40', 'https://jira.example.com/browse/IJT-99', 'background'))
+        $mentions = @(Get-JiraFeatDetectMention -Words @('IJT-40', 'https://jira.example.com/browse/IJT-99', 'background'))
         $mentions.Count | Should -Be 2
         $mentions[1].key | Should -Be 'IJT-99'
     }
 
     It 'detects COVID-19 like any other key once the gate is open' {
-        $mentions = @(Get-JiraFeatDetectMentions -Words @('IJT-40', 'COVID-19'))
+        $mentions = @(Get-JiraFeatDetectMention -Words @('IJT-40', 'COVID-19'))
         $mentions.Count | Should -Be 2
         $mentions[1].key | Should -Be 'COVID-19'
     }
 
     It 'detects nothing with no words at all' {
-        $mentions = @(Get-JiraFeatDetectMentions -Words @())
+        $mentions = @(Get-JiraFeatDetectMention -Words @())
         $mentions.Count | Should -Be 0
     }
 
