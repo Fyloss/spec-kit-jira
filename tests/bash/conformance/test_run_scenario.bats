@@ -130,3 +130,127 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"entry point not found"* ]]
 }
+
+# =============================================================================
+# T002 [030] — the @MOCK_BASE_URL@ and @PAT_HANG_COMMAND@ sentinel
+# substitutions (research.md §R6, §R11)
+# =============================================================================
+
+@test "T002 — @MOCK_BASE_URL@ is replaced in the copied workdir's config.yml (bash backend)" {
+  local stub="${TMP}/base-url-stub.sh"
+  cat > "${stub}" << 'EOF'
+#!/usr/bin/env bash
+cat .specify/jira/config.yml
+EOF
+  chmod +x "${stub}"
+  local scenario="${TMP}/base-url.json"
+  cat > "${scenario}" << 'EOF'
+{
+  "name": "mock-base-url-sub",
+  "mock": { "projects": { "IJT": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-030-base-url"
+}
+EOF
+  SPEC_KIT_JIRA_ENTRY_BASH="${stub}" bash "${HARNESS}" "${scenario}" bash "${OUT}"
+  run cat "${OUT}/stdout"
+  [[ "$output" != *"@MOCK_BASE_URL@"* ]]
+  [[ "$output" == *"base_url: \"http://127.0.0.1:"* ]]
+}
+
+@test "T002 — @MOCK_BASE_URL@ is replaced identically for the powershell backend" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local stub="${TMP}/base-url-stub.ps1"
+  cat > "${stub}" << 'EOF'
+Get-Content .specify/jira/config.yml
+EOF
+  local scenario="${TMP}/base-url.json"
+  cat > "${scenario}" << 'EOF'
+{
+  "name": "mock-base-url-sub-ps",
+  "mock": { "projects": { "IJT": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-030-base-url"
+}
+EOF
+  SPEC_KIT_JIRA_ENTRY_PWSH="${stub}" bash "${HARNESS}" "${scenario}" powershell "${OUT}"
+  run cat "${OUT}/stdout"
+  [[ "$output" != *"@MOCK_BASE_URL@"* ]]
+  [[ "$output" == *"base_url: \"http://127.0.0.1:"* ]]
+}
+
+@test "T002 — a fixture with neither the sentinel nor the file is copied byte-identically" {
+  # repo-with-config carries no .specify/jira/config.yml with the sentinel —
+  # the substitution's grep guard must be a no-op, not an error.
+  local scenario="${TMP}/no-sentinel.json"
+  cat > "${scenario}" << 'EOF'
+{
+  "name": "no-sentinel",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-config"
+}
+EOF
+  run bash "${HARNESS}" "${scenario}" bash "${OUT}"
+  [ "$status" -eq 0 ]
+  run diff -r "${ROOT}/tests/conformance/fixtures/repo-with-config/.specify" "${OUT}/workdir/.specify"
+  [ "$status" -eq 0 ]
+}
+
+@test "T002 — @PAT_HANG_COMMAND@ resolves in an env value to something that actually blocks" {
+  local stub="${TMP}/hang-stub.sh"
+  cat > "${stub}" << 'EOF'
+#!/usr/bin/env bash
+echo "resolved=${JIRA_PAT_COMMAND}"
+EOF
+  chmod +x "${stub}"
+  local scenario="${TMP}/hang.json"
+  cat > "${scenario}" << 'EOF'
+{
+  "name": "pat-hang-sub",
+  "mock": { "projects": { "COMP": "company" } },
+  "env": { "JIRA_PAT_COMMAND": "@PAT_HANG_COMMAND@" }
+}
+EOF
+  SPEC_KIT_JIRA_ENTRY_BASH="${stub}" bash "${HARNESS}" "${scenario}" bash "${OUT}"
+  run cat "${OUT}/stdout"
+  [[ "$output" != *"@PAT_HANG_COMMAND@"* ]]
+  local resolved="${output#resolved=}"
+  [ -n "${resolved}" ]
+
+  # The resolved command must actually block: run it directly with a short
+  # bound and confirm it is still alive when the bound expires (POSIX-only —
+  # the harness resolves a .cmd on Windows, unrunnable from this bats suite).
+  case "$(uname -s)" in
+    Linux | Darwin)
+      IFS=' ' read -ra hang_argv <<< "${resolved}"
+      "${hang_argv[@]}" &
+      local hang_pid=$!
+      sleep 1
+      run kill -0 "${hang_pid}"
+      [ "$status" -eq 0 ]
+      kill -TERM "${hang_pid}" 2> /dev/null
+      wait "${hang_pid}" 2> /dev/null || true
+      ;;
+  esac
+}
+
+@test "T002 — @PAT_HANG_COMMAND@ resolves to the SAME string for both ports in one run-scenario.sh invocation" {
+  # Recorded via two separate harness runs (each port its own process), so this
+  # asserts determinism of the resolution, not a single shared value — the
+  # actual byte-diff comparison across ports is ci-conformance.sh's job.
+  local stub_bash="${TMP}/hang-stub.sh"
+  cat > "${stub_bash}" << 'EOF'
+#!/usr/bin/env bash
+echo "resolved=${JIRA_PAT_COMMAND}"
+EOF
+  chmod +x "${stub_bash}"
+  local scenario="${TMP}/hang.json"
+  cat > "${scenario}" << 'EOF'
+{
+  "name": "pat-hang-sub-repeat",
+  "mock": { "projects": { "COMP": "company" } },
+  "env": { "JIRA_PAT_COMMAND": "@PAT_HANG_COMMAND@" }
+}
+EOF
+  SPEC_KIT_JIRA_ENTRY_BASH="${stub_bash}" bash "${HARNESS}" "${scenario}" bash "${TMP}/out1"
+  SPEC_KIT_JIRA_ENTRY_BASH="${stub_bash}" bash "${HARNESS}" "${scenario}" bash "${TMP}/out2"
+  [ "$(cat "${TMP}/out1/stdout")" = "$(cat "${TMP}/out2/stdout")" ]
+}

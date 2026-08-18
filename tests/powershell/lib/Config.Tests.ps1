@@ -551,6 +551,114 @@ Describe 'Import-JiraConfig' {
         Remove-Item -Recurse -Force $d
     }
 
+    # --- T007 [030] — Get-JiraConfigCredentialError with an exempt-path
+    # argument (data-model.md §4, contracts/connection-settings.md §5) -------
+
+    It 'T007 — a credential-shaped value at an exempt path passes' {
+        $obj = [ordered]@{ base_url = 'someone@example.com' }
+        (Get-JiraConfigCredentialError -Object $obj -ExemptPaths @('base_url')).Count | Should -Be 0
+    }
+
+    It 'T007 — every other path still refuses, even with an exempt path declared' {
+        $obj = [ordered]@{ other_key = 'someone@example.com' }
+        $errs = Get-JiraConfigCredentialError -Object $obj -ExemptPaths @('base_url')
+        ($errs -join "`n") | Should -Match 'other_key: email address'
+    }
+
+    It 'T007 — privacy stays exempt unconditionally, independent of the exempt-path list' {
+        $obj = [ordered]@{ privacy = [ordered]@{ allowlist = @('someone@example.com') } }
+        (Get-JiraConfigCredentialError -Object $obj).Count | Should -Be 0
+        (Get-JiraConfigCredentialError -Object $obj -ExemptPaths @('base_url')).Count | Should -Be 0
+    }
+
+    It 'T007 — ^ATATT is refused even at an exempt path (C5.3, never exempted)' {
+        $obj = [ordered]@{ base_url = 'ATATT3xFfGF0secrettoken' }
+        $errs = Get-JiraConfigCredentialError -Object $obj -ExemptPaths @('base_url')
+        ($errs -join "`n") | Should -Match 'base_url: Atlassian API token'
+    }
+
+    # --- T012 [030] — the whole base_url table (connection-settings.md §2.2,
+    # data-model.md §2/§2a) --------------------------------------------------
+
+    It 'T012 — base_url accepts a bare https URL' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nbase_url: `"https://team.atlassian.net`"`n") -NoNewline
+        (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 0
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T012 — base_url accepts http at the three loopback literals' {
+        foreach ($literal in @('127.0.0.1', 'localhost', '[::1]')) {
+            $d = New-TempConfigDir
+            Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nbase_url: `"http://${literal}:4000`"`n") -NoNewline
+            (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 0
+            Remove-Item -Recurse -Force $d
+        }
+    }
+
+    It 'T012 — base_url refuses a trailing slash' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nbase_url: `"https://team.atlassian.net/`"`n") -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'base_url is invalid'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T012 — base_url refuses a path' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nbase_url: `"https://team.atlassian.net/jira`"`n") -NoNewline
+        (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 4
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T012 — base_url refuses a scheme-less host' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nbase_url: `"team.atlassian.net`"`n") -NoNewline
+        (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 4
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T012 — base_url refuses an empty declaration' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nbase_url: `"`"`n") -NoNewline
+        (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 4
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T012 — base_url refuses http to a non-loopback host' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nbase_url: `"http://team.atlassian.net`"`n") -NoNewline
+        (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 4
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T012 — base_url refuses http to a private-range address (not loopback)' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nbase_url: `"http://192.168.1.10`"`n") -NoNewline
+        (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 4
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T012 — an absent base_url is accepted' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value $script:ValidTeam -NoNewline
+        (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 0
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T012 — C2.7: a malformed SPEC_KIT_JIRA_BASE_URL with no base_url in the file is passed through unvalidated' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value $script:ValidTeam -NoNewline
+        $env:SPEC_KIT_JIRA_BASE_URL = 'not a url at all'
+        try {
+            (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 0
+        } finally {
+            $env:SPEC_KIT_JIRA_BASE_URL = $null
+            Remove-Item -Recurse -Force $d
+        }
+    }
+
     It 'rejects a missing routing_default (exit 4)' {
         $d = New-TempConfigDir
         Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: company_managed`n" -NoNewline
@@ -873,6 +981,91 @@ Describe 'An empty local binding is tolerated (003 T013)' {
         $null = Remove-JiraHooksDisabled -LifecycleEvent 'after_implement' -ConfigDir $d
         (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 0
         (Get-JiraHooksDisabled -ConfigDir $d) | Should -BeExactly '[]'
+        Remove-Item -Recurse -Force $d
+    }
+}
+
+# =============================================================================
+# T023 [030] — Resolve-JiraConnection: sets the variable only when unset or
+# empty, never overwrites a non-empty value, treats the empty string as unset
+# (plan.md §Key design decision, contracts/connection-settings.md §1)
+# =============================================================================
+
+Describe 'Resolve-JiraConnection' {
+    BeforeEach {
+        $env:SPEC_KIT_JIRA_BASE_URL = $null
+        $env:JIRA_EMAIL = $null
+    }
+    AfterEach {
+        $env:SPEC_KIT_JIRA_BASE_URL = $null
+        $env:JIRA_EMAIL = $null
+    }
+
+    It 'T023 — sets SPEC_KIT_JIRA_BASE_URL from config.yml when unset' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nbase_url: `"https://team.atlassian.net`"`n") -NoNewline
+        Resolve-JiraConnection -ConfigDir $d | Out-Null
+        $env:SPEC_KIT_JIRA_BASE_URL | Should -Be 'https://team.atlassian.net'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T023 — never overwrites a non-empty SPEC_KIT_JIRA_BASE_URL' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nbase_url: `"https://team.atlassian.net`"`n") -NoNewline
+        $env:SPEC_KIT_JIRA_BASE_URL = 'https://preset.example.invalid'
+        Resolve-JiraConnection -ConfigDir $d | Out-Null
+        $env:SPEC_KIT_JIRA_BASE_URL | Should -Be 'https://preset.example.invalid'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T023 — treats an empty SPEC_KIT_JIRA_BASE_URL as unset' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nbase_url: `"https://team.atlassian.net`"`n") -NoNewline
+        $env:SPEC_KIT_JIRA_BASE_URL = ''
+        Resolve-JiraConnection -ConfigDir $d | Out-Null
+        $env:SPEC_KIT_JIRA_BASE_URL | Should -Be 'https://team.atlassian.net'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T023 — sets JIRA_EMAIL from personal.yml when unset' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value $script:ValidTeam -NoNewline
+        Set-Content -Path (Join-Path $d 'personal.yml') -Value "email: op@example.com`n" -NoNewline
+        Resolve-JiraConnection -ConfigDir $d | Out-Null
+        $env:JIRA_EMAIL | Should -Be 'op@example.com'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T023 — never overwrites a non-empty JIRA_EMAIL' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value $script:ValidTeam -NoNewline
+        Set-Content -Path (Join-Path $d 'personal.yml') -Value "email: op@example.com`n" -NoNewline
+        $env:JIRA_EMAIL = 'preset@example.invalid'
+        Resolve-JiraConnection -ConfigDir $d | Out-Null
+        $env:JIRA_EMAIL | Should -Be 'preset@example.invalid'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T023 — treats an empty JIRA_EMAIL as unset' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value $script:ValidTeam -NoNewline
+        Set-Content -Path (Join-Path $d 'personal.yml') -Value "email: op@example.com`n" -NoNewline
+        $env:JIRA_EMAIL = ''
+        Resolve-JiraConnection -ConfigDir $d | Out-Null
+        $env:JIRA_EMAIL | Should -Be 'op@example.com'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T023 — tolerant of an absent config.yml (US4 unattended/env-only path)' {
+        $d = New-TempConfigDir
+        (Resolve-JiraConnection -ConfigDir $d) | Should -Be 0
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T023 — fails closed on a present-but-malformed config.yml (C6.2)' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`nbase_url: `"not-a-url`"`n" -NoNewline
+        (Resolve-JiraConnection -ConfigDir $d) | Should -Be 4
         Remove-Item -Recurse -Force $d
     }
 }

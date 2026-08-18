@@ -1,0 +1,17 @@
+# 030 — base_url sourced from config.yml, resolved by run-scenario.sh's
+# @MOCK_BASE_URL@ substitution (research.md §R6/§R10). No personal.yml: the
+# chokepoint's other half (email) is left to the environment.
+base_url: "@MOCK_BASE_URL@"
+projects:
+  - key: IJT
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: ''
+    project: IJT
+routing_default: IJT
+privacy:
+  allowlist: []

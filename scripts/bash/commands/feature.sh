@@ -769,6 +769,14 @@ cmd_feature() {
     fi
     return 0
   fi
+
+  # The resolution chokepoint (030, contracts/connection-settings.md C1.5):
+  # seed SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL, environment first, using the
+  # `merged` config JUST validated above — no second config_load, and no
+  # second base_url validation to silently contradict the pass-through
+  # treatment a malformed config.yml already received a few lines up.
+  config_resolve_connection "${dir}" "${merged}" || return $?
+
   local team_count
   team_count="$(jq -r '(.teams // []) | length' <<< "${merged}")"
   if [[ "${team_count}" -eq 0 ]]; then

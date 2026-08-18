@@ -1,0 +1,16 @@
+# 030 — a base_url with a trailing slash (invalid per connection-settings.md
+# §2.2). Located refusal, exit 4, before any Jira call.
+base_url: "https://team.atlassian.net/"
+projects:
+  - key: TEST
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: ''
+    project: TEST
+routing_default: TEST
+privacy:
+  allowlist: []

@@ -97,7 +97,7 @@ At most **one** message per host command run, naming the **true** cause:
 | Rejected target | Exit `1`, message says a file "is not a feature specification" | Relay the entry point's own message verbatim — it names the rejected path and, when one exists, the correct `spec.md` for that folder. This is a caller defect (this procedure invoked the wrong artifact), not a degraded Jira state |
 | Not yet configured | The bridge exits `0` and reports no binding | At most three lines: this repository is not yet bound to a Jira project; run `/speckit.jira.config` |
 | Binding predates this release | Exit `4`, message says the binding "predates parent support" | The project is already bound; its local binding is a version behind. Run `/speckit.jira.config` to refresh it (see INSTALL.md, "Upgrading to the parent-hierarchy release") |
-| Credentials absent | Exit `4`, no token on any of the three resolution rungs | The token resolved through none of env, OS secret manager, or `.specify/jira/.env` |
+| Credentials absent, or a declared retrieval command failed | Exit `4`, no token from either resolution rung | The token resolved through neither `JIRA_API_TOKEN` nor a declared `JIRA_PAT_COMMAND`; a declared command that failed names the reason (missing, non-zero exit, timeout, empty output) |
 | Credentials rejected | Exit `3` | Jira rejected the credentials — they exist but are not accepted |
 | Prerequisite missing | Exit `5` | The named prerequisite is missing; relay the entry point's own message |
 | Jira unreachable | Exit `2` after exhausted retries | Jira could not be reached; nothing was mirrored |

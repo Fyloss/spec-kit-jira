@@ -43,6 +43,64 @@ teardown() {
   [ "$output" = "0" ]
 }
 
+@test "T081 [030, C4.1]: a token from the retrieval-command rung never appears in a full reconcile at max verbosity under set -x" {
+  # shellcheck source=/dev/null
+  source "${ROOT}/tests/bash/helpers/secret_store_stub.bash"
+  local fixture="${ROOT}/tests/conformance/fixtures/repo-with-task-tier"
+  local work2="${WORK}/bound"
+  cp -R "${fixture}" "${work2}"
+  local spec2="${work2}/specs/001-feature/spec.md"
+  local bindir counter
+  bindir="${WORK}/bin" counter="${WORK}/count"
+  helper_pat_command_install "${bindir}" "${counter}" "COMMAND-RUNG-SECRET-9988"
+  unset JIRA_API_TOKEN SPEC_KIT_JIRA_PROJECT_KEY
+  local cfg
+  cfg="$(mktemp)"
+  printf '%s' '{"projects":{"TASKP":"t"}}' > "${cfg}"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  export JIRA_CONFIG_DIR="${work2}/.specify/jira"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-feature"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  local out
+  out="$(cd "${work2}" && bash -x "${ENTRY_BASH}" reconcile --verbose --json "${spec2}" 2>&1 || true)"
+  run grep -c "COMMAND-RUNG-SECRET-9988" <<< "${out}"
+  [ "$output" = "0" ]
+  local basic
+  basic="$(printf '%s:%s' "${JIRA_EMAIL}" "COMMAND-RUNG-SECRET-9988" | base64 | tr -d '\n')"
+  run grep -c -- "${basic}" <<< "${out}"
+  [ "$output" = "0" ]
+}
+
+@test "T081 [030, C4.4]: a failure report never echoes the retrieval command's own stdout" {
+  # shellcheck source=/dev/null
+  source "${ROOT}/tests/bash/helpers/secret_store_stub.bash"
+  local fixture="${ROOT}/tests/conformance/fixtures/repo-with-task-tier"
+  local work2="${WORK}/bound2"
+  cp -R "${fixture}" "${work2}"
+  local spec2="${work2}/specs/001-feature/spec.md"
+  local bindir counter prog
+  bindir="${WORK}/bin2" counter="${WORK}/count2"
+  # exit 1: the failure path (C3.5), but stdout still carries a value that must
+  # never be echoed back by the located error message.
+  prog="$(helper_pat_command_install "${bindir}" "${counter}" "SHOULD-NEVER-BE-ECHOED" 1)"
+  export JIRA_PAT_COMMAND="${prog}"
+  unset JIRA_API_TOKEN SPEC_KIT_JIRA_PROJECT_KEY
+  local cfg
+  cfg="$(mktemp)"
+  printf '%s' '{"projects":{"TASKP":"t"}}' > "${cfg}"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  export JIRA_CONFIG_DIR="${work2}/.specify/jira"
+  export SPEC_KIT_JIRA_SPEC_SLUG="001-feature"
+  export SPEC_KIT_JIRA_REPO="acme/app"
+  local out
+  out="$(cd "${work2}" && bash -x "${ENTRY_BASH}" reconcile --verbose --json "${spec2}" 2>&1 || true)"
+  run grep -c "SHOULD-NEVER-BE-ECHOED" <<< "${out}"
+  [ "$output" = "0" ]
+  [[ "${out}" == *"exited with status 1"* ]]
+}
+
 @test "T010 — neither the token nor its base64 Authorization value leaks with timing and tracing both on (contracts/timing-report.md T7)" {
   mock_start "${MOCK}/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"

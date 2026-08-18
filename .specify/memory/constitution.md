@@ -1,6 +1,106 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 1.3.0 → 2.0.0 (MAJOR — two existing prohibitions are narrowed and a
+mandated resolution rung is removed. Every prior amendment qualified as MINOR on the
+stated ground that "nothing existing weakened or restated"; that ground does not hold
+here. Behaviour that satisfies 1.3.0 violates 2.0.0 and vice versa, which is the
+definition of a backward-incompatible governance change.)
+
+Modified principles:
+
+IV. Credential Security — Zero Tokens in the Tree, Ever
+  (a) The opening prohibition drops "real site URL" from the list of values banned from
+      every tracked file, and admits it at ONE dedicated key of the committed team
+      config. Token, authentication email, and accountId remain banned everywhere,
+      including test fixtures; a real site URL at any other key or in any other file
+      remains banned.
+  (b) The mandated resolution order changes from three rungs (environment variables →
+      OS secret manager → gitignored `.env`) to two (environment variables → an
+      operator-declared retrieval command). The `.env` rung is removed outright, and a
+      new rule forbids BOTH a file-based rung and an undeclared probe of a credential
+      store under a service name the bridge chooses for itself.
+  (c) The soft-optional rule is split in two along the axis that actually matters. When
+      nothing is declared, the rung stays silent exactly as before. Once the operator
+      HAS declared a retrieval command, a failure of that command MUST be reported
+      rather than swallowed — there is no next rung to fall through to, and silence
+      reports a missing token for a token that is correctly stored.
+  (d) The no-prompt / no-hang rule is preserved and strengthened: the retrieval
+      command's execution MUST be bounded, and exceeding the bound MUST be reported as
+      a failure of that command.
+  (e) The token-secrecy rule gains one clause: a failure report MUST NOT echo the
+      retrieval command's standard output, which may hold a partial secret. Reporting
+      its standard error is permitted and expected.
+  (f) The enforcement test is rewritten for the two-rung shape: argument-vector
+      execution, at-most-once execution, and a distinguishable report for each of the
+      four declared-failure paths.
+  UNCHANGED: the token never logged, never echoed, never in argv; the pre-write guard
+  and its dedicated exit code; the mechanism-substitution clause (which already covered
+  swapping `security` / `secret-tool` / `Get-Secret` for an operator-declared command,
+  and therefore needed no amendment); the CI note.
+
+V. Separation of Team Config / Local Binding / Secrets
+  (a) Layer 1 (committable team config) now names the Jira base URL among its contents
+      and states why it is admitted there — identical for every team on the site, agreed
+      once rather than re-declared per developer — together with the consequence the
+      adopter accepts: the hostname enters the repository's history irreversibly.
+  (b) A third layer is added: `.specify/jira/personal.yml`, the per-operator gitignored
+      config holding the authentication email and the optional team selection. This file
+      has existed since feature 002 and was never named in this principle; the amendment
+      records what already ships as much as it adds anything.
+  (c) The enforcement test now states that the two shape exemptions are per-key and
+      per-layer, and requires a test proving each shape is still refused at every other
+      key of its own file and at every key of the other files, with the token shape
+      refused everywhere without exception.
+
+Rationale: surfaced by feature 030's Constitution Check (specs/030-retire-env-
+credentials). The `.env` rung is a plaintext token inside the workspace — readable by any
+agent with filesystem access, and one careless `git add -A` from being committed. The
+gitignore entry is a convention, not a boundary. Replacing it with a retrieval command
+the operator declares in their shell profile removes the file entirely: the token lives
+in the OS credential store, encrypted at rest and gated by the OS session, and the only
+thing inside the repository is the absence of it. The undeclared fixed-service-name probe
+goes with it for a different reason — it searched one hardcoded location that nothing in
+the configuration declared, invisible to the operator and impossible to point elsewhere.
+The site URL moves the other way by an explicit operator decision: it is not a secret, it
+is the same for every team, and keeping it out of the committed config forced every
+developer to re-declare it in a shell profile that the agent's spawned shells do not
+reliably load.
+
+Added sections: none
+Removed sections: none
+
+Templates: re-verified — no template changes required
+- OK .specify/templates/plan-template.md — Constitution Check is generic; no reference to
+  Principle IV or V wording
+- OK .specify/templates/spec-template.md — Constitution Check rows reference principle
+  titles only; neither title changed
+- OK .specify/templates/tasks-template.md — no reference to credential or config-layer
+  wording
+- OK .specify/templates/checklist-template.md — no changes required
+
+Runtime documentation: flagged by this amendment, updated by feature 030's own
+Phase 8 (specs/030-retire-env-credentials/tasks.md T087-T098a), completed 2026-08-18
+Documentation describes SHIPPED behaviour and is updated by the change that implements
+the rung, never ahead of it (the standing rule from the 1.3.0 amendment). Feature 030
+carried these as FR-032, now DONE:
+- DONE docs/07-configuration-and-secrets.md — "Credential resolution" rewritten to two rungs (T087, T096, T098a)
+- DONE docs/01-system-context.md, docs/04-config-ceremony.md (T088, T089) — docs/05-reconcile-flow.md needed no change (zero `.env` references, measured)
+- DONE README.md, INSTALL.md — `.env` setup instructions replaced (T090, T091)
+- DONE commands/speckit.jira.config.md, commands/speckit.jira.reconcile.md (T092)
+- New: docs/CREDENTIALS.md (T094/T095), a CHANGELOG.md entry (T097)
+
+Deferred, and deliberately out of scope of this amendment:
+- Principle IV's pre-write-guard bullet says the guard "MUST scan the tracked tree",
+  while the shipped guard (sink/jira/privacy_guard.sh) scans the PAYLOAD bound for Jira.
+  The wording and the implementation disagree. This predates feature 030 and does not
+  block it — a base URL in config.yml does not trip a payload scanner — so it is left
+  for a separate PATCH amendment rather than corrected here on an unverified reading.
+
+Follow-up TODOs: none
+
+Prior report (1.3.0)
+--------------------
 Version change: 1.2.0 → 1.3.0 (MINOR — materially expanded guidance: the OS secret-manager
 rung is described by the property it must satisfy rather than by three product names, and
 one new rule is added to an existing principle. No principle added, removed, renumbered, or
@@ -292,36 +392,55 @@ unaffected by any bridge failure.
 
 ### IV. Credential Security — Zero Tokens in the Tree, Ever
 
-No token, authentication email, real site URL, or accountId may ever enter a tracked
-file, including test fixtures.
+No token, authentication email, or accountId may ever enter a tracked file, including
+test fixtures. A Jira base URL MAY be declared at the single dedicated key of the
+committed team config: it is a team-wide coordinate that every team on the site resolves
+identically, it is not a secret, and it grants nothing without a token. Anywhere else —
+any other key, any other file, any test fixture — a real site URL remains forbidden.
 
-- Credentials MUST be resolved in this order: environment variables → OS secret manager
-  → gitignored `.env`. The second rung requires a store that the operating system
-  encrypts at rest and that the bridge reads at run time; it is realized today by the
-  macOS Keychain (`security`), Linux libsecret (`secret-tool`), and, on Windows,
-  PowerShell SecretManagement (`Get-Secret`) against the operator's registered default
-  vault. A platform's mechanism MAY be replaced by another satisfying that same
-  requirement without amending this principle — the requirement is the rule, the
-  mechanisms are how it is met. In CI (GitHub Actions), secrets are injected as
-  environment variables and therefore resolve via the first rung; no separate mechanism
-  exists or is needed.
-- The OS secret manager rung is SOFT-OPTIONAL on every platform: an absent tool or
-  module, an unregistered or locked store, and a missing entry MUST each fall through
-  silently to the next rung. That rung MUST NEVER be tested by the prerequisite check,
-  MUST NEVER raise an error, and MUST NEVER prompt or block — the bridge runs inside
-  lifecycle hooks, where there is nobody to answer a prompt and a wait is
-  indistinguishable from a hang.
+- Credentials MUST be resolved in this order, and in no other: environment variables →
+  an operator-declared retrieval command. The second rung is an environment variable
+  whose value names a program printing the token on its standard output; the bridge
+  executes it at call time as an argument vector, NEVER through a shell, so
+  metacharacters in that value are inert. Its name MUST be read only from the process
+  environment, never from a file in the workspace, so no pull request can introduce a
+  command. The requirement is a store the operating system encrypts at rest and that the
+  bridge reads at run time; the mechanism is the operator's choice, satisfied today by
+  the macOS Keychain (`security`), Linux libsecret (`secret-tool`), Windows PowerShell
+  SecretManagement (`Get-Secret`), and any other manager that prints a secret on stdout.
+  In CI (GitHub Actions), secrets are injected as environment variables and therefore
+  resolve via the first rung; no separate mechanism exists or is needed.
+- There is NO file-based rung and NO undeclared probe. The bridge MUST NOT read a token
+  from any file inside the workspace, and MUST NOT search a credential store under a
+  service name of its own choosing. A plaintext token in the workspace is one careless
+  `git add -A` from being committed and is readable by any agent with filesystem access;
+  an undeclared probe is a door the operator cannot see, relocate, or audit.
+- Absence is silent; declared failure is loud. When no retrieval command is declared,
+  the second rung MUST NEVER be tested by the prerequisite check and MUST NEVER raise an
+  error of its own. Once the operator HAS declared one, a command that is absent, exits
+  non-zero, times out, or prints nothing MUST be reported — naming the command and how
+  it failed — and MUST NOT be swallowed: there is nothing left to fall through to, and
+  silence here reports a missing token for a token that is correctly stored, sending the
+  operator to debug the wrong thing.
+- Resolution MUST NEVER prompt or block. The bridge runs inside lifecycle hooks, where
+  there is nobody to answer a prompt and a wait is indistinguishable from a hang. The
+  retrieval command's execution MUST therefore be bounded, and exceeding that bound MUST
+  be reported as a failure of that command.
 - The token MUST NEVER be logged, never echoed in an error message, and never passed as
-  a command-line argument (visible in `ps`).
+  a command-line argument (visible in `ps`). A failure report MUST NOT echo what the
+  retrieval command wrote to its standard output — that stream may hold a partial
+  secret; reporting its standard error is permitted and expected.
 - A pre-write guard MUST scan the tracked tree and block — with a dedicated exit code
   and zero Jira writes — on any leak of a known coordinate.
 
 **Enforcement test**: a repository scan for known coordinates runs in CI and locally
 before every write; a test asserts the token never appears in any log or error output,
-including at maximum verbosity; each platform's secret-manager rung has a test proving
-that every unavailability path — tool or module absent, store unregistered, store locked,
-entry missing — falls through silently and without prompting, and a rung that fails a run
-or waits on input is a review rejection.
+including at maximum verbosity; a test proves the retrieval command is executed as an
+argument vector, so a pipe or a substitution in its value is inert; a test proves it is
+executed at most once per run; each declared-failure path — command absent, non-zero
+exit, timeout, empty output — has a test proving it is reported distinguishably from the
+others and never swallowed. A resolution path that prompts, waits unbounded, continues
+unauthenticated, or reads a token from a file in the workspace is a review rejection.
 
 ### V. Separation of Team Config / Local Binding / Secrets
 
@@ -329,19 +448,31 @@ Three strictly separate layers:
 
 1. **Team config, COMMITTABLE** — `.specify/jira/config.yml` at the repo root, outside
    the extension folder: workflow mappings, issue-type hierarchy, phase→status mapping
-   by logical name, generation options, multi-project mapping. It MUST contain NO
-   sensitive identifier and NO credential — only project keys and type names/ids that
-   are public within the organization.
+   by logical name, generation options, multi-project mapping, and the Jira base URL.
+   It MUST contain NO credential and NO sensitive identifier — only project keys, type
+   names/ids, and the site coordinate, all of which are public within the organization.
+   The base URL is admitted here, and at one dedicated key only, because it is identical
+   for every team on the site: a value the team agrees once rather than one each
+   developer re-declares. Whoever adopts it chooses knowingly that the hostname enters
+   the repository's history and cannot be retracted from it.
 2. **Local binding, GITIGNORED** — `.specify/jira/config.local.yml`: personal
    overrides, instance-specific resolved ids when the team chooses not to commit them.
-3. **Secrets** — never in any YAML; resolved only via Principle IV.
+3. **Per-operator config, GITIGNORED** — `.specify/jira/personal.yml`: the settings that
+   differ for every person rather than for every machine — the operator's authentication
+   email and their optional team selection. It MUST NEVER be committed and MUST NEVER
+   hold a credential.
+4. **Secrets** — never in any YAML; resolved only via Principle IV.
 
 Configuration MUST NEVER live inside the extension folder (`.specify/extensions/...`):
 a reinstall or upgrade of the extension must never be able to destroy the user's
 configuration or hooks.
 
 **Enforcement test**: an upgrade/reinstall test asserts config and hooks survive intact;
-schema validation rejects any credential-shaped value in either YAML layer.
+schema validation rejects any credential-shaped value in every YAML layer. The two
+narrow exemptions — a site coordinate at the team config's base-URL key, an email at the
+per-operator config's email key — are per-key and per-layer: a test proves that each of
+those shapes is still refused at every other key of its own file and at every key of the
+other files, and that a token shape is refused everywhere without exception.
 
 ### VI. macOS / Linux / Windows Portability
 
@@ -625,4 +756,4 @@ whose review requires verbal explanations to be understood fails this principle.
 - Every PR review verifies compliance with all sixteen principles; any deviation MUST
   be justified in the plan's "Complexity Tracking" section or the PR is rejected.
 
-**Version**: 1.3.0 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-08-07
+**Version**: 2.0.0 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-08-18

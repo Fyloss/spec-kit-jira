@@ -34,3 +34,39 @@ Describe 'Config-time mapping refusal' {
         $obj.style | Should -Be 'company_managed'
     }
 }
+
+# =============================================================================
+# T053 [030, US2] — the §6 ordering rule: a malformed FILE setting refuses
+# even when the environment holds a valid one (contracts/connection-
+# settings.md §6). Mirror of test_config_refusal.bats' T052 tests.
+# =============================================================================
+
+Describe 'T053 — a malformed file setting is never masked by a valid environment value' {
+    AfterEach {
+        $env:SPEC_KIT_JIRA_BASE_URL = $null
+        $env:JIRA_EMAIL = $null
+    }
+
+    It 'T053 — a malformed base_url in config.yml refuses even with a valid SPEC_KIT_JIRA_BASE_URL exported' {
+        $d = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $d -Force | Out-Null
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: company_managed`nrouting_default: PROJ`nbase_url: `"https://team.atlassian.net/`"`n" -NoNewline
+        $env:SPEC_KIT_JIRA_BASE_URL = 'https://valid.example.invalid'
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'base_url is invalid'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'T053 — a malformed email in personal.yml refuses even with a valid JIRA_EMAIL exported' {
+        $d = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $d -Force | Out-Null
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: company_managed`nrouting_default: PROJ`n" -NoNewline
+        Set-Content -Path (Join-Path $d 'personal.yml') -Value "email: not-an-address`n" -NoNewline
+        $env:JIRA_EMAIL = 'valid@example.com'
+        $r = Import-JiraPersonalConfig -ConfigDir $d -MergedJson '{}'
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'email is invalid'
+        Remove-Item -Recurse -Force $d
+    }
+}

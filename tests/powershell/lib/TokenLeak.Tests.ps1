@@ -40,9 +40,9 @@ Describe 'Credential leak guard (SC-007)' {
         # invisible on hosts that discover commands/ (whose Reconcile.* files
         # scrub that variable) after lib/, and red on the ones that do not.
         foreach ($name in @(
-                'JIRA_EMAIL', 'JIRA_API_TOKEN', 'JIRA_NO_SLEEP', 'JIRA_MAX_ATTEMPTS',
+                'JIRA_EMAIL', 'JIRA_API_TOKEN', 'JIRA_PAT_COMMAND', 'JIRA_NO_SLEEP', 'JIRA_MAX_ATTEMPTS',
                 'SPEC_KIT_JIRA_SPEC_SLUG', 'SPEC_KIT_JIRA_PROJECT_KEY', 'SPEC_KIT_JIRA_BASE_URL',
-                'SPEC_KIT_JIRA_TIMING')) {
+                'SPEC_KIT_JIRA_PLAN_CONTEXT', 'SPEC_KIT_JIRA_TIMING')) {
             Remove-Item -LiteralPath "Env:\$name" -ErrorAction SilentlyContinue
         }
     }
@@ -53,6 +53,50 @@ Describe 'Credential leak guard (SC-007)' {
         $pwshPath = (Get-Process -Id $PID).Path
         $out = & $pwshPath -NoProfile -File $Entry reconcile --verbose --json $Spec *>&1 | Out-String
         $out | Should -Not -Match 'RAWSECRETXYZ0123456789'
+    }
+
+    It 'T081 [030, C4.1]: a token from the retrieval-command rung never appears in a full reconcile at max verbosity' {
+        Import-Module (Join-Path $Root 'tests/powershell/helpers/SecretStoreStub.psm1') -Force
+        $script:Mock = Start-JiraMock -ConfigPath (Join-Path $MockDir 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:Mock.BaseUrl
+        # PROJ is the shipped PLACEHOLDER key (see the AfterEach comment above)
+        # — reconcile treats it as "not bound" and never reaches credential
+        # resolution at all, which would make this test pass vacuously. The
+        # project-key-override short-circuit ALSO requires a plan context
+        # (Reconcile.psm1's own comment: "a run overriding only the project
+        # key still needs the epic strategy... built from the plan context").
+        $env:SPEC_KIT_JIRA_PROJECT_KEY = 'COMP'
+        $env:SPEC_KIT_JIRA_PLAN_CONTEXT = '{"story_type_id":"10002","priority_ids":{"P1":"1","P2":"2","P3":"3"},"estimation_field_id":"customfield_30044","parent_type_id":"10001","parent_local_id":"eeeeeeeeeeeeeeee"}'
+        $bindir = Join-Path $Work 'bin'
+        $counter = Join-Path $Work 'count'
+        Install-JiraPatCommandStub -BinDir $bindir -CounterFile $counter -Token 'COMMAND-RUNG-SECRET-9988' | Out-Null
+        Remove-Item Env:\JIRA_API_TOKEN -ErrorAction SilentlyContinue
+        $pwshPath = (Get-Process -Id $PID).Path
+        $out = & $pwshPath -NoProfile -File $Entry reconcile --verbose --json $Spec *>&1 | Out-String
+        $out | Should -Not -Match 'COMMAND-RUNG-SECRET-9988'
+        $basic = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes("$($env:JIRA_EMAIL):COMMAND-RUNG-SECRET-9988"))
+        $out | Should -Not -Match ([regex]::Escape($basic))
+        $env:JIRA_PAT_COMMAND = $null
+    }
+
+    It 'T081 [030, C4.4]: a failure report never echoes the retrieval command''s own stdout' {
+        Import-Module (Join-Path $Root 'tests/powershell/helpers/SecretStoreStub.psm1') -Force
+        $script:Mock = Start-JiraMock -ConfigPath (Join-Path $MockDir 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:Mock.BaseUrl
+        # PROJ is the shipped PLACEHOLDER key — see the note above.
+        $env:SPEC_KIT_JIRA_PROJECT_KEY = 'COMP'
+        $env:SPEC_KIT_JIRA_PLAN_CONTEXT = '{"story_type_id":"10002","priority_ids":{"P1":"1","P2":"2","P3":"3"},"estimation_field_id":"customfield_30044","parent_type_id":"10001","parent_local_id":"eeeeeeeeeeeeeeee"}'
+        $bindir = Join-Path $Work 'bin'
+        $counter = Join-Path $Work 'count'
+        # ExitCode 1: the failure path (C3.5), but stdout still carries a value
+        # that must never be echoed back by the located error message.
+        Install-JiraPatCommandStub -BinDir $bindir -CounterFile $counter -Token 'SHOULD-NEVER-BE-ECHOED' -ExitCode 1 | Out-Null
+        Remove-Item Env:\JIRA_API_TOKEN -ErrorAction SilentlyContinue
+        $pwshPath = (Get-Process -Id $PID).Path
+        $out = & $pwshPath -NoProfile -File $Entry reconcile --verbose --json $Spec *>&1 | Out-String
+        $out | Should -Not -Match 'SHOULD-NEVER-BE-ECHOED'
+        $out | Should -Match 'exited with status 1'
+        $env:JIRA_PAT_COMMAND = $null
     }
 
     It 'T010 — neither the token nor its base64 Authorization value leaks with timing and tracing both on (contracts/timing-report.md T7)' {

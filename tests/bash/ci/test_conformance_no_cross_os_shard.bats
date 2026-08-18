@@ -15,7 +15,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (209)" {
+@test "the conformance corpus has exactly the recorded scenario count (231)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -190,8 +190,16 @@ setup() {
   # which-issues follow-up on a THREE-key request, pinning contract §3.1's
   # "carries the identical object" cross-port after the fallback was found
   # rebuilding it from the leading key alone (FR-034) (208 -> 209).
+  # 030 adds twenty-two: the two-rung credential chain (nothing declared,
+  # command absent, non-zero exit, timeout, empty output, env-wins,
+  # .env-inert, ceremony-reports), base_url/email now in tracked
+  # config.yml (settings-from-files, settings-env-wins, base-url-malformed,
+  # email-malformed, settings-missing-both, the C5.4 guard-not-a-hole
+  # cross-check table), personal.yml's team-optional ceremony (created,
+  # no-teams, created-then-loads, unchanged, dry-run, degraded,
+  # idempotent), and the unattended env-only path (209 -> 231).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 209 ]
+  [ "${count}" -eq 231 ]
 }
 
 @test "ci.yml's unit job never shards the corpus across OSes (FR-018)" {

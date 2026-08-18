@@ -778,19 +778,27 @@ config_to_yaml() {
 # Credential-shape rejection (T031, FR-023)
 # =============================================================================
 
-# _cfg_credential_errors — read a JSON object on stdin; print one error line per
-# credential-shaped string value found (excluding privacy.allowlist, FR-053).
-# The value itself is NEVER printed (NFR-3) — only its path and the matched shape.
+# _cfg_credential_errors [exempt-path ...] — read a JSON object on stdin; print
+# one error line per credential-shaped string value found. `privacy` stays
+# exempt unconditionally, on every surface (excluding privacy.allowlist,
+# FR-053). Each additional argument names one more top-level key this
+# particular surface legitimately holds a credential-shaped value at — the
+# base-url key of config.yml, the email key of personal.yml (030, data-model.md
+# §4, research R4). The token shape (`^ATATT`) is never affected by this list —
+# only the extension is parameterized, the mechanism (`select`) is not (FR-020).
 _cfg_credential_errors() {
+  local exempt_json
+  exempt_json="$(printf '%s\n' "$@" | jq -R . | jq -cs .)"
   # kcov-excl-start — jq literal (string lines are not statements)
-  jq -r '
+  jq -r --argjson ex "${exempt_json}" '
     def disppath:
       reduce .[] as $p (""; . + (if ($p|type)=="number" then "[\($p)]"
                                  elif . == "" then $p else "." + $p end));
+    def exempt: ((.[0] // "") as $k | ($k == "privacy") or (($ex | index($k)) != null));
     [ paths(scalars) as $p
-      | select( ($p[0] // "") != "privacy" )
-      | { path: ($p|disppath), v: (getpath($p)|tostring) }
+      | { path: ($p|disppath), v: (getpath($p)|tostring), exempt: ($p|exempt) }
       | ( if (.v|test("^ATATT")) then "\(.path): Atlassian API token"
+          elif .exempt then empty
           elif (.v|test("[a-z0-9][a-z0-9-]*\\.atlassian\\.net")) then "\(.path): Atlassian Cloud host"
           elif (.v|test("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")) then "\(.path): email address"
           else empty end )
@@ -855,7 +863,7 @@ def branchpattern:
    then "projects must be a non-empty array" else empty end),
   (if (.routing_default|type) != "string" or ((.routing_default|projkey) != true)
    then "routing_default must be a valid project key" else empty end),
-  (keys_unsorted[] | select(IN("version_compat","projects","routing","routing_default","privacy","teams","field_defaults","task_mirror")|not)
+  (keys_unsorted[] | select(IN("version_compat","projects","routing","routing_default","privacy","teams","field_defaults","task_mirror","base_url")|not)
    | "unknown top-level key: \(.)"),
   ( . as $top
     | ($top.projects // []) | map(.key) as $declaredKeys
@@ -969,6 +977,31 @@ def branchpattern:
          else empty end)
       ][] ) )
 ] | flatten'
+# kcov-excl-stop
+
+# _CFG_CONFIG_ERRORS_JQ (030, data-model.md §2/§2a, contracts/connection-
+# settings.md §2) — base_url validation, reported under its OWN "config" label
+# rather than "schema": an absolute URL with a host and nothing else (no
+# trailing slash, path, query or fragment); scheme https anywhere, or http ONLY
+# at one of the three loopback literals (research R10) — never a hostname that
+# merely resolves to one, so the check stays a pure string function with no DNS
+# lookup. Absent key is accepted (the environment may supply it instead,
+# C2.7); present-and-empty is refused (an empty declaration is a mistake, not
+# an opt-out).
+# shellcheck disable=SC2016  # `\(...)` is jq string interpolation, not shell expansion
+# kcov-excl-start — jq literal (string lines are not statements)
+_CFG_CONFIG_ERRORS_JQ='
+def https_url: test("^https://[^/?#]+$");
+def loopback_http: test("^http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:[0-9]+)?$");
+[
+  (if has("base_url") then
+     (.base_url) as $u
+     | (if ($u == "") then "base_url is invalid"
+        elif ($u | https_url) then empty
+        elif ($u | loopback_http) then empty
+        else "base_url is invalid" end)
+   else empty end)
+] | flatten | .[]'
 # kcov-excl-stop
 
 # shellcheck disable=SC2016  # `\(...)` is jq string interpolation, not shell expansion
@@ -1251,8 +1284,14 @@ def branchpattern:
   and (([match("<FEATURE_NAME>"; "g")] | length) == 1)
   and ((gsub("<ID>"; "") | gsub("<FEATURE_NAME>"; "")) | test("^[a-z0-9/_-]*$"));
 [
-  (keys_unsorted[] | select(IN("team","override")|not) | "unknown personal key: \(.)"),
-  (if ((.team // "") | test("^[a-z][a-z0-9]*$") | not) then "team is invalid" else empty end),
+  (keys_unsorted[] | select(IN("team","override","email")|not) | "unknown personal key: \(.)"),
+  (if has("team") then
+     (if ((.team // "") | test("^[a-z][a-z0-9]*$") | not) then "team is invalid" else empty end)
+   else empty end),
+  (if has("email") then
+     (if ((.email // "") | test("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$") | not)
+      then "email is invalid" else empty end)
+   else empty end),
   (if has("override") then
      ( .override
        | ( (keys_unsorted[] | select(IN("folder_prefix","branch_pattern")|not)
@@ -1286,9 +1325,23 @@ config_personal_load() {
   if ! pjson="$(config_yaml_to_json "${pf}")"; then
     return "${EXIT_CONFIG}"
   fi
-  printf '%s' "${pjson}" | _cfg_credential_errors | _cfg_report_errors "credential" "${pf}" || return "${EXIT_CONFIG}"
+  # See the identical guard in config_load — an empty personal.yml is a
+  # normal state (the ceremony writes only comments and a `# team:` line
+  # left commented, and an operator may blank it further).
+  [[ "${pjson}" == "null" ]] && pjson="{}"
+  printf '%s' "${pjson}" | _cfg_credential_errors "email" | _cfg_report_errors "credential" "${pf}" || return "${EXIT_CONFIG}"
   printf '%s' "${pjson}" | jq -r "${_CFG_PERSONAL_ERRORS_JQ}" 2> /dev/null \
     | _cfg_report_errors "personal" "${pf}" || return "${EXIT_CONFIG}"
+
+  # An absent `team` key is "no team selected" — identical to an absent file
+  # (030, FR-027, contracts/connection-settings.md C4.1/C4.4). The catalogue-
+  # membership check below is skipped entirely in this state, or a repository
+  # whose catalogue declares no teams would fail the moment personal.yml
+  # exists — exactly the file the config ceremony now creates by default.
+  if [[ "$(jq -r 'has("team")' <<< "${pjson}")" != "true" ]]; then
+    printf '{"active":false}'
+    return 0
+  fi
 
   # The selected team must exist in the committed catalogue (FR-011).
   local team ids
@@ -1339,14 +1392,25 @@ config_load() {
 
   local team_json
   team_json="$(config_yaml_to_json "${team}")" || return "${EXIT_CONFIG}"
+  # An empty file parses to jq `null` (YAML's own "empty document" reading) —
+  # coerced to `{}` here so every jq program below can assume an object
+  # without each one repeating a `(. // {})` guard. Without this, `keys_unsorted`
+  # and `has(...)` throw on a null top level, a jq crash (exit 5) that
+  # `pipefail` turns into a silent EXIT_CONFIG with no message at all.
+  [[ "${team_json}" == "null" ]] && team_json="{}"
 
-  printf '%s' "${team_json}" | _cfg_credential_errors | _cfg_report_errors "credential" "${team}" || return "${EXIT_CONFIG}"
+  printf '%s' "${team_json}" | _cfg_credential_errors "base_url" | _cfg_report_errors "credential" "${team}" || return "${EXIT_CONFIG}"
   printf '%s' "${team_json}" | _cfg_schema_errors "${_CFG_TEAM_ERRORS_JQ}" | _cfg_report_errors "schema" "${team}" || return "${EXIT_CONFIG}"
+  printf '%s' "${team_json}" | jq -r "${_CFG_CONFIG_ERRORS_JQ}" 2> /dev/null \
+    | _cfg_report_errors "config" "${team}" || return "${EXIT_CONFIG}"
 
   local merged="${team_json}"
   if [[ -f "${local_f}" ]]; then
     local local_json
     local_json="$(config_yaml_to_json "${local_f}")" || return "${EXIT_CONFIG}"
+    # See the identical guard on team_json above — an empty config.local.yml
+    # is a normal, common state (nothing has been resolved locally yet).
+    [[ "${local_json}" == "null" ]] && local_json="{}"
     printf '%s' "${local_json}" | _cfg_credential_errors | _cfg_report_errors "credential" "${local_f}" || return "${EXIT_CONFIG}"
     printf '%s' "${local_json}" | _cfg_schema_errors "${_CFG_LOCAL_ERRORS_JQ}" | _cfg_report_errors "schema" "${local_f}" || return "${EXIT_CONFIG}"
     # Recursive object merge of the local `overrides` over the team config. jq's
@@ -1371,4 +1435,63 @@ config_load() {
   fi
 
   printf '%s' "${merged}"
+}
+
+# =============================================================================
+# The resolution chokepoint (030, plan.md §Key design decision,
+# contracts/connection-settings.md §1)
+# =============================================================================
+
+# config_resolve_connection [config_dir] [merged-cfg-json] — seed
+# SPEC_KIT_JIRA_BASE_URL and JIRA_EMAIL into the PROCESS ENVIRONMENT from
+# config.yml / personal.yml, ONLY when the variable is unset or EMPTY — the
+# empty string counts as unset (the conformance harness relies on this idiom
+# exactly, C1.4). Call once per run, after config_load, before any Jira call
+# (C1.1). Never overwrites a non-empty value (C1.2/C1.3): environment-first
+# precedence falls out of the assignment itself rather than a rule every one
+# of the 72 existing readers must honour (research R1).
+#
+# [merged-cfg-json], when supplied, is used AS-IS for base_url — no second
+# config_load. feature.sh already loads and handles config.yml's own errors
+# (a malformed file is a pass-through there, not a hard failure); re-validating
+# it here would silently contradict that. Omitted, config.yml is loaded here
+# IF PRESENT; an ABSENT file is tolerated (US4: env-only, unattended, no
+# config files at all) — only a PRESENT and malformed one fails closed
+# (EXIT_CONFIG), because a file on disk that cannot be read correctly is a
+# fail-closed condition, not a value silently outranked (C6.2).
+config_resolve_connection() {
+  local dir="${1:-${JIRA_CONFIG_DIR}}" cfg="${2:-}"
+  if [[ -z "${cfg}" ]]; then
+    cfg='{}'
+    if [[ -f "${dir}/config.yml" ]]; then
+      cfg="$(config_load "${dir}")" || return "${EXIT_CONFIG}"
+    fi
+  fi
+
+  if [[ -z "${SPEC_KIT_JIRA_BASE_URL:-}" ]]; then
+    local base_url
+    base_url="$(jq -r '.base_url // ""' <<< "${cfg}")"
+    [[ -n "${base_url}" ]] && export SPEC_KIT_JIRA_BASE_URL="${base_url}"
+  fi
+
+  # A present personal.yml is validated UNCONDITIONALLY (C6.2: "a malformed
+  # setting refuses the run whether or not the environment would have
+  # supplied a valid one") — never gated on whether JIRA_EMAIL happens to be
+  # set already. Only the SEEDING of the variable is conditional.
+  local pf="${dir}/personal.yml"
+  if [[ -f "${pf}" ]]; then
+    # config_personal_load's return object never carries `email` — every
+    # branch of it is pinned to data-model.md §3's five-state table, none of
+    # which mentions the key. Call it anyway, for its validation side effect
+    # (a malformed team or email fails closed here, EXIT_CONFIG), then read
+    # the field straight from the parsed file.
+    config_personal_load "${dir}" "${cfg}" > /dev/null || return $?
+    if [[ -z "${JIRA_EMAIL:-}" ]]; then
+      local pjson email
+      pjson="$(config_yaml_to_json "${pf}")" || return "${EXIT_CONFIG}"
+      email="$(jq -r '.email // ""' <<< "${pjson}")"
+      [[ -n "${email}" ]] && export JIRA_EMAIL="${email}"
+    fi
+  fi
+  return 0
 }

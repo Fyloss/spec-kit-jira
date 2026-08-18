@@ -77,3 +77,32 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"seed-ran"* ]]
 }
+
+# =============================================================================
+# T028 [030] — every command dispatch entry calls the resolution chokepoint
+# (contracts/connection-settings.md C1.5). Enumerated from the dispatch
+# table's own commands directory, not hand-listed — a command file added
+# later is picked up automatically, and a missed one fails this test rather
+# than working only when the operator also exported the variable.
+# =============================================================================
+
+@test "T028 — every file in scripts/bash/commands/ calls config_resolve_connection" {
+  local dir="${ROOT}/scripts/bash/commands"
+  local f missing=""
+  for f in "${dir}"/*.sh; do
+    grep -q 'config_resolve_connection' "${f}" || missing="${missing}${missing:+, }$(basename "${f}")"
+  done
+  [ -z "${missing}" ] || {
+    printf 'missing the chokepoint call: %s\n' "${missing}" >&2
+    false
+  }
+}
+
+@test "T028 — the dispatch table has exactly the five entry points this assertion covers" {
+  # A sixth command file added later without updating this count is a signal
+  # to re-examine the enumeration, not a silent pass.
+  local dir="${ROOT}/scripts/bash/commands"
+  local n
+  n="$(find "${dir}" -maxdepth 1 -name '*.sh' | wc -l | tr -d ' ')"
+  [ "${n}" -eq 5 ]
+}

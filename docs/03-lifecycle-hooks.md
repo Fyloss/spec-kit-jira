@@ -129,7 +129,7 @@ flowchart TD
     Code -->|"1, rejected target"| Cause0["Rejected target (017)<br/>relay the entry point's own message —<br/>this is a caller defect, not a degraded Jira state"]
     Code -->|"0, no binding"| Cause1["Not yet configured<br/>run /speckit.jira.config"]
     Code -->|"5"| Cause4["Prerequisite missing<br/>relay the entry point's own message"]
-    Code -->|"4"| Cause2["Credentials absent<br/>no token on any of the three rungs"]
+    Code -->|"4"| Cause2["Credentials absent, or a declared<br/>JIRA_PAT_COMMAND failed (030) —<br/>reported as a WARNING, host still never fails"]
     Code -->|"3"| Cause3["Credentials rejected by Jira"]
     Code -->|"2"| Cause5["Jira unreachable<br/>nothing was mirrored"]
     Code -->|"0, mirrored"| Ok["Report created / updated / recognised / skipped"]

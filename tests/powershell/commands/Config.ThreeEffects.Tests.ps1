@@ -40,7 +40,7 @@ Describe 'Config three-effect reporting' {
         $obj = $sw.ToString().Trim() | ConvertFrom-Json
         # All effects are present as distinct, named sections (002 adds
         # gitignore; 011 adds field_defaults).
-        ($obj.effects.PSObject.Properties.Name | Sort-Object) -join ',' | Should -Be 'discovery,field_defaults,gitignore,hooks,readme,task_mirror'
+        ($obj.effects.PSObject.Properties.Name | Sort-Object) -join ',' | Should -Be 'discovery,field_defaults,gitignore,hooks,personal,readme,task_mirror'
         $obj.effects.discovery.status | Should -Be 'written'
         $obj.effects.hooks.status | Should -Not -BeNullOrEmpty
         $obj.effects.readme.status | Should -Not -BeNullOrEmpty
@@ -219,5 +219,66 @@ Describe 'T083 [Phase 9] — the §7.1 per-role audit and the §7.3 promotion no
         $r.Out | Should -Match 'config: project SAFE: commit this so your team mirrors identically —'
         $r.Out | Should -Match '    task: "Sub-task"'
         ($r.Out -split "`n" | Where-Object { $_ -match '^WARNING: ' }).Count | Should -Be 0
+    }
+}
+
+# =============================================================================
+# T060 [030, US3] — the personal effect statuses: created, unchanged,
+# would_create (contracts/personal-config-creation.md)
+# =============================================================================
+
+Describe 'T060 — the personal effect statuses' {
+    BeforeEach {
+        $script:Work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+        New-Item -ItemType Directory -Path $Work -Force | Out-Null
+        Copy-Item -Recurse (Join-Path $Fixture '.specify') (Join-Path $Work '.specify')
+        $env:JIRA_CONFIG_DIR = Join-Path $Work '.specify/jira'
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $M.BaseUrl
+    }
+    AfterEach {
+        Stop-JiraMock -Mock $M
+        Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
+    }
+
+    It 'T060 — personal reports created on a fresh repository, with the catalogue ids in the comment' {
+        $env:JIRA_EMAIL = 'op@example.com'
+        $sw = [System.IO.StringWriter]::new()
+        $orig = [Console]::Out
+        [Console]::SetOut($sw)
+        try { [void](Invoke-JiraConfig -Arguments @('config', '--child-type', 'COMP=Story', '--json')) }
+        finally { [Console]::SetOut($orig); $env:JIRA_EMAIL = 'user@example.com' }
+        $obj = $sw.ToString().Trim() | ConvertFrom-Json
+        $obj.effects.personal.status | Should -Be 'created'
+        $pf = Join-Path $env:JIRA_CONFIG_DIR 'personal.yml'
+        Test-Path $pf | Should -BeTrue
+        (Get-Content -Raw $pf) | Should -Match 'email: op@example.com'
+        (Get-Content -Raw $pf) | Should -Match '# team: alpha'
+    }
+
+    It 'T060 — personal reports unchanged when the file already exists, byte-identical' {
+        New-Item -ItemType Directory -Path $env:JIRA_CONFIG_DIR -Force | Out-Null
+        $pf = Join-Path $env:JIRA_CONFIG_DIR 'personal.yml'
+        [System.IO.File]::WriteAllText($pf, "email: kept@example.com`n# custom comment`n")
+        $before = Get-Content -Raw $pf
+        $sw = [System.IO.StringWriter]::new()
+        $orig = [Console]::Out
+        [Console]::SetOut($sw)
+        try { [void](Invoke-JiraConfig -Arguments @('config', '--child-type', 'COMP=Story', '--json')) }
+        finally { [Console]::SetOut($orig) }
+        $obj = $sw.ToString().Trim() | ConvertFrom-Json
+        $obj.effects.personal.status | Should -Be 'unchanged'
+        (Get-Content -Raw $pf) | Should -Be $before
+    }
+
+    It 'T060 — personal reports would_create under --dry-run, and writes nothing' {
+        $sw = [System.IO.StringWriter]::new()
+        $orig = [Console]::Out
+        [Console]::SetOut($sw)
+        try { [void](Invoke-JiraConfig -Arguments @('config', '--child-type', 'COMP=Story', '--dry-run', '--json')) }
+        finally { [Console]::SetOut($orig) }
+        $obj = $sw.ToString().Trim() | ConvertFrom-Json
+        $obj.effects.personal.status | Should -Be 'would_create'
+        Test-Path (Join-Path $env:JIRA_CONFIG_DIR 'personal.yml') | Should -BeFalse
     }
 }

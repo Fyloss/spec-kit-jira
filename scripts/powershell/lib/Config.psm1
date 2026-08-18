@@ -679,21 +679,28 @@ function ConvertTo-JiraConfigYaml {
 
 function Get-JiraCredentialPathError {
     # Walk a parsed structure yielding "<disppath>: <reason>" for each
-    # credential-shaped string value. privacy.* is exempt (FR-053). The value is
-    # never included. Path format mirrors jq's disppath used by the Bash port.
-    param($Node, [string] $Path, [System.Collections.Generic.List[string]] $Acc)
+    # credential-shaped string value. `privacy` stays exempt unconditionally,
+    # on every surface; -ExemptPaths names additional top-level keys this
+    # particular surface legitimately holds a credential-shaped value at — the
+    # base-url key of config.yml, the email key of personal.yml (030, data-
+    # model.md §4, contracts/connection-settings.md §5). The token shape
+    # (`^ATATT`) is NEVER exempted, at any key, on any surface (C5.3) — it is
+    # checked before either exemption applies. The value is never included.
+    # Path format mirrors jq's disppath used by the Bash port.
+    param($Node, [string] $Path, [System.Collections.Generic.List[string]] $Acc, [string[]] $ExemptPaths = @())
 
     if ($Node -is [System.Collections.IDictionary]) {
         foreach ($k in (Get-JiraOrdinalSorted $Node.Keys)) {
             $seg = if ($Path -eq '') { [string]$k } else { "$Path.$k" }
-            Get-JiraCredentialPathError $Node[$k] $seg $Acc
+            Get-JiraCredentialPathError $Node[$k] $seg $Acc $ExemptPaths
         }
     }
     elseif ($Node -is [string]) {
-        # Skip the whole privacy subtree.
-        if ($Path -like 'privacy*') { return }
+        $topKey = if ($Path -match '^([^.\[]+)') { $Matches[1] } else { $Path }
+        $exempt = ($topKey -eq 'privacy') -or ($ExemptPaths -ccontains $topKey)
         $reason = $null
         if ($Node -cmatch '^ATATT') { $reason = 'Atlassian API token' }
+        elseif ($exempt) { return }
         elseif ($Node -cmatch '[a-z0-9][a-z0-9-]*\.atlassian\.net') { $reason = 'Atlassian Cloud host' }
         elseif ($Node -cmatch '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$') { $reason = 'email address' }
         if ($reason) { $Acc.Add("${Path}: $reason") }
@@ -702,7 +709,7 @@ function Get-JiraCredentialPathError {
         $i = 0
         foreach ($item in $Node) {
             $seg = if ($Path -eq '') { "[$i]" } else { "$Path[$i]" }
-            Get-JiraCredentialPathError $item $seg $Acc
+            Get-JiraCredentialPathError $item $seg $Acc $ExemptPaths
             $i++
         }
     }
@@ -710,9 +717,9 @@ function Get-JiraCredentialPathError {
 
 function Get-JiraConfigCredentialError {
     [CmdletBinding()]
-    param([Parameter(Mandatory)] $Object)
+    param([Parameter(Mandatory)] $Object, [string[]] $ExemptPaths = @())
     $acc = [System.Collections.Generic.List[string]]::new()
-    Get-JiraCredentialPathError $Object '' $acc
+    Get-JiraCredentialPathError $Object '' $acc $ExemptPaths
     return $acc.ToArray()
 }
 
@@ -759,7 +766,7 @@ function Test-JiraTeamConfig {
         $errs.Add('routing_default must be a valid project key')
     }
 
-    $allowedTop = @('version_compat', 'projects', 'routing', 'routing_default', 'privacy', 'teams', 'field_defaults', 'task_mirror')
+    $allowedTop = @('version_compat', 'projects', 'routing', 'routing_default', 'privacy', 'teams', 'field_defaults', 'task_mirror', 'base_url')
     if ($Object -is [System.Collections.IDictionary]) {
         foreach ($k in (Get-JiraOrdinalSorted $Object.Keys)) {
             if ($allowedTop -cnotcontains [string]$k) { $errs.Add("unknown top-level key: $k") }
@@ -965,6 +972,33 @@ function Test-JiraTeamConfig {
     return $errs.ToArray()
 }
 
+function Test-JiraConfigFieldError {
+    <#
+    .SYNOPSIS
+      base_url validation (030, data-model.md §2/§2a, contracts/connection-
+      settings.md §2) — reported under its OWN "config" label rather than
+      "schema": an absolute URL with a host and nothing else (no trailing
+      slash, path, query or fragment); scheme https anywhere, or http ONLY at
+      one of the three loopback literals (research §R10) — never a hostname
+      that merely resolves to one, so the check stays a pure string function
+      with no DNS lookup. Absent key is accepted (the environment may supply
+      it instead, C2.7); present-and-empty is refused. Mirror of
+      _CFG_CONFIG_ERRORS_JQ.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Object)
+    $errs = [System.Collections.Generic.List[string]]::new()
+    if ($Object -is [System.Collections.IDictionary] -and $Object.Contains('base_url')) {
+        $u = [string](Get-CfgProp $Object 'base_url')
+        $httpsUrl = $u -cmatch '^https://[^/?#]+$'
+        $loopbackHttp = $u -cmatch '^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?$'
+        if ($u -ceq '' -or (-not $httpsUrl -and -not $loopbackHttp)) {
+            $errs.Add('base_url is invalid')
+        }
+    }
+    return $errs.ToArray()
+}
+
 function Test-JiraLocalConfig {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Object)
@@ -1130,8 +1164,9 @@ function Import-JiraConfig {
         return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() }
     }
 
-    if (& $fail 'credential' $team (Get-JiraConfigCredentialError $teamObj)) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() } }
+    if (& $fail 'credential' $team (Get-JiraConfigCredentialError $teamObj -ExemptPaths @('base_url'))) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() } }
     if (& $fail 'schema' $team (Test-JiraTeamConfig $teamObj)) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() } }
+    if (& $fail 'config' $team (Test-JiraConfigFieldError $teamObj)) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() } }
 
     $merged = $teamObj
     if (Test-Path -LiteralPath $localF) {
@@ -1159,16 +1194,27 @@ function Import-JiraConfig {
 }
 
 function Test-JiraPersonalObject {
-    # Personal-file schema (002 US3) — mirror of _CFG_PERSONAL_ERRORS_JQ.
+    # Personal-file schema (002 US3; 030 adds `email` and makes `team`
+    # optional, data-model.md §3, contracts/connection-settings.md §3-4) —
+    # mirror of _CFG_PERSONAL_ERRORS_JQ. `team`'s pattern check is
+    # conditional on the key being PRESENT: an absent key is "no team
+    # selected" (FR-027), not `team is invalid` — removing that would score
+    # every team-less repository as malformed.
     param([Parameter(Mandatory)] $Object)
     $errs = [System.Collections.Generic.List[string]]::new()
     if ($Object -is [System.Collections.IDictionary]) {
         foreach ($k in (Get-JiraOrdinalSorted $Object.Keys)) {
-            if (@('team', 'override') -cnotcontains [string]$k) { $errs.Add("unknown personal key: $k") }
+            if (@('team', 'override', 'email') -cnotcontains [string]$k) { $errs.Add("unknown personal key: $k") }
         }
     }
-    $team = [string](Get-CfgProp $Object 'team')
-    if ($team -cnotmatch '^[a-z][a-z0-9]*$') { $errs.Add('team is invalid') }
+    if ($Object -is [System.Collections.IDictionary] -and $Object.Contains('team')) {
+        $team = [string](Get-CfgProp $Object 'team')
+        if ($team -cnotmatch '^[a-z][a-z0-9]*$') { $errs.Add('team is invalid') }
+    }
+    if ($Object -is [System.Collections.IDictionary] -and $Object.Contains('email')) {
+        $email = [string](Get-CfgProp $Object 'email')
+        if ($email -cnotmatch '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$') { $errs.Add('email is invalid') }
+    }
     $override = Get-CfgProp $Object 'override'
     if ($null -ne $override -and $override -is [System.Collections.IDictionary]) {
         foreach ($k in (Get-JiraOrdinalSorted $override.Keys)) {
@@ -1227,8 +1273,18 @@ function Import-JiraPersonalConfig {
         }
         return $any
     }
-    if (& $emit 'credential' (Get-JiraConfigCredentialError $pObj)) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors } }
+    if (& $emit 'credential' (Get-JiraConfigCredentialError $pObj -ExemptPaths @('email'))) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors } }
     if (& $emit 'personal' (Test-JiraPersonalObject $pObj)) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors } }
+
+    # An absent `team` key is "no team selected" — identical to an absent file
+    # (030, FR-027, contracts/connection-settings.md C4.1/C4.4). The
+    # catalogue-membership check below is skipped entirely in this state, or a
+    # repository whose catalogue declares no teams would fail the moment
+    # personal.yml exists — exactly the file the config ceremony now creates
+    # by default.
+    if (-not ($pObj -is [System.Collections.IDictionary] -and $pObj.Contains('team'))) {
+        return [pscustomobject]@{ ExitCode = 0; Json = '{"active":false}'; Errors = $errors }
+    }
 
     $cfg = $MergedJson | ConvertFrom-Json -Depth 100
     $team = [string](Get-CfgProp $pObj 'team')
@@ -1244,6 +1300,67 @@ function Import-JiraPersonalConfig {
     $override = Get-CfgProp $pObj 'override'
     $result = [ordered]@{ active = $true; team = $team; override = $override }
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue $result); Errors = $errors }
+}
+
+function Resolve-JiraConnection {
+    <#
+    .SYNOPSIS
+      Seed SPEC_KIT_JIRA_BASE_URL and JIRA_EMAIL into the PROCESS ENVIRONMENT
+      from config.yml / personal.yml, ONLY when the variable is unset or EMPTY
+      — the empty string counts as unset (the conformance harness relies on
+      this idiom exactly, C1.4). Call once per run, after Import-JiraConfig,
+      before any Jira call (C1.1). Never overwrites a non-empty value
+      (C1.2/C1.3). Mirror of config_resolve_connection.
+
+      -MergedJson, when supplied, is used AS-IS for base_url — no second
+      Import-JiraConfig call. An OMITTED config.yml is tolerated (US4:
+      env-only, unattended, no config files at all); a PRESENT and malformed
+      one fails closed (ExitCode 4, C6.2).
+    #>
+    [CmdletBinding()]
+    param(
+        [string] $ConfigDir = (Get-JiraConfigDirPath),
+        [string] $MergedJson = ''
+    )
+    $cfg = $MergedJson
+    if (-not $cfg) {
+        $cfg = '{}'
+        $teamPath = Join-Path $ConfigDir 'config.yml'
+        if (Test-Path -LiteralPath $teamPath) {
+            $loaded = Import-JiraConfig -ConfigDir $ConfigDir
+            if ($loaded.ExitCode -ne 0) { return [int] $loaded.ExitCode }
+            $cfg = $loaded.Json
+        }
+    }
+
+    if (-not $env:SPEC_KIT_JIRA_BASE_URL) {
+        $cfgObj = $cfg | ConvertFrom-Json -Depth 100
+        if ($cfgObj.PSObject.Properties['base_url'] -and $cfgObj.base_url) {
+            $env:SPEC_KIT_JIRA_BASE_URL = [string] $cfgObj.base_url
+        }
+    }
+
+    # A present personal.yml is validated UNCONDITIONALLY (C6.2: "a malformed
+    # setting refuses the run whether or not the environment would have
+    # supplied a valid one") — never gated on whether JIRA_EMAIL happens to
+    # be set already. Only the SEEDING of the variable is conditional.
+    $pf = Join-Path $ConfigDir 'personal.yml'
+    if (Test-Path -LiteralPath $pf) {
+        # Import-JiraPersonalConfig's return object never carries `email`
+        # — every branch of it is pinned to data-model.md §3's five-state
+        # table, none of which mentions the key. Call it anyway, for its
+        # validation side effect (a malformed team or email fails closed
+        # here, ExitCode 4), then read the field straight from the parsed
+        # file.
+        $loadedP = Import-JiraPersonalConfig -ConfigDir $ConfigDir -MergedJson $cfg
+        if ($loadedP.ExitCode -ne 0) { return [int] $loadedP.ExitCode }
+        if (-not $env:JIRA_EMAIL) {
+            try { $pObj = Read-JiraConfigYamlObject -Path $pf } catch { return $script:ExitConfig }
+            $email = [string](Get-CfgProp $pObj 'email')
+            if ($email) { $env:JIRA_EMAIL = $email }
+        }
+    }
+    return 0
 }
 
 # =============================================================================
@@ -1573,10 +1690,10 @@ function Remove-JiraHooksDisabled {
     return 'released'
 }
 
-Export-ModuleMember -Function Get-JiraExtensionVersion, Assert-JiraSingleVersionSource, `
+Export-ModuleMember -Function Get-JiraConfigDirPath, Get-JiraExtensionVersion, Assert-JiraSingleVersionSource, `
     ConvertFrom-JiraConfigYaml, ConvertTo-JiraConfigYaml, Read-JiraConfigYamlObject, `
-    Get-JiraConfigCredentialError, Test-JiraTeamConfig, Test-JiraLocalConfig, Import-JiraConfig, `
-    Import-JiraPersonalConfig, `
+    Get-JiraConfigCredentialError, Test-JiraTeamConfig, Test-JiraLocalConfig, Test-JiraConfigFieldError, Import-JiraConfig, `
+    Test-JiraPersonalObject, Import-JiraPersonalConfig, Resolve-JiraConnection, `
     Get-JiraStatusClassification, Get-JiraPhaseStatusTargetSet, `
     Test-JiraPlaceholderKey, Get-JiraPlaceholderKey, `
     Get-JiraHookEventNameList, Get-JiraAfterEventNameList, Get-JiraHooksDisabled, Add-JiraHooksDisabled, Remove-JiraHooksDisabled, `

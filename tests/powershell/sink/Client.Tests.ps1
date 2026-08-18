@@ -15,6 +15,10 @@ Describe 'Jira REST transport' {
         $env:JIRA_EMAIL = 'user@example.com'
         $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
         $env:JIRA_NO_SLEEP = '1'
+        # Re-import -Force: resets Credentials.psm1's $script:-scoped credential
+        # cache (021, US3) to 'unset' — Pester runs every It in one process, so
+        # module scope has no per-test isolation otherwise (030, T043).
+        Import-Module (Join-Path $SinkDir 'Client.psm1') -Force
     }
 
     AfterEach {
@@ -39,6 +43,23 @@ Describe 'Jira REST transport' {
             $r = Invoke-JiraRequest -Method POST -Url "$($mock.BaseUrl)/rest/api/3/issue" -Body '{"fields":{}}'
             $r.ExitCode | Should -Be 0
             ($r.Body | ConvertFrom-Json).key | Should -Be 'COMP-1'
+        } finally { Stop-JiraMock -Mock $mock }
+    }
+
+    It 'T043 [030, C6.2/C6.3]: no credential resolvable maps to the auth exit code AND reports the reason, never silent' {
+        $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'default.json')
+        try {
+            $env:JIRA_API_TOKEN = $null
+            $se = [System.IO.StringWriter]::new()
+            $origErr = [Console]::Error
+            [Console]::SetError($se)
+            try {
+                $r = Invoke-JiraRequest -Method GET -Url "$($mock.BaseUrl)/rest/api/3/project/COMP"
+            } finally { [Console]::SetError($origErr) }
+            $r.ExitCode | Should -Be 3
+            $r.Body | Should -BeNullOrEmpty
+            $se.ToString() | Should -Match 'credential resolution failed'
+            $se.ToString() | Should -Match 'neither JIRA_API_TOKEN nor JIRA_PAT_COMMAND is set'
         } finally { Stop-JiraMock -Mock $mock }
     }
 

@@ -8,6 +8,8 @@ setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
   # shellcheck source=/dev/null
   source "${ROOT}/scripts/bash/commands/reconcile.sh"
+  export JIRA_EMAIL="user@example.com"
+  export JIRA_API_TOKEN="test-token-value"
   FIXTURE="${ROOT}/tests/conformance/fixtures/repo-with-two-styles"
   export JIRA_CONFIG_DIR="${FIXTURE}/.specify/jira"
   export SPEC_KIT_JIRA_BASE_URL="https://mock"

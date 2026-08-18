@@ -35,6 +35,20 @@ teardown() {
   [ "$(printf '%s' "$output" | jq -r .key)" = "COMP-1" ]
 }
 
+@test "T042 [030, C6.1]: no credential resolvable maps to the auth exit code AND reports the reason, never silent" {
+  mock_start "${MOCK}/configs/default.json"
+  unset JIRA_API_TOKEN
+  run --separate-stderr jira_request GET "${MOCK_BASE_URL}/rest/api/3/project/COMP"
+  [ "$status" -eq 3 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"credential resolution failed"* ]]
+  [[ "$stderr" == *"neither JIRA_API_TOKEN nor JIRA_PAT_COMMAND is set"* ]]
+  # The mock was never reached — the resolution failure short-circuits before
+  # any network call.
+  run mock_calls
+  [ -z "$output" ]
+}
+
 @test "401 maps to the auth exit code (3), zero body" {
   mock_start "${MOCK}/configs/faults.json"
   run jira_request GET "${MOCK_BASE_URL}/rest/api/3/project/AUTH"

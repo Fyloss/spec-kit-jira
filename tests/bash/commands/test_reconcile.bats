@@ -12,6 +12,8 @@ setup() {
   PS_CMD="${ROOT}/scripts/powershell/commands"
   # shellcheck source=/dev/null
   source "${CMD_DIR}/reconcile.sh"
+  export JIRA_EMAIL="user@example.com"
+  export JIRA_API_TOKEN="test-token-value"
   export SPEC_KIT_JIRA_BASE_URL="https://mock"
   export SPEC_KIT_JIRA_SPEC_SLUG="001-feature"
   export SPEC_KIT_JIRA_REPO="acme/app"

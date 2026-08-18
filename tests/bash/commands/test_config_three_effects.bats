@@ -46,8 +46,8 @@ boot() {
   run --separate-stderr cmd_config config --child-type COMP=Story --json
   [ "$status" -eq 0 ]
   # All effects are present as distinct, named sections (002 adds gitignore;
-  # 011 adds field_defaults).
-  [ "$(jq -r '.effects | keys | sort | join(",")' <<< "$output")" = "discovery,field_defaults,gitignore,hooks,readme,task_mirror" ]
+  # 011 adds field_defaults; 030 adds personal).
+  [ "$(jq -r '.effects | keys | sort | join(",")' <<< "$output")" = "discovery,field_defaults,gitignore,hooks,personal,readme,task_mirror" ]
   # The discovery effect performed its write this phase.
   [ "$(jq -r '.effects.discovery.status' <<< "$output")" = "written" ]
   # Every effect carries a status from the documented enumeration.
@@ -271,4 +271,40 @@ seed_disabled_registry() {
   run --separate-stderr cmd_config config --child-type COMP=Story --json
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"Task mirror: COMP — checklist (unchanged)"* ]]
+}
+
+# =============================================================================
+# T060 [030, US3] — the personal effect statuses: created, unchanged,
+# would_create (contracts/personal-config-creation.md)
+# =============================================================================
+
+@test "T060 — personal reports created on a fresh repository, with the catalogue ids in the comment" {
+  boot
+  export JIRA_EMAIL="op@example.com"
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.effects.personal.status' <<< "$output")" = "created" ]
+  [ -f "${JIRA_CONFIG_DIR}/personal.yml" ]
+  grep -qx 'email: op@example.com' "${JIRA_CONFIG_DIR}/personal.yml"
+  grep -qx '# team: alpha' "${JIRA_CONFIG_DIR}/personal.yml"
+}
+
+@test "T060 — personal reports unchanged when the file already exists, byte-identical" {
+  boot
+  mkdir -p "${JIRA_CONFIG_DIR}"
+  printf 'email: kept@example.com\n# custom comment\n' > "${JIRA_CONFIG_DIR}/personal.yml"
+  cp "${JIRA_CONFIG_DIR}/personal.yml" "${WORK}/before-personal.yml"
+  run --separate-stderr cmd_config config --child-type COMP=Story --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.effects.personal.status' <<< "$output")" = "unchanged" ]
+  run cmp "${WORK}/before-personal.yml" "${JIRA_CONFIG_DIR}/personal.yml"
+  [ "$status" -eq 0 ]
+}
+
+@test "T060 — personal reports would_create under --dry-run, and writes nothing" {
+  boot
+  run --separate-stderr cmd_config config --child-type COMP=Story --dry-run --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.effects.personal.status' <<< "$output")" = "would_create" ]
+  [ ! -f "${JIRA_CONFIG_DIR}/personal.yml" ]
 }

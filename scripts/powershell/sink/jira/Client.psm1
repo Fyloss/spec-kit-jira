@@ -78,8 +78,12 @@ function Invoke-JiraRequest {
 
     $maxAttempts = if ($env:JIRA_MAX_ATTEMPTS) { [int] $env:JIRA_MAX_ATTEMPTS } else { 3 }
 
+    # A resolution failure here (030, C6.2/C6.3) is reported to stderr —
+    # byte-identical to the Bash port's cred_curl_config, which reports it
+    # itself rather than leaving this call site to construct the message.
     $header = Get-JiraAuthHeader -Email $Email
     if (-not $header) {
+        [Console]::Error.WriteLine((Get-JiraCredentialLastError))
         return [pscustomobject]@{ Status = 0; Body = ''; ExitCode = (Get-JiraExitCode 'auth') }
     }
     $header['Accept'] = 'application/json'

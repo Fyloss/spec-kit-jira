@@ -1,5 +1,8 @@
-# T018 — Credential resolution (ELIMINATORY NFR-3 / SC-007), PowerShell side.
-# Mirror of tests/bash/lib/test_credentials.bats.
+# 030 — Credential resolution (contracts/credential-resolution.md), PowerShell
+# side. Mirror of tests/bash/lib/test_credentials.bats. Two rungs: environment
+# variable -> operator-declared retrieval command ($env:JIRA_PAT_COMMAND). No
+# .env, no hardcoded secret-manager probe. The resolved token NEVER appears in
+# argv, logs, errors, or the verbose stream.
 
 BeforeAll {
     $LibDir = Join-Path $PSScriptRoot '../../../scripts/powershell/lib'
@@ -10,9 +13,12 @@ BeforeAll {
 Describe 'Credentials' {
     BeforeEach {
         $env:JIRA_API_TOKEN = $null
+        $env:JIRA_PAT_COMMAND = $null
         $env:_CRED_SECRET_TOKEN = $null
         $script:TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
         New-Item -ItemType Directory -Path $script:TmpDir | Out-Null
+        $script:BinDir = Join-Path $script:TmpDir 'bin'
+        $script:Counter = Join-Path $script:TmpDir 'count'
         $env:JIRA_CONFIG_DIR = $script:TmpDir
         # Re-import -Force: resets the module's $script:-scoped credential
         # cache (021, US3) to 'unset', the PowerShell proxy for "a fresh
@@ -22,55 +28,141 @@ Describe 'Credentials' {
 
     AfterEach {
         $env:JIRA_API_TOKEN = $null
+        $env:JIRA_PAT_COMMAND = $null
         $env:_CRED_SECRET_TOKEN = $null
         $env:JIRA_CONFIG_DIR = $null
         if (Test-Path $script:TmpDir) { Remove-Item -Recurse -Force $script:TmpDir }
+        Remove-Item Function:\Get-Secret -ErrorAction SilentlyContinue # NOT Function:\global:Get-Secret — Set-Item honours the global: scope prefix on write, but Remove-Item silently no-ops on it (verified: the function survives), so removal must address the drive by its unqualified name
     }
 
-    Context 'Resolve-JiraToken' {
-    It 'resolves the token from the environment first' {
-        $env:JIRA_API_TOKEN = 'env-token'
-        Resolve-JiraToken | Should -Be 'env-token'
-    }
+    Context 'Sources and outcomes (C1.1, C3.1-C3.11)' {
+        It 'resolves the token from the environment first (C3.1)' {
+            $env:JIRA_API_TOKEN = 'env-token'
+            Resolve-JiraToken | Should -Be 'env-token'
+        }
 
-    It 'falls back to the gitignored .env when env and secret manager are empty' {
-        Set-Content -Path (Join-Path $script:TmpDir '.env') -Value 'JIRA_API_TOKEN=file-token'
-        Resolve-JiraToken | Should -Be 'file-token'
-    }
+        It 'no JIRA_API_TOKEN, command succeeds with non-empty stdout: token resolved (C3.2)' {
+            Install-JiraPatCommandStub -BinDir $script:BinDir -CounterFile $script:Counter -Token 'from-command' | Out-Null
+            Resolve-JiraToken | Should -Be 'from-command'
+        }
 
-    It 'environment token wins over the .env file' {
-        Set-Content -Path (Join-Path $script:TmpDir '.env') -Value 'JIRA_API_TOKEN=file-token'
-        $env:JIRA_API_TOKEN = 'env-token'
-        Resolve-JiraToken | Should -Be 'env-token'
-    }
+        It 'environment token wins over a declared command, which is never executed (C3.11)' {
+            Install-JiraPatCommandStub -BinDir $script:BinDir -CounterFile $script:Counter -Token 'from-command' | Out-Null
+            $env:JIRA_API_TOKEN = 'env-token'
+            Resolve-JiraToken | Should -Be 'env-token'
+            Get-JiraPatCommandStubCount -CounterFile $script:Counter | Should -Be 0
+        }
 
-    It "reads an 'export JIRA_API_TOKEN=...' line in .env (dotenv convention)" {
-        Set-Content -Path (Join-Path $script:TmpDir '.env') -Value 'export JIRA_API_TOKEN=file-token'
-        Resolve-JiraToken | Should -Be 'file-token'
-    }
+        It 'the _CRED_SECRET_TOKEN test override stands in for the command, unexecuted' {
+            Install-JiraPatCommandStub -BinDir $script:BinDir -CounterFile $script:Counter -Token 'from-command' | Out-Null
+            $env:_CRED_SECRET_TOKEN = 'keychain-token'
+            Resolve-JiraToken | Should -Be 'keychain-token'
+            Get-JiraPatCommandStubCount -CounterFile $script:Counter | Should -Be 0
+        }
 
-    It 'strips surrounding quotes from the .env value (dotenv convention)' {
-        Set-Content -Path (Join-Path $script:TmpDir '.env') -Value 'JIRA_API_TOKEN="file-token"'
-        Resolve-JiraToken | Should -Be 'file-token'
-        Set-Content -Path (Join-Path $script:TmpDir '.env') -Value "JIRA_API_TOKEN='file-token'"
-        Resolve-JiraToken | Should -Be 'file-token'
-    }
-
-    It 'strips the carriage return from a Windows-authored (CRLF) .env' {
-        [System.IO.File]::WriteAllText((Join-Path $script:TmpDir '.env'), "JIRA_API_TOKEN=file-token`r`n")
-        Resolve-JiraToken | Should -Be 'file-token'
-    }
-
-    It 'secret manager (mockable) sits between env and .env' {
-        Set-Content -Path (Join-Path $script:TmpDir '.env') -Value 'JIRA_API_TOKEN=file-token'
-        $env:_CRED_SECRET_TOKEN = 'keychain-token'
-        Resolve-JiraToken | Should -Be 'keychain-token'
-    }
-
-    It 'returns null when no source provides a token' {
+        It 'C3.3: neither variable set — failure names both, returns null' {
             Resolve-JiraToken | Should -BeNullOrEmpty
         }
 
+        It 'C3.3 message names JIRA_API_TOKEN and JIRA_PAT_COMMAND' {
+            Resolve-JiraToken | Out-Null
+            Get-JiraCredentialLastError | Should -Match 'JIRA_API_TOKEN'
+            Get-JiraCredentialLastError | Should -Match 'JIRA_PAT_COMMAND'
+        }
+
+        It 'C3.4: command not found — message names it and that it could not be executed' {
+            $env:JIRA_PAT_COMMAND = 'spec-kit-jira-no-such-helper'
+            Resolve-JiraToken | Out-Null
+            Get-JiraCredentialLastError | Should -Match 'spec-kit-jira-no-such-helper'
+            Get-JiraCredentialLastError | Should -Match 'could not be executed'
+        }
+
+        It 'C3.5: command exits non-zero — message names it and the exit status' {
+            $prog = Install-JiraPatCommandStub -BinDir $script:BinDir -CounterFile $script:Counter -Token '' -ExitCode 3
+            Resolve-JiraToken | Out-Null
+            $pattern = [regex]::Escape($prog)
+            Get-JiraCredentialLastError | Should -Match $pattern
+            Get-JiraCredentialLastError | Should -Match 'status 3'
+        }
+
+        It 'C3.7: command exits zero with empty stdout — message names it and that output was empty' {
+            $prog = Install-JiraPatCommandStub -BinDir $script:BinDir -CounterFile $script:Counter -Token ''
+            Resolve-JiraToken | Out-Null
+            $pattern = [regex]::Escape($prog)
+            Get-JiraCredentialLastError | Should -Match $pattern
+            Get-JiraCredentialLastError | Should -Match 'produced no output'
+        }
+
+        It 'C3.6: command exceeds the bound — message names it and the bound' {
+            InModuleScope Credentials { $script:CredBoundSeconds = 1 }
+            if ($IsWindows) {
+                $env:JIRA_PAT_COMMAND = 'powershell -NoProfile -Command Start-Sleep -Seconds 5'
+            } else {
+                $env:JIRA_PAT_COMMAND = 'sleep 5'
+            }
+            Resolve-JiraToken | Out-Null
+            Get-JiraCredentialLastError | Should -Match '1s bound'
+        }
+    }
+
+    Context 'Tokenization and secrecy (C2.1-C2.5)' {
+        It 'C2.3: interior whitespace preserved, surrounding whitespace (incl. CR) trimmed' {
+            New-Item -ItemType Directory -Path $script:BinDir -Force | Out-Null
+            $prog = Join-Path $script:BinDir 'spaced'
+            Set-Content -LiteralPath $prog -Value "#!/usr/bin/env bash`nprintf '  a b  \r\n'`n" -NoNewline
+            & chmod +x $prog
+            $env:JIRA_PAT_COMMAND = $prog
+            Resolve-JiraToken | Should -Be 'a b'
+        }
+
+        It "C2.4: the command's stderr never contributes to the token's value" {
+            New-Item -ItemType Directory -Path $script:BinDir -Force | Out-Null
+            $prog = Join-Path $script:BinDir 'noisy'
+            Set-Content -LiteralPath $prog -Value "#!/usr/bin/env bash`necho leaked-on-stderr >&2`nprintf 'real-token'`n" -NoNewline
+            & chmod +x $prog
+            $env:JIRA_PAT_COMMAND = $prog
+            Resolve-JiraToken | Should -Be 'real-token'
+        }
+
+        It 'C2.2: shell metacharacters in JIRA_PAT_COMMAND are inert' {
+            $evidence = Join-Path $script:TmpDir 'x'
+            $env:JIRA_PAT_COMMAND = "echo a | tee $evidence"
+            Resolve-JiraToken | Should -Be "a | tee $evidence"
+            Test-Path $evidence | Should -BeFalse
+        }
+
+        It 'C2.1: no shell, no eval — a command-substitution-shaped value is never evaluated' {
+            $evidence = Join-Path $script:TmpDir 'evidence'
+            $env:JIRA_PAT_COMMAND = "echo `$(touch $evidence)"
+            Resolve-JiraToken | Out-Null
+            Test-Path $evidence | Should -BeFalse
+        }
+
+        It 'C2.5: execution is bounded, and the bound is not configurable from a file' {
+            InModuleScope Credentials { $script:CredBoundSeconds } | Should -Be 5
+        }
+    }
+
+    Context 'The .env rung and the hardcoded probe are gone (C1.2, C1.3/C1.3a)' {
+        It 'C1.2: a gitignored .env holding a token is never opened — ignored entirely, no message names it' {
+            Set-Content -Path (Join-Path $script:TmpDir '.env') -Value 'JIRA_API_TOKEN=file-token'
+            Resolve-JiraToken | Should -BeNullOrEmpty
+            Get-JiraCredentialLastError | Should -Not -Match '\.env'
+        }
+
+        It 'C1.3/C1.3a: a stubbed Get-Secret returning a token is never consulted absent a declared command' {
+            Install-SecretStoreStub -CounterFile $script:Counter -Token 'from-the-store'
+            Resolve-JiraToken | Should -BeNullOrEmpty
+            Get-SecretStoreStubCount -CounterFile $script:Counter | Should -Be 0
+        }
+
+        It 'Get-JiraEnvFileToken and Get-JiraSecretManagerToken no longer exist' {
+            { InModuleScope Credentials { Get-JiraEnvFileToken } } | Should -Throw
+            { InModuleScope Credentials { Get-JiraSecretManagerToken } } | Should -Throw
+        }
+    }
+
+    Context 'Secrecy (§4)' {
         It 'never emits the token on the verbose stream (SC-007)' {
             $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
             $tmp = New-TemporaryFile
@@ -79,19 +171,45 @@ Describe 'Credentials' {
             $trace | Should -Not -Match 'RAWSECRETXYZ'
             Remove-Item $tmp.FullName -Force
         }
+
+        It 'Get-JiraAuthHeader emits Basic auth base64, never the raw token (NFR-3)' {
+            $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+            $header = Get-JiraAuthHeader -Email 'user@example.com'
+            $header.Authorization | Should -Not -Match 'RAWSECRETXYZ'
+            $header.Authorization | Should -Match '^Basic '
+            $b64 = $header.Authorization.Substring('Basic '.Length)
+            $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64))
+            $decoded | Should -Be 'user@example.com:RAWSECRETXYZ'
+        }
+
+        It "C4.4: a failure report never echoes the command's own stdout" {
+            New-Item -ItemType Directory -Path $script:BinDir -Force | Out-Null
+            $prog = Join-Path $script:BinDir 'partial'
+            Set-Content -LiteralPath $prog -Value "#!/usr/bin/env bash`nprintf 'PARTIAL-SECRET-ON-STDOUT'`nexit 1`n" -NoNewline
+            & chmod +x $prog
+            $env:JIRA_PAT_COMMAND = $prog
+            Resolve-JiraToken | Out-Null
+            Get-JiraCredentialLastError | Should -Not -Match 'PARTIAL-SECRET-ON-STDOUT'
+        }
+
+        It 'Get-JiraAuthHeader returns $null on a resolution failure, with the reason in Get-JiraCredentialLastError (C6.2, C6.3)' {
+            $header = Get-JiraAuthHeader -Email 'user@example.com'
+            $header | Should -BeNullOrEmpty
+            Get-JiraCredentialLastError | Should -Match 'credential resolution failed'
+        }
     }
 
-    # --- T039 [US3] — the per-run credential cache, PowerShell twin of
-    # T034/T036/T037/T038 in test_credentials.bats/test_reconcile_credential_cache.bats
-    # (contracts/credential-cache.md). No priming function exists on this port
-    # (module scope already persists for the process); the BeforeEach re-import
-    # above is this file's proxy for "a fresh process".
-    Context 'the credential cache' {
-        It 'the secret store is consulted exactly once across many resolutions, including a simulated retry (T034)' {
-            $counter = Join-Path $script:TmpDir 'secretstore.count'
-            Install-SecretStoreStub -CounterFile $counter -Token 'from-the-store'
-            1..5 | ForEach-Object { Resolve-JiraToken | Should -Be 'from-the-store' }
-            Get-SecretStoreStubCount -CounterFile $counter | Should -Be 1
+    # --- the per-run credential cache (contracts/credential-cache.md). No
+    # priming function exists on this port (module scope already persists for
+    # the process, so there is no subshell to lose a primed cache to — the
+    # Bash port's `cred_prime_cache`/several-`$(...)`-subshells test has no
+    # PowerShell twin for that reason); the BeforeEach re-import above is this
+    # file's proxy for "a fresh process".
+    Context 'the credential cache (C2.6, C5)' {
+        It 'the command is consulted exactly once across many resolutions, including a simulated retry' {
+            Install-JiraPatCommandStub -BinDir $script:BinDir -CounterFile $script:Counter -Token 'from-the-command' | Out-Null
+            1..5 | ForEach-Object { Resolve-JiraToken | Should -Be 'from-the-command' }
+            Get-JiraPatCommandStubCount -CounterFile $script:Counter | Should -Be 1
         }
 
         It 'the cache is never written to $env: — a child process spawned mid-run inherits no copy of the token (T036)' {
@@ -113,100 +231,11 @@ Describe 'Credentials' {
             Resolve-JiraToken | Should -Be 'token-two'
         }
 
-        It "an unresolved outcome caches as 'unresolved', a state distinct from an empty resolved token — the sources are not re-consulted on a second resolve (T037)" {
-            $counter = Join-Path $script:TmpDir 'secretstore.count'
-            Install-SecretStoreStub -CounterFile $counter -Token $null
+        It "an unresolved outcome caches as 'unresolved', a state distinct from an empty resolved token — the sources are not re-consulted on a second resolve (C2.6)" {
+            $prog = Install-JiraPatCommandStub -BinDir $script:BinDir -CounterFile $script:Counter -Token '' -ExitCode 1
             Resolve-JiraToken | Should -BeNullOrEmpty
             Resolve-JiraToken | Should -BeNullOrEmpty
-            Get-SecretStoreStubCount -CounterFile $counter | Should -Be 1
-        }
-
-        It 'the secret-manager rung returning nothing falls through silently to .env, no error (T038)' {
-            Set-Content -Path (Join-Path $script:TmpDir '.env') -Value 'JIRA_API_TOKEN=file-token'
-            $counter = Join-Path $script:TmpDir 'secretstore.count'
-            Install-SecretStoreStub -CounterFile $counter -Token $null
-            { Resolve-JiraToken } | Should -Not -Throw
-            Resolve-JiraToken | Should -Be 'file-token'
-        }
-    }
-
-    Context 'Get-JiraAuthHeader' {
-        It 'builds a Basic base64 header that decodes to email:token, raw token absent' {
-            $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
-            $header = Get-JiraAuthHeader -Email 'user@example.com'
-            $header.Authorization | Should -Not -Match 'RAWSECRETXYZ'
-            $header.Authorization | Should -Match '^Basic '
-            $b64 = $header.Authorization.Substring('Basic '.Length)
-            $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64))
-            $decoded | Should -Be 'user@example.com:RAWSECRETXYZ'
-        }
-    }
-
-    # --- T069-T072 [US6] — the Windows SecretManagement vault
-    # (contracts/credential-cache.md §5). `Get-Secret` does not exist on this
-    # host (SecretManagement is not installed), so it is stubbed as a
-    # global function first — Pester's `Mock -ModuleName` can only replace a
-    # command that already resolves somewhere — then mocked into Credentials'
-    # own session state, matching Get-JiraSecretManagerToken's unqualified
-    # call site.
-    Context 'the Windows SecretManagement vault (US6)' {
-        AfterEach {
-            Remove-Item Function:\Get-Secret -ErrorAction SilentlyContinue
-        }
-
-        It 'resolves the token from a stubbed vault when the environment is absent, and the environment still wins over it (T069)' {
-            function global:Get-Secret { 'vault-token' }
-            Mock -ModuleName Credentials -CommandName Get-Secret -MockWith { 'vault-token' }
-            Resolve-JiraToken | Should -Be 'vault-token'
-
-            Import-Module (Join-Path $LibDir 'Credentials.psm1') -Force
-            Mock -ModuleName Credentials -CommandName Get-Secret -MockWith { 'vault-token' }
-            $env:JIRA_API_TOKEN = 'env-token'
-            Resolve-JiraToken | Should -Be 'env-token'
-        }
-
-        It 'falls through silently when the SecretManagement module is not installed (T070)' {
-            Mock -ModuleName Credentials -CommandName Get-Command -ParameterFilter { $Name -eq 'Get-Secret' } -MockWith { $null }
-            { Resolve-JiraToken } | Should -Not -Throw
-            Resolve-JiraToken | Should -BeNullOrEmpty
-        }
-
-        It 'falls through silently when no vault is registered (T070)' {
-            function global:Get-Secret { throw 'No vault is registered as the default vault.' }
-            Mock -ModuleName Credentials -CommandName Get-Secret -MockWith { throw 'No vault is registered as the default vault.' }
-            { Resolve-JiraToken } | Should -Not -Throw
-            Resolve-JiraToken | Should -BeNullOrEmpty
-        }
-
-        It 'falls through silently when no secret named spec-kit-jira exists (T070)' {
-            function global:Get-Secret { throw 'The secret spec-kit-jira was not found.' }
-            Mock -ModuleName Credentials -CommandName Get-Secret -MockWith { throw 'The secret spec-kit-jira was not found.' }
-            { Resolve-JiraToken } | Should -Not -Throw
-            Resolve-JiraToken | Should -BeNullOrEmpty
-        }
-
-        It 'falls through silently and returns rather than waiting when the vault is locked (T070)' {
-            function global:Get-Secret { throw 'The vault SecretStore requires a password.' }
-            Mock -ModuleName Credentials -CommandName Get-Secret -MockWith { throw 'The vault SecretStore requires a password.' }
-            $result = $null
-            $elapsed = Measure-Command { $result = Resolve-JiraToken }
-            $result | Should -BeNullOrEmpty
-            $elapsed.TotalSeconds | Should -BeLessThan 2
-        }
-
-        It 'a vault-sourced token never enters $env: and never appears in an active Start-Transcript (T072)' {
-            function global:Get-Secret { 'VAULT-SOURCED-SECRET-XYZ' }
-            Mock -ModuleName Credentials -CommandName Get-Secret -MockWith { 'VAULT-SOURCED-SECRET-XYZ' }
-            $transcriptPath = Join-Path $script:TmpDir 'transcript.txt'
-            Start-Transcript -Path $transcriptPath -Force | Out-Null
-            try {
-                Resolve-JiraToken | Should -Be 'VAULT-SOURCED-SECRET-XYZ'
-            } finally {
-                Stop-Transcript | Out-Null
-            }
-            $leaked = Get-ChildItem Env: | Where-Object { $_.Value -eq 'VAULT-SOURCED-SECRET-XYZ' }
-            $leaked | Should -BeNullOrEmpty
-            (Get-Content -Raw $transcriptPath) | Should -Not -Match 'VAULT-SOURCED-SECRET-XYZ'
+            Get-JiraPatCommandStubCount -CounterFile $script:Counter | Should -Be 1
         }
     }
 }

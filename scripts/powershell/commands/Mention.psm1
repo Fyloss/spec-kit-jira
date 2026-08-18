@@ -13,6 +13,7 @@ Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot '../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Identity.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force
 
@@ -44,6 +45,12 @@ function Invoke-JiraMention {
         [Console]::Error.WriteLine('mention: an issue key argument is required (mention PROJ-123)')
         return [int](Get-JiraExitCode 'usage')
     }
+
+    # The resolution chokepoint (030, plan.md §Key design decision): seed
+    # SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml / personal.yml,
+    # environment first.
+    $chokepointRc = Resolve-JiraConnection -ConfigDir (Get-JiraConfigDirPath)
+    if ($chokepointRc -ne 0) { return [int] $chokepointRc }
 
     $base = if ($env:SPEC_KIT_JIRA_BASE_URL) { $env:SPEC_KIT_JIRA_BASE_URL } else { '' }
     if ([string]::IsNullOrEmpty($base)) {

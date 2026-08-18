@@ -712,6 +712,13 @@ function Invoke-JiraReconcileRun {
         return (Get-JiraReconcileFaultCode -Code ([int](Get-JiraExitCode 'usage')) -Message $targetMsg)
     }
 
+    # The resolution chokepoint (030, plan.md §Key design decision): seed
+    # SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml / personal.yml,
+    # environment first. Runs before the base-url check just below.
+    if ((Resolve-JiraConnection -ConfigDir (Get-JiraConfigDirPath)) -ne 0) {
+        return (Get-JiraReconcileFaultCode -Code ([int](Get-JiraExitCode 'config')) -Message 'reconcile: the team configuration could not be loaded (zero writes)')
+    }
+
     # NOT YET CONFIGURED (FR-017 first cause, FR-019). This is the normal state of
     # a freshly installed repository, not an error: the lifecycle step behaves
     # exactly as it would without the extension, apart from one notice. At most

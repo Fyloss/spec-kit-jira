@@ -25,6 +25,8 @@ source "${_cmd_mention_dir}/../lib/cli.sh"
 # shellcheck source=/dev/null
 source "${_cmd_mention_dir}/../lib/output.sh"
 # shellcheck source=/dev/null
+source "${_cmd_mention_dir}/../lib/config.sh"
+# shellcheck source=/dev/null
 source "${_cmd_mention_dir}/../sink/jira/identity.sh"
 # shellcheck source=/dev/null
 source "${_cmd_mention_dir}/../sink/jira/discovery.sh"
@@ -54,6 +56,13 @@ cmd_mention() {
     printf 'mention: an issue key argument is required (mention PROJ-123)\n' >&2
     return "$(cli_exit_code usage)"
   fi
+
+  # The resolution chokepoint (030, contracts/connection-settings.md C1.5):
+  # seed SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml / personal.yml,
+  # environment first, before either is read below. Self-loading — mention
+  # never called config_load — and tolerant of an absent config.yml (env-only
+  # is a valid, unattended state); a PRESENT but malformed one fails closed.
+  config_resolve_connection "${JIRA_CONFIG_DIR:-.specify/jira}" || return $?
 
   local base="${SPEC_KIT_JIRA_BASE_URL:-}"
   if [[ -z "${base}" ]]; then

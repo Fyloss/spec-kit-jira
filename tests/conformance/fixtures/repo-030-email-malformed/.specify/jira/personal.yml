@@ -1,0 +1,3 @@
+# 030 — a malformed email address (invalid per connection-settings.md §3.2).
+# Located refusal, exit 4, before any Jira call.
+email: not-an-address

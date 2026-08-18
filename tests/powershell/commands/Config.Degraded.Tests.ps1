@@ -99,13 +99,21 @@ Describe 'Config degraded mode' {
         @(Get-JiraMockCallLog -Mock $M | Where-Object { $_ }).Count | Should -Be 0
     }
 
-    It 'includes gitignore: skipped in the degraded effect set (T093)' {
+    It 'T062 — reports gitignore and personal with their TRUE status (030, research R5)' {
+        # Reordered ahead of the degraded early return: the fresh-setup case
+        # IS degraded mode, and it is exactly when personal.yml must be
+        # created and covered by the ignore rule (research R5) — reporting
+        # either "skipped" would be a lie about work that was in fact
+        # performed.
         $env:SPEC_KIT_JIRA_BASE_URL = ''
         $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
         $r = Invoke-ConfigCaptured @('config', '--json')
         $r.ExitCode | Should -Be 0
-        ($r.Out.Trim() | ConvertFrom-Json).effects.gitignore.status | Should -Be 'skipped'
-        Test-Path (Join-Path $Work '.gitignore') | Should -BeFalse
+        $obj = $r.Out.Trim() | ConvertFrom-Json
+        $obj.effects.gitignore.status | Should -Be 'created'
+        $obj.effects.personal.status | Should -Be 'created'
+        Test-Path (Join-Path $Work '.gitignore') | Should -BeTrue
+        Test-Path (Join-Path $env:JIRA_CONFIG_DIR 'personal.yml') | Should -BeTrue
     }
 
     It 'surfaces the proposals and rerun guidance in degraded prose (T093)' {
@@ -113,7 +121,8 @@ Describe 'Config degraded mode' {
         $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
         $r = Invoke-ConfigCaptured @('config')
         $r.ExitCode | Should -Be 0
-        $r.Out | Should -Match '  gitignore: skipped'
+        $r.Out | Should -Match '  gitignore: created'
+        $r.Out | Should -Match '  personal: created'
         $r.Out | Should -Match 'Provisional teams: ijt, wex'
         $r.Out | Should -Match ([regex]::Escape('Rerun: define SPEC_KIT_JIRA_BASE_URL, then re-run: .specify/extensions/jira/scripts/bash/spec-kit-jira.sh config (on Windows: .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 config)'))
     }
@@ -245,5 +254,45 @@ Describe 'Degraded causes are told apart (T047, 003 US5)' {
         $r.Out | Should -Not -Match 'must be one of'
         $r.Out | Should -Not -Match 'NotAnAllowedValue'
         (Get-Content -Raw -LiteralPath $path) | Should -Be $before
+    }
+}
+
+# =============================================================================
+# T044c [030, US1] — the ceremony's degraded trigger splits the credential
+# reason (contracts/credential-resolution.md C6.4-C6.6, FR-038)
+# =============================================================================
+
+Describe 'T044c — the degraded trigger splits the credential reason' {
+    BeforeEach {
+        Import-Module (Join-Path $PSScriptRoot '../../../scripts/powershell/commands/Config.psm1') -Force
+        $script:Work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+        New-Item -ItemType Directory -Path (Join-Path $Work '.specify/jira') -Force | Out-Null
+        $env:JIRA_CONFIG_DIR = Join-Path $Work '.specify/jira'
+        $lines = @('projects:', '  - key: TEAM', 'routing_default: TEAM')
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines -join "`n") + "`n"))
+        $env:SPEC_KIT_JIRA_BASE_URL = ''
+        $env:JIRA_API_TOKEN = $null
+        $env:JIRA_PAT_COMMAND = $null
+    }
+    AfterEach {
+        Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
+        $env:JIRA_PAT_COMMAND = $null
+    }
+
+    It 'T044c — with no JIRA_PAT_COMMAND declared, degraded mode is silent about the rung (C6.4)' {
+        $r = Invoke-ConfigCaptured @('config', '--json')
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Match 'JIRA_API_TOKEN'
+        $r.Err | Should -Not -Match 'JIRA_PAT_COMMAND'
+    }
+
+    It 'T044c — a declared and failing JIRA_PAT_COMMAND reports its reason on stderr and in detail, exit 0 (C6.5)' {
+        $env:JIRA_PAT_COMMAND = Join-Path $Work 'nonexistent-pat-helper'
+        $r = Invoke-ConfigCaptured @('config', '--json')
+        $r.ExitCode | Should -Be 0
+        $r.Err | Should -Match 'JIRA_PAT_COMMAND'
+        $r.Err | Should -Match 'could not be executed'
+        $obj = $r.Out.Trim() | ConvertFrom-Json
+        $obj.effects.personal.status | Should -Not -BeNullOrEmpty
     }
 }

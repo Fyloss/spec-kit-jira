@@ -595,6 +595,35 @@ YAML
   [ "$(jq -r '.projects[1].key' <<< "${output}")" = "OPS" ]
 }
 
+# --- T006 [030] — _cfg_credential_errors with an exempt-path argument -------
+# (data-model.md §4, contracts/connection-settings.md §5)
+
+@test "T006 — a credential-shaped value at an exempt path passes" {
+  local out
+  out="$(printf '%s' '{"base_url":"someone@example.com"}' | _cfg_credential_errors base_url)"
+  [ -z "${out}" ]
+}
+
+@test "T006 — every other path still refuses, even with an exempt path declared" {
+  local out
+  out="$(printf '%s' '{"other_key":"someone@example.com"}' | _cfg_credential_errors base_url)"
+  [[ "${out}" == *"other_key: email address"* ]]
+}
+
+@test "T006 — privacy stays exempt unconditionally, independent of the exempt-path list" {
+  local out
+  out="$(printf '%s' '{"privacy":{"allowlist":["someone@example.com"]}}' | _cfg_credential_errors)"
+  [ -z "${out}" ]
+  out="$(printf '%s' '{"privacy":{"allowlist":["someone@example.com"]}}' | _cfg_credential_errors base_url)"
+  [ -z "${out}" ]
+}
+
+@test "T006 — ^ATATT is refused even at an exempt path (C5.3, never exempted)" {
+  local out
+  out="$(printf '%s' '{"base_url":"ATATT3xFfGF0secrettoken"}' | _cfg_credential_errors base_url)"
+  [[ "${out}" == *"base_url: Atlassian API token"* ]]
+}
+
 # --- Credential-shape rejection (FR-023, exit 4) -----------------------------
 
 @test "config_load rejects an ATATT token shape in the team layer (exit 4)" {
@@ -635,6 +664,89 @@ YAML
   write_valid_team
   JIRA_CONFIG_DIR="${DIR}" run config_load
   [ "$status" -eq 0 ]
+}
+
+# --- T011 [030] — the whole base_url table (connection-settings.md §2.2,
+# data-model.md §2/§2a) -------------------------------------------------------
+
+@test "T011 — base_url accepts a bare https URL" {
+  write_valid_team
+  printf 'base_url: "https://team.atlassian.net"\n' >> "${DIR}/config.yml"
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+}
+
+@test "T011 — base_url accepts http at the three loopback literals" {
+  local literal
+  for literal in "127.0.0.1" "localhost" "[::1]"; do
+    write_valid_team
+    printf 'base_url: "http://%s:4000"\n' "${literal}" >> "${DIR}/config.yml"
+    JIRA_CONFIG_DIR="${DIR}" run config_load
+    [ "$status" -eq 0 ]
+    rm -f "${DIR}/config.yml"
+  done
+}
+
+@test "T011 — base_url refuses a trailing slash" {
+  write_valid_team
+  printf 'base_url: "https://team.atlassian.net/"\n' >> "${DIR}/config.yml"
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"base_url is invalid"* ]]
+}
+
+@test "T011 — base_url refuses a path" {
+  write_valid_team
+  printf 'base_url: "https://team.atlassian.net/jira"\n' >> "${DIR}/config.yml"
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"base_url is invalid"* ]]
+}
+
+@test "T011 — base_url refuses a scheme-less host" {
+  write_valid_team
+  printf 'base_url: "team.atlassian.net"\n' >> "${DIR}/config.yml"
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"base_url is invalid"* ]]
+}
+
+@test "T011 — base_url refuses an empty declaration" {
+  write_valid_team
+  printf 'base_url: ""\n' >> "${DIR}/config.yml"
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"base_url is invalid"* ]]
+}
+
+@test "T011 — base_url refuses http to a non-loopback host" {
+  write_valid_team
+  printf 'base_url: "http://team.atlassian.net"\n' >> "${DIR}/config.yml"
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"base_url is invalid"* ]]
+}
+
+@test "T011 — base_url refuses http to a private-range address (not loopback)" {
+  write_valid_team
+  printf 'base_url: "http://192.168.1.10"\n' >> "${DIR}/config.yml"
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"base_url is invalid"* ]]
+}
+
+@test "T011 — an absent base_url is accepted" {
+  write_valid_team
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+}
+
+@test "T011 — C2.7: a malformed SPEC_KIT_JIRA_BASE_URL with no base_url in the file is passed through unvalidated" {
+  write_valid_team
+  export SPEC_KIT_JIRA_BASE_URL="not a url at all"
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+  unset SPEC_KIT_JIRA_BASE_URL
 }
 
 # --- Schema validation -------------------------------------------------------
@@ -1059,4 +1171,102 @@ YAML
   run config_load "${DIR}"
   [ "$status" -eq 0 ]
   [ "$(config_hooks_disabled_read "${DIR}")" = "[]" ]
+}
+
+# =============================================================================
+# T022 [030] — config_resolve_connection: sets the variable only when unset or
+# empty, never overwrites a non-empty value, treats the empty string as unset
+# (plan.md §Key design decision, contracts/connection-settings.md §1)
+# =============================================================================
+
+@test "T022 — sets SPEC_KIT_JIRA_BASE_URL from config.yml when unset" {
+  write_valid_team
+  printf 'base_url: "https://team.atlassian.net"\n' >> "${DIR}/config.yml"
+  unset SPEC_KIT_JIRA_BASE_URL
+  JIRA_CONFIG_DIR="${DIR}" config_resolve_connection "${DIR}"
+  [ "${SPEC_KIT_JIRA_BASE_URL}" = "https://team.atlassian.net" ]
+  unset SPEC_KIT_JIRA_BASE_URL
+}
+
+@test "T022 — never overwrites a non-empty SPEC_KIT_JIRA_BASE_URL" {
+  write_valid_team
+  printf 'base_url: "https://team.atlassian.net"\n' >> "${DIR}/config.yml"
+  export SPEC_KIT_JIRA_BASE_URL="https://preset.example.invalid"
+  JIRA_CONFIG_DIR="${DIR}" config_resolve_connection "${DIR}"
+  [ "${SPEC_KIT_JIRA_BASE_URL}" = "https://preset.example.invalid" ]
+  unset SPEC_KIT_JIRA_BASE_URL
+}
+
+@test "T022 — treats an empty SPEC_KIT_JIRA_BASE_URL as unset" {
+  write_valid_team
+  printf 'base_url: "https://team.atlassian.net"\n' >> "${DIR}/config.yml"
+  export SPEC_KIT_JIRA_BASE_URL=""
+  JIRA_CONFIG_DIR="${DIR}" config_resolve_connection "${DIR}"
+  [ "${SPEC_KIT_JIRA_BASE_URL}" = "https://team.atlassian.net" ]
+  unset SPEC_KIT_JIRA_BASE_URL
+}
+
+@test "T022 — sets JIRA_EMAIL from personal.yml when unset" {
+  write_valid_team
+  printf 'email: op@example.com\n' > "${DIR}/personal.yml"
+  unset JIRA_EMAIL
+  JIRA_CONFIG_DIR="${DIR}" config_resolve_connection "${DIR}"
+  [ "${JIRA_EMAIL}" = "op@example.com" ]
+  unset JIRA_EMAIL
+}
+
+@test "T022 — never overwrites a non-empty JIRA_EMAIL" {
+  write_valid_team
+  printf 'email: op@example.com\n' > "${DIR}/personal.yml"
+  export JIRA_EMAIL="preset@example.invalid"
+  JIRA_CONFIG_DIR="${DIR}" config_resolve_connection "${DIR}"
+  [ "${JIRA_EMAIL}" = "preset@example.invalid" ]
+  unset JIRA_EMAIL
+}
+
+@test "T022 — treats an empty JIRA_EMAIL as unset" {
+  write_valid_team
+  printf 'email: op@example.com\n' > "${DIR}/personal.yml"
+  export JIRA_EMAIL=""
+  JIRA_CONFIG_DIR="${DIR}" config_resolve_connection "${DIR}"
+  [ "${JIRA_EMAIL}" = "op@example.com" ]
+  unset JIRA_EMAIL
+}
+
+@test "T022 — tolerant of an absent config.yml (US4 unattended/env-only path)" {
+  unset SPEC_KIT_JIRA_BASE_URL JIRA_EMAIL
+  run config_resolve_connection "${DIR}"
+  [ "$status" -eq 0 ]
+}
+
+@test "T022 — fails closed on a present-but-malformed config.yml (C6.2)" {
+  printf 'projects:\n  - key: PROJ\nbase_url: "not-a-url"\n' > "${DIR}/config.yml"
+  unset SPEC_KIT_JIRA_BASE_URL
+  run config_resolve_connection "${DIR}"
+  [ "$status" -eq 4 ]
+}
+
+# =============================================================================
+# Regression [030, discovered via us030-guard-not-a-hole scenario authoring]:
+# a truly empty (0-byte) config.local.yml parses to jq `null`, and every
+# schema/credential jq program assumes an object — `keys_unsorted[]`/`has(...)`
+# on a null top level is a jq RUNTIME ERROR (exit 5, stderr redirected to
+# /dev/null), which `pipefail` turned into a silent EXIT_CONFIG (4) with NO
+# located message at all. An empty config.local.yml/personal.yml is a normal
+# state (nothing resolved locally yet, or an operator-blanked file), not a
+# malformed one.
+# =============================================================================
+
+@test "an empty (0-byte) config.local.yml is accepted, not a silent crash" {
+  write_valid_team
+  : > "${DIR}/config.local.yml"
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+}
+
+@test "an empty (0-byte) personal.yml is accepted, not a silent crash" {
+  : > "${DIR}/personal.yml"
+  JIRA_CONFIG_DIR="${DIR}" run config_personal_load "${DIR}" '{}'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "false" ]
 }

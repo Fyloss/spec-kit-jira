@@ -22,9 +22,8 @@ flowchart TB
     end
 
     subgraph Host["Developer machine"]
-        Keychain["OS secret manager<br/>Keychain / libsecret"]
         EnvVars["Environment variables"]
-        DotEnv[(".specify/jira/.env<br/>gitignored")]
+        PatCmd["Operator-declared JIRA_PAT_COMMAND<br/>run tokenized, no shell — the only<br/>path to a credential store (030)"]
     end
 
     Jira["Jira Cloud<br/>REST API v3"]
@@ -42,9 +41,9 @@ flowchart TB
     Ext -->|"reads only, never writes"| Registry
     Ext -->|"splices a managed block"| Readme
 
-    EnvVars -->|"1st rung"| Ext
-    Keychain -->|"2nd rung"| Ext
-    DotEnv -->|"3rd rung"| Ext
+    EnvVars -->|"1st rung — JIRA_API_TOKEN"| Ext
+    PatCmd -->|"2nd rung, only if declared"| Ext
+    TeamCfg -->|"base_url (030)"| Ext
 
     Ext <-->|"HTTPS, Basic auth"| Jira
     Lead -->|"reads mirrored tickets"| Jira

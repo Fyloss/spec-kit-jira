@@ -10,9 +10,10 @@ a closed enumerated question — **no step is left to model judgement**, and the
 flowchart TD
     Start(["/speckit.jira.config"]) --> Hooks["1 · Hooks effect<br/>read the registry, classify every event<br/>needs no Jira and no committed config"]
     Hooks --> Load["2 · Load and validate the committed team config"]
-    Load --> Degraded{"Connection settings present?<br/>base URL · email · token"}
+    Load --> GitignorePersonal["2a · Gitignore + personal.yml effects (030)<br/>computed here, AHEAD of the degraded check —<br/>an operator with no working credentials yet<br/>still needs personal.yml created and covered"]
+    GitignorePersonal --> Degraded{"Connection settings present?<br/>base URL · email · token"}
 
-    Degraded -->|"one is absent"| Report["Degraded run<br/>name the missing setting, exit 0<br/>hook + gitignore + README effects still reported"]
+    Degraded -->|"one is absent"| Report["Degraded run<br/>name the missing setting, exit 0<br/>hooks + gitignore + personal + README effects still reported"]
     Degraded -->|"all present"| Key["3 · Resolve the project key<br/>positional arg → committed non-placeholder key<br/>→ closed question over discovered accessible projects"]
 
     Key --> Seed["4 · Read the existing local binding<br/>prior resolved ids seed the run, so a re-run<br/>only re-binds the projects it was asked about"]
@@ -21,8 +22,7 @@ flowchart TD
     Validate --> Persist["7 · Persist the resolved-id table<br/>config.local.yml, canonical serialisation"]
 
     Persist --> Teams["8 · Teams catalogue check<br/>warn, never block, on a team project you cannot see"]
-    Teams --> Ignore["9 · Gitignore effect<br/>cover config.local.yml, .env, personal.yml"]
-    Ignore --> Readme["10 · README effect<br/>splice the version-marked managed block"]
+    Teams --> Readme["9 · README effect<br/>splice the version-marked managed block"]
     Readme --> Summary(["Run summary — every effect reported separately"])
     Report --> Summary
 ```
@@ -221,7 +221,7 @@ non-subtask hierarchy level — never from a name compiled into the script.
 Refusing at config time is the whole point: an impossible mapping discovered at
 reconcile time would already have created tickets it cannot parent.
 
-## The five effects, reported separately
+## The six effects, reported separately
 
 A run reports what it did to each surface independently, so a partial success
 is legible rather than a single opaque "ok".
@@ -233,7 +233,17 @@ flowchart LR
     Run --> E3["Gitignore<br/>covered · updated"]
     Run --> E4["README<br/>created · updated · unchanged · refused"]
     Run --> E5["Task mirror (022)<br/>inert · created · written · unchanged · refused"]
+    Run --> E6["Personal (030)<br/>created · unchanged · would_create (dry-run)"]
 ```
+
+The personal effect (030) reports what happened to `.specify/jira/personal.yml`:
+created when the file was absent (pre-filled with the resolved email when one
+was available, and a commented team placeholder listing the catalogue's team
+ids), unchanged when it already existed and nothing needed writing, or
+`would_create` under `--dry-run`. Like the gitignore effect, it is computed
+**before** the degraded-mode check, not after — an operator with no working
+credentials yet is exactly the operator who most needs `personal.yml` created
+and gitignored on this run, not deferred to the first run that succeeds.
 
 The README block is spliced through the neutral `engine/managed_section`
 byte-splice: only the region between the markers is replaced, every byte

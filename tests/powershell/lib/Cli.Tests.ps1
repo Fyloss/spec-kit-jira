@@ -133,3 +133,26 @@ Describe 'Invoke-JiraCliParse — task-mirror flags (Phase 5, US3, 022)' {
         $out | Should -Match ([regex]::Escape('invalid --task-mirror value: COMP=bogus (expected <PROJECT_KEY>=<subtask|checklist>)'))
     }
 }
+
+# =============================================================================
+# T028 [030] — every command dispatch entry calls the resolution chokepoint
+# (contracts/connection-settings.md C1.5). Enumerated from the dispatch
+# table's own commands directory, not hand-listed.
+# =============================================================================
+
+Describe 'T028 — every command module calls the resolution chokepoint' {
+    It 'every file in scripts/powershell/commands/ calls Resolve-JiraConnection' {
+        $dir = Join-Path $PSScriptRoot '../../../scripts/powershell/commands'
+        $missing = [System.Collections.Generic.List[string]]::new()
+        foreach ($f in Get-ChildItem -Path $dir -Filter '*.psm1') {
+            $content = Get-Content -Raw -LiteralPath $f.FullName
+            if ($content -notmatch 'Resolve-JiraConnection') { $missing.Add($f.Name) }
+        }
+        ($missing -join ', ') | Should -BeNullOrEmpty
+    }
+
+    It 'the dispatch table has exactly the five entry points this assertion covers' {
+        $dir = Join-Path $PSScriptRoot '../../../scripts/powershell/commands'
+        (Get-ChildItem -Path $dir -Filter '*.psm1').Count | Should -Be 5
+    }
+}

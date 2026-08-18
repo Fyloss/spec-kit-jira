@@ -19,17 +19,29 @@ The prerequisite check runs **before any Jira interaction** and exits with code
 
 ## Credentials (NFR-3 — eliminatory)
 
-The API token is resolved in order: environment → OS secret manager → gitignored
-`.specify/jira/.env`. The resolved token **never** appears in argv, logs, errors,
-or traces at maximum verbosity (SC-007). Set:
+The API token is resolved in order: environment, then a retrieval command you
+declare — there is no third rung, and no file in the workspace is ever read
+for it. The resolved token **never** appears in argv, logs, errors, or traces
+at maximum verbosity (SC-007). Set:
 
 ```sh
 export JIRA_EMAIL="you@example.com"
-export JIRA_API_TOKEN="…"        # or store it in your OS secret manager / .env
+export JIRA_API_TOKEN="…"        # or declare JIRA_PAT_COMMAND instead — see docs/CREDENTIALS.md
 ```
+
+`JIRA_PAT_COMMAND` names a program run without a shell (its declared value is
+split into a program and arguments on whitespace) to back the token with an OS
+credential store or any other retrieval mechanism; a command that fails,
+is absent, times out (5s), or produces no output is a reported failure, not a
+silent fall-through. See [docs/CREDENTIALS.md](docs/CREDENTIALS.md) for
+platform-specific examples, the CI/unattended arrangement, and the Windows
+`Get-Secret` wrapper.
 
 The committable team config (`.specify/jira/config.yml`) is credential-free;
 credential-shaped values in either YAML layer are rejected at config time (exit 4).
+`config.yml` also carries the team's `base_url` (030) — see
+[`docs/07-configuration-and-secrets.md`](docs/07-configuration-and-secrets.md)
+for why that is a choice to make knowingly, not merely a convenience.
 
 ## Install & configure
 
