@@ -73,8 +73,8 @@ Describe 'Personal team selection loader' {
         $r.ExitCode | Should -Be 4
         ($r.Errors -join "`n") | Should -Not -Match 'someone@example\.com'
         ($r.Errors -join "`n") | Should -Match 'email address'
-    
-}
+    }
+
     # =========================================================================
     # T017 [030] — the five `team` states (data-model.md §3) and the `email`
     # accept/refuse table (contracts/connection-settings.md §3)

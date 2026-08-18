@@ -54,7 +54,7 @@ function Get-JiraCredentialFromCommand {
       $script:CredLastError to the located reason (never echoing the command's
       own stdout, C4.4) and returns $null.
     #>
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '', Justification = 'Kill() below races the process''s own exit after the WaitForExit timeout; an exception here means it already exited, which is the outcome being sought, not a fault to report.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '', Justification = 'The bound-exceeded path races the process''s own exit: Kill(), the reaping WaitForExit(), and the two stream drains all throw if it already exited or its pipes are already closed — the outcome being sought, not a fault to report.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $CommandLine)
 
@@ -76,25 +76,52 @@ function Get-JiraCredentialFromCommand {
     $psi.UseShellExecute = $false
 
     $proc = [System.Diagnostics.Process]::Start($psi)
-    # Async reads started BEFORE the bounded wait — a synchronous ReadToEnd()
-    # after WaitForExit would deadlock a command whose output fills the OS
-    # pipe buffer before it exits (the watchdog's counterpart to the Bash
-    # port's file-redirected background process, research §R3).
-    $outTask = $proc.StandardOutput.ReadToEndAsync()
-    $errTask = $proc.StandardError.ReadToEndAsync()
+    try {
+        # Async reads started BEFORE the bounded wait — a synchronous ReadToEnd()
+        # after WaitForExit would deadlock a command whose output fills the OS
+        # pipe buffer before it exits (the watchdog's counterpart to the Bash
+        # port's file-redirected background process, research §R3).
+        $outTask = $proc.StandardOutput.ReadToEndAsync()
+        $errTask = $proc.StandardError.ReadToEndAsync()
 
-    $exited = $proc.WaitForExit($script:CredBoundSeconds * 1000)
-    if (-not $exited) {
-        try { $proc.Kill() } catch { }
-        $script:CredLastError = "credential resolution failed: JIRA_PAT_COMMAND '$CommandLine' exceeded the $($script:CredBoundSeconds)s bound — see docs/CREDENTIALS.md"
-        return $null
+        $exited = $proc.WaitForExit($script:CredBoundSeconds * 1000)
+        if (-not $exited) {
+            try { $proc.Kill() } catch { }
+            # Reap the killed child and let its redirected reads settle before
+            # returning — the counterpart of the Bash port's `wait "${pid}"`.
+            # Kill() only requests termination: without this the function can
+            # return while the child is still dying and both read tasks are
+            # still pending on its pipes. Every wait here is BOUNDED, and the
+            # argument-less WaitForExit() is deliberately not used: both it and
+            # an unbounded task wait block until the pipes close, which a
+            # grandchild the command left behind holds open indefinitely —
+            # trading a leaked handle for a hung run.
+            try { [void]$proc.WaitForExit(1000) } catch { }
+            try { [void]$outTask.Wait(500) } catch { }
+            try { [void]$errTask.Wait(500) } catch { }
+            $script:CredLastError = "credential resolution failed: JIRA_PAT_COMMAND '$CommandLine' exceeded the $($script:CredBoundSeconds)s bound — see docs/CREDENTIALS.md"
+            return $null
+        }
+        # Ensure the redirected streams have fully drained (.NET's own guidance
+        # for the WaitForExit(int)-then-WaitForExit() pairing).
+        $proc.WaitForExit()
+        $out = $outTask.GetAwaiter().GetResult()
+        $err = $errTask.GetAwaiter().GetResult()
+        $rc = $proc.ExitCode
+    } finally {
+        # Every path — success, non-zero exit, bound exceeded — releases the
+        # process handle and BOTH redirected pipe ends here; a long-lived host
+        # (Pester, a reconcile run) would otherwise hold two descriptors per
+        # resolution attempt until the finalizer happened to run. The readers
+        # are disposed explicitly because $proc.Dispose() alone leaves them
+        # open — measured, not assumed (tests/powershell/lib/Credentials.Tests.ps1,
+        # 'Child-process hygiene on the bound-exceeded path'). Disposing a
+        # reader with its ReadToEndAsync still pending is also what unblocks
+        # that read when a grandchild is holding the pipe open.
+        try { $proc.StandardOutput.Dispose() } catch { }
+        try { $proc.StandardError.Dispose() } catch { }
+        $proc.Dispose()
     }
-    # Ensure the redirected streams have fully drained (.NET's own guidance
-    # for the WaitForExit(int)-then-WaitForExit() pairing).
-    $proc.WaitForExit()
-    $out = $outTask.GetAwaiter().GetResult()
-    $err = $errTask.GetAwaiter().GetResult()
-    $rc = $proc.ExitCode
 
     if ($rc -ne 0) {
         $script:CredLastError = "credential resolution failed: JIRA_PAT_COMMAND '$CommandLine' exited with status $rc — see docs/CREDENTIALS.md"

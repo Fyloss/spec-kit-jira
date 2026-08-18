@@ -104,6 +104,56 @@ Describe 'Credentials' {
             Get-JiraCredentialLastError | Should -Match '1s bound'
         }
     }
+    # PR review (Copilot, 030): the bound-exceeded path killed the child and
+    # returned at once — without reaping it, without letting the two redirected
+    # reads settle, and without releasing the Process handle. Measured on macOS:
+    # the child itself is reaped by .NET's own SIGCHLD handler and the two pipe
+    # descriptors each attempt holds are eventually reclaimed by the finalizer,
+    # so the cost is deferred rather than permanent — what the fix buys is
+    # deterministic release, which is what the first test below measures (it
+    # deliberately does NOT force a collection first). The Bash port has no
+    # counterpart defect (it redirects to files it removes and reaps with
+    # `wait`), so this is a port-local guard, not a conformance scenario.
+    Context 'Child-process hygiene on the bound-exceeded path' {
+        BeforeEach {
+            # No portable descriptor count on Windows (the .NET HandleCount is
+            # 0 on Unix and process-wide on Windows, so it measures neither
+            # the same thing nor reliably); these two are POSIX-only.
+            $script:CountFds = {
+                if (Test-Path "/proc/$PID/fd") { return (Get-ChildItem "/proc/$PID/fd" -Force).Count }
+                return (& lsof -p $PID 2> $null | Measure-Object).Count
+            }
+        }
+
+        It 'releases the child descriptors without waiting for a collection' -Skip:$IsWindows {
+            InModuleScope Credentials { $script:CredBoundSeconds = 0.2 }
+            [System.GC]::Collect(); [System.GC]::WaitForPendingFinalizers(); [System.GC]::Collect()
+            $before = & $script:CountFds
+            # Get-JiraCredentialFromCommand, not Resolve-JiraToken: the latter
+            # caches the failure and would consult its sources only once.
+            for ($i = 0; $i -lt 5; $i++) {
+                Get-JiraCredentialFromCommand -CommandLine 'sleep 30' | Should -BeNullOrEmpty
+            }
+            # No collection forced here — pre-fix this reads +10 (the two pipe
+            # ends of each attempt, held until the finalizer runs).
+            (& $script:CountFds) - $before | Should -BeLessThan 5
+        }
+
+        It 'still returns when the command leaves a grandchild holding the pipe' -Skip:$IsWindows {
+            New-Item -ItemType Directory -Path $script:BinDir -Force | Out-Null
+            $prog = Join-Path $script:BinDir 'leaves-grandchild'
+            # The backgrounded sleep inherits stdout, so the pipe stays open
+            # after the direct child is killed: an unbounded drain would block
+            # here for as long as the grandchild lives.
+            Set-Content -LiteralPath $prog -Value "#!/usr/bin/env bash`nsleep 5 &`nsleep 30`n" -NoNewline
+            & chmod +x $prog
+            InModuleScope Credentials { $script:CredBoundSeconds = 0.2 }
+            $elapsed = Measure-Command { Get-JiraCredentialFromCommand -CommandLine $prog | Should -BeNullOrEmpty }
+            $elapsed.TotalSeconds | Should -BeLessThan 5
+            Get-JiraCredentialLastError | Should -Match 'bound'
+        }
+    }
+
 
     Context 'Tokenization and secrecy (C2.1-C2.5)' {
         It 'C2.3: interior whitespace preserved, surrounding whitespace (incl. CR) trimmed' {
