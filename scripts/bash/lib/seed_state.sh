@@ -40,7 +40,9 @@ seed_state_path() {
 # `seed` then refused REF-EXISTS as though the operator had never seeded).
 #
 # Exact match wins outright. Otherwise the host's numbering is stripped —
-# `NNN-`, or the `YYYYmmdd-HHMMSS-` form its timestamp mode produces — and
+# `NNN-` at THREE digits or more, since every non-timestamp path in
+# create-new-feature.sh ends at `printf "%03d"` (an explicit `--number 1`
+# included), or the `YYYYmmdd-HHMMSS-` form its timestamp mode produces — and
 # the remainder is matched as a PREFIX of the recorded keys, since
 # truncation can only shorten a name. Exactly one candidate resolves;
 # zero or several resolve to the directory itself, so the caller fails
@@ -56,7 +58,7 @@ seed_state_resolve_key() {
   stripped="${dir}"
   if [[ "${stripped}" =~ ^[0-9]{8}-[0-9]{6}-(.+)$ ]]; then
     stripped="${BASH_REMATCH[1]}"
-  elif [[ "${stripped}" =~ ^[0-9]+-(.+)$ ]]; then
+  elif [[ "${stripped}" =~ ^[0-9]{3,}-(.+)$ ]]; then
     stripped="${BASH_REMATCH[1]}"
   fi
   # The key is peeled off each path with parameter expansion, never a

@@ -39,9 +39,10 @@ function Get-JiraSeedStateRecordKey {
       `feature` records under the resolved short name, while spec-kit's own
       create-new-feature.sh builds `<FEATURE_NUM>-<short-name>` and truncates
       the suffix past its branch-length cap. Exact match wins outright;
-      otherwise the host's numbering is stripped and the remainder is matched
-      as a PREFIX of the recorded keys, since truncation can only shorten a
-      name. Exactly one candidate resolves; zero or several resolve to the
+      otherwise the host's numbering is stripped — at three digits or more,
+      since every non-timestamp path in create-new-feature.sh ends at
+      `printf "%03d"` — and the remainder is matched as a PREFIX of the
+      recorded keys, since truncation can only shorten a name. Exactly one candidate resolves; zero or several resolve to the
       directory itself, so the caller fails exactly as it does today.
     #>
     [CmdletBinding()]
@@ -52,7 +53,7 @@ function Get-JiraSeedStateRecordKey {
 
     $stripped = $dir
     if ($dir -match '^[0-9]{8}-[0-9]{6}-(.+)$') { $stripped = $Matches[1] }
-    elseif ($dir -match '^[0-9]+-(.+)$') { $stripped = $Matches[1] }
+    elseif ($dir -match '^[0-9]{3,}-(.+)$') { $stripped = $Matches[1] }
 
     $hit = ''
     $n = 0

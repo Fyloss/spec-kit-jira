@@ -74,6 +74,19 @@ _spec_in() {
   [ "$output" = "ijt-a-very-long-feature-short-name" ]
 }
 
+@test "seed_state_resolve_key: a one- or two-digit prefix is NOT the host's numbering" {
+  # Every non-timestamp path in create-new-feature.sh ends at `printf "%03d"`,
+  # an explicit `--number 1` included, so a shorter prefix is part of the name
+  # rather than numbering. Stripping it would let `1-ijt` reach `ijt-42`.
+  _seed_record "ijt-42"
+  run seed_state_resolve_key "$(_spec_in 1-ijt)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1-ijt" ]
+  run seed_state_resolve_key "$(_spec_in 22-ijt)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "22-ijt" ]
+}
+
 @test "seed_state_resolve_key: two candidates resolve to nothing rather than the wrong one" {
   _seed_record "ijt-42"
   _seed_record "ijt-42-extra"

@@ -156,6 +156,15 @@ Describe 'Get-JiraSeedStateRecordKey — the record key vs the directory the hos
             Should -Be 'ijt-a-very-long-feature-short-name'
     }
 
+    It 'a one- or two-digit prefix is NOT the host''s numbering' {
+        # Every non-timestamp path in create-new-feature.sh ends at
+        # `printf "%03d"`, an explicit `--number 1` included, so a shorter
+        # prefix is part of the name rather than numbering.
+        New-SeedRecordFile 'ijt-42'
+        Get-JiraSeedStateRecordKey -SpecPath (Get-SpecPathIn '1-ijt') | Should -Be '1-ijt'
+        Get-JiraSeedStateRecordKey -SpecPath (Get-SpecPathIn '22-ijt') | Should -Be '22-ijt'
+    }
+
     It 'two candidates resolve to nothing rather than the wrong one' {
         New-SeedRecordFile 'ijt-42'
         New-SeedRecordFile 'ijt-42-extra'
