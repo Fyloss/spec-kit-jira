@@ -909,7 +909,7 @@ function Invoke-JiraFeature {
         # question was suppressed and which answer was assumed.
         $suppressedWarning = ''
         if ([string]::IsNullOrEmpty($reuseState) -and $acceptDefaultsState) {
-            $suppressedWarning = 'the reuse question was suppressed by --accept-defaults; assumed answer: create new'
+            $suppressedWarning = 'the reuse question was suppressed by --accept-defaults; assumed answer: do not reuse — the mentioned ticket names this feature but is not bound to it, and the next reconcile creates a new parent beside it'
         }
 
         # (029, FR-029/FR-030/FR-038) — "reuse" with no designator is the

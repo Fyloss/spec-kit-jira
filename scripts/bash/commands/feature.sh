@@ -904,7 +904,7 @@ cmd_feature() {
     # suppressed and which answer was assumed.
     local suppressed_warning=""
     if [[ -z "${reuse}" && "${accept_defaults}" == "true" ]]; then
-      suppressed_warning="the reuse question was suppressed by --accept-defaults; assumed answer: create new"
+      suppressed_warning="the reuse question was suppressed by --accept-defaults; assumed answer: do not reuse — the mentioned ticket names this feature but is not bound to it, and the next reconcile creates a new parent beside it"
     fi
 
     # (029, FR-029/FR-030/FR-038) — "reuse" with no designator is the

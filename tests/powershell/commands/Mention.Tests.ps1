@@ -44,6 +44,19 @@ Describe 'Mentioned-ticket editing' {
         @($calls | Where-Object { $_ -match '^PUT /rest/api/3/issue/MENT-1/properties/' }).Count | Should -Be 1
     }
 
+    It 'stamps a PARENT-role identity, the only shape recognition accepts' {
+        # Invoke-JiraParentRecognition blocks `parent-identity-unverifiable` on any
+        # marker whose role is not 'parent'. Stamping without a role bound nothing.
+        # Asserted on the call, exactly as the bats twin does: the mock persists a
+        # property only for a key it already holds in state.
+        Mock -CommandName Set-JiraIdentity -ModuleName Mention -MockWith { return 0 }
+        $script:Mock = Start-JiraMock -ConfigPath (Join-Path $MockDir 'configs/mention.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:Mock.BaseUrl
+        $null = Invoke-MentionSummary @('mention', 'MENT-1', '--json')
+        Should -Invoke -CommandName Set-JiraIdentity -ModuleName Mention -Times 1 -Exactly `
+            -ParameterFilter { $IssueKey -eq 'MENT-1' -and $Origin -eq 'human' -and $Role -eq 'parent' }
+    }
+
     It 'makes zero writes and refuses a ticket claimed by another spec (FR-051)' {
         $script:Mock = Start-JiraMock -ConfigPath (Join-Path $MockDir 'configs/mention-claimed.json')
         $env:SPEC_KIT_JIRA_BASE_URL = $script:Mock.BaseUrl

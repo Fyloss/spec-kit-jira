@@ -109,7 +109,13 @@ cmd_mention() {
   # (4) FR-049: stamp the spec's identity (origin human) and log the mutation. The
   #     --dry-run twin predicts the same single mutation without performing it.
   if [[ "${dry_run}" != "true" ]]; then
-    identity_write "${issue_key}" "${spec_ref}" "human" || return $?
+    # Role "parent" is load-bearing, not decoration: recognition_parent_run
+    # blocks `parent-identity-unverifiable` on a marker that carries no role
+    # (sink/jira/recognition.sh), so a role-less stamp bound nothing and left
+    # the next reconcile creating a parent beside the mentioned ticket. The
+    # seeding path has always passed it (commands/seed.sh); this one predates
+    # roles and was never updated.
+    identity_write "${issue_key}" "${spec_ref}" "human" "" "parent" || return $?
   fi
 
   local summary

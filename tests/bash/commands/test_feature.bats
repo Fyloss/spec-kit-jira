@@ -709,7 +709,22 @@ write_hierarchy_config() {
   run cmd_feature feature IJT-42 --accept-defaults --json "invoice export"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.ticket.action' <<< "$output")" = "attached" ]
-  [ "$(jq -r '.warnings[0]' <<< "$output")" = "the reuse question was suppressed by --accept-defaults; assumed answer: create new" ]
+  [ "$(jq -r '.warnings[0]' <<< "$output")" = "the reuse question was suppressed by --accept-defaults; assumed answer: do not reuse — the mentioned ticket names this feature but is not bound to it, and the next reconcile creates a new parent beside it" ]
+}
+
+@test "the suppressed-question warning names the consequence, not a create that never happens" {
+  # FR-014 requires the assumed answer to be stated. The shipped wording said
+  # "create new" while the run went on to ATTACH the ticket and bind nothing —
+  # a run that named a ticket and duplicated it minutes later said neither.
+  select_team ijt
+  write_hierarchy_config
+  boot '{"projects":{"IJT":"team"}}'
+  run cmd_feature feature IJT-42 --accept-defaults --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.ticket.action' <<< "$output")" = "attached" ]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"is not bound to it"* ]]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"creates a new parent beside it"* ]]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" != *"assumed answer: create new"* ]]
 }
 
 @test "--reuse no proceeds as today's run from here on, byte-identical (FR-010)" {

@@ -94,7 +94,10 @@ function Invoke-JiraMention {
     # (4) FR-049: stamp the spec's identity (origin human) and log the mutation. The
     #     --dry-run twin predicts the same single mutation without performing it.
     if (-not $dryRun) {
-        $wr = Set-JiraIdentity -IssueKey $issueKey -SpecRefJson $specRef -Origin 'human'
+        # Role 'parent' is load-bearing, not decoration: Invoke-JiraParentRecognition
+        # blocks `parent-identity-unverifiable` on a marker that carries no role,
+        # so a role-less stamp bound nothing. Mirror of mention.sh.
+        $wr = Set-JiraIdentity -IssueKey $issueKey -SpecRefJson $specRef -Origin 'human' -Role 'parent'
         if ([int]$wr -ne 0) { return [int]$wr }
     }
 
