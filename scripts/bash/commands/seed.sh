@@ -531,8 +531,11 @@ cmd_seed() {
     # The material already carries status/parent (FR-051's "0 additional
     # requests" — Jira's own bulkfetch nests a reduced parent representation
     # inline, so moment 1's single read already had this).
+    # The material is a sibling of the seed record and shares its key, so it
+    # is resolved the same way — the feature directory the host created is
+    # not always the name moment 1 wrote under (lib/seed_state.sh).
     local short_name material_path material
-    short_name="$(basename "$(dirname "${spec_file}")")"
+    short_name="$(seed_state_resolve_key "${spec_file}")"
     material_path="${JIRA_CONFIG_DIR:-.specify/jira}/state/${short_name}.seed-material.json"
     if [[ -f "${material_path}" ]]; then
       material="$(cat "${material_path}" 2> /dev/null)"

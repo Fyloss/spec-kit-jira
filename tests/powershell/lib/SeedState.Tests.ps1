@@ -14,6 +14,14 @@ BeforeAll {
         return [pscustomobject]@{ Work = $work; Spec = $spec }
     }
 
+    function New-SeedRecordFile([string] $Key) {
+        Set-Content -NoNewline -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR "state/$Key.seed.json") -Value '{}'
+    }
+
+    function Get-SpecPathIn([string] $FeatureDir) {
+        return (Join-Path $script:Ctx.Work "specs/$FeatureDir/spec.md")
+    }
+
     $script:DesignatorsJson = '[{"role":"specification","form":"key","key":"PROJ-1","raw":"PROJ-1","position":0},{"role":"story","form":"key","key":"PROJ-11","raw":"PROJ-11","position":0}]'
 }
 
@@ -115,5 +123,60 @@ Describe 'New-JiraSeedStateDocument: a single-item designators array survives ro
         $parsed = $doc | ConvertFrom-Json
         ($parsed.designators -is [array]) | Should -Be $true
         @($parsed.designators).Count | Should -Be 1
+    }
+}
+
+Describe 'Get-JiraSeedStateRecordKey — the record key vs the directory the host creates' {
+    # `feature` writes the record under the resolved short name; spec-kit's
+    # create-new-feature.sh then creates `specs/<FEATURE_NUM>-<short-name>`
+    # and truncates the suffix past its branch-length cap.
+    BeforeEach {
+        $script:Ctx = New-SeedTestWork
+        New-Item -ItemType Directory -Path (Join-Path $env:JIRA_CONFIG_DIR 'state') -Force | Out-Null
+    }
+
+    It 'an exact match wins outright' {
+        New-SeedRecordFile '001-add-payment-webhooks'
+        Get-JiraSeedStateRecordKey -SpecPath $script:Ctx.Spec | Should -Be '001-add-payment-webhooks'
+    }
+
+    It "the host's NNN- numbering is stripped" {
+        New-SeedRecordFile 'ijt-42'
+        Get-JiraSeedStateRecordKey -SpecPath (Get-SpecPathIn '022-ijt-42') | Should -Be 'ijt-42'
+    }
+
+    It "the host's timestamp numbering is stripped" {
+        New-SeedRecordFile 'ijt-42'
+        Get-JiraSeedStateRecordKey -SpecPath (Get-SpecPathIn '20260818-150950-ijt-42') | Should -Be 'ijt-42'
+    }
+
+    It 'a suffix the host truncated still resolves' {
+        New-SeedRecordFile 'ijt-a-very-long-feature-short-name'
+        Get-JiraSeedStateRecordKey -SpecPath (Get-SpecPathIn '022-ijt-a-very-long-feature') |
+            Should -Be 'ijt-a-very-long-feature-short-name'
+    }
+
+    It 'two candidates resolve to nothing rather than the wrong one' {
+        New-SeedRecordFile 'ijt-42'
+        New-SeedRecordFile 'ijt-42-extra'
+        Get-JiraSeedStateRecordKey -SpecPath (Get-SpecPathIn '022-ijt-42') | Should -Be '022-ijt-42'
+    }
+
+    It 'no record at all resolves to the directory itself' {
+        Get-JiraSeedStateRecordKey -SpecPath (Get-SpecPathIn '022-ijt-42') | Should -Be '022-ijt-42'
+    }
+
+    It 'Read-JiraSeedState finds the record moment 1 wrote under the un-numbered name' {
+        $doc = New-JiraSeedStateDocument -Slug 'ijt-42' -DesignatorsJson $script:DesignatorsJson -PlanDigest ''
+        Save-JiraSeedState -SpecPath (Join-Path $script:Ctx.Work 'specs/ijt-42/spec.md') -DocumentJson $doc
+        $read = Read-JiraSeedState -SpecPath (Get-SpecPathIn '022-ijt-42')
+        ($read | ConvertFrom-Json).slug | Should -Be 'ijt-42'
+    }
+
+    It 'Remove-JiraSeedState removes the record the read resolved, not a phantom' {
+        $doc = New-JiraSeedStateDocument -Slug 'ijt-42' -DesignatorsJson $script:DesignatorsJson -PlanDigest ''
+        Save-JiraSeedState -SpecPath (Join-Path $script:Ctx.Work 'specs/ijt-42/spec.md') -DocumentJson $doc
+        Remove-JiraSeedState -SpecPath (Get-SpecPathIn '022-ijt-42')
+        (Test-Path -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'state/ijt-42.seed.json')) | Should -BeFalse
     }
 }

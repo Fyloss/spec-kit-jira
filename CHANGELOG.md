@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A feature seeded from a mentioned ticket now reaches its `seed` step.**
+  `feature --reuse yes` records the seeded-not-bound state under the short
+  name it resolved, but spec-kit's own `create-new-feature.sh` always creates
+  `specs/<FEATURE_NUM>-<short-name>` — and truncates that suffix past its
+  branch-length cap. The record was therefore written under one name and
+  looked up under another, so `seed` refused every handoff with `REF-EXISTS:
+  retro-seeding is out of scope` and the reconcile that followed created a
+  duplicate parent beside the ticket the operator had just named. Reads (and
+  the delete that follows a successful seed) now resolve the record by
+  stripping the host's numbering and matching the remainder as a prefix of the
+  recorded keys; an ambiguous match resolves to nothing rather than to the
+  wrong record, and writes are unchanged. The seed material file, a sibling
+  keyed the same way, was affected identically and is resolved the same way.
+
+  This is why 0.19.0's reuse question did not close the reported incident:
+  answering it `yes` led straight into this second defect. The conformance
+  chain that was meant to prove the whole flow placed its drafted `spec.md` at
+  the un-numbered path, which is the shape no host produces, and so proved the
+  flow only for a directory layout that never occurs.
+
+- **`mention <issue-key>` now stamps a parent-role identity.** It wrote the
+  identity property with no `role` field, and recognition blocks any parent
+  whose marker does not carry `role: "parent"` — so the command bound nothing,
+  and the remedy `reconcile` itself names ("bind each with the bridge's
+  `mention <issue-key>` command") could not be followed. The seeding path has
+  always stamped the role; this one predates roles and was never updated.
+
+- **The suppressed-question warning now names the consequence.** Under
+  `--accept-defaults` the reuse question is suppressed and the run reported
+  `assumed answer: create new` — while going on to *attach* the ticket and bind
+  nothing. It now states that the mentioned ticket names the feature without
+  being bound to it, and that the next reconcile creates a new parent beside
+  it.
+
 ## [0.20.0] - 2026-08-19
 
 ### ⚠ BREAKING CHANGES

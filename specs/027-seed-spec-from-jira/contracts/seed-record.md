@@ -16,6 +16,20 @@ ${JIRA_CONFIG_DIR}/state/<feature-dir>.seed.json
 Sibling of `run_state_path`'s `<feature-dir>.json`, so the directory, its
 creation, and its gitignore rules are already settled by 021.
 
+**`<feature-dir>` is not always the directory that ends up on disk.** Moment 1
+writes the record before any directory exists, under the short name it
+resolved; the host's `create-new-feature.sh` then creates
+`specs/<FEATURE_NUM>-<short-name>` and truncates that suffix past its
+branch-length cap. The WRITE therefore stays keyed on the resolved short name
+— it is the only name moment 1 knows — while READS (and the delete that
+follows a successful seed) resolve the on-disk directory back onto it:
+`seed_state_resolve_key` / `Get-JiraSeedStateRecordKey` strip the host's
+numbering and match the remainder as a prefix of the recorded keys, since
+truncation can only shorten a name. An ambiguous match resolves to nothing
+rather than to the wrong record. The seed material file
+(`<feature-dir>.seed-material.json`) is keyed identically and resolved the
+same way.
+
 **A separate document, not a key in the run-state one.** Two reasons, and the
 first is measurable: the run-state schema comment states that a change to the set
 of recorded inputs bumps the version and "invalidat[es] every existing file", so

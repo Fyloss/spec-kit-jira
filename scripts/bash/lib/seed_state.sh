@@ -29,6 +29,62 @@ seed_state_path() {
   printf '%s/state/%s.seed.json' "${JIRA_CONFIG_DIR}" "$(basename "$(dirname "${spec_path}")")"
 }
 
+# seed_state_resolve_key <spec-path> — the key the record for this feature
+# was actually written under, which is NOT always the directory the host
+# went on to create. `feature` records under the resolved short name
+# (commands/feature.sh's synthesised `specs/<short-name>/spec.md`), while
+# spec-kit's own create-new-feature.sh builds `<FEATURE_NUM>-<short-name>`
+# and TRUNCATES the suffix past its branch-length cap. So an exact match is
+# the common case, never the guaranteed one, and keying reads on the
+# directory alone made every handoff miss (the record was written, and
+# `seed` then refused REF-EXISTS as though the operator had never seeded).
+#
+# Exact match wins outright. Otherwise the host's numbering is stripped —
+# `NNN-`, or the `YYYYmmdd-HHMMSS-` form its timestamp mode produces — and
+# the remainder is matched as a PREFIX of the recorded keys, since
+# truncation can only shorten a name. Exactly one candidate resolves;
+# zero or several resolve to the directory itself, so the caller fails
+# exactly as it does today — binding the wrong record is worse than none.
+seed_state_resolve_key() {
+  local spec_path="$1" dir state_dir stripped f cand hit="" n=0
+  dir="$(basename "$(dirname "${spec_path}")")"
+  state_dir="${JIRA_CONFIG_DIR}/state"
+  if [[ -f "${state_dir}/${dir}.seed.json" ]]; then
+    printf '%s' "${dir}"
+    return 0
+  fi
+  stripped="${dir}"
+  if [[ "${stripped}" =~ ^[0-9]{8}-[0-9]{6}-(.+)$ ]]; then
+    stripped="${BASH_REMATCH[1]}"
+  elif [[ "${stripped}" =~ ^[0-9]+-(.+)$ ]]; then
+    stripped="${BASH_REMATCH[1]}"
+  fi
+  # The key is peeled off each path with parameter expansion, never a
+  # `basename` call: no external process per candidate.
+  for f in "${state_dir}"/*.seed.json; do
+    [[ -f "${f}" ]] || continue
+    cand="${f##*/}"
+    cand="${cand%.seed.json}"
+    [[ "${cand}" == "${stripped}"* ]] || continue
+    hit="${cand}"
+    n=$((n + 1))
+  done
+  if ((n == 1)); then
+    printf '%s' "${hit}"
+    return 0
+  fi
+  printf '%s' "${dir}"
+}
+
+# seed_state_resolved_path <spec-path> — seed_state_path's read-side twin,
+# built from the resolved key. Reads and the post-success delete go through
+# this; the WRITE stays on seed_state_path, so a record is always created
+# under the name moment 1 knows and never under one inferred from a
+# directory that does not exist yet.
+seed_state_resolved_path() {
+  printf '%s/state/%s.seed.json' "${JIRA_CONFIG_DIR}" "$(seed_state_resolve_key "$1")"
+}
+
 # seed_state_compose <slug> <designators-json> <plan-digest> [<routing-json>]
 # [<plan-snapshot-json>] — prints the canonical JSON document (§2).
 # `bindings` is always an explicit empty array (FR-049 — a statement, not a
@@ -90,7 +146,7 @@ seed_state_plan_digest() {
 # (printing nothing) when absent, unreadable, or invalid JSON.
 seed_state_read() {
   local spec_path="$1" path content
-  path="$(seed_state_path "${spec_path}")"
+  path="$(seed_state_resolved_path "${spec_path}")"
   [[ -f "${path}" ]] || return 1
   content="$(cat "${path}" 2> /dev/null)" || return 1
   jq -e . > /dev/null 2>&1 <<< "${content}" || return 1
@@ -131,7 +187,7 @@ seed_state_write() {
 # success, not marked done). A no-op when absent.
 seed_state_delete() {
   local spec_path="$1" path
-  path="$(seed_state_path "${spec_path}")"
+  path="$(seed_state_resolved_path "${spec_path}")"
   rm -f "${path}" 2> /dev/null
   return 0
 }

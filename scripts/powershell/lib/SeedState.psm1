@@ -29,6 +29,59 @@ function Get-JiraSeedStatePath {
     return (Join-Path $stateDir "$featureDir.seed.json")
 }
 
+function Get-JiraSeedStateRecordKey {
+    <#
+    .SYNOPSIS
+      The key the record for this feature was actually written under, which
+      is NOT always the directory the host went on to create. Mirror of
+      seed_state_resolve_key.
+    .DESCRIPTION
+      `feature` records under the resolved short name, while spec-kit's own
+      create-new-feature.sh builds `<FEATURE_NUM>-<short-name>` and truncates
+      the suffix past its branch-length cap. Exact match wins outright;
+      otherwise the host's numbering is stripped and the remainder is matched
+      as a PREFIX of the recorded keys, since truncation can only shorten a
+      name. Exactly one candidate resolves; zero or several resolve to the
+      directory itself, so the caller fails exactly as it does today.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $SpecPath)
+    $dir = Split-Path -Leaf (Split-Path -Parent $SpecPath)
+    $stateDir = Join-Path (Get-JiraSeedStateConfigDir) 'state'
+    if (Test-Path -LiteralPath (Join-Path $stateDir "$dir.seed.json") -PathType Leaf) { return $dir }
+
+    $stripped = $dir
+    if ($dir -match '^[0-9]{8}-[0-9]{6}-(.+)$') { $stripped = $Matches[1] }
+    elseif ($dir -match '^[0-9]+-(.+)$') { $stripped = $Matches[1] }
+
+    $hit = ''
+    $n = 0
+    if (Test-Path -LiteralPath $stateDir -PathType Container) {
+        foreach ($f in [System.IO.Directory]::GetFiles($stateDir, '*.seed.json')) {
+            $cand = [System.IO.Path]::GetFileName($f)
+            $cand = $cand.Substring(0, $cand.Length - '.seed.json'.Length)
+            if (-not $cand.StartsWith($stripped, [System.StringComparison]::Ordinal)) { continue }
+            $hit = $cand
+            $n++
+        }
+    }
+    if ($n -eq 1) { return $hit }
+    return $dir
+}
+
+function Get-JiraSeedStateResolvedPath {
+    <#
+    .SYNOPSIS
+      Get-JiraSeedStatePath's read-side twin, built from the resolved key.
+      Reads and the post-success delete go through this; the WRITE stays on
+      Get-JiraSeedStatePath. Mirror of seed_state_resolved_path.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $SpecPath)
+    $stateDir = Join-Path (Get-JiraSeedStateConfigDir) 'state'
+    return (Join-Path $stateDir ((Get-JiraSeedStateRecordKey -SpecPath $SpecPath) + '.seed.json'))
+}
+
 function New-JiraSeedStateDocument {
     <#
     .SYNOPSIS
@@ -141,7 +194,7 @@ function Read-JiraSeedState {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $SpecPath)
-    $path = Get-JiraSeedStatePath -SpecPath $SpecPath
+    $path = Get-JiraSeedStateResolvedPath -SpecPath $SpecPath
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
     try { $content = [System.IO.File]::ReadAllText($path) } catch { return $null }
     try { $null = $content | ConvertFrom-Json -Depth 100 } catch { return $null }
@@ -199,9 +252,10 @@ function Remove-JiraSeedState {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $SpecPath)
-    $path = Get-JiraSeedStatePath -SpecPath $SpecPath
+    $path = Get-JiraSeedStateResolvedPath -SpecPath $SpecPath
     Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue
 }
 
-Export-ModuleMember -Function Get-JiraSeedStatePath, New-JiraSeedStateDocument, Read-JiraSeedState, `
+Export-ModuleMember -Function Get-JiraSeedStatePath, Get-JiraSeedStateRecordKey, Get-JiraSeedStateResolvedPath, `
+    New-JiraSeedStateDocument, Read-JiraSeedState, `
     Save-JiraSeedState, Remove-JiraSeedState, Test-JiraSeedStateDesignatorsEqual, Get-JiraSeedStatePlanDigest

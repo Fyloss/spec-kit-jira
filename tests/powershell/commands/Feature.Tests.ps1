@@ -480,7 +480,7 @@ Describe 'Feature command' {
         $r.ExitCode | Should -Be 0
         $obj = $r.Out.Trim() | ConvertFrom-Json
         $obj.ticket.action | Should -Be 'attached'
-        $obj.warnings[0] | Should -Be 'the reuse question was suppressed by --accept-defaults; assumed answer: create new'
+        $obj.warnings[0] | Should -Be 'the reuse question was suppressed by --accept-defaults; assumed answer: do not reuse — the mentioned ticket names this feature but is not bound to it, and the next reconcile creates a new parent beside it'
     }
 
     It '--reuse no proceeds as today''s run from here on, byte-identical (FR-010)' {

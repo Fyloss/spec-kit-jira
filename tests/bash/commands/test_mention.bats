@@ -94,6 +94,29 @@ boot() {
   grep -qE '^PUT /rest/api/3/issue/MENT-1/properties/' <(mock_calls)
 }
 
+@test "mention stamps a PARENT-role identity, the only shape recognition accepts" {
+  # recognition_parent_run blocks `parent-identity-unverifiable` on any marker
+  # whose role is not "parent" (sink/jira/recognition.sh). Stamping without a
+  # role made the remedy reconcile's own duplicate-probe refusal names —
+  # "bind each with the bridge's `mention <issue-key>` command" — impossible
+  # to follow. Asserted on the call rather than on a read-back: the mock
+  # persists a property only for a key it already holds in state, and seeding
+  # MENT-1 there would move the FR-050 fetch onto a different shim branch.
+  boot
+  local argfile="${BATS_TEST_TMPDIR}/identity_write.args"
+  identity_write() {
+    printf '%s\n' "$#" "$1" "$2" "$3" "$4" "$5" > "${argfile}"
+    return 0
+  }
+  run cmd_mention mention MENT-1 --json
+  [ "$status" -eq 0 ]
+  [ -f "${argfile}" ]
+  [ "$(sed -n 2p "${argfile}")" = "MENT-1" ]
+  [ "$(sed -n 4p "${argfile}")" = "human" ]
+  [ "$(sed -n 6p "${argfile}")" = "parent" ]
+  [ "$(jq -r '.spec_slug' <<< "$(sed -n 3p "${argfile}")")" = "001-onboarding" ]
+}
+
 @test "mention --dry-run predicts the stamp but performs zero writes (FR-033)" {
   boot
   run cmd_mention mention MENT-1 --dry-run --json

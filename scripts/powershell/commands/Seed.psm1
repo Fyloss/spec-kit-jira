@@ -564,7 +564,10 @@ function Invoke-JiraSeed {
         # First run: the seed material file moment 1 already wrote — NO
         # Jira read here (T100's one-way-read guarantee for the first
         # gate-reach). The material already carries status/parent.
-        $shortName = Split-Path -Leaf (Split-Path -Parent $specFile)
+        # The material is a sibling of the seed record and shares its key, so it
+        # is resolved the same way — the feature directory the host created is
+        # not always the name moment 1 wrote under (lib/SeedState.psm1).
+        $shortName = Get-JiraSeedStateRecordKey -SpecPath $specFile
         $configDir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
         $materialPath = Join-Path $configDir "state/$shortName.seed-material.json"
         if (Test-Path -LiteralPath $materialPath -PathType Leaf) {

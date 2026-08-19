@@ -28,6 +28,84 @@ _designators() {
   [ "$output" = "${JIRA_CONFIG_DIR}/state/001-add-payment-webhooks.seed.json" ]
 }
 
+# --- The record key vs the directory the host actually creates -------------
+#
+# `feature` writes the record under the resolved short name; spec-kit's
+# create-new-feature.sh then creates `specs/<FEATURE_NUM>-<short-name>` and
+# truncates the suffix past its branch-length cap. Keying the read on the
+# directory alone made every handoff miss.
+
+_seed_record() {
+  # _seed_record <key> — place an empty record under <key>.seed.json
+  mkdir -p "${JIRA_CONFIG_DIR}/state"
+  printf '{}' > "${JIRA_CONFIG_DIR}/state/$1.seed.json"
+}
+
+_spec_in() {
+  # _spec_in <feature-dir> — a spec path inside that feature directory
+  printf '%s/specs/%s/spec.md' "${WORK}" "$1"
+}
+
+@test "seed_state_resolve_key: an exact match wins outright" {
+  _seed_record "001-add-payment-webhooks"
+  run seed_state_resolve_key "${SPEC}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "001-add-payment-webhooks" ]
+}
+
+@test "seed_state_resolve_key: the host's NNN- numbering is stripped" {
+  _seed_record "ijt-42"
+  run seed_state_resolve_key "$(_spec_in 022-ijt-42)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ijt-42" ]
+}
+
+@test "seed_state_resolve_key: the host's timestamp numbering is stripped" {
+  _seed_record "ijt-42"
+  run seed_state_resolve_key "$(_spec_in 20260818-150950-ijt-42)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ijt-42" ]
+}
+
+@test "seed_state_resolve_key: a suffix the host truncated still resolves" {
+  _seed_record "ijt-a-very-long-feature-short-name"
+  run seed_state_resolve_key "$(_spec_in 022-ijt-a-very-long-feature)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ijt-a-very-long-feature-short-name" ]
+}
+
+@test "seed_state_resolve_key: two candidates resolve to nothing rather than the wrong one" {
+  _seed_record "ijt-42"
+  _seed_record "ijt-42-extra"
+  run seed_state_resolve_key "$(_spec_in 022-ijt-42)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "022-ijt-42" ]
+}
+
+@test "seed_state_resolve_key: no record at all resolves to the directory itself" {
+  mkdir -p "${JIRA_CONFIG_DIR}/state"
+  run seed_state_resolve_key "$(_spec_in 022-ijt-42)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "022-ijt-42" ]
+}
+
+@test "seed_state_read finds the record moment 1 wrote under the un-numbered name" {
+  local doc
+  doc="$(seed_state_compose "ijt-42" "$(_designators)" "")"
+  seed_state_write "${WORK}/specs/ijt-42/spec.md" "${doc}"
+  run seed_state_read "$(_spec_in 022-ijt-42)"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.slug' <<< "$output")" = "ijt-42" ]
+}
+
+@test "seed_state_delete removes the record the read resolved, not a phantom" {
+  local doc
+  doc="$(seed_state_compose "ijt-42" "$(_designators)" "")"
+  seed_state_write "${WORK}/specs/ijt-42/spec.md" "${doc}"
+  seed_state_delete "$(_spec_in 022-ijt-42)"
+  [ ! -f "${JIRA_CONFIG_DIR}/state/ijt-42.seed.json" ]
+}
+
 # --- S-1/S-8: the record is written with bindings: [] and the ordered set ---
 
 @test "S-1: seed_state_compose carries bindings: [] and the ordered designator set" {
