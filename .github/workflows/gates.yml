@@ -93,6 +93,14 @@ jobs:
           path: /var/cache/apt/archives
           key: apt-archives-coverage-bash-${{ runner.os }}-jq-curl-kcov
       - name: Install toolchain
+        # 18 seconds on every run that completes it — the ceiling is here only
+        # so that a hang fails fast instead of taking the whole job with it.
+        # MEASURED 2026-08-19 (run 32274698086): this step hung in apt for
+        # 2 h 38 m and was still going when the run was cancelled, which meant
+        # the coverage step behind it never started and the job proved nothing
+        # about coverage in either direction. Neither this step nor the job
+        # carried a ceiling, so the only bound was GitHub's own 6-hour cap.
+        timeout-minutes: 10
         run: |
           sudo apt-get update && sudo apt-get install -y jq curl kcov
           # Jammy's apt bats is 1.2.1, which predates BATS_TEST_TMPDIR (added in
@@ -221,6 +229,10 @@ jobs:
           exit "${rc}"
       - name: Traceability fallback (only if kcov could not measure)
         if: ${{ steps.kcov.outcome == 'failure' }}
+        # Seconds of work — a grep per shipped script. Bounded for the same
+        # reason as the install above: an unbounded step in this job has no
+        # ceiling but GitHub's 6-hour cap.
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           if [ "${{ steps.kcov.outputs.rescue }}" != "true" ]; then
