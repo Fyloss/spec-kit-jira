@@ -180,6 +180,9 @@ jira_request() {
 
     # Build the curl config on stdin: the auth header first, then the request
     # shape. Data (never secret) is referenced from a file, still off argv.
+    # A resolution failure here (030, C6.1) is reported by cred_curl_config
+    # itself, to stderr, before it returns — this call site only needs to map
+    # the failure to the auth exit code, not construct the message.
     local cfg
     if ! cfg="$(cred_curl_config "${email}")"; then
       rc="$(cli_exit_code auth)"

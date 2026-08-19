@@ -1,0 +1,8 @@
+# A hand-edited file — quirky formatting the ceremony must never rewrite.
+
+override:
+  branch_pattern: "ijt-<ID>/<FEATURE_NAME>"
+  folder_prefix: "ijt-"
+
+email: kept@example.com
+# team: ijt   <- left commented on purpose

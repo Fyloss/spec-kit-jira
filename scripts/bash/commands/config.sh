@@ -124,15 +124,25 @@ config_resolved_ids_for() {
 }
 
 # _config_degraded_run <json:true|false> <dry_run:true|false> <missing-vars>
+# <hooks_status> <hooks_detail> <gitignore_status> <personal_status>
+# <personal_detail> [cred_reason]
 # The degraded, report-only path (002 US2, FR-008/FR-009): entered ONLY when
 # connection parameters are undefined, BEFORE any Jira call. Scans local branch
 # names for `<prefix>-<number>/…` shapes (the command layer may read git;
 # research §4), proposes the distinct prefixes as PROVISIONAL team candidates,
 # prints exactly one warning naming the missing variables plus copy-pasteable
-# re-run guidance, and writes NOTHING — every effect reports `skipped` and the
-# authoritative resolved-id binding is untouched. Exit 0.
+# re-run guidance. `discovery` and `readme` still report `skipped` — they need
+# Jira. `hooks`, `gitignore` and `personal` report their TRUE status (030,
+# research R5): the fresh-setup case IS degraded mode, and it is exactly when
+# personal.yml must be created and covered by the ignore rule.
+#
+# `cred_reason` (030, FR-038, C6.4–C6.6) is the located C3.x reason when
+# `JIRA_PAT_COMMAND` was declared and failed — appended to `detail` and already
+# printed to stderr by the caller. Empty when no retrieval command was
+# declared: that half of the trigger stays silent, exactly as before.
 _config_degraded_run() {
   local json="$1" dry_run="$2" missing="$3" hooks_status="$4" hooks_detail="$5"
+  local gitignore_status="$6" personal_status="$7" personal_detail="$8" cred_reason="${9:-}"
   local branches proposals
   branches="$(git for-each-ref refs/heads --format='%(refname:short)' 2> /dev/null || true)"
   proposals="$(printf '%s\n' "${branches}" \
@@ -146,17 +156,21 @@ _config_degraded_run() {
   rerun="define ${missing}, then re-run: $(output_bridge_invocation config)"
 
   local detail="degraded mode: Jira connection parameters undefined"
+  [[ -n "${cred_reason}" ]] && detail="${detail}; ${cred_reason}"
   local effects summary
   # The hooks effect is reported even here. It needs no Jira at all — it reads
   # two local files — and an operator running the ceremony to release a held
   # event with --enable-hook is very likely to be doing it before the credentials
   # are in place. Reporting it "skipped" would have been a lie about work that
-  # was in fact performed.
-  effects="$(jq -cn --arg d "${detail}" --arg hs "${hooks_status}" --arg hd "${hooks_detail}" '{
+  # was in fact performed. The gitignore and personal effects need the same
+  # argument (030, research R5).
+  effects="$(jq -cn --arg d "${detail}" --arg hs "${hooks_status}" --arg hd "${hooks_detail}" \
+    --arg gs "${gitignore_status}" --arg ps "${personal_status}" --arg pd "${personal_detail}" '{
     discovery: {status: "skipped", detail: $d},
     hooks:     {status: $hs, detail: $hd},
     readme:    {status: "skipped", detail: $d},
-    gitignore: {status: "skipped", detail: $d}
+    gitignore: {status: $gs, detail: "personal.yml gitignore coverage"},
+    personal:  {status: $ps, detail: $pd}
   }')"
   summary="$(jq -cn --argjson effects "${effects}" --argjson dry "${dry_run}" \
     --argjson prov "${proposals}" --arg rerun "${rerun}" '
@@ -742,11 +756,19 @@ _config_task_mirror_write() {
 }
 
 # _config_gitignore_effect <repo-root> <dry_run> — enforce gitignore coverage of
-# the gitignored config layer (002 US3, FR-019): config.local.yml, .env, and the
-# new personal.yml. Only missing exact lines are appended, idempotently; an
-# absent file is created with the three lines. Prints the effect status
+# the gitignored config layer (002 US3, FR-019): config.local.yml and
+# personal.yml. Only missing exact lines are appended, idempotently; an absent
+# file is created with the three lines. Prints the effect status
 # (created|written|unchanged) on stdout; a dry-run computes the status without
 # touching the file.
+#
+# `.env` stays in the rule set too, but it is no longer part of that
+# gitignored config LAYER (030, personal-config-creation.md §5, C5.3): the
+# bridge does not read that file any more (credential-resolution.md C1.2). The
+# rule is kept for an installation that predates this feature and still has
+# one on disk holding a real token — retiring the reader must not be the thing
+# that un-ignores, and so commits, a leftover secret. It costs one line and
+# guards a file this tool will never create again.
 _config_gitignore_effect() {
   local repo_root="$1" dry_run="$2"
   local gi="${SPEC_KIT_JIRA_GITIGNORE:-${repo_root}/.gitignore}"
@@ -782,6 +804,85 @@ _config_gitignore_effect() {
     fi
   fi
   printf '%s' "${status}"
+}
+
+# =============================================================================
+# The personal.yml effect (030, US3, contracts/personal-config-creation.md)
+# =============================================================================
+
+# _config_personal_content <email-value> <team-ids-csv> — the byte-identical
+# content of a created personal.yml (§2, data-model.md §6). `email-value` empty
+# yields a commented placeholder; `team-ids-csv` empty yields the
+# "no teams declared" wording rather than an empty list (US3 AC4). `team` is
+# ALWAYS commented out (FR-026) — the ceremony never selects one, even when the
+# catalogue offers exactly one.
+_config_personal_content() {
+  local email_value="$1" ids="$2"
+  local email_line ids_line
+  if [[ -n "${email_value}" ]]; then
+    email_line="email: ${email_value}"
+  else
+    email_line="# email: dev@example.com"
+  fi
+  if [[ -z "${ids}" ]]; then
+    ids_line="(the catalogue declares no teams)"
+  else
+    ids_line="${ids}"
+  fi
+  printf '%s\n' \
+    "# .specify/jira/personal.yml — your personal settings. Never committed." \
+    "" \
+    "# Your Jira account email, used for authentication." \
+    "${email_line}" \
+    "" \
+    "# Your team, from the catalogue in config.yml. Optional — leave it commented" \
+    "# out to work without a team selection." \
+    "# Available: ${ids_line}" \
+    "# team: alpha"
+}
+
+# The two values _config_personal_effect produces: a status token and a prose
+# detail. Returned through globals for the same reason as the hooks effect
+# above — the function MUST NOT be invoked through command substitution.
+_CONFIG_PERSONAL_STATUS=''
+_CONFIG_PERSONAL_DETAIL=''
+
+# _config_personal_effect <config_dir> <cfg-json> <dry_run> — create
+# .specify/jira/personal.yml when absent (030, US3, FR-024–FR-031). Runs AFTER
+# config_resolve_connection (the chokepoint), so the outstanding-settings
+# detail reflects the RESOLVED state (env or file), not the file alone — an
+# operator who already exports SPEC_KIT_JIRA_BASE_URL is not nagged to also
+# put it in config.yml. Call DIRECTLY, never in `$(...)`.
+_config_personal_effect() {
+  local dir="$1" cfg="$2" dry_run="$3"
+  local pf="${dir}/personal.yml"
+
+  local -a outstanding=()
+  [[ -z "${SPEC_KIT_JIRA_BASE_URL:-}" ]] && outstanding+=("base_url is not set — add it to config.yml (or export SPEC_KIT_JIRA_BASE_URL)")
+  [[ -z "${JIRA_EMAIL:-}" ]] && outstanding+=("email is not set — add it to personal.yml (or export JIRA_EMAIL)")
+
+  local detail item
+  detail=""
+  for item in "${outstanding[@]}"; do
+    detail="${detail}${detail:+; }${item}"
+  done
+  [[ -z "${detail}" ]] && detail="nothing outstanding"
+  _CONFIG_PERSONAL_DETAIL="${detail}"
+
+  if [[ -f "${pf}" ]]; then
+    _CONFIG_PERSONAL_STATUS="unchanged"
+    return 0
+  fi
+  if [[ "${dry_run}" == "true" ]]; then
+    _CONFIG_PERSONAL_STATUS="would_create"
+    return 0
+  fi
+
+  local ids
+  ids="$(jq -r '[.teams[]?.id] | join(", ")' <<< "${cfg}")"
+  mkdir -p "${dir}"
+  _config_personal_content "${JIRA_EMAIL:-}" "${ids}" > "${pf}"
+  _CONFIG_PERSONAL_STATUS="created"
 }
 
 # =============================================================================
@@ -931,24 +1032,53 @@ cmd_config() {
   local cfg
   cfg="$(config_load "${configdir}")" || return $?
 
+  # The resolution chokepoint (030, plan.md §Key design decision): seed
+  # SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml / personal.yml,
+  # environment first. Runs before anything below reads either variable.
+  config_resolve_connection "${configdir}" "${cfg}" || return $?
+
+  # Gitignore + personal effects (030, research §R5) — moved AHEAD of the
+  # degraded-mode early return below. The fresh-setup case IS degraded mode
+  # (no base URL, no token yet), which is exactly when personal.yml must be
+  # created and covered by the ignore rule; an operator would otherwise need
+  # working Jira credentials to obtain the file in which they declare them.
+  local repo_root gitignore_status
+  repo_root="$(dirname "$(dirname "${configdir}")")"
+  gitignore_status="$(_config_gitignore_effect "${repo_root}" "${dry_run}")"
+  _config_personal_effect "${configdir}" "${cfg}" "${dry_run}"
+  local personal_status="${_CONFIG_PERSONAL_STATUS}" personal_detail="${_CONFIG_PERSONAL_DETAIL}"
+
   # Degraded-mode trigger (002 US2, FR-008) — tested BEFORE any Jira call and
   # ONLY on ABSENT connection parameters: an unset/empty base URL, or a token
-  # that resolves through none of the three rungs. Defined-but-wrong parameters
-  # keep the fail-closed auth/network exits below (research §4).
+  # that resolves through neither of the two rungs. Defined-but-wrong
+  # parameters keep the fail-closed auth/network exits below (research §4).
+  #
+  # 030, FR-038, contracts/credential-resolution.md C6.4–C6.6: a token failure
+  # is SILENT here when nothing was declared (unchanged), but REPORTED — on
+  # stderr and in the degraded run's detail — when JIRA_PAT_COMMAND was
+  # declared and failed. Refusing here would deny the operator the very file
+  # in which they declare their settings, so the run still completes degraded.
   local degraded_missing=""
   if [[ -z "${SPEC_KIT_JIRA_BASE_URL:-}" ]]; then
     degraded_missing="SPEC_KIT_JIRA_BASE_URL"
   fi
+  local cred_declared="false" cred_reason=""
+  [[ -n "${JIRA_PAT_COMMAND:-}" ]] && cred_declared="true"
   if ! cred_resolve_token > /dev/null 2>&1; then
     if [[ -n "${degraded_missing}" ]]; then
       degraded_missing="${degraded_missing}, JIRA_API_TOKEN"
     else
       degraded_missing="JIRA_API_TOKEN"
     fi
+    if [[ "${cred_declared}" == "true" ]]; then
+      cred_reason="${_CRED_LAST_ERROR}"
+      printf 'config: %s\n' "${cred_reason}" >&2
+    fi
   fi
   if [[ -n "${degraded_missing}" ]]; then
     _config_degraded_run "${json}" "${dry_run}" "${degraded_missing}" \
-      "${hooks_status}" "${hooks_detail}"
+      "${hooks_status}" "${hooks_detail}" "${gitignore_status}" \
+      "${personal_status}" "${personal_detail}" "${cred_reason}"
     return $?
   fi
 
@@ -1263,12 +1393,8 @@ cmd_config() {
     fi
   fi
 
-  # Gitignore effect (002 US3, FR-019): ensure the repository .gitignore covers the
-  # gitignored config layer (config.local.yml, .env, personal.yml). Repo root is
-  # the parent of the .specify directory (overridable via SPEC_KIT_JIRA_GITIGNORE).
-  local repo_root gitignore_status
-  repo_root="$(dirname "$(dirname "${configdir}")")"
-  gitignore_status="$(_config_gitignore_effect "${repo_root}" "${dry_run}")"
+  # Gitignore + personal effects (030): already computed above, ahead of the
+  # degraded-mode check (research §R5) — reused here, not recomputed.
 
   # README effect (US5, T065): splice the version-marked managed block into the
   # consuming repository's README. The path derives from the config dir's repo
@@ -1302,6 +1428,7 @@ cmd_config() {
     --arg hs "${hooks_status}" --arg hd "${hooks_detail}" \
     --arg rs "${readme_status}" --arg rd "${readme_detail}" \
     --arg gs "${gitignore_status}" \
+    --arg ps "${personal_status}" --arg pd "${personal_detail}" \
     --arg fs "${fd_write_status}" \
     --arg tms "${tm_write_status}" '
     {
@@ -1309,6 +1436,7 @@ cmd_config() {
       hooks:     {status: $hs, detail: $hd},
       readme:    {status: $rs, detail: $rd},
       gitignore: {status: $gs, detail: "personal.yml gitignore coverage"},
+      personal:  {status: $ps, detail: $pd},
       field_defaults: {status: $fs, detail: "recorded field defaults in config.yml"},
       task_mirror: {status: $tms, detail: "recorded task mirror mode in config.yml"}
     }')"

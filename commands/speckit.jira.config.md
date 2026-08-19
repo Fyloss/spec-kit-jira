@@ -86,13 +86,16 @@ pre-existing template enumerations of step 1 — nothing else.
 1. **Prerequisite gate** — the entry point checks `bash ≥ 4` (macOS ships 3.2 —
    name it explicitly), `curl`/`jq`/`git`, or `pwsh ≥ 7`. On failure it exits `5`
    **before any Jira interaction** (NFR-4). Do not proceed.
-2. **Credentials** — resolve the token via env → OS secret manager → gitignored
-   `.specify/jira/.env` (NFR-3). The token NEVER appears in argv, logs, or errors.
+2. **Credentials** — resolve the token via env (`JIRA_API_TOKEN`), then a
+   declared `JIRA_PAT_COMMAND` (NFR-3). There is no third rung and no file is
+   ever read for it; a declared command that fails is reported, not silently
+   skipped (FR-038). The token NEVER appears in argv, logs, or errors.
 
 ## Degraded mode (FR-008/FR-009)
 
-When `SPEC_KIT_JIRA_BASE_URL` is undefined or the token resolves through none of
-the three rungs, the entry point enters degraded mode **before any Jira call**:
+When the base URL (`SPEC_KIT_JIRA_BASE_URL` or `config.yml`'s `base_url`) is
+undefined or the token resolves through neither rung, the entry point enters
+degraded mode **before any Jira call**:
 it exits `0`, prints exactly one warning naming the missing variables, proposes
 team names scanned from existing branch prefixes with every proposal marked
 `provisional: true`, and writes **nothing** — the authoritative resolved-id
@@ -299,7 +302,8 @@ A single run's effects are each reported **separately** in the summary:
 - **hooks** — a **read-only verification** of the lifecycle hooks (see below).
 - **readme** — the version-marked managed README block (US5).
 - **gitignore** — idempotent `.gitignore` coverage of the gitignored config
-  layer (`config.local.yml`, `.env`, `personal.yml` — FR-019).
+  layer (`config.local.yml`, `personal.yml`), plus the `.env` rule kept as a
+  leftover-file guard even though nothing reads that file any more (FR-041).
 
 ## The hooks effect: verify and report, never write — normative
 

@@ -155,3 +155,45 @@ _refusal_summary() {
   [ "$(jq -r '.rerun_guidance' <<< "$(_refusal_summary)")" != "null" ]
   rm -rf "${WORK}"
 }
+
+# =============================================================================
+# T052 [030, US2] — the §6 ordering rule: a malformed FILE setting refuses
+# even when the environment holds a valid one (contracts/connection-
+# settings.md §6). config_load validates the file unconditionally; the
+# chokepoint only ever SEEDS an unset variable, so a bad file is never masked
+# by a good environment value.
+# =============================================================================
+
+@test "T052 — a malformed base_url in config.yml refuses even with a valid SPEC_KIT_JIRA_BASE_URL exported" {
+  local dir; dir="$(mktemp -d)"
+  cat > "${dir}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    style: company_managed
+routing_default: PROJ
+base_url: "https://team.atlassian.net/"
+YAML
+  export SPEC_KIT_JIRA_BASE_URL="https://valid.example.invalid"
+  JIRA_CONFIG_DIR="${dir}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"base_url is invalid"* ]]
+  unset SPEC_KIT_JIRA_BASE_URL
+  rm -rf "${dir}"
+}
+
+@test "T052 — a malformed email in personal.yml refuses even with a valid JIRA_EMAIL exported" {
+  local dir; dir="$(mktemp -d)"
+  cat > "${dir}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    style: company_managed
+routing_default: PROJ
+YAML
+  printf 'email: not-an-address\n' > "${dir}/personal.yml"
+  export JIRA_EMAIL="valid@example.com"
+  JIRA_CONFIG_DIR="${dir}" run config_personal_load "${dir}" '{}'
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"email is invalid"* ]]
+  unset JIRA_EMAIL
+  rm -rf "${dir}"
+}

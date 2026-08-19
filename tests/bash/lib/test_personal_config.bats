@@ -115,3 +115,49 @@ teardown() {
   [[ "$output" != *"Invalid numeric literal"* ]]
   [[ "$output" != *"jq: error"* ]]
 }
+
+# =============================================================================
+# T016 [030] — the five `team` states (data-model.md §3) and the `email`
+# accept/refuse table (contracts/connection-settings.md §3)
+# =============================================================================
+
+@test "T016 — team present-and-empty still refuses (exit 4), not treated as absent" {
+  printf 'team: ""\n' > "${DIR}/personal.yml"
+  run config_personal_load "${DIR}" "${TEAMS}"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"team is invalid"* ]]
+}
+
+@test "T016 — email accepts a well-formed address" {
+  printf 'email: op@example.com\n' > "${DIR}/personal.yml"
+  run config_personal_load "${DIR}" "${TEAMS}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "false" ]
+}
+
+@test "T016 — email refuses a malformed address" {
+  printf 'email: not-an-address\n' > "${DIR}/personal.yml"
+  run config_personal_load "${DIR}" "${TEAMS}"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"email is invalid"* ]]
+}
+
+@test "T016 — email refuses when present and empty" {
+  printf 'email: ""\n' > "${DIR}/personal.yml"
+  run config_personal_load "${DIR}" "${TEAMS}"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"email is invalid"* ]]
+}
+
+@test "T016 — email absent is accepted (the environment may supply it)" {
+  printf 'team: ijt\n' > "${DIR}/personal.yml"
+  run config_personal_load "${DIR}" "${TEAMS}"
+  [ "$status" -eq 0 ]
+}
+
+@test "T016 — a valid email alongside a valid team both survive validation" {
+  printf 'team: ijt\nemail: op@example.com\n' > "${DIR}/personal.yml"
+  run config_personal_load "${DIR}" "${TEAMS}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "true" ]
+}

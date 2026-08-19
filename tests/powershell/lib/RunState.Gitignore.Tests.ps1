@@ -41,4 +41,20 @@ Describe 'RunState gitignore' {
         Test-Path -LiteralPath (Join-Path $script:Work '.specify/jira/state/021-example.json') | Should -Be $true
         (& git -C $script:Work status --porcelain) | Should -BeNullOrEmpty
     }
+
+    It "T082 [030]: the state .gitignore is a bare '*', and base_url/email land ONLY there" {
+        Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+
+        (Get-Content -Raw (Join-Path $script:Work '.specify/jira/state/.gitignore')).TrimEnd("`n") | Should -Be '*'
+        $stateJson = Get-Content -Raw (Join-Path $script:Work '.specify/jira/state/021-example.json') | ConvertFrom-Json
+        $stateJson.base_url | Should -Be 'https://acme.atlassian.net'
+        $stateJson.email | Should -Be 'user@example.com'
+
+        # No OTHER tracked artifact under the repo root carries either value —
+        # 030 sources base_url/email from config.yml/personal.yml (both
+        # already gitignored, or never written by the tool) and the run-state
+        # document (self-ignored); nothing new escapes into a tracked file.
+        $hits = & git -C $script:Work grep -l 'acme.atlassian.net' -- . 2>$null
+        $hits | Should -BeNullOrEmpty
+    }
 }

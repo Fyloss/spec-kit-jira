@@ -227,11 +227,11 @@ function ConvertTo-JiraSummaryProse {
     }
     $lines.Add("Warnings: $($s.counts.warnings), Errors: $($s.counts.errors)")
     # The config ceremony's effects, reported separately (FR-054), in a fixed
-    # order (discovery, hooks, readme, gitignore) so both ports match
-    # byte-for-byte.
+    # order (discovery, hooks, readme, gitignore, personal) so both ports
+    # match byte-for-byte.
     if ($s.PSObject.Properties.Name -contains 'effects') {
         $lines.Add('Effects:')
-        foreach ($effect in @('discovery', 'hooks', 'readme', 'gitignore')) {
+        foreach ($effect in @('discovery', 'hooks', 'readme', 'gitignore', 'personal')) {
             $e = if ($s.effects.PSObject.Properties.Name -contains $effect) { $s.effects.$effect } else { $null }
             if ($null -eq $e) { continue }
             $status = $e.status

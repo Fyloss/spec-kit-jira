@@ -162,6 +162,25 @@ _normalize_state_base_url() {
 }
 export -f _normalize_state_base_url
 
+# _normalize_config_yaml_base_url <workdir> — masks the SAME field
+# _normalize_state_base_url masks, in the OTHER place it lands: a tracked
+# config.yml the @MOCK_BASE_URL@ substitution (research.md §R6/§R10, T001)
+# wrote into the copied fixture BEFORE either port ever ran. The Bash port's
+# curl-shim backend and the PowerShell port's real socket server resolve the
+# sentinel to two DIFFERENT literal `http://127.0.0.1:<port>` strings
+# (contracts/mock-driver.md Decision 2), so a scenario whose config.yml
+# declares `base_url` diverges on this one field even though the run itself
+# is byte-identical. `sed`, not `jq`: config.yml is YAML, not JSON.
+_normalize_config_yaml_base_url() {
+  local dir="$1" f
+  [ -d "${dir}" ] || return 0
+  while IFS= read -r -d '' f; do
+    sed -i.bak -E 's#http://127\.0\.0\.1:[0-9]+#http://127.0.0.1:MOCK_PORT#g' "${f}" 2> /dev/null
+    rm -f "${f}.bak"
+  done < <(find "${dir}" -path '*/jira/config.yml' -print0 2> /dev/null)
+}
+export -f _normalize_config_yaml_base_url
+
 # Scenarios are independent (each gets its own mktemp workdir and an
 # OS-assigned ephemeral mock port, per run-scenario.sh), so they run
 # concurrently across cores instead of one after another. xargs -P exits 123
@@ -186,6 +205,8 @@ run_scenario() {
   done
   _normalize_state_base_url "${out_bash}/workdir"
   _normalize_state_base_url "${out_ps}/workdir"
+  _normalize_config_yaml_base_url "${out_bash}/workdir"
+  _normalize_config_yaml_base_url "${out_ps}/workdir"
   if ! diff -ru "${out_bash}/workdir" "${out_ps}/workdir"; then
     echo "conformance divergence in ${name} (written files)"
     while IFS= read -r line; do
@@ -228,6 +249,8 @@ run_scenario() {
       done
       _normalize_state_base_url "${on_dir}/workdir"
       _normalize_state_base_url "${off_dir}/workdir"
+      _normalize_config_yaml_base_url "${on_dir}/workdir"
+      _normalize_config_yaml_base_url "${off_dir}/workdir"
       if ! diff -rq "${on_dir}/workdir" "${off_dir}/workdir" > /dev/null 2>&1; then
         echo "prefetch differential divergence in ${name} (${port}, written files differ prefetch on vs off)"
         detail="${detail}  ${port}: written files differ between prefetch on and off"$'\n'
@@ -297,6 +320,8 @@ run_scenario() {
     done
     _normalize_state_base_url "${alt_bash}/workdir"
     _normalize_state_base_url "${alt_ps}/workdir"
+    _normalize_config_yaml_base_url "${alt_bash}/workdir"
+    _normalize_config_yaml_base_url "${alt_ps}/workdir"
     if ! diff -rq "${alt_bash}/workdir" "${alt_ps}/workdir" > /dev/null 2>&1; then
       echo "conformance divergence in ${name} (after_plan variant, written files)"
       detail="${detail}  after_plan variant: written files differ between ports"$'\n'

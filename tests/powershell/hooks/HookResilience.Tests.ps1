@@ -143,15 +143,43 @@ Describe 'T110b [Phase 8, 022] — a checklist-caused fault downgrades identical
         $Mock = Join-Path $Root 'tests/conformance/mock-jira'
         $Fixture = Join-Path $Root 'tests/conformance/fixtures/repo-with-config'
         Import-Module (Join-Path $Mock 'Mock.psm1') -Force
+        # Same clobber, one layer deeper (030): commands/Config.psm1 -Force-
+        # imports sink/jira/Discovery.psm1, which itself imports
+        # sink/jira/Client.psm1 WITHOUT -Force (module-scope reuse, by
+        # design — see project memory: powershell-import-force-clobbers-
+        # caller-scope). That reuse means Discovery.psm1 stays bound to
+        # WHATEVER Client.psm1 instance was first loaded in this process —
+        # if an earlier-discovered file (CredentialFailClosed.Tests.ps1)
+        # already poisoned that instance's Credentials.psm1 cache to
+        # 'unresolved', config's own discovery call inherits the poison
+        # even with JIRA_EMAIL/JIRA_API_TOKEN freshly set below. Force a
+        # fresh Client.psm1 FIRST, before any Config.psm1 reimport, so
+        # Discovery.psm1's later non-force nested import picks up the new
+        # one instead of the stale one.
+        Import-Module (Join-Path $Root 'scripts/powershell/sink/jira/Client.psm1') -Force
         Import-Module (Join-Path $ConfigCmdDir 'Config.psm1') -Force
         # Config.psm1 -Force-imports lib/Config.psm1 internally, rebinding it into
         # its own scope — reimport here so this Describe's own use of it (and
         # Reconcile.psm1's) keeps working too (memory:
         # powershell-import-force-clobbers-caller-scope).
         Import-Module (Join-Path $Root 'scripts/powershell/lib/Config.psm1') -Force
-        # Same clobber: Config.psm1 -Force-imports sink/jira/Hierarchy.psm1
-        # nested (non-Global), re-scoping Get-JiraHierarchyMandatoryGate out of
-        # Reconcile.psm1's own -Global registration. Restore it -Global too.
+        # Same clobber, the credential-cache direction (030): commands/Config.psm1
+        # (imported once, above) carries its OWN binding to lib/Credentials.psm1
+        # from THAT import. An earlier-run test file that already left the
+        # credential cache in an 'unresolved' state leaves it there for this
+        # Describe too — the cache check short-circuits before ever looking at
+        # JIRA_API_TOKEN again, so setting it fresh in the It block below is not
+        # enough on its own. Re-import commands/Config.psm1 -Force AGAIN, last
+        # among the Config.psm1 reimports, so it is the most-recent binder of
+        # lib/Credentials.psm1 (module instances are process-wide, not
+        # per-Describe).
+        Import-Module (Join-Path $ConfigCmdDir 'Config.psm1') -Force
+        # Same clobber: EVERY Config.psm1 -Force reimport above also
+        # -Force-imports sink/jira/Hierarchy.psm1 nested (non-Global),
+        # re-scoping Get-JiraHierarchyMandatoryGate out of Reconcile.psm1's own
+        # -Global registration. This must run LAST — after both Config.psm1
+        # reimports above, not between them — or the second Config.psm1
+        # reimport just re-breaks it again.
         Import-Module (Join-Path $Root 'scripts/powershell/sink/jira/Hierarchy.psm1') -Force -Global
 
         function Invoke-CapturedConfig {
@@ -168,6 +196,11 @@ Describe 'T110b [Phase 8, 022] — a checklist-caused fault downgrades identical
         New-Item -ItemType Directory -Path $hookWork -Force | Out-Null
         Copy-Item -Recurse (Join-Path $Fixture '.specify') (Join-Path $hookWork '.specify')
         $env:JIRA_CONFIG_DIR = Join-Path $hookWork '.specify/jira'
+        # Explicit, not ambient: this Describe block has its own BeforeAll and
+        # no BeforeEach, so it must not depend on what a DIFFERENT Describe
+        # block's test happened to leave in the process environment.
+        $env:JIRA_EMAIL = 'user@example.com'
+        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
         $cfgPath = Write-JiraMockConfig -Json '{"projects":{"COMP":"company"}}'
         $m = Start-JiraMock -ConfigPath $cfgPath
         $env:SPEC_KIT_JIRA_BASE_URL = $m.BaseUrl
@@ -215,6 +248,10 @@ Describe 'T110b [Phase 8, 022] — a checklist-caused fault downgrades identical
             Stop-JiraMock -Mock $m
             Remove-Item -Recurse -Force $hookWork -ErrorAction SilentlyContinue
             Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue
+            Remove-Item Env:\JIRA_EMAIL -ErrorAction SilentlyContinue
+            Remove-Item Env:\JIRA_API_TOKEN -ErrorAction SilentlyContinue
+            Remove-Item Env:\JIRA_CONFIG_DIR -ErrorAction SilentlyContinue
+            Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
         }
     }
 }

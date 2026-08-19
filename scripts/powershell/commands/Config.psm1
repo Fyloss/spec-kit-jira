@@ -126,15 +126,25 @@ function Invoke-JiraConfigDegraded {
       The degraded, report-only path (002 US2, FR-008/FR-009). Mirror of
       _config_degraded_run: branch-scan proposals marked provisional, exactly
       one warning naming the missing variables, re-run guidance, zero writes,
-      every effect skipped, exit 0.
+      exit 0. `hooks`, `gitignore` and `personal` report their TRUE status
+      (030, research §R5): the fresh-setup case IS degraded mode, and it is
+      exactly when personal.yml must be created and covered by the ignore
+      rule. -CredReason (030, FR-038, C6.4-C6.6) is the located C3.x reason
+      when JIRA_PAT_COMMAND was declared and failed — appended to the detail
+      and already printed to stderr by the caller.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'CredReason', Justification = 'Holds a located, human-readable failure reason (C6.4-C6.6), never a token or secret; the name matches the rule''s naming heuristic, not its intent.')]
     [CmdletBinding()]
     param(
         [bool] $Json = $false,
         [bool] $DryRun = $false,
         [Parameter(Mandatory)] [string] $Missing,
         [string] $HooksStatus = 'skipped',
-        [string] $HooksDetail = ''
+        [string] $HooksDetail = '',
+        [string] $GitignoreStatus = 'skipped',
+        [string] $PersonalStatus = 'skipped',
+        [string] $PersonalDetail = '',
+        [string] $CredReason = ''
     )
     $branches = @()
     try { $branches = @(git for-each-ref refs/heads --format='%(refname:short)' 2> $null) }
@@ -152,6 +162,7 @@ function Invoke-JiraConfigDegraded {
     $rerun = "define $Missing, then re-run: $(Get-JiraBridgeInvocation config)"
 
     $detail = 'degraded mode: Jira connection parameters undefined'
+    if ($CredReason) { $detail = "$detail; $CredReason" }
     $summaryObj = [ordered]@{
         schema_version = '1.0'
         command        = 'config'
@@ -163,10 +174,12 @@ function Invoke-JiraConfigDegraded {
             # reads two local files — and an operator running the ceremony to
             # release a held event with --enable-hook is very likely to be doing it
             # before the credentials are in place. Reporting it "skipped" would
-            # have been a lie about work that was in fact performed.
+            # have been a lie about work that was in fact performed. The gitignore
+            # and personal effects need the same argument (030, research R5).
             hooks     = [ordered]@{ status = $HooksStatus; detail = $HooksDetail }
             readme    = [ordered]@{ status = 'skipped'; detail = $detail }
-            gitignore = [ordered]@{ status = 'skipped'; detail = $detail }
+            gitignore = [ordered]@{ status = $GitignoreStatus; detail = 'personal.yml gitignore coverage' }
+            personal  = [ordered]@{ status = $PersonalStatus; detail = $PersonalDetail }
         }
         provisional    = $proposals
         rerun_guidance = $rerun
@@ -870,11 +883,19 @@ function Set-JiraConfigGitignore {
     <#
     .SYNOPSIS
       Enforce gitignore coverage of the gitignored config layer (002 US3,
-      FR-019): config.local.yml, .env, and personal.yml. Mirror of
+      FR-019): config.local.yml and personal.yml. Mirror of
       _config_gitignore_effect. Only missing exact lines are appended,
       idempotently; an absent file is created with the three lines. Returns the
       effect status (created|written|unchanged); a dry-run computes the status
       without touching the file.
+
+      `.env` stays in the rule set too, but it is no longer part of that
+      gitignored config LAYER (030, personal-config-creation.md §5, C5.3): the
+      bridge does not read that file any more (credential-resolution.md C1.2).
+      The rule is kept for an installation that predates this feature and
+      still has one on disk holding a real token — retiring the reader must
+      not be the thing that un-ignores, and so commits, a leftover secret. It
+      costs one line and guards a file this tool will never create again.
     #>
     [CmdletBinding()]
     param(
@@ -905,6 +926,76 @@ function Set-JiraConfigGitignore {
         [System.IO.File]::WriteAllText($gi, $content, $utf8)
     }
     return 'written'
+}
+
+# =============================================================================
+# The personal.yml effect (030, US3, contracts/personal-config-creation.md)
+# =============================================================================
+
+function Get-JiraConfigPersonalContent {
+    <#
+    .SYNOPSIS
+      The byte-identical content of a created personal.yml (§2, data-model.md
+      §6). Mirror of _config_personal_content. An empty -EmailValue yields a
+      commented placeholder; an empty -Ids yields the "no teams declared"
+      wording rather than an empty list (US3 AC4). `team` is ALWAYS commented
+      out (FR-026) — the ceremony never selects one, even when the catalogue
+      offers exactly one.
+    #>
+    param([string] $EmailValue = '', [string] $Ids = '')
+    $emailLine = if ($EmailValue) { "email: $EmailValue" } else { '# email: dev@example.com' }
+    $idsLine = if ($Ids) { $Ids } else { '(the catalogue declares no teams)' }
+    $lines = @(
+        '# .specify/jira/personal.yml — your personal settings. Never committed.'
+        ''
+        '# Your Jira account email, used for authentication.'
+        $emailLine
+        ''
+        '# Your team, from the catalogue in config.yml. Optional — leave it commented'
+        '# out to work without a team selection.'
+        "# Available: $idsLine"
+        '# team: alpha'
+    )
+    return ($lines -join "`n") + "`n"
+}
+
+function Set-JiraConfigPersonal {
+    <#
+    .SYNOPSIS
+      Create .specify/jira/personal.yml when absent (030, US3, FR-024-FR-031).
+      Mirror of _config_personal_effect. Runs AFTER Resolve-JiraConnection (the
+      chokepoint), so the outstanding-settings detail reflects the RESOLVED
+      state (env or file), not the file alone. Returns { Status; Detail }.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ConfigDir,
+        [string] $CfgJson = '{}',
+        [bool] $DryRun = $false
+    )
+    $pf = Join-Path $ConfigDir 'personal.yml'
+    $outstanding = [System.Collections.Generic.List[string]]::new()
+    if (-not $env:SPEC_KIT_JIRA_BASE_URL) { $outstanding.Add('base_url is not set — add it to config.yml (or export SPEC_KIT_JIRA_BASE_URL)') }
+    if (-not $env:JIRA_EMAIL) { $outstanding.Add('email is not set — add it to personal.yml (or export JIRA_EMAIL)') }
+    $detail = if ($outstanding.Count -gt 0) { $outstanding -join '; ' } else { 'nothing outstanding' }
+
+    if (Test-Path -LiteralPath $pf) {
+        return [pscustomobject]@{ Status = 'unchanged'; Detail = $detail }
+    }
+    if ($DryRun) {
+        return [pscustomobject]@{ Status = 'would_create'; Detail = $detail }
+    }
+
+    $ids = [System.Collections.Generic.List[string]]::new()
+    $cfgObj = $CfgJson | ConvertFrom-Json -Depth 100
+    if ($cfgObj.PSObject.Properties['teams'] -and $null -ne $cfgObj.teams) {
+        foreach ($t in @($cfgObj.teams)) { if ($t.PSObject.Properties['id']) { $ids.Add([string]$t.id) } }
+    }
+    New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
+    $content = Get-JiraConfigPersonalContent -EmailValue $env:JIRA_EMAIL -Ids ($ids -join ', ')
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($pf, $content, $utf8)
+    return [pscustomobject]@{ Status = 'created'; Detail = $detail }
 }
 
 # =============================================================================
@@ -1036,14 +1127,48 @@ function Invoke-JiraConfig {
     if ($cfg.ExitCode -ne 0) { return [int] $cfg.ExitCode }
     $cfgObj = $cfg.Json | ConvertFrom-Json -Depth 100
 
+    # The resolution chokepoint (030, plan.md §Key design decision): seed
+    # SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml / personal.yml,
+    # environment first. Runs before anything below reads either variable.
+    $chokepointRc = Resolve-JiraConnection -ConfigDir $configdir -MergedJson $cfg.Json
+    if ($chokepointRc -ne 0) { return [int] $chokepointRc }
+
+    # Gitignore + personal effects (030, research §R5) — moved AHEAD of the
+    # degraded-mode early return below. The fresh-setup case IS degraded mode
+    # (no base URL, no token yet), which is exactly when personal.yml must be
+    # created and covered by the ignore rule; an operator would otherwise need
+    # working Jira credentials to obtain the file in which they declare them.
+    $gitignoreRoot = Get-CmdParentPath (Get-CmdParentPath $configdir)
+    $gitignoreStatus = Set-JiraConfigGitignore -RepoRoot $gitignoreRoot -DryRun ([bool]$dryRun)
+    $personalEffect = Set-JiraConfigPersonal -ConfigDir $configdir -CfgJson $cfg.Json -DryRun ([bool]$dryRun)
+    $personalStatus = $personalEffect.Status
+    $personalDetail = $personalEffect.Detail
+
     # Degraded-mode trigger (002 US2, FR-008) — tested BEFORE any Jira call and
     # ONLY on ABSENT connection parameters (research §4).
+    #
+    # 030, FR-038, contracts/credential-resolution.md C6.4-C6.6: a token
+    # failure is SILENT here when nothing was declared (unchanged), but
+    # REPORTED — on stderr and in the degraded run's detail — when
+    # JIRA_PAT_COMMAND was declared and failed. Refusing here would deny the
+    # operator the very file in which they declare their settings, so the run
+    # still completes degraded.
     $missing = [System.Collections.Generic.List[string]]::new()
     if (-not $env:SPEC_KIT_JIRA_BASE_URL) { $missing.Add('SPEC_KIT_JIRA_BASE_URL') }
-    if (-not (Resolve-JiraToken)) { $missing.Add('JIRA_API_TOKEN') }
+    $credDeclared = [bool]$env:JIRA_PAT_COMMAND
+    $credReason = ''
+    if (-not (Resolve-JiraToken)) {
+        $missing.Add('JIRA_API_TOKEN')
+        if ($credDeclared) {
+            $credReason = Get-JiraCredentialLastError
+            [Console]::Error.WriteLine("config: $credReason")
+        }
+    }
     if ($missing.Count -gt 0) {
         return [int](Invoke-JiraConfigDegraded -Json $json -DryRun $dryRun -Missing ($missing -join ', ') `
-                -HooksStatus $hooksStatus -HooksDetail $hooksDetail)
+                -HooksStatus $hooksStatus -HooksDetail $hooksDetail `
+                -GitignoreStatus $gitignoreStatus -PersonalStatus $personalStatus -PersonalDetail $personalDetail `
+                -CredReason $credReason)
     }
 
     # Project-key sourcing (002 US2, FR-004/FR-005): positional argument ->
@@ -1456,12 +1581,6 @@ function Invoke-JiraConfig {
         }
     }
 
-    # Gitignore effect (002 US3, FR-019): ensure the repository .gitignore covers the
-    # gitignored config layer (config.local.yml, .env, personal.yml). Repo root is
-    # the parent of the .specify directory (overridable via SPEC_KIT_JIRA_GITIGNORE).
-    $gitignoreRoot = Get-CmdParentPath (Get-CmdParentPath $configdir)
-    $gitignoreStatus = Set-JiraConfigGitignore -RepoRoot $gitignoreRoot -DryRun ([bool]$dryRun)
-
     # README effect (US5, T065): splice the version-marked managed block into the
     # consuming repository's README. The path derives from the config dir's repo
     # root (the parent of .specify), overridable via SPEC_KIT_JIRA_README.
@@ -1499,6 +1618,7 @@ function Invoke-JiraConfig {
         hooks          = [ordered]@{ status = $hooksStatus; detail = $hooksDetail }
         readme         = [ordered]@{ status = $readmeStatus; detail = $readmeDetail }
         gitignore      = [ordered]@{ status = $gitignoreStatus; detail = 'personal.yml gitignore coverage' }
+        personal       = [ordered]@{ status = $personalStatus; detail = $personalDetail }
         field_defaults = [ordered]@{ status = $fdWriteStatus; detail = 'recorded field defaults in config.yml' }
         task_mirror    = [ordered]@{ status = $tmWriteStatus; detail = 'recorded task mirror mode in config.yml' }
     }
@@ -1530,6 +1650,7 @@ function Invoke-JiraConfig {
 Export-ModuleMember -Function Test-JiraMappingValidity, New-JiraProjectMapping, `
     Get-JiraResolvedIdMap, Get-JiraDeclaredHierarchyFor, Get-JiraOperatorRolesFor, `
     Write-JiraRoleProblemsReport, Invoke-JiraConfig, `
+    Get-JiraConfigPersonalContent, Set-JiraConfigPersonal, `
     Get-JiraFieldAnswersFor, Get-JiraFieldDefaultsBlock, Set-JiraFieldDefaultsBlock, `
     Get-JiraFieldDefaultAnswerProblem, Merge-JiraFieldDefault, Get-JiraFieldDefaultsReport, `
     Write-JiraFieldDefaultProblemsReport, Get-JiraFieldDefaultNote, `

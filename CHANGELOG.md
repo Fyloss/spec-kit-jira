@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-08-19
+
+### ⚠ BREAKING CHANGES
+
+- **`.specify/jira/.env` support is removed.** The token is no longer read
+  from that file, or from any other file in the workspace. Credential
+  resolution is now two rungs, not three: `JIRA_API_TOKEN` in the
+  environment, then a retrieval command you declare in `JIRA_PAT_COMMAND`,
+  run without a shell and bounded at 5 seconds. The old hardcoded probe of an
+  OS secret manager under a fixed service name — the macOS Keychain, the
+  Linux libsecret keyring, a PowerShell SecretManagement vault — is deleted
+  outright; a credential store is reached only through a `JIRA_PAT_COMMAND`
+  you declare yourself. See [`docs/CREDENTIALS.md`](docs/CREDENTIALS.md) for
+  how to declare one on each platform.
+
+  A declared `JIRA_PAT_COMMAND` that fails is now a **reported** failure — a
+  WARNING in a lifecycle hook, an error everywhere else — where the old three
+  rungs fell through to the next one silently. An operator who had a working
+  Keychain/keyring/vault entry under the old scheme needs to export
+  `JIRA_API_TOKEN` directly or declare `JIRA_PAT_COMMAND` explicitly; there is
+  no automatic migration, and none is possible, since nothing was ever read
+  from a fixed service name to begin with in the new scheme.
+
+  The `.gitignore` rule covering `.specify/jira/.env` is kept even though
+  nothing reads that file any more — an installation predating this release
+  may still have one on disk holding a real token, and removing the rule
+  would un-ignore it.
+
+- **`config.yml` gains a `base_url` key.** The Jira site URL can now be
+  committed with the team's config instead of living only in each
+  developer's shell profile. This is opt-in — `SPEC_KIT_JIRA_BASE_URL` still
+  takes precedence when set, and an unset `base_url` changes nothing — but a
+  team that does commit it should read
+  [`docs/07-configuration-and-secrets.md`](docs/07-configuration-and-secrets.md#the-three-connection-settings)
+  first: the value enters the repository's git history irreversibly, and the
+  committed form (unlike the environment variable) is validated for scheme at
+  load time — `https://`, except at a loopback address.
+
+### Added
+
+- **`personal.yml` gains an `email` key, and its `team` key becomes
+  optional** (`specs/030-retire-env-credentials/`). The config ceremony now
+  creates `personal.yml` when it is absent — pre-filled with the resolved
+  email when one is available, and a commented team placeholder — and reports
+  it as a sixth effect (`personal`), computed ahead of the degraded-mode
+  check so an operator with no working credentials yet still gets the file
+  created and gitignored.
+- New credential-resolution chokepoint (`config_resolve_connection` /
+  `Resolve-JiraConnection`), called from every command entry point, seeds
+  `SPEC_KIT_JIRA_BASE_URL`/`JIRA_EMAIL` from `config.yml`/`personal.yml` into
+  the process environment once, only when not already set.
+- New [`docs/CREDENTIALS.md`](docs/CREDENTIALS.md): per-platform
+  `JIRA_PAT_COMMAND` setup, the CI/unattended arrangement, and the harness
+  deny-rule pattern for keeping a coding agent out of the credential store.
+
+### Fixed
+
+- A `JIRA_PAT_COMMAND` that exceeds its 5-second bound is now reaped, and
+  both of its redirected pipe ends released, before the failure is reported
+  (PowerShell port). Each timed-out attempt previously held two file
+  descriptors until the runtime's finalizer happened to run — invisible in a
+  one-shot command, but accumulating in a long-lived host. Every wait on that
+  path is bounded, so a retrieval command that leaves a background child
+  holding the pipe open can no longer stall a run.
+
 ## [0.19.0] - 2026-08-18
 
 ### ⚠ BREAKING CHANGES
@@ -1128,7 +1193,8 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.17.0...v0.18.0

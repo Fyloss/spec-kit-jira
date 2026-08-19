@@ -97,6 +97,35 @@ if [ -n "${FIXTURE}" ]; then
   cp -R "${REPO_ROOT}/${FIXTURE}/." "${WORKDIR}/"
 fi
 
+# --- @PAT_HANG_COMMAND@ resolution (030, T001, research.md §R11) ------------
+# Resolved ONCE per run and handed identically to both ports, so the C3.6
+# timeout scenario's failure message names the same command string on either
+# backend and the byte diff between them stays clean. No single literal blocks
+# on macOS, Linux and Windows alike (`sleep` is absent from a bare Windows
+# PATH; `ping` returns in seconds on Windows but hangs forever on Linux), so a
+# POSIX host resolves to the `sleep` already on every such runner, and a
+# Windows host (MINGW/MSYS/CYGWIN — the git-bash this harness itself needs to
+# run at all) resolves to a small .cmd wrapping the `Start-Sleep` cmdlet, which
+# every windows-latest runner already carries via `powershell.exe`. `.cmd` is
+# directly executable through CreateProcess (Windows resolves it via PATHEXT
+# the way POSIX exec() resolves a shebang), so the resolved value is one token
+# with no embedded space — no wrapper-script indirection is needed to declare
+# it as JIRA_PAT_COMMAND (FR-004).
+case "$(uname -s 2> /dev/null || true)" in
+  MINGW* | MSYS* | CYGWIN*)
+    _pat_hang_cmd="${OUTDIR}/pat-hang.cmd"
+    printf '@echo off\r\npowershell -NoProfile -Command "Start-Sleep -Seconds 30"\r\n' > "${_pat_hang_cmd}"
+    if command -v cygpath > /dev/null 2>&1; then
+      PAT_HANG_COMMAND_RESOLVED="$(cygpath -w "${_pat_hang_cmd}")"
+    else
+      PAT_HANG_COMMAND_RESOLVED="${_pat_hang_cmd}"
+    fi
+    ;;
+  *)
+    PAT_HANG_COMMAND_RESOLVED="sleep 30"
+    ;;
+esac
+
 # --- Mock double -------------------------------------------------------------
 # Backend follows PORT (Decision 2, contracts/mock-driver.md): the Bash port
 # is exercised through the curl shim (no process); the PowerShell port needs
@@ -114,6 +143,20 @@ mock_start "${MOCK_CFG}" "${PORT}"
 # on our behalf. An orphan holds each descriptor it inherited, and whoever reads
 # the other end then blocks forever rather than failing.
 trap mock_stop EXIT
+
+# --- @MOCK_BASE_URL@ substitution (030, T001, research.md §R6/§R10) ---------
+# The fixture's `config.yml` (a tracked file — Constitution IV forbids a real
+# site URL there) declares `base_url: "@MOCK_BASE_URL@"`; substituted here,
+# AFTER mock_start so the mock's OS-assigned loopback port is known, and
+# BEFORE the run so config_load sees a resolved, loopback-exempt `http://`
+# value rather than the literal sentinel. A fixture with no such file, or no
+# sentinel in it, is copied byte-identically — the substitution is a no-op.
+_config_yml="${WORKDIR}/.specify/jira/config.yml"
+if [ -f "${_config_yml}" ] && grep -q '@MOCK_BASE_URL@' "${_config_yml}" 2> /dev/null; then
+  _tmp_cfg="$(mktemp)"
+  sed "s|@MOCK_BASE_URL@|${MOCK_BASE_URL}|g" "${_config_yml}" > "${_tmp_cfg}"
+  mv "${_tmp_cfg}" "${_config_yml}"
+fi
 
 # --- Optional git repository (degraded-mode / branch-state scenarios) --------
 # `git_branch` initialises the workdir as a git repo checked out on that branch
@@ -163,7 +206,13 @@ unset _ambient
 # the empty string, which the ports treat as unset — the degraded-mode trigger).
 export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 while IFS=$'\t' read -r key value; do
-  [ -n "${key}" ] && export "${key}=${value}"
+  [ -n "${key}" ] || continue
+  # @PAT_HANG_COMMAND@ (030, T001): substituted in env VALUES only, after the
+  # resolution above — same string for both ports (research §R11).
+  case "${value}" in
+    *@PAT_HANG_COMMAND@*) value="${value//@PAT_HANG_COMMAND@/${PAT_HANG_COMMAND_RESOLVED}}" ;;
+  esac
+  export "${key}=${value}"
 done < <(jq_lines -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | @tsv' "${SCENARIO}")
 
 # The one way a CALLER may set a port variable for a single run: newline-

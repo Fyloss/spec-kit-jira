@@ -572,6 +572,17 @@ _reconcile_run() {
     return $?
   fi
 
+  # The resolution chokepoint (030, contracts/connection-settings.md C1.5):
+  # seed SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml / personal.yml,
+  # environment first, before the "not configured" check below reads either.
+  # Self-loading and tolerant of an absent config.yml — which is exactly the
+  # state that check exists to handle gracefully; only a PRESENT and malformed
+  # file fails closed.
+  if ! config_resolve_connection "${JIRA_CONFIG_DIR:-.specify/jira}"; then
+    _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the team configuration could not be loaded (zero writes)'
+    return $?
+  fi
+
   # NOT YET CONFIGURED (FR-017 first cause, FR-019). This is the normal state of
   # a freshly installed repository, not an error: the lifecycle step behaves
   # exactly as it would without the extension, apart from one notice. At most

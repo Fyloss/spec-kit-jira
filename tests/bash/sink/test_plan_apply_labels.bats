@@ -16,6 +16,8 @@ setup() {
   source "${MOCK}/lib.sh"
   # shellcheck source=/dev/null
   source "${CMD_DIR}/reconcile.sh"
+  export JIRA_EMAIL="user@example.com"
+  export JIRA_API_TOKEN="test-token-value"
 }
 
 teardown() {

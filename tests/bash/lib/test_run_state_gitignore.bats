@@ -43,3 +43,19 @@ teardown() {
   [ -f "${WORK}/.specify/jira/state/021-example.json" ]
   [ -z "$(git -C "${WORK}" status --porcelain)" ]
 }
+
+@test "T082 [030]: the state .gitignore is a bare '*', and base_url/email land ONLY there" {
+  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" ""
+
+  [ "$(cat "${WORK}/.specify/jira/state/.gitignore")" = "*" ]
+  [ "$(jq -r '.base_url' "${WORK}/.specify/jira/state/021-example.json")" = "https://acme.atlassian.net" ]
+  [ "$(jq -r '.email' "${WORK}/.specify/jira/state/021-example.json")" = "user@example.com" ]
+
+  # No OTHER tracked artifact under the repo root carries either value —
+  # 030 sources base_url/email from config.yml/personal.yml (both already
+  # gitignored, or never written by the tool) and the run-state document
+  # (self-ignored); nothing new escapes into a tracked file.
+  local hits
+  hits="$(git -C "${WORK}" grep -l "acme.atlassian.net" -- . 2> /dev/null || true)"
+  [ -z "${hits}" ]
+}

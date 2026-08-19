@@ -1,0 +1,13 @@
+projects:
+  - key: TEST
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: ''
+    project: TEST
+routing_default: TEST
+privacy:
+  allowlist: []

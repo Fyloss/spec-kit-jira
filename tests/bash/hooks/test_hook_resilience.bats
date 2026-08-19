@@ -231,3 +231,37 @@ teardown() {
   mock_stop
   rm -rf "${hookwork}"
 }
+
+# =============================================================================
+# T084 [030] — the fail-closed departure: a declared retrieval command that
+# fails now RAISES where the old .env/secret-manager rungs fell through
+# silently. In hook context the host is still never failed (FR-015 holds
+# unconditionally) — what changes is that the failure is REPORTED, and that
+# it is bounded rather than hanging or prompting.
+# =============================================================================
+
+@test "T084: a hook-invoked run with a failing declared JIRA_PAT_COMMAND reports and completes without hanging or prompting" {
+  # shellcheck source=/dev/null
+  source "${ROOT}/tests/bash/helpers/secret_store_stub.bash"
+  local bindir counter prog
+  bindir="${WORK}/bin" counter="${WORK}/count"
+  prog="$(helper_pat_command_install "${bindir}" "${counter}" "" 1)"
+  export JIRA_PAT_COMMAND="${prog}"
+  unset JIRA_API_TOKEN
+  export SPEC_KIT_JIRA_HOOK_CONTEXT=1
+
+  local start end elapsed
+  start="${EPOCHSECONDS:-$(date +%s)}"
+  run cmd_reconcile reconcile --json "${SPEC}"
+  end="${EPOCHSECONDS:-$(date +%s)}"
+  elapsed=$((end - start))
+
+  # Bounded: the credential rung's own 5s bound, not a hang — a generous
+  # ceiling for CI-noise, still far below "prompting and waiting on a human".
+  [ "${elapsed}" -lt 10 ]
+  # The host is never failed (FR-015 holds for this new failure branch too).
+  [ "$status" -eq 0 ]
+  # Reported: exactly one WARNING, unlike the old rungs' silent fall-through.
+  [ "$(grep -c 'WARNING:' <<< "$output")" -eq 1 ]
+  [[ "$output" == *"credential resolution failed"* ]]
+}

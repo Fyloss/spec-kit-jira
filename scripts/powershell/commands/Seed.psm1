@@ -11,6 +11,7 @@ Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot '../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/SeedState.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../engine/PinMarker.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../engine/MarkerSplice.psm1') -Force
@@ -409,6 +410,11 @@ function Invoke-JiraSeed {
 
     # --- §4 step 2: compare designator sets, ONLY when the operator
     # resupplied them (S-3/S-4). ------------------------------------------
+    # The resolution chokepoint (030, plan.md §Key design decision): seed
+    # SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml / personal.yml,
+    # environment first.
+    $chokepointRc = Resolve-JiraConnection -ConfigDir (Get-JiraConfigDirPath)
+    if ($chokepointRc -ne 0) { return [int] $chokepointRc }
     $baseUrl = if ($env:SPEC_KIT_JIRA_BASE_URL) { $env:SPEC_KIT_JIRA_BASE_URL } else { '' }
     if ($parentSeen -or $stories) {
         $classified = [System.Collections.Generic.List[object]]::new()

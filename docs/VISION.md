@@ -380,10 +380,10 @@ through `/speckit.implement` unattended, and opens a pull request. The bridge
 has to mirror just as faithfully there, with nobody watching.
 
 Part of this already works, by design rather than by accident. Credential
-resolution is **environment-first** (`JIRA_API_TOKEN`, then the OS secret
-manager, then the gitignored `.env`), so an Actions secret or a Codespaces
-secret resolves without a Keychain or a keyring existing at all — and the
-token still never reaches argv, logs, or a trace. The non-blocking hook rule
+resolution is **environment-first** (`JIRA_API_TOKEN`, then a declared
+`JIRA_PAT_COMMAND` — no other rung exists, 030), so an Actions secret or a
+Codespaces secret resolves without any credential store existing at all — and
+the token still never reaches argv, logs, or a trace. The non-blocking hook rule
 means a bridge failure cannot break the agent's run. The universal dry run
 gives a safe first execution in an unfamiliar environment.
 
@@ -441,8 +441,9 @@ The appeal is not novelty, it is credentials and governance. An organisation
 that has already sanctioned the Atlassian MCP server has already settled its
 authentication, its consent screen, and its audit trail centrally. Asking each
 developer to also mint a personal API token, and asking this extension to
-carry it through a Keychain, a keyring, or a gitignored `.env`, duplicates a
-decision that was already made — and duplicates the risk that comes with it.
+carry it through a declared retrieval command backed by whatever credential
+store the developer has, duplicates a decision that was already made — and
+duplicates the risk that comes with it.
 Over MCP, the token this extension handles most carefully is a token it never
 holds at all.
 

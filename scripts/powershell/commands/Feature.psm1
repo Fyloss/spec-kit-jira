@@ -766,6 +766,11 @@ function Invoke-JiraFeature {
         return 0
     }
     $merged = $cfg.Json | ConvertFrom-Json -Depth 100
+    # The resolution chokepoint (030, plan.md §Key design decision): seed
+    # SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml / personal.yml,
+    # environment first.
+    $chokepointRc = Resolve-JiraConnection -ConfigDir $dir -MergedJson $cfg.Json
+    if ($chokepointRc -ne 0) { return [int] $chokepointRc }
     $teams = @((Get-FeatProp $merged 'teams') | Where-Object { $null -ne $_ })
     if ($teams.Count -eq 0) {
         if ($hasMention) {

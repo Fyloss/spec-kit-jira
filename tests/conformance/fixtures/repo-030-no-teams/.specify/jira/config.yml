@@ -1,0 +1,15 @@
+# 030 — a valid config.yml whose catalogue declares NO teams: the created
+# personal.yml's comment must say so rather than listing an empty set.
+projects:
+  - key: IJT
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: ''
+    project: IJT
+routing_default: IJT
+privacy:
+  allowlist: []

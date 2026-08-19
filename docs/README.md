@@ -28,7 +28,7 @@ flowchart LR
     Specs[("specs/*/spec.md<br/>source of truth")] --> Engine
     Engine -->|"story marker line"| Specs
     Config[(".specify/jira/<br/>config layers")] --> Commands
-    Secrets["env → OS secret manager → gitignored .env"] --> Sink
+    Secrets["JIRA_API_TOKEN, or a declared<br/>JIRA_PAT_COMMAND (two rungs)"] --> Sink
     Sink <-->|"REST v3, fail-closed"| Jira["Jira Cloud"]
 
     Host -.->|"never fails, at most one WARNING"| Dev

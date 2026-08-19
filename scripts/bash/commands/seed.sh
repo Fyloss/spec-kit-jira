@@ -23,6 +23,8 @@ source "${_cmd_seed_dir}/../lib/cli.sh"
 # shellcheck source=/dev/null
 source "${_cmd_seed_dir}/../lib/output.sh"
 # shellcheck source=/dev/null
+source "${_cmd_seed_dir}/../lib/config.sh"
+# shellcheck source=/dev/null
 source "${_cmd_seed_dir}/../lib/seed_state.sh"
 # shellcheck source=/dev/null
 source "${_cmd_seed_dir}/../engine/pin_marker.sh"
@@ -344,6 +346,12 @@ cmd_seed() {
     printf 'seed: no seeded-not-bound state was found for %s — REF-EXISTS: retro-seeding is out of scope; create a new specification\n' "${spec_file}" >&2
     return "$(cli_exit_code config)"
   fi
+
+  # The resolution chokepoint (030, contracts/connection-settings.md C1.5):
+  # seed SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml / personal.yml,
+  # environment first, before either is read below. Self-loading — seed never
+  # called config_load — and tolerant of an absent config.yml.
+  config_resolve_connection "${JIRA_CONFIG_DIR:-.specify/jira}" || return $?
 
   # --- §4 step 2: compare designator sets, ONLY when the operator resupplied
   # them (S-3/S-4) — an ordinary decline/resume cycle passes neither flag,

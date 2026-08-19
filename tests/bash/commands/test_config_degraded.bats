@@ -2,8 +2,8 @@
 # T023 [US2] — Degraded mode: loud, provisional, write-free (FR-008/FR-009).
 #
 # The trigger is tested BEFORE any Jira call and fires ONLY when
-# SPEC_KIT_JIRA_BASE_URL is unset/empty or the token resolves through none of
-# the three rungs. A degraded run exits 0 with exactly one warning naming the
+# SPEC_KIT_JIRA_BASE_URL is unset/empty or the token resolves through neither of
+# the two rungs (030). A degraded run exits 0 with exactly one warning naming the
 # missing variables, proposes the distinct `<prefix>-<number>/…` branch prefixes
 # as provisional team candidates, prints re-run guidance, and writes NOTHING —
 # config.local.yml is byte-identical to before. Defined-but-wrong credentials
@@ -87,13 +87,7 @@ run_in_work() {
   # Base URL defined but pointing nowhere reachable: if the trigger check ran
   # any Jira call first this would fail with a network exit, not degrade.
   export SPEC_KIT_JIRA_BASE_URL="http://127.0.0.1:1"
-  unset JIRA_API_TOKEN
-  # Neutralise the secret-manager and .env rungs deterministically.
-  export PATH="${WORK}/nobin:${PATH}"
-  mkdir -p "${WORK}/nobin"
-  printf '#!/bin/sh\nexit 1\n' > "${WORK}/nobin/security"
-  printf '#!/bin/sh\nexit 1\n' > "${WORK}/nobin/secret-tool"
-  chmod +x "${WORK}/nobin/security" "${WORK}/nobin/secret-tool"
+  unset JIRA_API_TOKEN JIRA_PAT_COMMAND
   run run_in_work config --json
   [ "$status" -eq 0 ]
   [[ "$output" == *"JIRA_API_TOKEN"* ]]
@@ -125,15 +119,21 @@ run_in_work() {
   [ -z "$(mock_calls)" ]
 }
 
-@test "degraded effects include gitignore: skipped — same effect set as nominal (T093)" {
+@test "degraded effects report gitignore and personal with their TRUE status (030, T062, research R5)" {
+  # Reordered ahead of the degraded early return: the fresh-setup case IS
+  # degraded mode, and it is exactly when personal.yml must be created and
+  # covered by the ignore rule (research R5) — reporting either "skipped"
+  # would be a lie about work that was in fact performed.
   unset SPEC_KIT_JIRA_BASE_URL
   export JIRA_API_TOKEN="RAWSECRETXYZ"
   run run_in_work config --json
   [ "$status" -eq 0 ]
   local summary
   summary="$(printf '%s\n' "$output" | grep -v '^WARNING:')"
-  [ "$(jq -r '.effects.gitignore.status' <<< "${summary}")" = "skipped" ]
-  [ ! -f "${WORK}/.gitignore" ]
+  [ "$(jq -r '.effects.gitignore.status' <<< "${summary}")" = "created" ]
+  [ "$(jq -r '.effects.personal.status' <<< "${summary}")" = "created" ]
+  [ -f "${WORK}/.gitignore" ]
+  [ -f "${JIRA_CONFIG_DIR}/personal.yml" ]
 }
 
 @test "degraded prose surfaces the proposals and the rerun guidance (T093)" {
@@ -144,7 +144,8 @@ run_in_work() {
   export JIRA_API_TOKEN="RAWSECRETXYZ"
   run run_in_work config
   [ "$status" -eq 0 ]
-  [[ "$output" == *"  gitignore: skipped"* ]]
+  [[ "$output" == *"  gitignore: created"* ]]
+  [[ "$output" == *"  personal: created"* ]]
   # The hooks effect is NOT skipped: it reads two local files and needs no Jira,
   # so reporting it skipped would be a lie about work that was performed (003 US6).
   [[ "$output" != *"  hooks: skipped"* ]]
@@ -251,4 +252,29 @@ run_in_work() {
   [[ "$output" != *"must be one of"* ]]
   [[ "$output" != *"NotAnAllowedValue"* ]]
   [ "$(cat "${JIRA_CONFIG_DIR}/config.yml")" = "${before}" ]
+}
+
+# =============================================================================
+# T044a [030, US1] — the ceremony's degraded trigger splits the credential
+# reason (contracts/credential-resolution.md C6.4–C6.6, FR-038)
+# =============================================================================
+
+@test "T044a — with no JIRA_PAT_COMMAND declared, degraded mode is silent about the rung (C6.4)" {
+  unset SPEC_KIT_JIRA_BASE_URL JIRA_API_TOKEN JIRA_PAT_COMMAND
+  run --separate-stderr run_in_work config --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"JIRA_API_TOKEN"* ]]
+  [[ "$stderr" != *"JIRA_PAT_COMMAND"* ]]
+}
+
+@test "T044a — a declared and failing JIRA_PAT_COMMAND reports its reason on stderr and in detail, exit 0 (C6.5)" {
+  unset SPEC_KIT_JIRA_BASE_URL JIRA_API_TOKEN
+  export JIRA_PAT_COMMAND="${WORK}/nonexistent-pat-helper"
+  run --separate-stderr run_in_work config --json
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"JIRA_PAT_COMMAND"* ]]
+  [[ "$stderr" == *"could not be executed"* ]]
+  local summary
+  summary="$(printf '%s\n' "$output" | grep -v '^WARNING:')"
+  [[ "$(jq -r '.effects.personal.status' <<< "${summary}")" != "" ]]
 }
