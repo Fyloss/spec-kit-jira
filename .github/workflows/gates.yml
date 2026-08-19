@@ -111,7 +111,9 @@ jobs:
         # with `rescue` unset and that step fails the job genuinely (FR-016).
         continue-on-error: true
         # INVARIANT: this ceiling must stay ABOVE the two inner wall clocks plus
-        # the rescue re-run below (90 + 120 + ~65 minutes). The inner clocks are
+        # the rescue re-run below (90 + 120 + ~100 minutes — the re-run is
+        # `tests/run-bash.sh`, measured at 99 minutes on this image in CI job
+        # "Unit suites (ubuntu-latest)", 2026-08-19). The inner clocks are
         # the diagnostics — they print how far the exercise got and the tail of
         # kcov.log — and a step killed underneath them takes that record with it.
         # That inversion is what made this job red and undiagnosable from
@@ -120,20 +122,28 @@ jobs:
         # "failed genuinely" for what was only ever a run that had not finished.
         # A ceiling is not a duration: the expected run is ~3 h, and this only
         # decides how much earlier than GitHub's own 6-hour cap a stuck run dies.
-        timeout-minutes: 300
+        timeout-minutes: 350
         env:
           # Both clocks are sized from the runner, never from a laptop.
           #
-          # kcov drives all 133 conformance scenarios serially, in-process,
-          # under the tracer. MEASURED 2026-08-10 (run 31379383480): killed at
-          # 2400 s having reached scenario 72 of 133, with a progress line at
-          # t=2399 s — steady throughput, no stall. That is ~33 s per scenario,
-          # so the phase needs ~74 minutes; 90 leaves room for the corpus to
-          # grow before anyone has to look at this number again.
+          # kcov drives every conformance scenario serially, in-process, under
+          # the tracer. MEASURED 2026-08-10 (run 31379383480): killed at 2400 s
+          # having reached scenario 72 of the 133 that existed then, with a
+          # progress line at t=2399 s — steady throughput, no stall. That was
+          # ~33 s per scenario, so the phase needed ~74 minutes and 90 was the
+          # bound.
+          #
+          # The corpus is 231 scenarios as of 2026-08-19, and 024 (996ccdc) cut
+          # the per-spawn cost that dominated that 33 s by ~89% on a real run —
+          # the two move this number in opposite directions and neither has been
+          # re-measured under kcov. 90 minutes is therefore a bound to CHECK, not
+          # one to trust: an expiry here is not a failure, it returns 2 ("could
+          # not measure") and the traceability fallback below takes over, so the
+          # job stays green either way and the annotation names which clock went.
           #
           # The traced phase re-runs the unit suite with xtrace exported into
-          # every child. `tests/run-bash.sh` alone is ~63 minutes on this image
-          # (CI job "Unit suites (ubuntu-latest)", 2026-08-09) and tracing only
+          # every child. `tests/run-bash.sh` alone is ~99 minutes on this image
+          # (CI job "Unit suites (ubuntu-latest)", 2026-08-19) and tracing only
           # adds to it; it has never once been reached, so 120 is a first
           # measurement rather than a fitted bound. The runner now names which
           # clock expired, so an overrun reports instead of dying mute.
