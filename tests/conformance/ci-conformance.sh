@@ -135,7 +135,33 @@ byte_diff() {
       "${label}" "${loc}" "$(_size "${a}")" "$(_size "${b}")"
   fi
 }
-export -f _size _byte_at byte_diff
+# stderr_note <bash-capture> <pwsh-capture> — the ports' own explanations, for a
+# scenario that has ALREADY failed.
+#
+# stderr is deliberately absent from the artifact comparison below: the two ports
+# owe each other byte-identical stdout, exit code, call sequence and written
+# tree, never identically phrased diagnostics. But the harness captures it, and
+# on a failing scenario it is the one file that says WHY — and it was being
+# discarded on every failing run. Measured 2026-08-20 (issue #46): 89 of 231
+# scenarios diverge on windows-latest, 76 of them reporting only "bash wrote 1
+# byte of stdout", and not one of them said what bash had complained about.
+#
+# Bounded on purpose. A workflow annotation is truncated as a whole, so an
+# unbounded tail here is paid for by the scenarios reported after it. Newlines
+# are folded to `|` for the same reason — one scenario, one line per port.
+stderr_note() {
+  local a="$1" b="$2" port f
+  for port in bash pwsh; do
+    if [ "${port}" = bash ]; then f="${a}"; else f="${b}"; fi
+    [ -s "${f}" ] || continue
+    # The fixture token is masked even though it is a literal in a public
+    # corpus: this text lands in an annotation, and a diagnostic channel that
+    # learns to print secrets is a habit, not an accident (NFR-3).
+    printf '  %s stderr: %s\n' "${port}" \
+      "$(head -c 400 "${f}" | tr '\n' '|' | sed -e 's/RAWSECRET[A-Za-z0-9]*/<redacted>/g' -e 's/[[:cntrl:]]/./g')"
+  done
+}
+export -f _size _byte_at byte_diff stderr_note
 
 # _normalize_state_base_url <workdir> — masks the one field a recorded
 # run-state document (021, contracts/run-state.md) can never agree on across
@@ -221,6 +247,12 @@ run_scenario() {
       esac
     done < <(diff -rq "${out_bash}/workdir" "${out_ps}/workdir" 2>&1 || true)
     failed=1
+  fi
+
+  # Only for a scenario that has already failed above: never a comparison, and
+  # never a reason to fail on its own.
+  if [ "${failed}" -ne 0 ]; then
+    detail="${detail}$(stderr_note "${out_bash}/stderr" "${out_ps}/stderr")"$'\n'
   fi
 
   # 021 US4, contracts/recognition-prefetch.md §6 (T049-T051): the SECOND,
