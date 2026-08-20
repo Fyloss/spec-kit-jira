@@ -387,6 +387,19 @@ if [ ${#reports[@]} -gt 0 ]; then
   summary="$(cat "${reports[@]}")"
   printf '\n===== byte-level divergence report (%s scenarios) =====\n%s\n' \
     "${#reports[@]}" "${summary}"
+  # The annotation stays: it is the channel a reader without repository admin
+  # rights can see. But GitHub truncates it AS A WHOLE, so a corpus with many
+  # divergences loses its tail — measured 2026-08-20, run 32392779765, where
+  # adding each port's stderr cut the scenarios that fitted from 89 to 34. The
+  # file below is the same report with nothing dropped; the workflow uploads it
+  # as an artifact so depth and breadth stop competing for one budget.
+  if [ -n "${SPEC_KIT_JIRA_CONFORMANCE_REPORT_DIR:-}" ]; then
+    mkdir -p "${SPEC_KIT_JIRA_CONFORMANCE_REPORT_DIR}"
+    # Named per shard: four shards write into one uploaded directory, and an
+    # unsuffixed name would have them overwrite each other's findings.
+    printf '%s\n' "${summary}" \
+      > "${SPEC_KIT_JIRA_CONFORMANCE_REPORT_DIR}/divergences-shard-${SPEC_KIT_JIRA_SHARD_INDEX:-all}.txt"
+  fi
   printf '::error title=Conformance divergence (%s scenarios)::%s\n' \
     "${#reports[@]}" \
     "$(printf '%s' "${summary}" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN { ORS = "" } { print $0 "%0A" }')"

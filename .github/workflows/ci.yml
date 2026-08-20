@@ -161,7 +161,19 @@ jobs:
       # itself (MSYS_PWSH) and drives native pwsh.exe accordingly.
       - name: Run the conformance corpus against both ports and diff the captures
         shell: bash
+        env:
+          SPEC_KIT_JIRA_CONFORMANCE_REPORT_DIR: ${{ runner.temp }}/conformance-report
         run: bash tests/conformance/ci-conformance.sh
+
+      # The annotation this step emits is truncated as a whole; the artifact is
+      # the same report with nothing dropped. Only a failing run writes one.
+      - name: Upload the full divergence report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-divergences-${{ matrix.os }}-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/conformance-report
+          if-no-files-found: ignore
 
   lint:
     # T105 (008) — Constitution XII names lint as a blocking merge gate on both
