@@ -133,6 +133,21 @@ teardown() {
   [ "$(jq -r ".inputs[\"${JIRA_CONFIG_DIR}/personal.yml\"]" <<< "${doc}")" = "$(git hash-object --no-filters "${JIRA_CONFIG_DIR}/personal.yml")" ]
 }
 
+@test "the config input key is the config dir's own bytes plus a forward slash (FR-027)" {
+  # Twin of RunState.Tests.ps1's "spells the config input key by
+  # concatenation, never through Join-Path". This port has always
+  # concatenated, so this pins the contract the PowerShell twin had to be
+  # corrected to meet: a trailing separator on the config dir survives into
+  # the key rather than being collapsed. The doubled slash is deliberate —
+  # the conformance corpus compares bytes, so the twin mirrors it rather than
+  # tidying it.
+  local dir="${JIRA_CONFIG_DIR}/"
+  printf 'projects: []\n' > "${dir}config.yml"
+  local doc
+  doc="$(JIRA_CONFIG_DIR="${dir}" run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  [ "$(jq -r --arg k "${dir}/config.yml" '.inputs | has($k)' <<< "${doc}")" = "true" ]
+}
+
 @test "run_state_compose returns 1 and prints nothing when spec.md cannot be hashed" {
   run run_state_compose "${WORK}/specs/021-example/does-not-exist.md" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
   [ "${status}" -eq 1 ]
