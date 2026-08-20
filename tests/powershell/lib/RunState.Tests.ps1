@@ -246,10 +246,21 @@ Describe 'RunState' {
     Describe 'T023 [022] — task_mirror edits invalidate the short-circuit' {
         It 'editing task_mirror in config.yml changes the recorded config.yml hash' {
             $cfgPath = Join-Path $env:JIRA_CONFIG_DIR 'config.yml'
+            # $cfgPath REACHES the file; $cfgKey LOOKS IT UP in the recorded
+            # document, where the key is spelled with a forward slash on every
+            # host to match the Bash twin. On Windows those two strings differ,
+            # and using $cfgPath as the key found nothing — both hashes came
+            # back $null, which made "changed" trivially false. Green on macOS,
+            # red on windows-latest only.
+            $cfgKey = "$env:JIRA_CONFIG_DIR/config.yml"
             [System.IO.File]::WriteAllText($cfgPath, "projects:`n  - key: CONSUMER`n    style: company_managed`nrouting_default: CONSUMER`n")
-            $before = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' | ConvertFrom-Json -Depth 10).inputs.$cfgPath
+            $before = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' | ConvertFrom-Json -Depth 10).inputs.$cfgKey
+            # Fail on a missing key HERE rather than letting two $nulls reach
+            # the comparison below, where "changed" is vacuously false and the
+            # message names the wrong thing.
+            $before | Should -Not -BeNullOrEmpty
             Add-Content -LiteralPath $cfgPath -Value "task_mirror:`n  CONSUMER: checklist`n"
-            $after = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' | ConvertFrom-Json -Depth 10).inputs.$cfgPath
+            $after = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' | ConvertFrom-Json -Depth 10).inputs.$cfgKey
             $after | Should -Not -Be $before
             $expected = (& git hash-object --no-filters $cfgPath 2>$null | Select-Object -First 1).Trim()
             $after | Should -Be $expected
