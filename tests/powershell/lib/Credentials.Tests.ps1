@@ -162,6 +162,17 @@ Describe 'Credentials' {
                 $ps1 = Join-Path $script:BinDir 'spaced.ps1'
                 Set-Content -LiteralPath $ps1 -Value '[Console]::Out.Write("  a b  " + [char]13 + [char]10)'
                 $env:JIRA_PAT_COMMAND = "powershell -NoProfile -File $ps1"
+                # What this test asserts is the TRIMMING, not the bound — C2.5
+                # is what pins the 5-second default. Windows PowerShell 5.1's
+                # cold start is the slowest thing either port ever spawns, and
+                # it does not fit reliably inside 5 s on a loaded runner: this
+                # test failed on `windows-latest` at 5.07 s (run 32274698063),
+                # where the process was killed at the bound and the assertion
+                # then compared '' against 'a b' — a red test naming whitespace
+                # for a defect that was never about whitespace. Only the
+                # Windows branch is relaxed; the POSIX one still runs the real
+                # default against a shell script that starts in milliseconds.
+                InModuleScope Credentials { $script:CredBoundSeconds = 60 }
             } else {
                 $prog = Join-Path $script:BinDir 'spaced'
                 Set-Content -LiteralPath $prog -Value "#!/usr/bin/env bash`nprintf '  a b  \r\n'`n" -NoNewline
@@ -177,6 +188,11 @@ Describe 'Credentials' {
                 $ps1 = Join-Path $script:BinDir 'noisy.ps1'
                 Set-Content -LiteralPath $ps1 -Value "[Console]::Error.WriteLine('leaked-on-stderr'); [Console]::Out.Write('real-token')"
                 $env:JIRA_PAT_COMMAND = "powershell -NoProfile -File $ps1"
+                # Same exposure as C2.3 above, and for the same reason: this
+                # test is about stderr never reaching the token's value, not
+                # about the clock. It has not gone red yet only because it lost
+                # no race so far.
+                InModuleScope Credentials { $script:CredBoundSeconds = 60 }
             } else {
                 $prog = Join-Path $script:BinDir 'noisy'
                 Set-Content -LiteralPath $prog -Value "#!/usr/bin/env bash`necho leaked-on-stderr >&2`nprintf 'real-token'`n" -NoNewline

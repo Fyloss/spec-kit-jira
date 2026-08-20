@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- On Windows, a reconcile pointed at the wrong file in a feature folder now
+  names the correct target in the caller's own spelling. The refusal used to
+  answer `specs\001-example/spec.md` for a target spelled
+  `specs/001-example/plan.md`, because the parent folder was taken through a
+  path primitive that rewrites every separator to the host's native one. The
+  PowerShell port now cuts the parent out of the argument's own bytes, as the
+  Bash port's `dirname` already did, so both ports emit the same message on
+  every host.
+
 ## [0.20.1] - 2026-08-19
 
 ### Fixed

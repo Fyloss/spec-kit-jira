@@ -108,11 +108,23 @@ function New-JiraRunStateDocument {
 
     $configDir = Get-JiraConfigDir
     foreach ($f in @('config.yml', 'config.local.yml', 'personal.yml')) {
+        # Two spellings on purpose. Join-Path is the right way to REACH the
+        # file, and $p keeps that job. The recorded key is a different thing:
+        # it lands in a written document the Bash twin also writes, where that
+        # twin spells "${JIRA_CONFIG_DIR}/${f}" with a forward slash on every
+        # host (lib/run_state.sh). Join-Path renormalises to `\` on Windows, so
+        # using $p as the key made the two ports write different state files —
+        # the divergence the conformance corpus reported on `windows-latest`
+        # for sc008-deleted-managed-region-restored (byte 138, bash=2f
+        # pwsh=5c), the first run in which that step ever executed there.
+        # Same rule as the target guard's <sibling> and AGENTS.md: a provider
+        # primitive reaches the filesystem, it never spells a path into output.
         $p = Join-Path $configDir $f
+        $key = "$configDir/$f"
         if (Test-Path -LiteralPath $p -PathType Leaf) {
             $hash = Get-JiraGitHash -Path $p
             if (-not $hash) { return $null }
-            $inputs[$p] = $hash
+            $inputs[$key] = $hash
         }
     }
 

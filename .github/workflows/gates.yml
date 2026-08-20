@@ -29,8 +29,9 @@ env:
 
 jobs:
   changes:
-    # Cheap gate in front of the expensive one: kcov+xtrace costs 20-35 minutes
-    # per run (see bash-coverage.sh), so PRs that never touch Bash-covered paths
+    # Cheap gate in front of the expensive one: kcov+xtrace runs the whole unit
+    # suite a second time under a trace, which costs more than an hour on this
+    # image (see bash-coverage.sh), so PRs that never touch Bash-covered paths
     # skip it entirely. Push to main always runs the real job regardless of this
     # output — Constitution XIII's "measured on every CI run" holds unconditionally
     # there; this filter only saves iteration time on PRs whose diff cannot move
@@ -92,6 +93,14 @@ jobs:
           path: /var/cache/apt/archives
           key: apt-archives-coverage-bash-${{ runner.os }}-jq-curl-kcov
       - name: Install toolchain
+        # 18 seconds on every run that completes it — the ceiling is here only
+        # so that a hang fails fast instead of taking the whole job with it.
+        # MEASURED 2026-08-19 (run 32274698086): this step hung in apt for
+        # 2 h 38 m and was still going when the run was cancelled, which meant
+        # the coverage step behind it never started and the job proved nothing
+        # about coverage in either direction. Neither this step nor the job
+        # carried a ceiling, so the only bound was GitHub's own 6-hour cap.
+        timeout-minutes: 10
         run: |
           sudo apt-get update && sudo apt-get install -y jq curl kcov
           # Jammy's apt bats is 1.2.1, which predates BATS_TEST_TMPDIR (added in
@@ -109,10 +118,45 @@ jobs:
         # explicit rc=2 path below, so a kill-by-timeout reaches the fallback
         # with `rescue` unset and that step fails the job genuinely (FR-016).
         continue-on-error: true
-        timeout-minutes: 15
+        # INVARIANT: this ceiling must stay ABOVE the two inner wall clocks plus
+        # the rescue re-run below (90 + 120 + ~100 minutes — the re-run is
+        # `tests/run-bash.sh`, measured at 99 minutes on this image in CI job
+        # "Unit suites (ubuntu-latest)", 2026-08-19). The inner clocks are
+        # the diagnostics — they print how far the exercise got and the tail of
+        # kcov.log — and a step killed underneath them takes that record with it.
+        # That inversion is what made this job red and undiagnosable from
+        # 2026-07-28 on: the step died at 15 minutes with 30 minutes of inner
+        # budget outstanding, so the fallback saw `rescue` unset and reported
+        # "failed genuinely" for what was only ever a run that had not finished.
+        # A ceiling is not a duration: the expected run is ~3 h, and this only
+        # decides how much earlier than GitHub's own 6-hour cap a stuck run dies.
+        timeout-minutes: 350
         env:
-          SPEC_KIT_JIRA_COVERAGE_TIMEOUT: 600
-          SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT: 1200
+          # Both clocks are sized from the runner, never from a laptop.
+          #
+          # kcov drives every conformance scenario serially, in-process, under
+          # the tracer. MEASURED 2026-08-10 (run 31379383480): killed at 2400 s
+          # having reached scenario 72 of the 133 that existed then, with a
+          # progress line at t=2399 s — steady throughput, no stall. That was
+          # ~33 s per scenario, so the phase needed ~74 minutes and 90 was the
+          # bound.
+          #
+          # The corpus is 231 scenarios as of 2026-08-19, and 024 (996ccdc) cut
+          # the per-spawn cost that dominated that 33 s by ~89% on a real run —
+          # the two move this number in opposite directions and neither has been
+          # re-measured under kcov. 90 minutes is therefore a bound to CHECK, not
+          # one to trust: an expiry here is not a failure, it returns 2 ("could
+          # not measure") and the traceability fallback below takes over, so the
+          # job stays green either way and the annotation names which clock went.
+          #
+          # The traced phase re-runs the unit suite with xtrace exported into
+          # every child. `tests/run-bash.sh` alone is ~99 minutes on this image
+          # (CI job "Unit suites (ubuntu-latest)", 2026-08-19) and tracing only
+          # adds to it; it has never once been reached, so 120 is a first
+          # measurement rather than a fitted bound. The runner now names which
+          # clock expired, so an overrun reports instead of dying mute.
+          SPEC_KIT_JIRA_COVERAGE_TIMEOUT: 5400
+          SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT: 7200
         run: |
           set -euo pipefail
           # Never `kcov ... bats`: kcov instruments bats-core's own DEBUG-trap
@@ -125,6 +169,22 @@ jobs:
           # nothing) and the xtrace-suspended credential/transport machinery
           # (NFR-3: secrets must never reach a trace).
           mkdir -p coverage
+          # The runner explains itself on stderr, and stderr is the job log —
+          # which is 403 for a reader without repository admin rights here, as
+          # is the artifact. It mirrors those explanations into a file for
+          # exactly that reason; this lifts them into an annotation, the one
+          # channel that stays readable.
+          annotate_diagnostics() {
+            local f='coverage/bash-scratch/diagnostics.log'
+            [ -s "${f}" ] || return 0
+            echo "::error::coverage runner: $(tr '\n' ' ' < "${f}" | cut -c1-900)"
+            {
+              echo "### Why the coverage runner stopped"
+              echo '```'
+              cat "${f}"
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          }
           rc=0
           # stdout is teed for the step summary; stderr is deliberately NOT
           # redirected — kcov swaps its own stderr for the traced program's pipe
@@ -142,24 +202,51 @@ jobs:
           # 2 is the runner's "could not measure" (no kcov, unusable
           # interpreter, empty report); only that hands over to the fallback.
           if [ "${rc}" -eq 2 ]; then
+            annotate_diagnostics
             # The parallel runner, not a serial `bats -r`: this re-run only
             # proves the suite is green before the fallback vouches for it,
             # and the serial form alone outgrows the step's own timeout.
-            tests/run-bash.sh
+            #
+            # Its exit code is CAPTURED, never left to `set -e`: an abort here
+            # takes the step out before `rescue` is recorded, and the fallback
+            # then reports "no verdict" for a run whose cause is known exactly.
+            # A red suite under the fallback IS a genuine failure — it just has
+            # to say so itself.
+            suite_rc=0
+            tests/run-bash.sh || suite_rc=$?
+            if [ "${suite_rc}" -ne 0 ]; then
+              echo "::error::kcov could not measure, AND the suite is red on this runner (tests/run-bash.sh exit ${suite_rc}) — the traceability fallback cannot vouch for a red suite. The FAIL lines above name the files."
+              exit 1
+            fi
             echo "suite green but coverage unmeasurable — using the traceability fallback"
             echo "rescue=true" >> "${GITHUB_OUTPUT}"
             exit 42
           fi
           if [ "${rc}" -ne 0 ]; then
+            annotate_diagnostics
             echo "::error::Bash coverage is below the 80% gate"
           fi
           exit "${rc}"
       - name: Traceability fallback (only if kcov could not measure)
         if: ${{ steps.kcov.outcome == 'failure' }}
+        # Seconds of work — a grep per shipped script. Bounded for the same
+        # reason as the install above: an unbounded step in this job has no
+        # ceiling but GitHub's 6-hour cap.
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           if [ "${{ steps.kcov.outputs.rescue }}" != "true" ]; then
-            echo "::error::coverage gate failed genuinely (suite red or coverage below 80%)"
+            # Name the cause. A verdict line in the gate log means the gate did
+            # run and the number was short; no verdict line means the step never
+            # reached one — killed at its ceiling, or aborted before the merge —
+            # and those two are not the same failure to go and fix. The message
+            # is an annotation on purpose: it is the one part of this job a
+            # reader without repository admin rights can still see.
+            if grep -q '^Bash statement coverage:' coverage/bash-gate.log 2> /dev/null; then
+              echo "::error::$(grep -m1 '^Bash statement coverage:' coverage/bash-gate.log) — below the 80% gate"
+            else
+              echo "::error::the coverage step produced no verdict — it was killed at its ceiling or aborted before the merge; progress.log and kcov.log are in the bash-kcov-coverage artifact"
+            fi
             exit 1
           fi
           # Every shipped script must be referenced by at least one test file.
@@ -177,7 +264,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bash-kcov-coverage
-          path: coverage/bash
+          # The whole of coverage/, not coverage/bash alone: the runner writes
+          # its exercise scratch to `<report-dir>-scratch` (kcov owns the report
+          # directory itself), and progress.log lives there. Uploading only the
+          # report discarded the one record of where a stalled run got to —
+          # exactly the file the timeout diagnostics tell a reader to consult.
+          path: coverage/
           if-no-files-found: ignore
 
   coverage-pwsh:

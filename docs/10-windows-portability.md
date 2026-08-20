@@ -88,6 +88,40 @@ filesystem path for jq itself to read, so disabling the rewrite is safe
 everywhere; a future call that ever needs MSYS to resolve a real path for a
 *different* native binary must set the variable back locally for that call.
 
+### 8. PowerShell's path primitives renormalise every separator
+
+`Split-Path`, `Join-Path` and `Test-Path` go through the FileSystem provider,
+which rewrites the separator to the host's native one — `/` becomes `\` on
+Windows, and `\` becomes `/` on Unix. Both directions are measured: on macOS
+`Split-Path -Leaf 'specs\001-x\spec.md'` answers `spec.md` and `Test-Path` on
+the same string is `True`; on `windows-latest`, `Split-Path -Parent` over the
+forward-slash spelling every scenario uses answered a backslash path, so
+`reconcile`'s target-guard refusal named `specs\001-x/spec.md` where the Bash
+twin's `dirname` named `specs/001-x/spec.md`.
+
+The renormalisation is invisible on the host you develop on and shows up only
+in the *other* host's bytes, which is why it survived until the Pester twin of
+`§5 T1` was the only red test on `windows-latest`.
+
+Rule: a path that ends up in **output** — a message, a summary, a written file
+— must be cut out of the caller's own bytes, never obtained from a provider
+primitive. Using the primitives to *reach* the filesystem is fine and correct;
+using them to *spell* a path back to the operator is not.
+
+`String.LastIndexOfAny` takes a `char[]`, so the cast is not optional — the
+two-argument spelling matches no overload and throws:
+
+```powershell
+$cut = $path.LastIndexOfAny([char[]]@('/', '\'))
+if ($cut -ge 0) {
+    $sep    = $path[$cut]              # the separator the CALLER used
+    $parent = $path.Substring(0, $cut)
+}
+```
+
+Rejoin with `$sep`, not with a literal `/` or `\`: that is what keeps the
+bytes identical to the Bash twin's `dirname` on both hosts.
+
 ## The probe loop — how to ask Windows a question
 
 `.github/workflows/windows-conformance.yml` runs the conformance corpus alone

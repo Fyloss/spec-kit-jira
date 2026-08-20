@@ -123,9 +123,31 @@ Describe 'RunState' {
 
             $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
             $inputs = ($doc | ConvertFrom-Json).inputs
-            $inputs.$cfgYml | Should -Be (& git hash-object --no-filters $cfgYml)
-            $inputs.$cfgLocalYml | Should -Be (& git hash-object --no-filters $cfgLocalYml)
-            $inputs.$personalYml | Should -Be (& git hash-object --no-filters $personalYml)
+            # The KEY is spelled the way the Bash twin spells it — always a
+            # forward slash — not the way Join-Path would spell it on this
+            # host. On Windows those two differ, which is the whole point.
+            $inputs."$env:JIRA_CONFIG_DIR/config.yml" | Should -Be (& git hash-object --no-filters $cfgYml)
+            $inputs."$env:JIRA_CONFIG_DIR/config.local.yml" | Should -Be (& git hash-object --no-filters $cfgLocalYml)
+            $inputs."$env:JIRA_CONFIG_DIR/personal.yml" | Should -Be (& git hash-object --no-filters $personalYml)
+        }
+
+        It 'spells the config input key by concatenation, never through Join-Path (FR-027)' {
+            # Reproduces off Windows what `windows-latest` reported for
+            # sc008-deleted-managed-region-restored: Join-Path NORMALISES, and
+            # the Bash twin's "${JIRA_CONFIG_DIR}/${f}" does not. A trailing
+            # separator on the config dir makes the two disagree on every host
+            # — Join-Path collapses it, concatenation keeps it — so this fails
+            # on macOS and Linux too, where the separator difference alone
+            # cannot be seen. The doubled slash is mirrored rather than tidied
+            # for the same reason the target guard mirrors its own: the corpus
+            # compares bytes.
+            $env:JIRA_CONFIG_DIR = "$env:JIRA_CONFIG_DIR/"
+            $cfgYml = Join-Path $env:JIRA_CONFIG_DIR 'config.yml'
+            [System.IO.File]::WriteAllText($cfgYml, "projects: []`n")
+
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $keys = ($doc | ConvertFrom-Json).inputs.PSObject.Properties.Name
+            $keys | Should -Contain "$env:JIRA_CONFIG_DIR/config.yml"
         }
 
         It 'returns $null when spec.md cannot be hashed' {
@@ -224,10 +246,21 @@ Describe 'RunState' {
     Describe 'T023 [022] — task_mirror edits invalidate the short-circuit' {
         It 'editing task_mirror in config.yml changes the recorded config.yml hash' {
             $cfgPath = Join-Path $env:JIRA_CONFIG_DIR 'config.yml'
+            # $cfgPath REACHES the file; $cfgKey LOOKS IT UP in the recorded
+            # document, where the key is spelled with a forward slash on every
+            # host to match the Bash twin. On Windows those two strings differ,
+            # and using $cfgPath as the key found nothing — both hashes came
+            # back $null, which made "changed" trivially false. Green on macOS,
+            # red on windows-latest only.
+            $cfgKey = "$env:JIRA_CONFIG_DIR/config.yml"
             [System.IO.File]::WriteAllText($cfgPath, "projects:`n  - key: CONSUMER`n    style: company_managed`nrouting_default: CONSUMER`n")
-            $before = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' | ConvertFrom-Json -Depth 10).inputs.$cfgPath
+            $before = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' | ConvertFrom-Json -Depth 10).inputs.$cfgKey
+            # Fail on a missing key HERE rather than letting two $nulls reach
+            # the comparison below, where "changed" is vacuously false and the
+            # message names the wrong thing.
+            $before | Should -Not -BeNullOrEmpty
             Add-Content -LiteralPath $cfgPath -Value "task_mirror:`n  CONSUMER: checklist`n"
-            $after = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' | ConvertFrom-Json -Depth 10).inputs.$cfgPath
+            $after = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' | ConvertFrom-Json -Depth 10).inputs.$cfgKey
             $after | Should -Not -Be $before
             $expected = (& git hash-object --no-filters $cfgPath 2>$null | Select-Object -First 1).Trim()
             $after | Should -Be $expected

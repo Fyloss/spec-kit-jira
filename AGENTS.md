@@ -21,6 +21,10 @@ version:
 - Never call `jq` directly in the bash port — its Windows build emits CRLF on
   multi-line output. Go through `scripts/bash/lib/output.sh`.
 - Paths handed to `curl` must be spelled with `cygpath -m`.
+- Never spell a path back to the operator through `Split-Path` / `Join-Path` —
+  the provider renormalises every separator to the host's own, in both
+  directions. A path that reaches a message or a written file is cut out of the
+  caller's own bytes.
 - A Windows-only divergence is diagnosed by **measurement on the real runner**
   (push to `ci/windows-probe`, ~11 min, results arrive as annotations — see the
   doc), never by emulation, and a platform fix is unproven without a green run
