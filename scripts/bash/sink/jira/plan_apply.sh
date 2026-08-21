@@ -1392,13 +1392,17 @@ plan_lifecycle() {
     if ((${#_tr_new_warns[@]} > 0)); then
       local _tr_warns_f; _tr_warns_f="$(mktemp)"
       printf '%s\n' "${_tr_new_warns[@]}" > "${_tr_warns_f}"
-      warns="$(jq -c --argjson add "$(jq -Rs 'split("\n") | map(select(length > 0))' "${_tr_warns_f}")" '. + $add' <<< "${warns}")"
+      # json_path_arg: the inner jq OPENS this path (positional argument, not a
+      # redirection), and a native jq.exe cannot resolve an MSYS "/tmp/...".
+      warns="$(jq -c --argjson add "$(jq -Rs 'split("\n") | map(select(length > 0))' "$(json_path_arg "${_tr_warns_f}")")" '. + $add' <<< "${warns}")"
       rm -f "${_tr_warns_f}"
     fi
     if ((${#_tr_new_notes[@]} > 0)); then
       local _tr_notes_f; _tr_notes_f="$(mktemp)"
       printf '%s\n' "${_tr_new_notes[@]}" > "${_tr_notes_f}"
-      notes="$(jq -c --argjson add "$(jq -Rs 'split("\n") | map(select(length > 0))' "${_tr_notes_f}")" '. + $add' <<< "${notes}")"
+      # json_path_arg: the inner jq OPENS this path (positional argument, not a
+      # redirection), and a native jq.exe cannot resolve an MSYS "/tmp/...".
+      notes="$(jq -c --argjson add "$(jq -Rs 'split("\n") | map(select(length > 0))' "$(json_path_arg "${_tr_notes_f}")")" '. + $add' <<< "${notes}")"
       rm -f "${_tr_notes_f}"
     fi
   fi

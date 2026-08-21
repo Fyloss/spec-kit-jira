@@ -74,6 +74,46 @@ setup() {
   }
 }
 
+# The second spelling, and the one the first fix missed: a mktemp path handed
+# to jq as a POSITIONAL argument. `jq -Rs '…' "${f}"` makes jq open ${f};
+# `jq '…' < "${f}"` and `… >> "${f}"` do not — there bash owns the file and jq
+# only sees a stream. The distinction is the whole rule, so it is encoded here
+# rather than left to a reviewer's eye.
+@test "no mktemp path reaches jq as a positional argument untranslated (#46)" {
+  local bad=""
+  bad="$(awk '
+    FNR == 1 { delete v; nv = 0 }
+    match($0, /[A-Za-z_][A-Za-z0-9_]*="?\$\(mktemp/) {
+      s = substr($0, RSTART)
+      sub(/="?\$\(mktemp.*/, "", s)
+      v[++nv] = s
+    }
+    { if (buf == "") start = FNR }
+    /\\$/ { sub(/\\$/, " "); buf = buf $0; next }
+    { buf = buf $0; check(); buf = "" }
+    END { if (buf != "") check() }
+    function check(  line, i, n) {
+      line = buf
+      sub(/#.*/, "", line)
+      if (line !~ /jq /) return
+      if (line ~ /json_path_arg/) return
+      for (i = 1; i <= nv; i++) {
+        n = "\\$\\{?" v[i] "\\}?"
+        # A reference preceded by < or > is a shell redirection: bash opens it.
+        if (line ~ n && line !~ ("[<>] *\"?" n)) {
+          printf "%s:%d: [%s] %s\n", FILENAME, start, v[i], buf
+          return
+        }
+      }
+    }
+  ' "${PORT_FILES[@]}")"
+  [ -z "${bad}" ] || {
+    printf 'a mktemp path is handed to jq to open, untranslated:\n%s\n' "${bad}" >&2
+    printf 'Wrap it: "$(json_path_arg "${f}")".\n' >&2
+    return 1
+  }
+}
+
 @test "json_path_arg exists and is the helper the guards name" {
   grep -q '^json_path_arg()' "${ROOT}/scripts/bash/lib/output.sh"
 }
