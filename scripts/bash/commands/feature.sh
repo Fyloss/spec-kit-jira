@@ -580,7 +580,7 @@ _feat_seed_from_designators() {
           {key:.entry.fields.parent.key, summary:(.entry.fields.parent.fields.summary // ""), status:(.entry.fields.parent.fields.status.name // "")}
         else null end)
     }]
-  ' "${combined_file}" | json_canonical)"
+  ' "$(json_path_arg "${combined_file}")" | json_canonical)"
   rm -f "${combined_file}"
 
   # --- FR-065: the two-tier pre-write privacy guard, over the seed material,
