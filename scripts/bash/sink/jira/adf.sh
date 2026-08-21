@@ -374,14 +374,24 @@ _adf_resolve_managed() {
   # can pass the 128 KiB per-argument cap. $st is a short string and stays in
   # argv: this keeps the jq call and moves only the large values, which is the
   # shape #31 chose for a mixed call. Captured, not piped — see above.
-  local spliced rc=0
+  # Real files, NOT `<(…)`. A process substitution is an MSYS `/dev/fd/N`, and
+  # the jq on PATH under git-bash is a native Windows binary that cannot open
+  # one — measured as 103 of the 231 conformance scenarios failing on
+  # windows-latest, all of them here (the `p_f` in "Bad JSON in --slurpfile
+  # p_f /dev/fd/63"). json_path_arg spells the path for that jq.
+  local spliced rc=0 _p_f _c_f
+  _p_f="$(mktemp)"
+  _c_f="$(mktemp)"
+  printf '%s' "${prefix}" > "${_p_f}"
+  printf '%s' "${managed}" > "${_c_f}"
   spliced="$(jq -cn \
-    --slurpfile p_f <(printf '%s' "${prefix}") \
+    --slurpfile p_f "$(json_path_arg "${_p_f}")" \
     --argjson m "${marker_nodes}" \
-    --slurpfile c_f <(printf '%s' "${managed}") \
+    --slurpfile c_f "$(json_path_arg "${_c_f}")" \
     --arg st "${status}" \
     '($p_f[0]) as $p | ($c_f[0]) as $c |
      {status:$st, doc:{type:"doc", version:1, content: ($p + $m + $c)}}')" || rc=$?
+  rm -f "${_p_f}" "${_c_f}"
   ((rc == 0)) || return "${rc}"
   printf '%s' "${spliced}" | json_canonical
 }

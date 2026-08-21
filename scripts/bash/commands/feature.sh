@@ -239,7 +239,10 @@ _feat_compose_reuse_question() {
   done
 
   local issues_json
-  issues_json="$(jq -sc '.' "${entries_file}")"
+  # json_path_arg: jq OPENS this path, and a native jq.exe under git-bash
+  # cannot resolve an MSYS `/tmp/…` (see lib/output.sh). A positional file
+  # argument needs the same spelling as a --slurpfile one.
+  issues_json="$(jq -sc '.' "$(json_path_arg "${entries_file}")")"
   rm -f "${entries_file}"
 
   local declines_json

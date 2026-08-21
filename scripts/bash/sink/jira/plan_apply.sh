@@ -1125,12 +1125,8 @@ plan_lifecycle() {
   local _lc_acts_f _lc_lc_f _lc_acts_arg _lc_lc_arg
   _lc_acts_f="$(mktemp)"; printf '%s' "${actions}" > "${_lc_acts_f}"
   _lc_lc_f="$(mktemp)"; printf '%s' "${lc}" > "${_lc_lc_f}"
-  _lc_acts_arg="${_lc_acts_f}"
-  _lc_lc_arg="${_lc_lc_f}"
-  if [[ "${JIRA_PATH_STYLE}" == "native" ]] && command -v cygpath > /dev/null 2>&1; then
-    _lc_acts_arg="$(cygpath -m "${_lc_acts_f}")"
-    _lc_lc_arg="$(cygpath -m "${_lc_lc_f}")"
-  fi
+  _lc_acts_arg="$(json_path_arg "${_lc_acts_f}")"
+  _lc_lc_arg="$(json_path_arg "${_lc_lc_f}")"
   while IFS="${_lc_sep}" read -r _f1 _f2 _f3 _f4 _f5 _f6 _f7 _f8 _f9 _f10 _f11 _f12; do
     _lc_sid[_lc_i]="${_f1}"; _lc_action[_lc_i]="${_f2}"; _lc_method[_lc_i]="${_f3}"
     _lc_tk[_lc_i]="${_f4}"; _lc_status[_lc_i]="${_f5}"; _lc_target[_lc_i]="${_f6}"
@@ -1328,10 +1324,7 @@ plan_lifecycle() {
     _tr_map+="}"
     local _tr_map_f; _tr_map_f="$(mktemp)"
     printf '%s' "${_tr_map}" > "${_tr_map_f}"
-    local _tr_map_arg="${_tr_map_f}"
-    if [[ "${JIRA_PATH_STYLE}" == "native" ]] && command -v cygpath > /dev/null 2>&1; then
-      _tr_map_arg="$(cygpath -m "${_tr_map_f}")"
-    fi
+    local _tr_map_arg; _tr_map_arg="$(json_path_arg "${_tr_map_f}")"
 
     local -a _tr_kind=() _tr_tid=() _tr_outcome=()
     local _tr_i=0 _r1 _r2 _r3
@@ -1390,7 +1383,10 @@ plan_lifecycle() {
     if ((${#_tr_kept[@]} > 0)); then
       local _tr_kept_f; _tr_kept_f="$(mktemp)"
       printf '%s\n' "${_tr_kept[@]}" > "${_tr_kept_f}"
-      kept="$(jq -c --slurpfile add "${_tr_kept_f}" '. + $add' <<< "${kept}")"
+      # json_path_arg, like the two calls above in this file: the path is being
+      # handed to jq to OPEN, and a native jq.exe cannot resolve an MSYS
+      # `/tmp/…`. This one was missed when the other two were translated.
+      kept="$(jq -c --slurpfile add "$(json_path_arg "${_tr_kept_f}")" '. + $add' <<< "${kept}")"
       rm -f "${_tr_kept_f}"
     fi
     if ((${#_tr_new_warns[@]} > 0)); then

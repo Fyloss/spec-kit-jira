@@ -122,6 +122,30 @@ json_canonical() {
 # as <name>_f and re-bound to $<name> in a generated prelude — every caller's
 # filter text is then usable unchanged, which is the point: this is the write
 # path, and its behaviour is frozen (FR-030).
+# json_path_arg <path> — spell <path> for the jq that will OPEN it.
+#
+# The jq on PATH under git-bash is a NATIVE Windows binary, and a native binary
+# resolves none of MSYS's virtual paths: neither `/tmp/…` (an MSYS mount that
+# does not exist to Windows) nor `/dev/fd/N` (an MSYS descriptor). Handing it
+# either produces "Could not open …" and the run dies before writing anything.
+#
+# Measured 2026-08-20 on the probe (run 32410922051): 115 of 231 conformance
+# scenarios failed this way on windows-latest — 103 on a `/dev/fd/N` from a
+# process substitution, 12 on a `/tmp/tmp.X` from mktemp. The wrapper below runs
+# with MSYS_NO_PATHCONV=1, so MSYS translates nothing on our behalf; the
+# translation has to be explicit and it has to be here.
+#
+# `-m` (not `-w`) matches the spelling client.sh measured for curl — see
+# _jira_curl_path. Every caller that hands jq a path goes through this, so the
+# rule has one home instead of four copies.
+json_path_arg() {
+  if [[ "${JIRA_PATH_STYLE}" == "native" ]] && command -v cygpath > /dev/null 2>&1; then
+    cygpath -m "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
 json_build() {
   local filter="$1"
   shift
@@ -134,10 +158,7 @@ json_build() {
     tmp="$(mktemp)"
     printf '%s' "${value}" > "${tmp}"
     tmps+=("${tmp}")
-    tmp_arg="${tmp}"
-    if [[ "${JIRA_PATH_STYLE}" == "native" ]] && command -v cygpath > /dev/null 2>&1; then
-      tmp_arg="$(cygpath -m "${tmp}")"
-    fi
+    tmp_arg="$(json_path_arg "${tmp}")"
     args+=(--slurpfile "${name}_f" "${tmp_arg}")
     prelude="${prelude}(\$${name}_f[0]) as \$${name} | "
   done
