@@ -114,6 +114,35 @@ setup() {
   }
 }
 
+# The third shape, and the one that defeated both guards above: a jq filter
+# written as a MULTI-LINE single-quoted string, whose path operand sits on the
+# closing line — ten lines below the `jq` token, with no backslash to join them.
+#
+#     material_content="$(jq -c '
+#       …ten lines of filter…
+#     ' "${combined_file}" | json_canonical)"        <- feature.sh:583
+#
+# Joining by quote parity was tried and abandoned: an apostrophe in any comment
+# ("the caller's own bytes") desyncs the parity for the rest of the file, and
+# the buffer was measurably still open from thirty lines earlier. A runtime
+# guard was tried too — a recording `cygpath` plus a `jq` shim — and could not
+# separate the port's own calls from the mock's inside one scenario.
+#
+# So the rule keys on the shape itself: a line that is a closing filter quote
+# followed immediately by a path operand. Distinctive enough to carry no false
+# positive across the port today, and it reports feature.sh:583 on the commit
+# before the fix.
+@test "a multi-line jq filter's path operand is translated (#46)" {
+  local bad=""
+  bad="$(awk "/^[ \t]*'[ \t]+\"\\\$\\{[A-Za-z_]/ && !/json_path_arg/ {
+    printf \"%s:%d: %s\n\", FILENAME, FNR, \$0
+  }" "${PORT_FILES[@]}")"
+  [ -z "${bad}" ] || {
+    printf 'a multi-line jq filter hands its operand over untranslated:\n%s\n' "${bad}" >&2
+    return 1
+  }
+}
+
 @test "json_path_arg exists and is the helper the guards name" {
   grep -q '^json_path_arg()' "${ROOT}/scripts/bash/lib/output.sh"
 }
