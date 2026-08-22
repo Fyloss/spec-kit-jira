@@ -15,7 +15,7 @@ _JIRA_ENGINE_INTERCHANGE=1
 
 _interchange_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-source "${_interchange_dir}/../lib/output.sh" # json_canonical only — lib/, never sink/
+source "${_interchange_dir}/../lib/output.sh" # json_canonical/json_build only — lib/, never sink/
 
 # The validation program: emits a JSON array of human-readable error strings
 # (empty array => valid). Kept as a jq program so the rules are declarative.
@@ -149,9 +149,16 @@ interchange_validate() {
 interchange_build() {
   local parse="$1" ctx="$2" doc
 
+  # `parse` is the whole parse result, stories included, so it grows with the
+  # specification exactly as parse_spec's own `stories` does — the same #46
+  # category-B defect one step downstream, and the one that fires next once
+  # parse_spec stops spelling its array into a command line. Bound from a file
+  # through json_build for the same reason and with the same measurement
+  # behind it (engine/parse.sh, issue #46).
+  local rc=0
   # kcov-excl-start — jq literal (string lines are not statements)
-  doc="$(jq -cn \
-    --argjson parse "${parse}" --argjson ctx "${ctx}" '
+  # shellcheck disable=SC2016  # a jq filter: $parse/$ctx are jq variables
+  doc="$(json_build '
     {
       schema_version: "1.0",
       spec_ref: $ctx.spec_ref,
@@ -163,8 +170,14 @@ interchange_build() {
         marker: ($parse.epic.marker // {state:"absent", id:"", lines:[]})
       },
       stories: ($parse.stories // [])
-    }' | json_canonical)"
+    }' parse "${parse}" ctx "${ctx}")" || rc=$?
   # kcov-excl-stop
+  # json_canonical is applied to the CAPTURED value, not inside the pipeline
+  # above: it exits 0 on empty input, which would swallow a json_build failure
+  # and hand interchange_validate an empty document to refuse for the wrong
+  # reason.
+  ((rc == 0)) || return "${rc}"
+  doc="$(printf '%s' "${doc}" | json_canonical)"
 
   if ! printf '%s' "${doc}" | interchange_validate; then
     return 1
