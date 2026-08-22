@@ -2082,13 +2082,21 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
                 resume_with       = "/speckit.jira.reconcile $specFile --accept-defaults"
             }
             $fdConfirmationJson = ConvertTo-JiraJsonValue $fdConfirmation
+            # Write + an explicit "`n", never WriteLine: WriteLine's terminator
+            # is [Environment]::NewLine, which is CRLF on Windows, while the
+            # Bash twin's `printf '…\n'` is LF on every host (reconcile.sh
+            # 1785-1789). These were the only three WriteLine calls on stdout in
+            # the port and all three diverged; the two conformance scenarios
+            # that caught it (us2-field-defaults-question and
+            # -option-question) exercise the --json branch only — the prose
+            # branch below is uncovered and was the same defect (#46 D3).
             if ($json) {
-                [Console]::Out.WriteLine($fdConfirmationJson)
+                [Console]::Out.Write($fdConfirmationJson + "`n")
             }
             else {
                 $fdLabels = ($fdFields | ForEach-Object { [string]$_.label }) -join ', '
-                [Console]::Out.WriteLine("Jira mirror paused: confirm $fdLabels before $fdCreationsPending creation(s) are written.")
-                [Console]::Out.WriteLine("Resume with: $($fdConfirmation.resume_with)")
+                [Console]::Out.Write("Jira mirror paused: confirm $fdLabels before $fdCreationsPending creation(s) are written.`n")
+                [Console]::Out.Write("Resume with: $($fdConfirmation.resume_with)`n")
             }
             return 0
         }
