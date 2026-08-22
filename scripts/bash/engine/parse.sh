@@ -18,7 +18,7 @@ _JIRA_ENGINE_PARSE=1
 
 _parse_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-source "${_parse_dir}/../lib/output.sh" # json_canonical only — lib/, never sink/
+source "${_parse_dir}/../lib/output.sh" # json_canonical/json_build only — lib/, never sink/
 # shellcheck source=/dev/null
 source "${_parse_dir}/story_marker.sh" # the durable identifier's grammar (Phase 2, contracts/story-marker.md)
 # shellcheck source=/dev/null
@@ -754,7 +754,26 @@ parse_spec() {
   epic_local_id="$(_parse_local_id_for_marker "${epic_minfo}")"
   epic_marker_json="$(json_canonical <<< "${epic_minfo}")"
 
-  jq -cn --arg et "${etitle}" --argjson ed "${edesc}" --argjson st "${stories}" \
-    --arg eid "${epic_local_id}" --argjson em "${epic_marker_json}" \
-    '{epic:{title:$et, description:$ed, local_id:$eid, marker:$em}, stories:$st}' | json_canonical
+  # `stories` carries every parsed story and grows with the specification —
+  # ~660 bytes each, measured — so it is bound from a file, never spelled into
+  # a command line. Windows' cap is CreateProcess's command line and it is far
+  # tighter than Linux's MAX_ARG_STRLEN: measured on a real Windows host
+  # 2026-08-22, 32700 bytes exec fine and 33000 do not. That puts the failure
+  # at ~50 stories there against ~200 on Linux, which is why this call site
+  # survived the 128 KiB-calibrated guard and killed the four category-B
+  # scenarios of #46 on windows-latest alone (issue #46, FINDINGS §1).
+  #
+  # Captured rather than piped straight into json_canonical: on empty input
+  # json_canonical writes nothing and exits 0, so a json_build failure here
+  # would be swallowed and the caller would read a parse fault as success.
+  local _parsed
+  # shellcheck disable=SC2016  # a jq filter: $et/$ed/$st/$eid/$em are jq variables
+  _parsed="$(json_build \
+    '{epic:{title:$et, description:$ed, local_id:$eid, marker:$em}, stories:$st}' \
+    et "$(jq -cn --arg v "${etitle}" '$v')" \
+    ed "${edesc}" \
+    st "${stories}" \
+    eid "$(jq -cn --arg v "${epic_local_id}" '$v')" \
+    em "${epic_marker_json}")" || return $?
+  printf '%s' "${_parsed}" | json_canonical
 }
