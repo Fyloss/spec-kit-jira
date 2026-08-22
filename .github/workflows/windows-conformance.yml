@@ -160,4 +160,19 @@ jobs:
 
       - name: Run the conformance corpus against both ports and diff the captures
         shell: bash
+        env:
+          SPEC_KIT_JIRA_CONFORMANCE_REPORT_DIR: ${{ runner.temp }}/conformance-report
         run: bash tests/conformance/ci-conformance.sh
+
+      # The annotation this step also emits is truncated as a whole, so on a
+      # corpus with many divergences it loses its tail — which is exactly the
+      # case this probe exists to investigate. The artifact carries the same
+      # report with nothing dropped. `always()` because the only run whose
+      # report is worth having is the one that failed.
+      - name: Upload the full divergence report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-divergences-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/conformance-report
+          if-no-files-found: ignore

@@ -229,8 +229,20 @@ _reconcile_field_default_notes() {
   # $actions is the whole planned action set — past Linux's 128 KiB
   # per-argument cap on a large specification (see lib/output.sh json_build).
   # Only it moves to a file; the rest are scalars and stay in argv.
+  # A real file, NOT `<(…)`: a process substitution is an MSYS `/dev/fd/N`, and
+  # the native jq.exe under git-bash cannot open one (json_path_arg's comment
+  # carries the measurement).
+  local _acts_f _acts_rc=0
+  _acts_f="$(mktemp)"
+  printf '%s' "${actions}" > "${_acts_f}"
+  # The status is CAPTURED and re-returned below, never left to `rm -f`. This
+  # jq was the function's last command, so its status WAS the function's; an
+  # unguarded cleanup line after it would return 0 for a failed jq, and the
+  # dispatcher's `set -e` would stop aborting a run whose notes could not be
+  # composed — turning a fail-closed abort (Constitution III) into a silent
+  # empty result.
   jq -rn --arg pkey "${pkey}" --argjson itypes "${itypes}" --argjson df "${df}" \
-    --argjson resolved "${resolved}" --slurpfile actions_f <(printf '%s' "${actions}") --argjson parent "${parent}" \
+    --argjson resolved "${resolved}" --slurpfile actions_f "$(json_path_arg "${_acts_f}")" --argjson parent "${parent}" \
     --arg ask "${ask}" --arg accept "${accept}" --arg dry "${dry_run}" '
     def typeName($tid): (first($itypes[] | select(.id == $tid)) // null) | .logical_name // $tid;
     def labelFor($tid; $fid): (first((($df[$tid]) // [])[] | select(.field_id == $fid)) // null) | .logical_name // $fid;
@@ -255,8 +267,10 @@ _reconcile_field_default_notes() {
         elif $ask == "false" then
           "config: project \($pkey): the confirmation question was skipped — field-defaults confirmation is off for this project (ask: false)"
         else empty end)
-  '
+  ' || _acts_rc=$?
   # kcov-excl-stop
+  rm -f "${_acts_f}"
+  return "${_acts_rc}"
 }
 
 # _reconcile_local_binding_for <project-key> <config-dir> — the persisted
@@ -2095,9 +2109,17 @@ _reconcile_run() {
   # $actions carries every planned action — past Linux's 128 KiB
   # per-argument cap on a large specification (see lib/output.sh json_build).
   # A silent failure here would empty the run summary, so it moves to a file.
+  # A real file, NOT `<(…)` — see json_path_arg. The native jq.exe under
+  # git-bash cannot open an MSYS `/dev/fd/N`, and this call composes the run
+  # summary: failing here empties it, which is the silent failure the comment
+  # above already warns about.
+  local _disp_f
+  _disp_f="$(mktemp)"
+  printf '%s' "${disp_actions}" > "${_disp_f}"
+  local _disp_rc=0
   summary="$(jq -cn \
     --argjson dry "${dry_run}" --argjson c "${created}" --argjson u "${updated}" \
-    --argjson x "${rc}" --slurpfile actions_f <(printf '%s' "${disp_actions}") \
+    --argjson x "${rc}" --slurpfile actions_f "$(json_path_arg "${_disp_f}")" \
     --argjson wc "${warn_count}" --argjson w "${warns}" --argjson no "${notes}" \
     --argjson hl "${has_lifecycle}" --argjson hooks "${hooks_health}" \
     --argjson rec "${recognised_count}" --argjson asg "${assigned_count}" --argjson sk "${skipped_count}" \
@@ -2114,7 +2136,9 @@ _reconcile_run() {
                 } end)),
      actions:$actions}
     + (if $hl then {warnings:$w, notes:$no} else {} end)
-    + {hook_health:$hooks, exit_code:$x}' | json_canonical)"
+    + {hook_health:$hooks, exit_code:$x}' | json_canonical)" || _disp_rc=$?
+  rm -f "${_disp_f}"
+  ((_disp_rc == 0)) || return "${_disp_rc}"
 
   timing_phase_end "apply" "$(jira_request_count)"
 
