@@ -22,8 +22,27 @@ function Start-JiraMock {
     New-Item -ItemType File -Path $callLog | Out-Null
 
     $server = Join-Path $mockDir 'mock-server.ps1'
-    $argList = @('-NoProfile', '-File', $server, '-CallLogPath', $callLog, '-ReadyFile', $ready, '-FixtureDir', $FixtureDir)
-    if ($ConfigPath) { $argList += @('-ConfigPath', $ConfigPath) }
+    # Every path is quoted individually. Start-Process joins an -ArgumentList
+    # array with spaces and quotes NOTHING, so a single path containing a space
+    # — C:\Users\First Last\AppData\Local\Temp\… is the ordinary case on a
+    # developer machine — is delivered as two arguments, and every parameter
+    # after it binds to the wrong value. Observed as
+    #
+    #   mock-server.ps1: Cannot process argument transformation on parameter
+    #   'Port'. Cannot convert value "LAST\AppData\Local\Temp\x\calls.log" to
+    #   type "System.Int32"
+    #
+    # followed by "mock process exited before ready" from every mock-based
+    # Pester test in the suite. GitHub's Windows runner is C:\Users\runneradmin
+    # with no space anywhere, which is why this has never fired in CI and why
+    # it looked like a broken machine rather than a broken harness.
+    $argList = @(
+        '-NoProfile', '-File', "`"$server`"",
+        '-CallLogPath', "`"$callLog`"",
+        '-ReadyFile', "`"$ready`"",
+        '-FixtureDir', "`"$FixtureDir`""
+    )
+    if ($ConfigPath) { $argList += @('-ConfigPath', "`"$ConfigPath`"") }
 
     $pwshPath = (Get-Process -Id $PID).Path
     $proc = Start-Process -FilePath $pwshPath -ArgumentList $argList -PassThru -NoNewWindow
