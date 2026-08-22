@@ -238,7 +238,17 @@ Describe 'RunState' {
 
     Describe 'Get-JiraRunStatePath' {
         It 'names the recorded document after the spec''s feature directory' {
-            $want = Join-Path (Join-Path $env:JIRA_CONFIG_DIR 'state') '021-example.json'
+            # The expectation is the BASH twin's spelling —
+            # `printf '%s/state/%s.json'`, lib/run_state.sh:31 — and not
+            # Join-Path's. Written with Join-Path this was a tautology against
+            # the very primitive whose renormalisation is the #46 D1 defect:
+            # it passed on Windows precisely because both sides were wrong in
+            # the same way, while `state_file` reached stdout spelled with
+            # backslashes in nine conformance scenarios. The separator between
+            # the config dir and `state` comes from the port, so it is the
+            # port's `/`; whatever separators the config dir itself carries are
+            # the caller's own bytes and are preserved untouched.
+            $want = "$env:JIRA_CONFIG_DIR/state/021-example.json"
             (Get-JiraRunStatePath -SpecPath $script:Spec) | Should -Be $want
         }
     }
