@@ -249,7 +249,18 @@ _plan_apply_managed_field() {
     doc="null"
     warning="${label}'s rendered description exceeds what Jira accepts and was not written — nothing changed in Jira. Reduce the number of tasks in this story, or switch this project to subtask mode."
   fi
-  jq -cn --argjson d "${doc}" --arg w "${warning}" '{doc:$d, warning:$w}'
+  # `doc` is capped at _PLAN_APPLY_DESCRIPTION_SIZE_CEILING above, and that
+  # ceiling is 32767 — the SAME number as Windows' whole-command-line cap. The
+  # ceiling bounds the value; CreateProcess bounds the value plus the filter,
+  # the other argument and the program name. So a description sitting exactly
+  # at the ceiling still overflows the command line, and the guard that let it
+  # through was calibrated to Linux's 128 KiB (#46 B).
+  #
+  # Last command of the function: its status is the function's, and json_build
+  # propagates jq's.
+  # shellcheck disable=SC2016  # a jq filter: $d/$w are jq variables
+  json_build '{doc:$d, warning:$w}' \
+    d "${doc}" w "$(jq -cn --arg v "${warning}" '$v')"
 }
 
 # plan_writes <neutral-doc-json> <plan-context-json> — resolve the validated

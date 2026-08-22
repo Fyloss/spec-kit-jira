@@ -47,21 +47,52 @@ _arg_of() {
 # `.` inherits this function's positional parameters, so the value is built
 # and measured inside one shell. This is the same file, and the same
 # comparison, the shim runs.
+# <limit> is optional and defaults to the shipped one. It is a parameter so the
+# per-host boundary cases below can each measure against the constant they are
+# actually about — Linux's per-argument cap and Windows' command-line cap are
+# different numbers and both must stay pinned, while the DEFAULT is the tighter
+# of the two.
 _measured_in_process() {
   local val
   val="$(_arg_of "$1")"
-  local ARGV_SIZE_LIMIT="${HELPER_ARGV_SIZE_LIMIT}" ARGV_SIZE_REPORT="${REPORT_FILE}"
+  local ARGV_SIZE_LIMIT="${2:-${HELPER_ARGV_SIZE_LIMIT}}" ARGV_SIZE_REPORT="${REPORT_FILE}"
   set -- "${val}"
   # shellcheck source=/dev/null
   source "${HELPERS}/argv_size_measure.sh"
 }
 
-@test "the real limit is Linux's MAX_ARG_STRLEN, 32 pages" {
-  [ "${HELPER_ARGV_SIZE_LIMIT}" = "131072" ]
+@test "Linux's per-argument cap is MAX_ARG_STRLEN, 32 pages" {
+  [ "${HELPER_ARGV_SIZE_LIMIT_LINUX}" = "131072" ]
 }
 
-@test "an argument of 131073 bytes is recorded" {
-  _measured_in_process 131073
+# Measured on a real Windows 11 host, 2026-08-22 (#46 B): 32700 bytes exec
+# fine, 33000 do not. That is CreateProcess's lpCommandLine cap — the WHOLE
+# command line, not one argument — and it binds four times tighter than Linux.
+@test "Windows' command-line cap is CreateProcess's 32767" {
+  [ "${HELPER_ARGV_SIZE_LIMIT_WINDOWS}" = "32767" ]
+}
+
+# The one that matters. This constant was Linux's 131072 until #46, and that is
+# the whole reason a detector built for the oversized-argument defect sat green
+# while four conformance scenarios failed on windows-latest: their payloads
+# were ~40-67 KB, over Windows' cap and under Linux's. The default must be the
+# tightest cap across supported hosts or the helper's promise of a verdict
+# "identical on every host" is false for the host with the smallest budget.
+@test "the shipped default is the TIGHTEST cap across supported hosts" {
+  [ "${HELPER_ARGV_SIZE_LIMIT}" = "${HELPER_ARGV_SIZE_LIMIT_WINDOWS}" ]
+  [ "${HELPER_ARGV_SIZE_LIMIT}" -lt "${HELPER_ARGV_SIZE_LIMIT_LINUX}" ]
+}
+
+# The band between the two caps — fatal on Windows, survivable on Linux. This
+# is where every category-B scenario of #46 lived, and where the old default
+# recorded nothing at all.
+@test "an argument between the Windows and Linux caps is recorded by default" {
+  _measured_in_process 43475
+  [ "$(cat "${REPORT_FILE}")" = "43475" ]
+}
+
+@test "an argument of 131073 bytes is recorded against the Linux cap" {
+  _measured_in_process 131073 "${HELPER_ARGV_SIZE_LIMIT_LINUX}"
   [ "$(wc -l < "${REPORT_FILE}" | tr -d '[:space:]')" = "1" ]
   [ "$(cat "${REPORT_FILE}")" = "131073" ]
 }
@@ -74,13 +105,25 @@ _measured_in_process() {
 # waved 131072 through therefore reported "no oversized argument" about a run
 # that cannot start.
 @test "the boundary value 131072 bytes IS recorded — Linux refuses an argument that fills the limit" {
-  _measured_in_process 131072
+  _measured_in_process 131072 "${HELPER_ARGV_SIZE_LIMIT_LINUX}"
   [ "$(wc -l < "${REPORT_FILE}" | tr -d '[:space:]')" = "1" ]
   [ "$(cat "${REPORT_FILE}")" = "131072" ]
 }
 
 @test "an argument of 131071 bytes is not recorded — it is the largest one Linux will exec" {
-  _measured_in_process 131071
+  _measured_in_process 131071 "${HELPER_ARGV_SIZE_LIMIT_LINUX}"
+  [ ! -s "${REPORT_FILE}" ]
+}
+
+# The same boundary rule on the other cap: "reaches the limit" is fatal, one
+# byte under it is not.
+@test "the boundary value 32767 bytes IS recorded against the Windows cap" {
+  _measured_in_process 32767 "${HELPER_ARGV_SIZE_LIMIT_WINDOWS}"
+  [ "$(cat "${REPORT_FILE}")" = "32767" ]
+}
+
+@test "an argument of 32766 bytes is not recorded against the Windows cap" {
+  _measured_in_process 32766 "${HELPER_ARGV_SIZE_LIMIT_WINDOWS}"
   [ ! -s "${REPORT_FILE}" ]
 }
 

@@ -472,15 +472,29 @@ _reconcile_plan_context() {
   # a task's summary record after a write needs its origin, same as a story.
   ticket_origins="$(jq -c --argjson t "$(jq -c '(.bound // {}) | with_entries(.value |= .origin)' <<< "${tasks_recog}")" '. + $t' <<< "${ticket_origins}")"
 
-  jq -cn --arg b "${base}" --arg st "${story_type}" --argjson pids "${priority_ids}" --arg ef "${est_field}" \
-    --arg pt "${parent_type_id}" --argjson psl "${parent_supports_link}" \
-    --argjson tk "${tickets}" --argjson to "${ticket_origins}" --argjson td "${ticket_descriptions}" \
-    --argjson tp "${ticket_parents}" --argjson fd "${field_defaults}" --argjson tl "${ticket_labels}" \
-    --argjson dft "${defaultable_fields_by_type}" --argjson itl "${issue_types_list}" \
-    --arg tt "${task_type_id}" --argjson tc "${ticket_current}" \
-  --argjson ts "${ticket_summaries}" --argjson tls "${ticket_last_summaries}" --arg tm "${task_mirror_pc}" \
-  --argjson tlc "${ticket_last_checklists}" '
-    {base_url:$b}
+  # Nine of these values grow with the ticket count — tickets, their origins,
+  # descriptions, parents, labels, current state, summaries, last summaries and
+  # last checklists — and together they were the largest command line in the
+  # port. Windows caps a whole command line at 32767 (#46 B), so every one is
+  # bound from a file through json_build.
+  #
+  # The six small scalars are gathered into ONE object first and unpacked by a
+  # prelude, rather than JSON-encoded one at a time: it costs a single extra
+  # process instead of six, and it leaves the filter body below byte-identical
+  # to what it was, which is the point — this is the write path and its
+  # behaviour is frozen (FR-030).
+  #
+  # This is the function's LAST command, so its status is the function's;
+  # json_build propagates jq's exit code and nothing may follow it here.
+  local _plan_ctx_scalars
+  _plan_ctx_scalars="$(jq -cn --arg b "${base}" --arg st "${story_type}" --arg ef "${est_field}" \
+    --arg pt "${parent_type_id}" --arg tt "${task_type_id}" --arg tm "${task_mirror_pc}" \
+    '{b:$b, st:$st, ef:$ef, pt:$pt, tt:$tt, tm:$tm}')"
+  # shellcheck disable=SC2016  # a jq filter: every $name below is a jq variable
+  json_build '
+    ($sc.b) as $b | ($sc.st) as $st | ($sc.ef) as $ef
+    | ($sc.pt) as $pt | ($sc.tt) as $tt | ($sc.tm) as $tm
+    | {base_url:$b}
     + (if $st == "" then {} else {story_type_id:$st} end)
     + (if $pt == "" then {} else {parent_type_id:$pt} end)
     + {parent_supports_link: $psl}
@@ -499,7 +513,13 @@ _reconcile_plan_context() {
     + (if ($ts|length) == 0 then {} else {ticket_summaries:$ts} end)
     + (if ($tls|length) == 0 then {} else {ticket_last_summaries:$tls} end)
     + (if ($tlc|length) == 0 then {} else {ticket_last_checklists:$tlc} end)
-    + (if $tm == "" then {} else {task_mirror:$tm} end)'
+    + (if $tm == "" then {} else {task_mirror:$tm} end)' \
+    sc "${_plan_ctx_scalars}" pids "${priority_ids}" psl "${parent_supports_link}" \
+    tk "${tickets}" to "${ticket_origins}" td "${ticket_descriptions}" \
+    tp "${ticket_parents}" fd "${field_defaults}" tl "${ticket_labels}" \
+    dft "${defaultable_fields_by_type}" itl "${issue_types_list}" \
+    tc "${ticket_current}" ts "${ticket_summaries}" tls "${ticket_last_summaries}" \
+    tlc "${ticket_last_checklists}"
 }
 
 # cmd_reconcile <argv...> — reconcile one specification into its Jira project.
@@ -1040,8 +1060,15 @@ _reconcile_run() {
         local tasks_for_doc="${tasks_raw}"
         local tasks_parsed
         tasks_parsed="$(printf '%s' "${tasks_for_doc}" | tasks_parse_document)"
-        doc_for_write="$(jq -c --argjson tp "${tasks_parsed}" '
-          ($tp.tasks // []) as $all
+        # `$doc` replaces the here-string: json_build is `-cn`-shaped, so the
+        # document that used to arrive as `.` is bound by name like every other
+        # value. Both operands grow with the specification — the neutral
+        # document measured 43475 bytes on the 60-story fixture — and Windows
+        # caps a whole command line at 32767 (#46 B).
+        # shellcheck disable=SC2016  # a jq filter: $tp/$doc are jq variables
+        doc_for_write="$(json_build '
+          $doc
+          | ($tp.tasks // []) as $all
           | (.stories | length) as $n
           | ($all | map(select(.attribution.story_ordinal != null
                                 and .attribution.story_ordinal >= 1
@@ -1051,9 +1078,12 @@ _reconcile_run() {
               | ($attributed | map(select(.attribution.story_ordinal == $ord))) as $ts
               | if ($ts | length) > 0 then ($s + {tasks: $ts}) else $s end
             ))
-        ' <<< "${doc_for_write}")"
-        task_skip_notes="$(jq -cn --argjson tp "${tasks_parsed}" --argjson n "$(jq '.stories | length' <<< "${doc_for_write}")" \
-          --arg tf "${candidate_tasks_file}" --arg sf "${spec_file}" '
+        ' tp "${tasks_parsed}" doc "${doc_for_write}")"
+        # `tp` is the parsed task set and grows with tasks.md (#46 B). The two
+        # file names are strings, so they are JSON-encoded before binding —
+        # json_build reads every value as a JSON document.
+        # shellcheck disable=SC2016  # a jq filter: $tp/$n/$tf/$sf are jq variables
+        task_skip_notes="$(json_build '
           [ ($tp.tasks // [])[]
             | if (.attribution.story_ordinal == null) then
                 "\(.task_ref) in \($tf) carries no story attribution and was not mirrored."
@@ -1061,7 +1091,11 @@ _reconcile_run() {
                 "\(.task_ref) in \($tf) is attributed to User Story \(.attribution.story_ordinal), which \($sf) does not contain, and was not mirrored."
               else empty
               end
-          ]')"
+          ]' \
+          tp "${tasks_parsed}" \
+          n "$(jq '.stories | length' <<< "${doc_for_write}")" \
+          tf "$(jq -cn --arg v "${candidate_tasks_file}" '$v')" \
+          sf "$(jq -cn --arg v "${spec_file}" '$v')")"
         if ! printf '%s' "${doc_for_write}" | interchange_validate > /dev/null 2>&1; then
           doc_for_write="$(jq -c '.stories |= map(del(.tasks))' <<< "${doc_for_write}")"
           task_warns="$(jq -c '. + ["reconcile: the task tier could not be validated (a malformed or duplicate task identifier) and was withheld this run; the specification and story tiers still reconciled"]' <<< "${task_warns}")"
@@ -1090,13 +1124,17 @@ _reconcile_run() {
         # at least one task is attributed.
         local tasks_parsed_raw
         tasks_parsed_raw="$(printf '%s' "${tasks_raw}" | tasks_parse_document)"
-        task_withheld_count="$(jq --argjson tp "${tasks_parsed_raw}" -r '
-          ($tp.tasks // []) as $all
+        # `tasks_parsed_raw` grows with tasks.md (#46 B). The result is a bare
+        # count, so json_build's `-c` prints the same bytes `-r` did here.
+        # shellcheck disable=SC2016  # a jq filter: $tp/$doc are jq variables
+        task_withheld_count="$(json_build '
+          $doc
+          | ($tp.tasks // []) as $all
           | (.stories | length) as $n
           | [$all[] | select(.attribution.story_ordinal != null
                               and .attribution.story_ordinal >= 1
                               and .attribution.story_ordinal <= $n)] | length
-        ' <<< "${doc_for_write}")"
+        ' tp "${tasks_parsed_raw}" doc "${doc_for_write}")"
         if ((task_withheld_count > 0)); then
           local task_type_name
           task_type_name="$(jq -r '.roles.task.logical_name' <<< "${gate_binding}")"
@@ -1138,8 +1176,15 @@ _reconcile_run() {
         # neither ever reaches the document. Nesting a task under its
         # story's own `tasks` array is what makes "attributed to a story
         # this specification does not contain" unrepresentable downstream.
-        doc_for_write="$(jq -c --argjson tp "${tasks_parsed}" '
-          ($tp.tasks // []) as $all
+        # `$doc` replaces the here-string: json_build is `-cn`-shaped, so the
+        # document that used to arrive as `.` is bound by name like every other
+        # value. Both operands grow with the specification — the neutral
+        # document measured 43475 bytes on the 60-story fixture — and Windows
+        # caps a whole command line at 32767 (#46 B).
+        # shellcheck disable=SC2016  # a jq filter: $tp/$doc are jq variables
+        doc_for_write="$(json_build '
+          $doc
+          | ($tp.tasks // []) as $all
           | (.stories | length) as $n
           | ($all | map(select(.attribution.story_ordinal != null
                                 and .attribution.story_ordinal >= 1
@@ -1149,13 +1194,16 @@ _reconcile_run() {
               | ($attributed | map(select(.attribution.story_ordinal == $ord))) as $ts
               | if ($ts | length) > 0 then ($s + {tasks: $ts}) else $s end
             ))
-        ' <<< "${doc_for_write}")"
+        ' tp "${tasks_parsed}" doc "${doc_for_write}")"
 
         # Neither an unattributed nor a dangling task ever reaches the
         # document (contract §3): this is the only place either can still be
         # named, by task_ref, with its reason (FR-004, FR-028).
-        task_skip_notes="$(jq -cn --argjson tp "${tasks_parsed}" --argjson n "$(jq '.stories | length' <<< "${doc_for_write}")" \
-          --arg tf "${candidate_tasks_file}" --arg sf "${spec_file}" '
+        # `tp` is the parsed task set and grows with tasks.md (#46 B). The two
+        # file names are strings, so they are JSON-encoded before binding —
+        # json_build reads every value as a JSON document.
+        # shellcheck disable=SC2016  # a jq filter: $tp/$n/$tf/$sf are jq variables
+        task_skip_notes="$(json_build '
           [ ($tp.tasks // [])[]
             | if (.attribution.story_ordinal == null) then
                 "\(.task_ref) in \($tf) carries no story attribution and was not mirrored."
@@ -1163,7 +1211,11 @@ _reconcile_run() {
                 "\(.task_ref) in \($tf) is attributed to User Story \(.attribution.story_ordinal), which \($sf) does not contain, and was not mirrored."
               else empty
               end
-          ]')"
+          ]' \
+          tp "${tasks_parsed}" \
+          n "$(jq '.stories | length' <<< "${doc_for_write}")" \
+          tf "$(jq -cn --arg v "${candidate_tasks_file}" '$v')" \
+          sf "$(jq -cn --arg v "${spec_file}" '$v')")"
 
         # A task-tier schema violation (FR-018's duplicate identifier, most
         # commonly) withholds the WHOLE tier rather than the whole run —
@@ -1230,8 +1282,12 @@ _reconcile_run() {
   fi
   if [[ "${task_tier_mode}" == "subtask" ]]; then
     local orphan_notes
-    orphan_notes="$(jq -cn --argjson recog "${recog}" --argjson doc "${doc_for_write}" --argjson trecog "${tasks_recog}" \
-      --arg ttid "${task_type_id_candidate}" --arg tf "${candidate_tasks_file}" '
+    # THREE growing documents in one command line — the recognition result,
+    # the neutral document (43475 bytes on the 60-story fixture) and the task
+    # recognition result. This was the single worst argv site in the port
+    # (#46 B).
+    # shellcheck disable=SC2016  # a jq filter: $recog/$doc/$trecog/$ttid/$tf are jq variables
+    orphan_notes="$(json_build '
       [ ($doc.stories // [])[] as $s
         | ($recog.bound[$s.local_id].key // null) as $skey
         | select($skey != null)
@@ -1241,11 +1297,15 @@ _reconcile_run() {
         | select($sub.issuetype_id == $ttid)
         | select(($expected | index($sub.key)) == null)
         | "\($sub.key) is recorded in Jira as a sub-task of \($skey), but \($tf) no longer attributes any task to it; nothing was changed in Jira."
-      ]')"
+      ]' \
+      recog "${recog}" doc "${doc_for_write}" trecog "${tasks_recog}" \
+      ttid "$(jq -cn --arg v "${task_type_id_candidate}" '$v')" \
+      tf "$(jq -cn --arg v "${candidate_tasks_file}" '$v')")"
 
     local reattribution_notes
-    reattribution_notes="$(jq -cn --argjson recog "${recog}" --argjson doc "${doc_for_write}" --argjson trecog "${tasks_recog}" \
-      --arg tf "${candidate_tasks_file}" '
+    # Same three growing documents as orphan_notes above (#46 B).
+    # shellcheck disable=SC2016  # a jq filter: $recog/$doc/$trecog/$tf are jq variables
+    reattribution_notes="$(json_build '
       [ ($doc.stories // [])[] as $s
         | ($recog.bound[$s.local_id].key // null) as $target_key
         | select($target_key != null)
@@ -1254,7 +1314,9 @@ _reconcile_run() {
         | ($trecog.bound[$t.local_id].current.parent // null) as $cur_parent
         | select($tkey != null and $cur_parent != null and $cur_parent != $target_key)
         | "\($tkey) is attributed to \($target_key) in \($tf), but is recorded in Jira under \($cur_parent); nothing was re-parented."
-      ]')"
+      ]' \
+      recog "${recog}" doc "${doc_for_write}" trecog "${tasks_recog}" \
+      tf "$(jq -cn --arg v "${candidate_tasks_file}" '$v')")"
 
     task_notes="$(jq -c --argjson b "${reattribution_notes}" '. + $b' <<< "${orphan_notes}")"
   fi
@@ -1274,10 +1336,26 @@ _reconcile_run() {
     switch_out_n="$(jq '[.tasks[] | select(.marker.state=="bound")] | length' <<< "${switch_out_parsed}")"
     if ((switch_out_n > 0)); then
       local switch_out_stories switch_out_keys
-      switch_out_stories="$(jq -r --argjson doc "${doc_for_write}" '
-        [.tasks[] | select(.marker.state=="bound") | .attribution.story_ordinal] | unique
+      # A real file, not argv: doc_for_write grows with the specification and
+      # Windows caps a whole command line at 32767 (#46 B). NOT json_build —
+      # `-r` is load-bearing here, the result is a joined title list printed
+      # raw, and json_build is `-c`-shaped and would quote it. Same
+      # --slurpfile + json_path_arg shape as the notes builder above, and a
+      # real file rather than `<(…)` for the reason recorded there.
+      #
+      # No captured status: unlike that builder this is not the function's last
+      # command, so the dispatcher's `set -e` still aborts on a failed jq and a
+      # cleanup line here cannot become the return value.
+      local _swo_f
+      _swo_f="$(mktemp)"
+      printf '%s' "${doc_for_write}" > "${_swo_f}"
+      # shellcheck disable=SC2016  # a jq filter: $doc_f/$doc are jq variables
+      switch_out_stories="$(jq -r --slurpfile doc_f "$(json_path_arg "${_swo_f}")" '
+        ($doc_f[0]) as $doc
+        | [.tasks[] | select(.marker.state=="bound") | .attribution.story_ordinal] | unique
         | map($doc.stories[. - 1].title // empty) | join(", ")
       ' <<< "${switch_out_parsed}")"
+      rm -f "${_swo_f}"
       switch_out_keys="$(jq -r '[.tasks[] | select(.marker.state=="bound") | .marker.ticket] | join(", ")' <<< "${switch_out_parsed}")"
       task_notes="$(jq -c --arg n "${switch_out_n}" --arg s "${switch_out_stories}" --arg k "${switch_out_keys}"         '. + ["reconcile: switched to checklist mode — \($n) sub-task(s) across \($s) are no longer maintained by this mirror; issue in (\($k)) selects exactly them for cleanup"]'         <<< "${task_notes}")"
     fi
