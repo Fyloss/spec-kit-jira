@@ -579,7 +579,20 @@ function Invoke-JiraFeatSeedFromDesignator {
         $doc = New-JiraSeedStateDocument -Slug $shortName -DesignatorsJson $designatorsJson -PlanDigest '' -RoutingJson $routingJson -PlanSnapshotJson '[]'
         Save-JiraSeedState -SpecPath $synthSpecPath -DocumentJson $doc
         $configDir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
-        $seedMaterialPath = Join-Path $configDir "state/$shortName.seed-material.json"
+        # Spelled, not joined. This value is printed to stdout as
+        # `seed_material` a few lines below, so it owes the Bash twin byte
+        # parity (NFR-1) and the twin is a plain interpolation —
+        # "${JIRA_CONFIG_DIR:-.specify/jira}/state/${short_name}.seed-material.json"
+        # (commands/feature.sh:622). Join-Path renormalises to the host's
+        # separator in BOTH directions — it rewrote even the `/` inside the
+        # literal argument here — which diverged five conformance scenarios on
+        # Windows at exit 0, silently (#46 D2). Quirk 8,
+        # docs/10-windows-portability.md; the rule is in AGENTS.md.
+        #
+        # WriteAllText below takes this same string: .NET resolves either
+        # separator on Windows, so one value still serves both jobs, exactly as
+        # it does in the Bash twin.
+        $seedMaterialPath = "$configDir/state/$shortName.seed-material.json"
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($seedMaterialPath, $materialContent, $utf8NoBom)
     }
