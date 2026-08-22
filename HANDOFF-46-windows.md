@@ -188,3 +188,30 @@ before believing a red.
 
 Then push to `ci/windows-probe` (force-push is the documented way to drive it)
 and read the artifact, not the annotation.
+
+## 10. How to report back
+
+Do not paste the report into a chat — it is long and it will be retyped by
+hand. Write it to a file and push it:
+
+```bash
+bash tests/conformance/diagnose-windows-silent.sh > FINDINGS-46-windows.md
+```
+
+Then append, in that same file and in your own words:
+
+1. **The answer to §4** — same `file:line` for all sixteen, or several? Give the
+   distinct stopping points and how many scenarios each accounts for.
+2. What you can already rule out, and what you cannot.
+3. Anything in this brief that turned out to be **wrong** — say so plainly, it
+   was written from the other side of the machine boundary and some of it is
+   inference.
+
+Commit it to `ci/windows-d-diagnostic` and push. That branch is the exchange
+channel; the macOS side reads it with `git fetch`.
+
+```bash
+git add FINDINGS-46-windows.md
+git commit -m "docs: report where the silent Windows failures stop (#46)"
+git push origin ci/windows-d-diagnostic
+```
