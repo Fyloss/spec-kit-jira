@@ -164,29 +164,44 @@ restore the bridge, reinstall the extension with
 
 5. **Nominal output** (`active: true` with `branch_name`/`short_name`) ⇒ hand
    the computed names to the steps that own them, then return to the host:
-   1. `.specify/scripts/bash/create-new-feature.sh --short-name "<short_name>"`
-      — the flat spec folder component; the team `folder_prefix` is already
-      applied and never duplicated. Spell that full path rather than the bare
-      name: a repository that installs a git extension carries a **second,
-      different** script of the same name (in the reference setup,
+   1. Run the **host's** feature-folder script with
+      `--short-name "<short_name>"` — the flat spec folder component; the team
+      `folder_prefix` is already applied and never duplicated. Select the port
+      the repository was initialised with, as for the entry point above:
+
+      | Host | Script |
+      | --- | --- |
+      | macOS, Linux | `.specify/scripts/bash/create-new-feature.sh` |
+      | Windows | `.specify/scripts/powershell/create-new-feature.ps1` |
+
+      Spell that full path rather than the bare name: a repository that
+      installs a git extension carries a **second, different** script of the
+      same name (in the reference setup,
       `.specify/extensions/git/scripts/bash/create-new-feature.sh`), and the
-      two do opposite halves of the job — the host's creates the folder and an
-      empty `spec.md` and runs no git command; the other creates the branch and
-      no folder. The host's writes **no specification content**. Neither gap is
-      yours to close here.
+      two do opposite halves of the job — the host's script creates the folder
+      and an empty `spec.md` and runs no git command; the other creates the
+      branch and no folder. The host's script writes **no specification
+      content**. Neither gap is yours to close here.
    2. `branch_name` is this step's branch **name** — an output, not a licence
-      to manage branches. Convey it, do not act on it: **export
-      `GIT_BRANCH_NAME=<branch_name>` before whatever hook creates the
-      branch**. That variable is the **host's** own documented channel for
-      using a branch name verbatim ("bypassing all prefix/suffix generation"),
-      so the obligation is the export, and it holds whoever the recipient turns
-      out to be. In the reference setup that recipient is the git extension's
+      to manage branches. Convey it, do not act on it: **set
+      `GIT_BRANCH_NAME` to `branch_name` in the environment the
+      branch-creating hook is dispatched in**, spelled for the host you are on:
+
+      | Host | Spelling |
+      | --- | --- |
+      | macOS, Linux | `export GIT_BRANCH_NAME='<branch_name>'` |
+      | Windows | `$env:GIT_BRANCH_NAME = '<branch_name>'` |
+
+      That variable is the **host's** own documented channel for using a branch
+      name verbatim ("bypassing all prefix/suffix generation"), so the
+      obligation is setting it, and it holds whoever the recipient turns out to
+      be. In the reference setup that recipient is the git extension's
       `git.feature`, dispatched immediately after this one, which reads the
       variable in both of its ports — but that is an illustration of where the
       value lands, **not a prerequisite**: this extension neither requires nor
       detects any git extension, and behaves identically when none is
-      installed. Without the export the receiving hook regenerates a name of
-      its own and the ticket number is lost from the branch. A `/` in the pattern
+      installed. Unset, the receiving hook regenerates a name of its own and
+      the ticket number is lost from the branch. A `/` in the pattern
       creates git hierarchy only; the branch name does not dictate the spec
       directory name. Create or switch the branch yourself **only** if the host
       registers no branch-creating hook at all, and then create exactly

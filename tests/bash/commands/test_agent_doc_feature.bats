@@ -113,9 +113,26 @@ setup() {
   grep -qE 'neither[[:space:]]+requires[[:space:]]+nor[[:space:]]+detects' <<< "${step5}"
 }
 
-@test "step 5 records that the host folder script writes no specification content" {
+# This definition is read on both hosts. A Bash-only spelling makes the
+# ceremony undeterministic on Windows, where `export` does not exist and the
+# host ships the PowerShell port of its own scripts.
+@test "step 5 spells the environment variable for both hosts" {
   local step5
   step5="$(awk '/^5\. \*\*Nominal output\*\*/ { f = 1 } f && /^## / { f = 0 } f' "${DOC}")"
+  grep -qE 'GIT_BRANCH_NAME=' <<< "${step5}"
+  grep -qE '\$env:GIT_BRANCH_NAME' <<< "${step5}"
+}
+
+@test "step 5 spells the host folder script for both hosts" {
+  local step5
+  step5="$(awk '/^5\. \*\*Nominal output\*\*/ { f = 1 } f && /^## / { f = 0 } f' "${DOC}")"
+  grep -qE '\.specify/scripts/bash/create-new-feature\.sh' <<< "${step5}"
+  grep -qE '\.specify/scripts/powershell/create-new-feature\.ps1' <<< "${step5}"
+}
+
+@test "step 5 records that the host folder script writes no specification content" {
+  local step5
+  step5="$(awk '/^5\. \*\*Nominal output\*\*/ { f = 1 } f && /^## / { f = 0 } f' "${DOC}" | tr '\n' ' ')"
   grep -qE 'create-new-feature\.sh' <<< "${step5}"
-  grep -qE 'no specification content' <<< "${step5}"
+  grep -qE 'no[[:space:]]+specification[^*]*content' <<< "${step5}"
 }
