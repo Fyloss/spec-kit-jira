@@ -76,16 +76,11 @@ us4-migration-clean             us5-plan-on-parent
 They write **nothing** to stderr, which is why the stderr channel PR #47 adds to
 the divergence report is already blind to them.
 
-**Start here:**
-
-```bash
-bash tests/conformance/diagnose-windows-silent.sh
-```
-
-It runs each one and prints the last traced frames — `file:line` — so the last
-frame is where the run stops. It works by injecting `BASH_ENV`, which bash
-sources for every non-interactive shell; the hook guards on `$0` so the trace
-covers the port and not the mock or the harness.
+**This section's premise is WRONG — see the ADDENDUM, §11.** Nothing stops.
+The scenarios complete and exit 0 on both ports; the divergence is in stdout
+CONTENT. The script this section used to send you to has been deleted, and
+`docs/10-windows-portability.md` quirk 9 records why it could never have worked.
+Go to §11.
 
 **The first question to answer, before any fixing:** do the sixteen stop at the
 **same** `file:line` or at several? A1 was 103 scenarios and one cause. C looked
@@ -194,11 +189,7 @@ and read the artifact, not the annotation.
 Do not paste the report into a chat — it is long and it will be retyped by
 hand. Write it to a file and push it:
 
-```bash
-bash tests/conformance/diagnose-windows-silent.sh > FINDINGS-46-windows.md
-```
-
-Then append, in that same file and in your own words:
+Write your measurements to `FINDINGS-46-windows.md` and, in your own words:
 
 1. **The answer to §4** — same `file:line` for all sixteen, or several? Give the
    distinct stopping points and how many scenarios each accounts for.
@@ -233,9 +224,11 @@ corrects §4 of this brief and it is right.
   the CI artifact I already had: `us022-checklist-crlf` is `bash=2f pwsh=5c`
   at byte 206, sizes 236/239 — comparable sizes, not 1-vs-2877. I had
   classified by "no stderr" and never looked at the sizes.
-- `diagnose-windows-silent.sh` therefore answers a question these scenarios do
-  not pose. It is left in the tree because the BASH_ENV trick is worth keeping,
-  but do not build on it for this work.
+- `diagnose-windows-silent.sh` answered a question these scenarios do not pose,
+  and its `$0` guard could never match on the bash MSYS ships anyway. **Deleted.**
+  The durable part — BASH_ENV works, `$0` is the shell on bash <= 4.4, scope such
+  a hook with a marker variable — is now quirk 9 in
+  `docs/10-windows-portability.md`.
 
 ## 12. The work, in order
 
