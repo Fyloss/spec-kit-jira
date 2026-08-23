@@ -122,6 +122,39 @@ if ($cut -ge 0) {
 Rejoin with `$sep`, not with a literal `/` or `\`: that is what keeps the
 bytes identical to the Bash twin's `dirname` on both hosts.
 
+### 9. `$0` inside a `BASH_ENV` file is the SHELL on the bash MSYS ships
+
+`BASH_ENV` is the way to inject setup into a script this repo's harness invokes
+(`SHELLOPTS=xtrace` cannot be: `run-scenario.sh` `export`s what
+`SPEC_KIT_JIRA_HARNESS_ENV` carries, `SHELLOPTS` is readonly in a running shell,
+and the failure takes the harness down under `set -e`). Bash sources `BASH_ENV`
+for every non-interactive shell, so `bash <script>` picks it up.
+
+What `$0` holds at that moment depends on the bash version, and the two hosts
+land on opposite sides. Measured 2026-08-22, same one-line hook, same
+invocation:
+
+| bash | `$0` inside the `BASH_ENV` file |
+|---|---|
+| 3.2.57 (Apple `/bin/bash`) | `/bin/bash` — the shell |
+| 4.4.23 (**MSYS, what Windows runs**) | `bash` — the shell |
+| 5.3.15 | `inner.sh` — the script |
+
+So a hook that scopes itself with `case "$0" in */my-script.sh)` works on a
+modern bash and **can never match on Windows**. A tool written that way is not
+merely wrong there — it reports "the program never started" for every input, in
+the one place it was built to run.
+
+Scope such a hook with a **marker variable the caller sets**, never with `$0`:
+
+```sh
+[ "${MY_TOOL_TRACE:-}" = 1 ] || return 0
+```
+
+This cost a cycle to find because the instrument was smoke-tested on macOS,
+where bash 5 made it appear to work — the same mistake this document opens by
+warning against. Verify a Windows instrument on Windows.
+
 ## The probe loop — how to ask Windows a question
 
 `.github/workflows/windows-conformance.yml` runs the conformance corpus alone

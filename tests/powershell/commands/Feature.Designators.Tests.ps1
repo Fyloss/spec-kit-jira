@@ -136,6 +136,38 @@ Describe 'Invoke-JiraFeatSeedFromDesignator (T070)' {
         $material[2].key | Should -Be 'PROJ-13'
     }
 
+    # #46 D2 — `seed_material` is printed to stdout, so it is a path spelled
+    # back to the OPERATOR and it owes the Bash twin byte parity (NFR-1). The
+    # twin is a plain interpolation, commands/feature.sh:622:
+    #
+    #   "${JIRA_CONFIG_DIR:-.specify/jira}/state/${short_name}.seed-material.json"
+    #
+    # Join-Path cannot produce those bytes: it renormalises every separator to
+    # the host's own — rewriting even the `/` already inside the literal it is
+    # handed — and collapses a duplicated one. Five conformance scenarios
+    # diverged on this and still exited 0, silently (issue #46, FINDINGS §1).
+    # Quirk 8 of docs/10-windows-portability.md; the rule is in AGENTS.md.
+    #
+    # Note the SAME value legitimately reaches the filesystem two lines later
+    # in Feature.psm1. Reaching a file with the primitives is right; spelling
+    # the path back is not — which is why the assertion below checks both that
+    # the name matches the twin AND that it still resolves.
+    It 'spells seed_material the way the Bash twin does, keeping the caller''s separators (#46 D2)' {
+        # The TRAILING separator is what makes this fire on macOS and Linux as
+        # well: string concatenation keeps the duplicate, Join-Path collapses
+        # it. Without it the assertion is Windows-only, and the maintainer's
+        # own machine gets no signal from it at all — the failure mode §13 of
+        # the handoff names, and the one two of #47's three guards had.
+        $env:JIRA_CONFIG_DIR = "$($env:JIRA_CONFIG_DIR)/"
+        Start-ThreeStoriesMock
+        $r = Invoke-FeatureCaptured2 @('feature', '--json', '--story', 'PROJ-11', 'invoice export')
+        $r.ExitCode | Should -Be 0
+        $out = $r.Out.Trim() | ConvertFrom-Json
+        $out.seed_material |
+            Should -Be "$($env:JIRA_CONFIG_DIR)/state/$($out.short_name).seed-material.json"
+        Test-Path -LiteralPath $out.seed_material | Should -BeTrue
+    }
+
     It 'C-5 (T073): Jira unreachable WITH designators supplied -> exit 2, never the {active:false} fallback' {
         $cfg = Write-JiraMockConfig -Json '{"issues":{"PROJ-11":{"summary":"S","description":"D"}},"fault":{"status":500}}'
         $script:M = Start-JiraMock -ConfigPath $cfg

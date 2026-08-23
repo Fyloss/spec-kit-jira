@@ -18,6 +18,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Bash port's `dirname` already did, so both ports emit the same message on
   every host.
 
+- On Windows, a reconcile or a seed of a specification above roughly fifty
+  stories died before writing anything, reporting `jq: Argument list too long`
+  and `the specification could not be parsed`. The batched JSON payload was
+  handed to `jq` as a single command-line argument, and Windows caps a whole
+  command line at about 32 767 bytes — four times tighter than Linux, and
+  unlimited on macOS, which is why the same specification succeeded everywhere
+  else. Fourteen call sites now route that payload through a temp file. Large
+  specifications reconcile on Windows again; no output changes on any host.
+
+- On Windows, the PowerShell port spelled `state_file` and `seed_material` with
+  backslashes in machine-readable output, while the Bash port spelled the same
+  paths with forward slashes. Both are now cut from the caller's own bytes
+  rather than rebuilt through a path primitive, so the two ports agree byte for
+  byte.
+
+- On Windows, the PowerShell port terminated its standard output with CRLF
+  where the Bash port used LF, because the write took its line terminator from
+  the host. The terminator is now explicit. A consumer diffing the two ports'
+  output no longer sees a difference that renders identically on screen.
+
 ## [0.20.1] - 2026-08-19
 
 ### Fixed

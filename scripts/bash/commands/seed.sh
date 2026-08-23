@@ -608,8 +608,14 @@ cmd_seed() {
   warnings_json="$(jq -Rn '[inputs] | map(select(length > 0))' <<< "${scatter_warnings}")"
 
   if [[ "${dry_run}" == "true" ]]; then
-    _seed_emit "$(jq -cn --argjson plan "${plan}" --argjson prov "${provenance}" --argjson delta "${delta}" --argjson w "${warnings_json}" \
-      '{active:true, confirmation_required:{plan:$plan, provenance:$prov, delta:$delta}, warnings:$w}' | json_canonical)" "${json}"
+    # `plan`, `provenance` and `delta` all grow with the seeded set, and
+    # Windows caps a whole command line at 32767 — far tighter than Linux's
+    # 128 KiB per argument, which is why this shape survived the guard built
+    # for it (#46 B). json_build binds each from a file.
+    # shellcheck disable=SC2016  # a jq filter: $plan/$prov/$delta/$w are jq variables
+    _seed_emit "$(json_build \
+      '{active:true, confirmation_required:{plan:$plan, provenance:$prov, delta:$delta}, warnings:$w}' \
+      plan "${plan}" prov "${provenance}" delta "${delta}" w "${warnings_json}" | json_canonical)" "${json}"
     return 0
   fi
 
@@ -622,8 +628,14 @@ cmd_seed() {
     doc="$(seed_state_compose "$(jq -r '.slug' <<< "${record}")" "$(jq -c '.designators' <<< "${record}")" "${new_digest}" "${routing}" "${plan}")"
     seed_state_write "${spec_file}" "${doc}"
 
-    _seed_emit "$(jq -cn --argjson plan "${plan}" --argjson prov "${provenance}" --argjson delta "${delta}" --argjson w "${warnings_json}" \
-      '{active:true, confirmation_required:{plan:$plan, provenance:$prov, delta:$delta}, warnings:$w}' | json_canonical)" "${json}"
+    # `plan`, `provenance` and `delta` all grow with the seeded set, and
+    # Windows caps a whole command line at 32767 — far tighter than Linux's
+    # 128 KiB per argument, which is why this shape survived the guard built
+    # for it (#46 B). json_build binds each from a file.
+    # shellcheck disable=SC2016  # a jq filter: $plan/$prov/$delta/$w are jq variables
+    _seed_emit "$(json_build \
+      '{active:true, confirmation_required:{plan:$plan, provenance:$prov, delta:$delta}, warnings:$w}' \
+      plan "${plan}" prov "${provenance}" delta "${delta}" w "${warnings_json}" | json_canonical)" "${json}"
     return 0
   fi
 

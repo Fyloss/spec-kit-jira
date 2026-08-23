@@ -50,9 +50,20 @@ function Get-JiraRunStatePath {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $SpecPath)
+    # The leaf is DERIVED with the primitives and that is correct — the result
+    # is a bare directory name carrying no separator of its own. The join is a
+    # different job: this string is printed to stdout as `state_file`, so it is
+    # spelled here, from the caller's own bytes, exactly as the Bash twin's
+    # `printf '%s/state/%s.json'` spells it (lib/run_state.sh:31).
+    #
+    # Join-Path renormalises to `\` on Windows and collapses a duplicated
+    # separator on every host, which is neither what the twin writes nor what
+    # the operator handed us — the same rule already recorded twelve lines
+    # below for the recorded `inputs` keys, and quirk 8 of
+    # docs/10-windows-portability.md. Nine conformance scenarios diverged on
+    # this alone (#46).
     $featureDir = Split-Path -Leaf (Split-Path -Parent $SpecPath)
-    $stateDir = Join-Path (Get-JiraConfigDir) 'state'
-    return (Join-Path $stateDir "$featureDir.json")
+    return "$(Get-JiraConfigDir)/state/$featureDir.json"
 }
 
 function New-JiraRunStateDocument {

@@ -60,24 +60,44 @@ not pass its (now much larger) payload to a program as a single command-line
 argument, when that payload can grow with input. It must travel through a
 temp file — `json_build`'s established path — instead.
 
-The binding limit is Linux's `MAX_ARG_STRLEN`: **128 KiB per single
-argument**, 32 pages. This is **not** `ARG_MAX`, the total argument-list
-size, which is far larger — a value comfortably inside `ARG_MAX` still fails
-if one *single* element exceeds `MAX_ARG_STRLEN`. Confusing the two is why
-the defect reads as "the arguments aren't that big" during review: the total
-looks fine; the one oversized element does not stand out unless you are
-looking for it specifically.
+**The binding limit is the tightest cap across the supported hosts — never the
+cap of the host you are standing on.** The three do not agree, and they span a
+factor of four:
 
-The limit is **inclusive**: 131 072 bytes exactly already fails. Linux bounds
+| host | per-argument cap | mechanism |
+|---|---|---|
+| **Windows** | **≈32 767 bytes** | `CreateProcess` bounds the whole command line |
+| Linux | **128 KiB** (131 072) | `MAX_ARG_STRLEN` |
+| macOS | none | — |
+
+Windows is the binding one. Measured on a real Windows 11 host: 32 700 bytes
+exec fine, 33 000 come back `E2BIG`. Note what `CreateProcess` counts — the
+whole command line, so the *value* plus the filter, the other arguments and the
+program name. A payload capped at exactly 32 767 still overflows once anything
+joins it on the line; that is a real defect this document's own rule missed
+(`plan_apply.sh`, whose description ceiling was set to that very number).
+
+Linux's `MAX_ARG_STRLEN` is **not** `ARG_MAX`, the total argument-list size,
+which is far larger — a value comfortably inside `ARG_MAX` still fails if one
+*single* element exceeds `MAX_ARG_STRLEN`. Confusing the two is why the defect
+reads as "the arguments aren't that big" during review: the total looks fine;
+the one oversized element does not stand out unless you are looking for it.
+
+Linux's limit is **inclusive**: 131 072 bytes exactly already fails. It bounds
 the search for the argument's terminating NUL by `MAX_ARG_STRLEN`, so a string
 that fills the limit leaves no room for it. The largest single argument that
 can be delivered is 131 071 bytes — measured on the Ubuntu CI runner, where
 131 072 and 131 073 both come back as "Argument list too long".
 
-macOS enforces **no** per-argument cap, so the identical run succeeds there.
-The failure is a Linux-only `E2BIG`, invisible to a maintainer developing on
-macOS by simply running the code — which is the entire reason it was caught
-late, by CI, three times.
+**Why the spread is the whole problem.** macOS enforces no cap at all, so the
+identical run succeeds on the maintainer's own machine — which is why this was
+caught late, by CI, three times. Then the same reasoning was applied one level
+up: the guard built to catch it was calibrated to *Linux*, and Windows' cap is
+four times tighter, so a payload of roughly 33–131 KB is fatal on
+`windows-latest` and invisible to every other host **and to the guard itself**.
+That blind spot hid fourteen call sites of this exact defect until 2026-08-22.
+A payload is safe only when it clears the smallest cap of any host the project
+supports.
 
 One consequence bites anyone writing a check for this defect: a value at or
 above the limit **cannot be handed to a process on Linux at all**. A check
@@ -136,29 +156,43 @@ structural argument instead.
   permanently red or with a hardcoded tolerance FR-012 forbids. See
   `specs/025-spawn-budget-guardrails/research.md` R5/D7.
 - Argument size (feature 025): `tests/bash/sink/test_argv_size.bats` measures
-  every argument any call site produces during a whole run against the
-  128 KiB threshold, on every host, regardless of that host's own limit.
+  every argument any call site produces during a whole run against
+  `HELPER_ARGV_SIZE_LIMIT` in `tests/bash/helpers/argv_size.bash` — **the
+  tightest cap across supported hosts, on every host, regardless of that
+  host's own limit**. `_LINUX` and `_WINDOWS` are kept as separate named
+  constants, each pinned by its own boundary cases, so the verdict cannot
+  quietly drift back to whichever host happens to run the suite. It was
+  calibrated to Linux until 2026-08-22, and that is precisely how it stayed
+  green through fourteen instances of the defect it was built to catch.
+  Consequence, by design: the guard fails for payloads macOS and Linux
+  deliver without complaint. That is what makes it cover the class.
 
-## Known gaps, live in the tree today
+## The gaps this document used to list — closed 2026-08-22
 
-Two reconcile-path call sites already route an input-growing payload through
-a single `argv` element — the exact defect class this document exists to
-prevent, still present, found by this feature's own measurement rather than
-fixed by it (SC-007 forbids a production change under `scripts/` from this
-feature):
+This section named two reconcile-path call sites that routed an input-growing
+payload through a single `argv` element, measured but deliberately not fixed
+(SC-007 forbade a production change under `scripts/` from feature 025). They
+were `engine/parse.sh` (`--argjson st`, the whole stories array) and
+`engine/interchange.sh` (`--argjson parse`, the whole parse result), at 66–72 KB
+on a 100-story fixture.
 
-- `scripts/bash/engine/parse.sh:680` — `--argjson st`, the whole stories
-  array. Measured at 66 369 and 71 257 bytes across its two invocations on a
-  100-story fixture.
-- `scripts/bash/engine/interchange.sh:154` — `--argjson parse`, the whole
-  parse result. Measured at 71 542 bytes on the same fixture — 54.6% of
-  `MAX_ARG_STRLEN`.
+**Both are fixed, and they were two of fourteen.** The estimate that there were
+two is the part worth keeping in mind: it came from reading the sites this
+document's authors already knew about, and the real number was found only by
+sweeping the whole port for a payload that can grow with input reaching argv.
+The others were in `commands/reconcile.sh` (eight), `commands/seed.sh` (two),
+and `sink/jira/plan_apply.sh` (one) — the last of these capped at exactly
+32 767 bytes and overflowing anyway, for the reason given above.
 
-Both grow linearly with story count. At this fixture's story size, ≈183
-stories crosses 131 072 bytes; realistically-sized stories cross it sooner,
-and the 61-item reference specification is already the same order of
-magnitude. Fixing either is production work under `scripts/`; chartering that
-fix is a maintainer decision, not something this document resolves.
+The arithmetic this section used to close on was also host-blind. It said ≈183
+stories crosses 131 072 bytes; on Windows the crossing is at ≈50, and the
+61-item reference specification is already past it. That is why four conformance
+scenarios failed on `windows-latest` alone and nowhere else.
+
+Closed by `fix/windows-remaining-divergences`, proven on the real Windows runner
+across all 231 conformance scenarios. If you are adding a call site, the guard —
+not this list — is what protects you; the list is here as a record of how a
+hand-kept one fails.
 
 See `specs/024-reconcile-local-performance/contracts/spawn-budget.md` for the
 full derivation and measurement method, and

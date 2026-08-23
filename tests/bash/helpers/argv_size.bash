@@ -24,13 +24,41 @@
 # so the measurement has to be reachable without an execve carrying it. See
 # that file's header, and A2.4 for the boundary the threshold encodes.
 
-# HELPER_ARGV_SIZE_LIMIT — Linux's MAX_ARG_STRLEN, 32 pages. A single
+# HELPER_ARGV_SIZE_LIMIT_LINUX — Linux's MAX_ARG_STRLEN, 32 pages. A single
 # argument of exactly this many bytes ALREADY fails: `strnlen_user` looks for
 # the terminating NUL within the limit and does not find it, so 131072 and
 # 131073 both come back as E2BIG. Measured on the Ubuntu CI runner (T039):
 # 131071 bytes exec successfully, 131072 and 131073 do not. The threshold is
 # therefore "reaches the limit", not "exceeds it".
-HELPER_ARGV_SIZE_LIMIT=131072
+HELPER_ARGV_SIZE_LIMIT_LINUX=131072
+
+# HELPER_ARGV_SIZE_LIMIT_WINDOWS — the whole command line, not one argument.
+# CreateProcess caps `lpCommandLine` at 32767 characters, so on git-bash the
+# binding constraint is FOUR TIMES TIGHTER than Linux's per-argument cap.
+# Measured on a real Windows 11 host, 2026-08-22 (issue #46 category B):
+#
+#     32000 bytes: OK     32700 bytes: OK
+#     33000 bytes: jq: Argument list too long     40000: same     65000: same
+HELPER_ARGV_SIZE_LIMIT_WINDOWS=32767
+
+# HELPER_ARGV_SIZE_LIMIT — the TIGHTEST cap across the three supported hosts,
+# applied on every one of them.
+#
+# This used to be Linux's 131072, and that is the single reason a detector
+# written for the oversized-argument defect sat green through it. The parse
+# phase's `stories` array costs ~660 bytes per story, so it crosses Windows'
+# cap at ~50 stories and Linux's at ~200: every specification between those two
+# bounds failed on windows-latest and passed everywhere else. Four conformance
+# scenarios lived in exactly that band (us021-prefetch-count-61, -101,
+# -61-deleted, us023-sixty-stories-due) and the 100-story test one directory
+# over reported nothing about any of them.
+#
+# The header above promises a verdict "identical on every host — including
+# macOS". A Linux-calibrated threshold cannot keep that promise; it silently
+# exempts the host with the smallest budget. Taking the minimum is what makes
+# the claim true, and it is why this is the default rather than a parameter
+# some tests remember to pass.
+HELPER_ARGV_SIZE_LIMIT="${HELPER_ARGV_SIZE_LIMIT_WINDOWS}"
 
 # helper_argv_size_setup <shim_dir> <report_file> [limit] — populate
 # <shim_dir> with an argument-length-measuring shim for jq, sed, awk and

@@ -40,10 +40,14 @@ The short version — one inseparable rule, not two:
   Batch it into a bounded number of calls for the whole set instead.
 - **In the same breath**: the batched payload that produces must not travel
   through a single command-line argument that can grow with input — route it
-  through a temp file. Linux caps a single argument at 128 KiB
-  (`MAX_ARG_STRLEN`), independent of the much larger `ARG_MAX`; macOS has no
-  such cap, so the defect is invisible on the maintainer's own machine and
-  has been reintroduced twice by applying the first half without the second.
+  through a temp file. **The cap that binds is the tightest across supported
+  hosts, never the one on the machine you are using**: Windows ≈32 767 bytes
+  (`CreateProcess` counts the whole command line), Linux 128 KiB
+  (`MAX_ARG_STRLEN`, independent of the much larger `ARG_MAX`), macOS none at
+  all. That spread is the defect's camouflage — it is invisible on the
+  maintainer's own machine, and it has been reintroduced **three** times: twice
+  by applying the first half of this rule without the second, and once by
+  calibrating the guard itself to Linux, which let fourteen instances sit green.
 
 ## Running the suites
 
