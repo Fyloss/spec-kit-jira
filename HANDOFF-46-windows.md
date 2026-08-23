@@ -31,7 +31,7 @@ shards (CI run 32530470422, commit `78b5d06`):
 | **A1** `jq … /dev/fd/N: Could not open` | 103 | **0** | fixed |
 | **A2** `jq … /tmp/tmp.X: Could not open` | 12 | **0** | fixed |
 | **C** `seed: no seeded-not-bound state was found` | 12 | **0** | fell out with A1 |
-| **B** `jq: Argument list too long` | 4 | 4 | **not yours — see §5** |
+| **B** `jq: Argument list too long` | 4 | **0** | closed 2026-08-23 — see §12 |
 | **D** no bash stderr at all | 11 | **16** | **yours** |
 | other | 2 | 1 | `us021-state-unchanged` |
 | **total** | **144** | **21** | −85% |
@@ -108,6 +108,13 @@ reconcile: the specification could not be parsed (zero writes)
 Already diagnosed, being fixed from the macOS side on a separate branch. Leave
 it alone or you will collide. If your D work lands in the same files, say so and
 we rebase.
+
+> **CORRECTION, 2026-08-23 — this section no longer applies to B.** B was not
+> separable: the estimate that made it a small macOS-side job was wrong by a
+> factor of fourteen, and the real fix was a test constant inseparable from the
+> Windows measurement that produced it. It was therefore done from the Windows
+> side, and the macOS side has confirmed it holds nothing local or unpushed on
+> B. **B is closed.** See the correction under §12 for the substance.
 
 ## 6. Doctrine — non-negotiable
 
@@ -237,10 +244,40 @@ changed; doing it first keeps the two apart.
 
 | | cause | site | scenarios |
 |---|---|---|---|
-| B | `jq: Argument list too long` | `lib/output.sh:69`, caller in the parse path | 4 |
+| B | `jq: Argument list too long` | **fourteen** sites — see the correction below | 4 |
 | D1 | `\` vs `/` in `state_file` | `lib/RunState.psm1:53-55` | 9 (+`us021-state-unchanged`) |
 | D2 | `\` vs `/` in `seed_material` | `commands/Feature.psm1:582` | 5 |
 | D3 | trailing CRLF on stdout | `commands/Reconcile.psm1:2086`, and 2090-2091 uncovered | 2 |
+
+> **CORRECTION, 2026-08-23 — B is closed, and this row was wrong.** It said one
+> site, `lib/output.sh:69`, "caller in the parse path". That line is only where
+> every E2BIG *surfaces* — it is inside the CRLF wrapper that execs jq, so it is
+> reported whatever the caller. **The callers were fourteen**, across
+> `reconcile.sh`, `seed.sh`, `interchange.sh`, `parse.sh` and `plan_apply.sh`.
+> `FINDINGS-46-windows-2.md` §2 found twelve; widening the guard from a
+> hand-kept list of function names to a port-wide sweep found the last two, and
+> those two are the argument against ever keeping the list by hand.
+>
+> **The premise that hid them was a threshold, not a missing site.**
+> `HELPER_ARGV_SIZE_LIMIT` in `tests/bash/helpers/argv_size.bash` was Linux's
+> `MAX_ARG_STRLEN`, **131072** — so a detector written for this exact defect sat
+> green through all fourteen instances. Windows' cap is CreateProcess's command
+> line and it is four times tighter: **~32767**, measured on a real host as
+> 32700 bytes exec fine and 33000 do not. A story costs ~660 bytes, so the
+> payload crosses Windows' cap at ~50 stories and Linux's at ~200 — every
+> scenario between those bounds fails on `windows-latest` alone, which is
+> exactly the four category-B scenarios. **A 100-story Linux test proves nothing
+> about them.**
+>
+> The constant is now the tightest cap across supported hosts, with `_LINUX` and
+> `_WINDOWS` as separate named constants each pinned by its own boundary cases.
+> Consequence, so it is not rediscovered in review: the guard now fails for
+> payloads macOS and Linux handle without complaint. That is what makes it cover
+> the class instead of a list.
+>
+> Closed on `fix/windows-remaining-divergences`, proven by probe run
+> `32592732551` at `f98f64c` — 231 scenarios, zero divergences. Full account in
+> `FINDINGS-46-windows-3.md`.
 
 ## 13. Guard specification — the part that must not be skipped
 
@@ -270,6 +307,12 @@ same call.
 
 **B.** Assert the offending call site goes through `json_build` (or a temp file)
 rather than argv. Prove it red the same way.
+
+> **CORRECTION, 2026-08-23.** "The offending call site", singular, is what made
+> the first guard the wrong shape: it named two functions by hand and was blind
+> to the other twelve. Sweep the whole port for a payload that can grow with
+> input reaching argv, and calibrate the threshold to the tightest supported
+> host — not to the host you are standing on. See §12.
 
 ## 14. Sequence to close it
 
