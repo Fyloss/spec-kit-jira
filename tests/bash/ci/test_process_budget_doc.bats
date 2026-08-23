@@ -34,6 +34,34 @@ setup() {
   grep -q "128 KiB" "${DOC}"
 }
 
+# The test above pinned Linux's cap alone, and that is exactly the shape of
+# reasoning that let the defect hide: HELPER_ARGV_SIZE_LIMIT was calibrated to
+# 131072 while Windows' CreateProcess cap is four times tighter, so a detector
+# written for this defect stayed green through fourteen instances of it. A
+# document that names only the loosest cap invites the same recalibration back.
+# Pin the tightest one, and pin the rule that ranks them.
+# A prose rule wraps wherever the paragraph happens to reflow, so these match
+# against the file with newlines flattened to spaces. A line-anchored grep here
+# would go red on a pure reflow — a false failure that teaches the next editor
+# to weaken the guard rather than keep the rule.
+_flat() { tr '\n' ' ' < "$1" | tr -s '[:space:]' ' '; }
+
+@test "the document names Windows' tighter per-argument cap" {
+  _flat "${DOC}" | grep -qE "32[  ]?767"
+}
+
+@test "the document says the binding cap is the tightest supported host's" {
+  _flat "${DOC}" | grep -qiE "tightest cap across (the )?supported hosts"
+}
+
+@test "AGENTS.md carries the same host-ranking rule, not just the Linux cap" {
+  # AGENTS.md is loaded into every session; docs/11 is only read on purpose.
+  # If the short version says "Linux caps a single argument at 128 KiB" and
+  # stops there, the rule is wrong in the one place everyone actually sees it.
+  _flat "${AGENTS}" | grep -qE "32[  ]?767"
+  _flat "${AGENTS}" | grep -qiE "tightest across supported hosts"
+}
+
 @test "every repository path the document names actually exists" {
   # T037: guards the document's outbound references, not only AGENTS.md's
   # inbound one — the exact link rot T031 found and corrected (the document
