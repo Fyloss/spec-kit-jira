@@ -74,7 +74,7 @@ flowchart LR
 
     FeatureName --> Short["naming_short_name<br/>prefix without duplicating it"]
     Prefix["folder_prefix"] --> Short
-    Short --> Folder["ijt-add-payment-webhooks"]
+    Short --> ShortName["short-name:<br/>ijt-add-payment-webhooks"]
 ```
 
 Two rules make this predictable:
@@ -83,6 +83,41 @@ Two rules make this predictable:
   and nothing else.
 - The folder short-name is **always a single flat component**, whatever the
   branch pattern looks like.
+
+The short-name is not yet the folder name: the host prefixes its own feature
+number, so `ijt-add-payment-webhooks` lands on disk as
+`specs/001-ijt-add-payment-webhooks`. That numbering belongs to spec-kit and
+has no flag to suppress it.
+
+### Who creates the branch — the extension does not
+
+Both strings above are **outputs**. This extension names; it does not act on
+the repository. The host's `create-new-feature.sh` (spec-kit 0.13.x) creates
+the spec folder and an empty `spec.md`, and runs no git command at all — so the
+branch is created by whichever `before_specify` hook the repository registers
+for that job, dispatched after this one.
+
+`branch_name` reaches it through **`GIT_BRANCH_NAME`** — the **host's** own
+documented channel for using a branch name verbatim, "bypassing all
+prefix/suffix generation". The agent that sequences the hooks is what exports
+it; without that export the receiving hook regenerates a name of its own and
+the ticket number is lost from the branch.
+
+**This is a convention, not a dependency.** The extension names no counterpart
+in its manifest, detects none at run time, and behaves identically when none is
+installed — `branch_name` is simply emitted and unused. What it depends on is
+`GIT_BRANCH_NAME`, which belongs to spec-kit, the host already declared in
+`requires:`. The commonly installed git extension happens to read that variable
+in both of its ports, which is why the convention works in practice; if it is
+absent, or replaced, or renamed, nothing here breaks.
+
+One trap worth knowing: with a git extension installed there are two scripts
+called `create-new-feature.sh` doing opposite halves of the job — the host's
+makes the folder and runs no git, the extension's makes the branch and no
+folder. Anything invoking one by bare name is ambiguous. Widening this hook to create the branch itself is what let a
+single dispatch absorb the whole specify command in the 2026-08-22 consumer
+incident; the boundary is stated normatively in
+`commands/speckit.jira.feature.md`.
 
 The module carries no key-shaped literal and no tracker vocabulary at all; a
 boundary grep in the suite proves it. `naming_ticket_number` does not know what
