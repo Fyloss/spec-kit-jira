@@ -351,6 +351,10 @@ Jira succeeds.
 - **FR-018**: The system MUST validate the email when loading `personal.yml`
   and refuse the run with a located error — naming the file and the key — when
   it is malformed, before any network call.
+  *Amended 2026-08-24 by spec 031 (contract C6.2a): on a path that makes no
+  network call at all, the located error is reported and the run exits
+  successfully instead of being refused. The validation itself is unchanged, and
+  every path that can reach the network still refuses.*
 - **FR-019**: `personal.yml` MUST remain optional: a run whose email comes from
   the environment and which has no such file MUST succeed.
 
