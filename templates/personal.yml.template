@@ -12,8 +12,16 @@
 # config.yml. An unknown id is a located error listing the valid ids.
 # team: ijt
 
-# Exceptional, auditable convention override. Same validation rules as a
-# catalogue entry; every feature-creation output reports when it was used.
+# Exceptional, auditable convention override: ship under a different naming
+# convention from your team's, without editing the committed config.yml.
+# Either key may be given alone — the one you omit is inherited from your
+# team's catalogue entry. Same validation rules as that entry, and every
+# feature-creation output reports `override_used` when it fires, so it can
+# never quietly become the norm.
+#
+# <ID> is the ticket number with its project prefix removed (IJT-453 -> 453),
+# <FEATURE_NAME> the slug of your description. A `/` builds branch hierarchy
+# only; the spec folder is always one flat component.
 # override:
 #   folder_prefix: "special-"
 #   branch_pattern: "special-<ID>/<FEATURE_NAME>"

@@ -245,6 +245,65 @@ specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releas
 Run `/speckit.jira.config`. If it reports a degraded run, it names the missing
 connection setting. From then on every lifecycle step mirrors on its own.
 
+## Naming features by team
+
+By default a feature is named the way spec-kit names it. Declare a `teams:`
+catalogue in the committed `.specify/jira/config.yml` and each developer's
+features carry their team's convention instead — with the real ticket number in
+the branch, decided *before* the feature is created rather than renamed
+afterwards:
+
+```yaml
+# .specify/jira/config.yml — committed, reviewed in a pull request
+teams:
+  - id: ijt
+    project: IJT
+    folder_prefix: "ijt-"
+    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"
+```
+
+Which team you personally work in is not a team decision, so it does not live
+in that file. It lives in `.specify/jira/personal.yml`, which is yours and
+gitignored — no script ever writes it:
+
+```yaml
+# .specify/jira/personal.yml — yours, gitignored
+team: ijt
+```
+
+With that, `IJT-453` and the description "fix issue" produce the branch
+`ijt-453/fix-issue`. `<ID>` is the ticket number with its project prefix
+removed; `<FEATURE_NAME>` is the slug of your description. A `/` builds branch
+hierarchy only — the spec folder stays one flat component, which spec-kit then
+numbers (`specs/001-ijt-fix-issue`).
+
+Two developers on one repository can therefore ship under different
+conventions without either of them editing a committed file. Without a
+`personal.yml`, or with the `team` line left commented, nothing changes at all:
+naming is exactly what it would be without this extension, and no Jira request
+is made.
+
+### Overriding your team's convention
+
+Rarely, your team's convention does not work for you — a constraint from your
+git host, a temporary assignment. Override it in your own file rather than
+changing your team's:
+
+```yaml
+# .specify/jira/personal.yml
+team: ijt
+override:
+  folder_prefix: "special-"
+  branch_pattern: "special-<ID>/<FEATURE_NAME>"
+```
+
+Either key may be given alone; the one you omit is inherited from the
+catalogue entry. Both are validated exactly as a catalogue entry is.
+
+The override is deliberately hard to forget: every feature-creation output
+reports `override_used`, so it announces itself on every run and can never
+quietly become the norm.
+
 ## Telling the bridge where each lifecycle step leaves a ticket
 
 By default nothing on your board moves: the bridge mirrors content and never
