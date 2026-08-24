@@ -1,10 +1,20 @@
 # spec-kit-jira team configuration.
 #
-# This file is COMMITTABLE and MUST stay credential-free. It never contains a
-# token, an email, or a real *.atlassian.net site host — the schema rejects any
-# such value (exit 4). Personal overrides and resolved ids live in the gitignored
-# .specify/jira/config.local.yml; secrets live in the gitignored .specify/jira/.env.
+# This file is COMMITTABLE. It carries no credential: an API token and an email
+# address are refused at every key (exit 4). The one host-shaped value it may
+# hold is `base_url` below — your team's Jira identifies the team, not you, so
+# it belongs in a reviewed file rather than in each developer's shell.
 #
+# The token never lives in any file. It is read from JIRA_API_TOKEN, or from a
+# retrieval command you declare in JIRA_PAT_COMMAND so that an OS vault answers
+# for it — see docs/CREDENTIALS.md. Your own email goes in the gitignored
+# .specify/jira/personal.yml, and resolved ids in .specify/jira/config.local.yml.
+#
+# Your team's Jira site. The ceremony does not invent it: until it is set here
+# (or SPEC_KIT_JIRA_BASE_URL is exported) every run reports a degraded state
+# naming this key. No trailing slash — the sink appends /rest/api/3/... itself.
+# base_url: "https://your-site.atlassian.net"
+
 # Keys use business language (what the team decides), not Jira internals. The
 # `/speckit.jira.config` command fills the discovered ids into config.local.yml.
 

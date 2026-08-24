@@ -5,11 +5,21 @@
 # workflow requires it — without it the feature ceremony passes through and
 # behaves exactly as if the extension were absent.
 #
-# Like every committed config file it MUST stay credential-free: a token, an
-# email, or a real *.atlassian.net host in any value is refused (exit 4).
+# It MUST stay free of anything that grants access. An API token is refused at
+# every key here, and so is a real *.atlassian.net host (exit 4). Your email
+# address is the one exception, and only at the `email` key below — anywhere
+# else it is refused too.
+
+# Your Atlassian account email, used to authenticate. The environment variable
+# takes precedence when it is set; this file is where it lives otherwise.
+# Leaving it out is legitimate — the email then comes from the environment.
+# email: you@example.com
 
 # The catalogue team you work in — one of the `teams:` ids declared in
 # config.yml. An unknown id is a located error listing the valid ids.
+# Leaving it commented is legitimate, and is the state this file starts in:
+# no team is selected, and feature naming behaves exactly as if this file
+# were absent.
 # team: ijt
 
 # Exceptional, auditable convention override: ship under a different naming
