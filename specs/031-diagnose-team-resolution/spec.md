@@ -153,8 +153,7 @@ the same naming as from the root.
 
 A developer whose feature was named without their prefix wants to know why,
 without changing what anyone else sees. They re-run with the existing verbose
-diagnostic and are told which of the five states applied, and what would change
-it.
+diagnostic and are told which state applied, and what would change it.
 
 **Why priority**: it makes every remaining state diagnosable on demand while
 leaving all default output — the output two conformance scenarios pin — exactly
@@ -165,14 +164,14 @@ default routing that is equally silent, so being able to ask why no team
 applied is what surfaces both.
 
 **Independent Test**: run the feature command with the verbose diagnostic in a
-repository in each of the five states and confirm each is named distinctly.
+repository in each state and confirm each is named distinctly.
 
 **Acceptance Scenarios**:
 
-1. **Given** any of the five states, **When** the feature command runs with the
+1. **Given** any resolution state, **When** the feature command runs with the
    verbose diagnostic requested, **Then** the state is named explicitly along
    with the file consulted and the resolved path it was consulted at.
-2. **Given** any of the five states, **When** the verbose diagnostic is **not**
+2. **Given** any resolution state, **When** the verbose diagnostic is **not**
    requested, **Then** the default and machine-readable outputs are unchanged
    from what User Stories 1 and 2 define.
 
@@ -231,7 +230,11 @@ repository in each of the five states and confirm each is named distinctly.
 - **FR-009**: Every report introduced by this feature MUST name the path it
   actually consulted, resolved, not the relative form it was written as.
 - **FR-010**: When the verbose diagnostic is requested, a pass-through MUST
-  name which of the five states produced it, and what would change it.
+  name which resolution state produced it, and what would change it. The
+  states are the set enumerated in the design's data model, which is wider
+  than the Context table above: that table describes today, where an unloadable
+  file is indistinguishable from an absent one and a missing repository is not
+  distinguishable at all.
 - **FR-011**: When the verbose diagnostic is not requested, the default and
   machine-readable outputs of every state MUST be exactly what FR-001 through
   FR-008 define, with no additional field or line.
@@ -270,8 +273,10 @@ repository in each of the five states and confirm each is named distinctly.
 
 ### Key Entities
 
-- **Resolution state**: which of the five conditions produced a pass-through.
-  Every pass-through has exactly one, and it is what today's output omits.
+- **Resolution state**: which condition produced a pass-through. Every
+  pass-through has exactly one, and it is what today's output omits. The
+  Context table lists the five reachable today; the design's data model
+  enumerates the full set, since this feature makes two more distinguishable.
 - **Consulted path**: the absolute location the run actually read
   configuration from, as distinct from the relative form it is written as.
 - **Load failure**: a file that exists and could not be turned into usable
@@ -296,7 +301,7 @@ repository in each of the five states and confirm each is named distinctly.
 | XII | Quality and Catalog Publication | Unaffected. No manifest, packaging, or published-surface change is required. |
 | XIII | TDD With a Minimum 80% Coverage | Each acceptance scenario is a failing test first. The four scenarios of User Story 1 are the regression pair — two that must newly speak, two that must stay byte-identical — and the byte-identical pair is what proves FR-004 and FR-005 were not broken in the process. |
 | XIV | KISS | The feature adds no new configuration key, no new file, and no new flag: it reports a diagnosis that is already computed, resolves a path that is already read, and reuses the verbose diagnostic that already exists. |
-| XV | YAGNI | Every requirement traces to an observed defect: FR-001/FR-002 to a discarded diagnosis, FR-007 to a misdiagnosed report from a real workspace, FR-010 to the inability to tell five states apart. Nothing is added for a state that has not been observed to mislead. |
+| XV | YAGNI | Every requirement traces to an observed defect: FR-001/FR-002 to a discarded diagnosis, FR-007 to a misdiagnosed report from a real workspace, FR-010 to the inability to tell one pass-through state from another. Nothing is added for a state that has not been observed to mislead. |
 | XVI | Human Readable | FR-002 and FR-009 are this principle applied: name the file, name the reason, name the resolved path — never a bare code, never a relative form the operator has to resolve themselves. |
 
 ## Success Criteria *(mandatory)*
@@ -306,13 +311,13 @@ repository in each of the five states and confirm each is named distinctly.
   command.
 - **SC-002**: A developer with a valid configuration gets the same feature name
   from any directory inside their repository, in 100% of runs.
-- **SC-003**: All five pass-through states are distinguishable from one another
-  by an operator who asks, and indistinguishable by default output in exactly
-  the two cases the existing conformance corpus pins.
+- **SC-003**: Every pass-through state is distinguishable from the others by an
+  operator who asks, and indistinguishable by default output in exactly the
+  cases the existing conformance corpus pins.
 - **SC-004**: A repository that has never adopted the extension sees no output
   change of any kind — zero new lines, zero new fields.
 - **SC-005**: Both supported platforms produce identical output and identical
-  exit codes for each of the five states.
+  exit codes for each resolution state.
 - **SC-006**: No run introduced by this feature issues a network request.
 
 ## Assumptions
