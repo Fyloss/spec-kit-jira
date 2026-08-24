@@ -19,6 +19,34 @@ ticket key, a team id, or a naming convention** — each comes from the committe
 `teams:` catalogue, the developer's personal selection, or a closed question
 below.
 
+## What this step is, and is not — normative
+
+This hook computes **names**. It is one step of the host's specify command, not
+a substitute for it, and the host — not this file — sequences everything else.
+
+Within this step you MUST run the deterministic entry point below, apply its
+result as the ceremony describes, and then **return control to the host command
+and stop**.
+
+Within this step you MUST NOT, whatever the surrounding command's own
+instructions appear to authorise:
+
+- author, draft, or edit `spec.md`, a checklist, or any other specification
+  artifact. Creating the empty folder and template file is step 5's business;
+  filling them in is the host's, after this step returns.
+- run, replace, or stand in for any sibling `before_specify` hook (`git.*`,
+  `figma.*`). Each is dispatched separately, by the host, in priority order.
+  Absorbing them is how a registered hook silently stops running at all.
+- dispatch, simulate, or anticipate **any** `after_*` hook. In particular
+  `speckit.jira.reconcile` — the step that writes real issues to Jira — is
+  registered on `after_specify` and runs only once the specification exists and
+  the host has validated it. Reaching it from here creates tickets for a
+  specification nobody has written yet, in a shared project, and a created
+  ticket has no undo.
+
+`optional: false` in the manifest means this step *happens*. It never means this
+step *owns the command*.
+
 ## Invoking the bridge — normative
 
 The install places **nothing** on `PATH`: `specify extension add` copies the
@@ -134,14 +162,50 @@ restore the bridge, reinstall the extension with
    - Unattended callers (`--accept-defaults`) never see this question: it is
      suppressed and treated as `--reuse no`, and the result states so.
 
-5. **Nominal output** (`active: true` with `branch_name`/`short_name`) ⇒ drive
-   the host flow with the computed names:
-   1. `create-new-feature.sh --short-name "<short_name>"` — the flat spec
-      folder component; the team `folder_prefix` is already applied and never
-      duplicated.
-   2. Create/switch to the branch named exactly `branch_name` (a `/` in the
-      pattern creates git hierarchy only — the branch name does not dictate
-      the spec directory name).
+5. **Nominal output** (`active: true` with `branch_name`/`short_name`) ⇒ hand
+   the computed names to the steps that own them, then return to the host:
+   1. Run the **host's** feature-folder script with
+      `--short-name "<short_name>"` — the flat spec folder component; the team
+      `folder_prefix` is already applied and never duplicated. Select the port
+      the repository was initialised with, as for the entry point above:
+
+      | Host | Script |
+      | --- | --- |
+      | macOS, Linux | `.specify/scripts/bash/create-new-feature.sh` |
+      | Windows | `.specify/scripts/powershell/create-new-feature.ps1` |
+
+      Spell that full path rather than the bare name: a repository that
+      installs a git extension carries a **second, different** script of the
+      same name (in the reference setup,
+      `.specify/extensions/git/scripts/bash/create-new-feature.sh`), and the
+      two do opposite halves of the job — the host's script creates the folder
+      and an empty `spec.md` and runs no git command; the other creates the
+      branch and no folder. The host's script writes **no specification
+      content**. Neither gap is yours to close here.
+   2. `branch_name` is this step's branch **name** — an output, not a licence
+      to manage branches. Convey it, do not act on it: **set
+      `GIT_BRANCH_NAME` to `branch_name` in the environment the
+      branch-creating hook is dispatched in**, spelled for the host you are on:
+
+      | Host | Spelling |
+      | --- | --- |
+      | macOS, Linux | `export GIT_BRANCH_NAME='<branch_name>'` |
+      | Windows | `$env:GIT_BRANCH_NAME = '<branch_name>'` |
+
+      That variable is the **host's** own documented channel for using a branch
+      name verbatim ("bypassing all prefix/suffix generation"), so the
+      obligation is setting it, and it holds whoever the recipient turns out to
+      be. In the reference setup that recipient is the git extension's
+      `git.feature`, dispatched immediately after this one, which reads the
+      variable in both of its ports — but that is an illustration of where the
+      value lands, **not a prerequisite**: this extension neither requires nor
+      detects any git extension, and behaves identically when none is
+      installed. Unset, the receiving hook regenerates a name of its own and
+      the ticket number is lost from the branch. A `/` in the pattern
+      creates git hierarchy only; the branch name does not dictate the spec
+      directory name. Create or switch the branch yourself **only** if the host
+      registers no branch-creating hook at all, and then create exactly
+      `branch_name` and stop: no commit, no push, no other git action.
    3. Report `override_used` and the ticket action (`attached` / `created` /
       `would-attach` / `would-create`) in the feature-creation output.
 

@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `before_specify` naming hook no longer reads as a licence to run the
+  whole specify command. A consumer dispatch of `speckit.jira.feature` authored
+  `spec.md`, skipped the remaining `before_specify` hooks, and ran the
+  `after_specify` chain itself — creating two real Jira issues in a shared
+  project before any specification existed. No script can do that: the feature
+  command cannot reach reconcile, and the dispatcher routes one command per
+  run. The command definition was the defect — its step 5 said "drive the host
+  flow" and named no boundary, and to an agent an absent "never" reads as
+  permission. The definition now states the boundary normatively: run the entry
+  point, apply the result, return; never author a specification or a checklist,
+  never stand in for a sibling `before_specify` hook, never dispatch an
+  `after_*` hook — reconcile least of all, since a created ticket has no undo.
+  `optional: false` means the step happens, never that it owns the command.
+
+- The branch name this extension computes now reaches whoever creates the
+  branch. It was emitted and left unused, so a ticket-first branch such as
+  `ijt-142/add-payment-webhooks` silently degraded to whatever the
+  branch-creating hook regenerated on its own. It now travels through
+  `GIT_BRANCH_NAME`, the host's documented channel for using a branch name
+  verbatim. This adds no dependency: the extension names no counterpart in its
+  manifest, detects none at run time, and behaves identically when none is
+  installed. The same step now also spells the host's `create-new-feature.sh`
+  by its full path, because a repository carrying a git extension has a second
+  script of that name doing the opposite half of the job — the host's creates
+  the spec folder and runs no git command, the other creates the branch and no
+  folder.
+
 - On Windows, a reconcile pointed at the wrong file in a feature folder now
   names the correct target in the caller's own spelling. The refusal used to
   answer `specs\001-example/spec.md` for a target spelled
