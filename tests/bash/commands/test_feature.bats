@@ -144,13 +144,31 @@ boot() {
   [ "$status" -eq 1 ]
 }
 
-@test "an unloadable personal file is reported and passed through, not fatal (031, FR-013, C3.3)" {
-  printf 'team: zzz\n' > "${JIRA_CONFIG_DIR}/personal.yml"
+@test "a STRUCTURALLY unloadable personal file is reported and passed through, not fatal (031, FR-013, C3.3)" {
+  printf 'team: Not_Valid\n' > "${JIRA_CONFIG_DIR}/personal.yml"
   run --separate-stderr cmd_feature feature --json "invoice export"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.active' <<< "$output")" = "false" ]
   [[ "$stderr" == *"personal.yml"* ]]
+  [[ "$stderr" == *"team is invalid"* ]]
+}
+
+@test "a personal file selecting a team ABSENT from the catalogue still fails closed, unchanged (031, FR-017)" {
+  printf 'team: zzz\n' > "${JIRA_CONFIG_DIR}/personal.yml"
+  run --separate-stderr cmd_feature feature --json "invoice export"
+  [ "$status" -eq 4 ]
+  [[ "$stderr" == *"personal.yml"* ]]
+  [[ "$stderr" == *"unknown team"* ]]
   [[ "$stderr" == *"ijt"* ]]
+}
+
+@test "a personal file selecting a team absent from an EMPTY catalogue still fails closed (031, FR-017, code review)" {
+  printf 'projects:\n  - key: IJT\nrouting_default: IJT\nteams: []\n' > "${JIRA_CONFIG_DIR}/config.yml"
+  printf 'team: zzz\n' > "${JIRA_CONFIG_DIR}/personal.yml"
+  run --separate-stderr cmd_feature feature --json "invoice export"
+  [ "$status" -eq 4 ]
+  [[ "$stderr" == *"unknown team"* ]]
+  [[ "$stderr" == *"(none)"* ]]
 }
 
 @test "a mentioned same-team ticket is validated and attached: names computed (FR-013/FR-015)" {

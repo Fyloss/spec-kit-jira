@@ -805,55 +805,88 @@ cmd_feature() {
       "create ${dir}/config.yml with a teams: catalogue to change this"
     return 0
   fi
-  # An empty config.yml — 0 bytes, or comments-only, parsing to YAML's own
-  # "empty document" — carries no statement from its author (FR-006, C2.5):
-  # treated exactly like a valid catalogue declaring zero teams, never as a
-  # load failure. config_load's OWN empty-document coercion (null -> {})
-  # happens too late to help here — a coerced {} still fails config.yml's
-  # schema (`projects must be a non-empty array`), which is correct for a
-  # NON-empty file missing that key but wrong for a file with no content at
-  # all. Checked with the raw parser directly, cheap and memoised, never a
-  # second config_load (research D2 rejected doubling that cost).
-  local raw_team
-  if raw_team="$(config_yaml_to_json "${dir}/config.yml" 2> /dev/null)" && [[ "${raw_team}" == "null" ]]; then
-    resolution_state="no-teams"
-    if [[ "${has_mention}" == "true" ]]; then
-      _feat_emit "$(jq -cn --arg w "${no_config_msg}" '{active:false, warnings:[$w]}')" "${json}"
-    else
-      _feat_emit '{"active":false}' "${json}"
-    fi
-    _feat_verbose_diag "${verbose}" "${resolution_state}" "${dir}" \
-      "add an entry to teams: in ${dir}/config.yml to change this"
-    return 0
-  fi
-
   local merged
   # 031, research D2: the loader's stderr is no longer discarded here — a
   # present-but-unloadable config.yml is REPORTED (FR-001/FR-002, C2.1),
   # whether or not a ticket was mentioned; the JSON payload below is
-  # unaffected either way (C4.2).
-  if ! merged="$(config_load "${dir}")"; then
-    resolution_state="config-unloadable"
-    if [[ "${has_mention}" == "true" ]]; then
-      _feat_emit "$(jq -cn --arg w "${no_config_msg}" '{active:false, warnings:[$w]}')" "${json}"
+  # unaffected either way (C4.2). Called ONCE: the common (successful) path
+  # pays exactly this one parse, never two (code review). config_load prints
+  # its located error as a SIDE EFFECT of parsing — unconditionally, before
+  # this function ever gets to decide whether the cause was "genuinely
+  # empty" (silent, below) or "genuinely broken" (reported) — so its stderr
+  # is captured here, not streamed live, and only replayed on the branch
+  # that actually needs it (an earlier version streamed it live and leaked
+  # a schema report for an empty file, code review caught it in testing).
+  local config_err_file
+  config_err_file="$(mktemp)"
+  if ! merged="$(config_load "${dir}" 2> "${config_err_file}")"; then
+    # An empty config.yml — 0 bytes, or comments-only, parsing to YAML's own
+    # "empty document" — carries no statement from its author (FR-006,
+    # C2.5): treated exactly like a valid catalogue declaring zero teams,
+    # never as a load failure. config_load's OWN empty-document coercion
+    # (null -> {}) happens too late to help here — a coerced {} still fails
+    # config.yml's schema (`projects must be a non-empty array`), correct
+    # for a NON-empty file missing that key but wrong for no content at all.
+    # A cheap raw re-parse, on this (rare) failure path only, is what
+    # research D2 already accepted; it is never the doubled FULL config_load
+    # D2 rejected.
+    local raw_team
+    if raw_team="$(config_yaml_to_json "${dir}/config.yml" 2> /dev/null)" && [[ "${raw_team}" == "null" ]]; then
+      merged='{}'
+      rm -f "${config_err_file}"
     else
-      _feat_emit '{"active":false}' "${json}"
+      resolution_state="config-unloadable"
+      cat "${config_err_file}" >&2
+      rm -f "${config_err_file}"
+      if [[ "${has_mention}" == "true" ]]; then
+        _feat_emit "$(jq -cn --arg w "${no_config_msg}" '{active:false, warnings:[$w]}')" "${json}"
+      else
+        _feat_emit '{"active":false}' "${json}"
+      fi
+      # config_load validates config.yml AND config.local.yml — the located
+      # error above already names whichever layer actually failed, so the
+      # hint names the directory, never a filename that may not be the one
+      # that broke (code review).
+      _feat_verbose_diag "${verbose}" "${resolution_state}" "${dir}" \
+        "fix the configuration error reported above in ${dir} to change this"
+      return 0
     fi
-    _feat_verbose_diag "${verbose}" "${resolution_state}" "${dir}" \
-      "fix the error reported above in ${dir}/config.yml to change this"
-    return 0
+  else
+    rm -f "${config_err_file}"
   fi
+
+  # (2) Personal selection (human-owned; validated; never written), checked
+  # NOW — before team_count, not after. A personal.yml that structurally
+  # fails to load is reported and passed through (FR-013, C3.3), but a
+  # WELL-FORMED file selecting a team absent from the catalogue still fails
+  # closed (FR-017: "that behaviour is unchanged") EVEN WHEN the catalogue
+  # is empty — exactly the scenario this ordering exists to reach. Checking
+  # this after team_count would let the zero-teams silence below swallow
+  # that located error (code review).
+  local personal personal_rc
+  personal="$(config_personal_load "${dir}" "${merged}" "true")"
+  personal_rc=$?
+  # NOT `if ! personal="$(...)"; then return $?; fi` — `!` inverts the exit
+  # status bash reports for the compound command itself, so `$?` inside that
+  # `then` block reads 0, not the failing call's real code (verified: this
+  # exact shape silently turned the FR-017 hard-fail below into an exit-0
+  # no-op, code review caught the SYMPTOM and this fixes the actual cause).
+  if [[ "${personal_rc}" -ne 0 ]]; then
+    return "${personal_rc}"
+  fi
+  local p_active p_team p_override p_state
+  p_active="$(jq -r '.active' <<< "${personal}")"
+  p_team="$(jq -r '.team // ""' <<< "${personal}")"
+  p_override="$(jq -c '.override // null' <<< "${personal}")"
+  p_state="$(jq -r '.state // ""' <<< "${personal}")"
 
   # The resolution chokepoint (030, contracts/connection-settings.md C1.5):
   # seed SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL, environment first, using the
-  # `merged` config JUST validated above — no second config_load, and no
-  # second base_url validation to silently contradict the pass-through
-  # treatment a malformed config.yml already received a few lines up.
-  # `true` (031, FR-013, contract C3.3/C3.4): this path reaches no network,
-  # so an unloadable personal.yml is reported and passed through below,
-  # never fails closed here — every OTHER caller of config_resolve_connection
-  # omits this argument and keeps failing closed (research D3).
-  config_resolve_connection "${dir}" "${merged}" "true" || return $?
+  # `merged` config and the `personal` result JUST computed above — no
+  # second config_load, no second config_personal_load, and no second
+  # base_url/personal validation to silently contradict the pass-through
+  # treatment a malformed file already received a few lines up.
+  config_resolve_connection "${dir}" "${merged}" "${personal}" || return $?
 
   local team_count
   team_count="$(jq -r '(.teams // []) | length' <<< "${merged}")"
@@ -869,11 +902,7 @@ cmd_feature() {
     return 0
   fi
 
-  # (2) Personal selection (human-owned; validated; never written). An
-  #     unloadable file is reported and passed through (FR-013, C3.3) —
-  #     the same treatment as an unloadable config.yml above, never fatal.
-  local personal
-  if ! personal="$(config_personal_load "${dir}" "${merged}")"; then
+  if [[ "${p_state}" == "personal-unloadable" ]]; then
     resolution_state="personal-unloadable"
     if [[ "${has_mention}" == "true" ]]; then
       _feat_emit "$(jq -cn --arg w "${no_selection_msg}" '{active:false, warnings:[$w]}')" "${json}"
@@ -884,11 +913,6 @@ cmd_feature() {
       "fix the error reported above in ${dir}/personal.yml to change this"
     return 0
   fi
-  local p_active p_team p_override p_state
-  p_active="$(jq -r '.active' <<< "${personal}")"
-  p_team="$(jq -r '.team // ""' <<< "${personal}")"
-  p_override="$(jq -c '.override // null' <<< "${personal}")"
-  p_state="$(jq -r '.state // ""' <<< "${personal}")"
 
   # No selection and no cross-team answer ⇒ pass-through (FR-017).
   if [[ "${p_active}" != "true" && -z "${use_team}" ]]; then
