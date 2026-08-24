@@ -97,6 +97,20 @@ if [ -n "${FIXTURE}" ]; then
   cp -R "${REPO_ROOT}/${FIXTURE}/." "${WORKDIR}/"
 fi
 
+# `cwd` (031, C1.2/C1.4 — the two hosts' path-resolution divergence surface,
+# contract §5.2): a directory RELATIVE to the fixture root the entry point is
+# invoked from, instead of the fixture root itself — the shape a nested
+# checkout needs to prove the walk-upward resolution (T003's
+# repo-031-nested/sub/module/). Everything else (the config.yml substitution
+# above the WORKDIR itself, the git init below, the post-run tree capture)
+# stays rooted at WORKDIR; only the command's own working directory moves.
+CWD_REL="$(jq_lines -r '.cwd // empty' "${SCENARIO}")"
+RUNDIR="${WORKDIR}"
+if [ -n "${CWD_REL}" ]; then
+  RUNDIR="${WORKDIR}/${CWD_REL}"
+  [ -d "${RUNDIR}" ] || { echo "cwd not found in fixture: ${CWD_REL}" >&2; exit 1; }
+fi
+
 # --- @PAT_HANG_COMMAND@ resolution (030, T001, research.md §R11) ------------
 # Resolved ONCE per run and handed identically to both ports, so the C3.6
 # timeout scenario's failure message names the same command string on either
@@ -322,17 +336,17 @@ for ((i = 1; i <= RUN_COUNT; i++)); do
       # PS4 trace on fd 2, so redirecting fd 2 to a file would hide every executed
       # line from it. Coverage mode asserts nothing about stderr.
       # shellcheck source=/dev/null
-      ( cd "${WORKDIR}" && source "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout.${i}"
+      ( cd "${RUNDIR}" && source "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout.${i}"
       : > "${OUTDIR}/stderr.${i}"
     else
-      ( cd "${WORKDIR}" && bash "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout.${i}" 2> "${OUTDIR}/stderr.${i}"
+      ( cd "${RUNDIR}" && bash "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout.${i}" 2> "${OUTDIR}/stderr.${i}"
     fi
   elif [ -z "${MSYS_PWSH:-}" ]; then
     # The plain invocation, unchanged since T009 and green on Linux and macOS
     # for this project's whole history. Everywhere except git-bash-on-Windows
     # this is exactly right, so it stays the default: the workaround below can
     # only ever regress the platform it was written for.
-    ( cd "${WORKDIR}" && pwsh -NoProfile -File "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout.${i}" 2> "${OUTDIR}/stderr.${i}"
+    ( cd "${RUNDIR}" && pwsh -NoProfile -File "${ENTRY}" ${ARGV[@]+"${ARGV[@]}"} ) > "${OUTDIR}/stdout.${i}" 2> "${OUTDIR}/stderr.${i}"
   else
     # git-bash (MSYS) on Windows ONLY. Spawning the NATIVE pwsh.exe with
     # `-File <path> <args...>` loses or mangles trailing simple-word arguments
@@ -343,7 +357,7 @@ for ((i = 1; i <= RUN_COUNT; i++)); do
     entry_native="$(cygpath -w "${ENTRY}")"
     printf '%s' "${entry_native}" > "${OUTDIR}/entry.${i}"
     printf '%s\n' ${ARGV[@]+"${ARGV[@]}"} > "${OUTDIR}/argv.${i}"
-    ( cd "${WORKDIR}" \
+    ( cd "${RUNDIR}" \
       && SPEC_KIT_JIRA_HARNESS_ENTRYFILE="$(cygpath -w "${OUTDIR}/entry.${i}")" \
          SPEC_KIT_JIRA_HARNESS_ARGVFILE="$(cygpath -w "${OUTDIR}/argv.${i}")" \
          pwsh -NoProfile -File "$(cygpath -w "${CONF_DIR}/pwsh-invoke.ps1")" \
@@ -366,6 +380,16 @@ cp "${OUTDIR}/exit.${RUN_COUNT}" "${OUTDIR}/exit"
 # it after would silently produce an empty capture.
 cp "${MOCK_CALLLOG}" "${OUTDIR}/calls.log" 2> /dev/null || : > "${OUTDIR}/calls.log"
 mock_stop
+
+# The WORKDIR path itself (031, C1.1/C1.4): every port gets its OWN mktemp -d,
+# so a field that legitimately reports an absolute path UNDER it (the
+# resolved configuration directory, or a file written beneath it) can never
+# be byte-identical across two independent runs even when the RUN ITSELF is —
+# the same class of never-agrees value _normalize_state_base_url already
+# documents for the mock's ephemeral port. Recorded here so the caller can
+# normalise it out of stdout before comparing; nothing in this repository
+# reads the file's own content from inside a running scenario.
+printf '%s' "${WORKDIR}" > "${OUTDIR}/workdir.path"
 
 # --- Snapshot the post-run repository tree (written files) -------------------
 rm -rf "${OUTDIR}/workdir"

@@ -207,6 +207,30 @@ _normalize_config_yaml_base_url() {
 }
 export -f _normalize_config_yaml_base_url
 
+# _normalize_workdir_path <outdir> — masks EACH PORT'S OWN randomly-named
+# workdir (031, C1.1/C1.4) wherever it appears literally in stdout or
+# calls.log. run-scenario.sh gives every port invocation its OWN `mktemp -d`,
+# so a value that legitimately reports an absolute path BENEATH it — the
+# resolved configuration directory a `no-repository`/`config-unloadable`
+# report names, or the `seed_material` file feature.sh writes under it — can
+# never agree across two independent runs even when the run itself is
+# byte-identical. <outdir>/workdir.path is run-scenario.sh's own record of
+# the string being masked (031, T027). Same technique as
+# _normalize_state_base_url, applied to the two OTHER places an absolute
+# path can reach: stdout and calls.log.
+_normalize_workdir_path() {
+  local outdir="$1" wd f
+  [ -f "${outdir}/workdir.path" ] || return 0
+  wd="$(cat "${outdir}/workdir.path")"
+  [ -n "${wd}" ] || return 0
+  for f in "${outdir}/stdout" "${outdir}/calls.log"; do
+    [ -f "${f}" ] || continue
+    sed -i.bak "s#${wd}#WORKDIR#g" "${f}" 2> /dev/null
+    rm -f "${f}.bak"
+  done
+}
+export -f _normalize_workdir_path
+
 # Scenarios are independent (each gets its own mktemp workdir and an
 # OS-assigned ephemeral mock port, per run-scenario.sh), so they run
 # concurrently across cores instead of one after another. xargs -P exits 123
@@ -220,6 +244,8 @@ run_scenario() {
   out_ps="$(mktemp -d)"
   "${harness}" "${scenario}" bash "${out_bash}"
   "${harness}" "${scenario}" powershell "${out_ps}"
+  _normalize_workdir_path "${out_bash}"
+  _normalize_workdir_path "${out_ps}"
   # The observable contract: stdout, exit code, Jira call sequence, and the
   # written repository tree must be byte-identical across ports.
   for artifact in stdout exit calls.log; do
@@ -270,6 +296,8 @@ run_scenario() {
     off_ps="$(mktemp -d)"
     SPEC_KIT_JIRA_HARNESS_ENV="_RECOGNITION_NO_PREFETCH=1" "${harness}" "${scenario}" bash "${off_bash}"
     SPEC_KIT_JIRA_HARNESS_ENV="_RECOGNITION_NO_PREFETCH=1" "${harness}" "${scenario}" powershell "${off_ps}"
+    _normalize_workdir_path "${off_bash}"
+    _normalize_workdir_path "${off_ps}"
     for port in bash powershell; do
       if [ "${port}" = bash ]; then on_dir="${out_bash}"; off_dir="${off_bash}"; else on_dir="${out_ps}"; off_dir="${off_ps}"; fi
       for artifact in stdout stderr exit; do
@@ -343,6 +371,8 @@ run_scenario() {
     alt_ps="$(mktemp -d)"
     SPEC_KIT_JIRA_HARNESS_ENV="SPEC_KIT_JIRA_HOOK_EVENT=after_plan" "${harness}" "${scenario}" bash "${alt_bash}"
     SPEC_KIT_JIRA_HARNESS_ENV="SPEC_KIT_JIRA_HOOK_EVENT=after_plan" "${harness}" "${scenario}" powershell "${alt_ps}"
+    _normalize_workdir_path "${alt_bash}"
+    _normalize_workdir_path "${alt_ps}"
     for artifact in stdout exit calls.log; do
       if ! diff -u "${alt_bash}/${artifact}" "${alt_ps}/${artifact}"; then
         echo "conformance divergence in ${name} (after_plan variant, ${artifact})"

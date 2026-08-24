@@ -90,7 +90,7 @@ boot() {
 
 @test "US6: an unreadable config.yml + a mentioned ticket names the file and the command (FR-026)" {
   printf '  bad: [unterminated\n' > "${JIRA_CONFIG_DIR}/config.yml"
-  run cmd_feature feature IJT-42 --json "invoice export"
+  run --separate-stderr cmd_feature feature IJT-42 --json "invoice export"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.active' <<< "$output")" = "false" ]
   [[ "$(jq -r '.warnings[0]' <<< "$output")" == *".specify/jira/config.yml"* ]]
@@ -144,12 +144,13 @@ boot() {
   [ "$status" -eq 1 ]
 }
 
-@test "an invalid personal file stops with a located error (exit 4)" {
+@test "an unloadable personal file is reported and passed through, not fatal (031, FR-013, C3.3)" {
   printf 'team: zzz\n' > "${JIRA_CONFIG_DIR}/personal.yml"
-  run cmd_feature feature --json "invoice export"
-  [ "$status" -eq 4 ]
-  [[ "$output" == *"personal.yml"* ]]
-  [[ "$output" == *"ijt"* ]]
+  run --separate-stderr cmd_feature feature --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "false" ]
+  [[ "$stderr" == *"personal.yml"* ]]
+  [[ "$stderr" == *"ijt"* ]]
 }
 
 @test "a mentioned same-team ticket is validated and attached: names computed (FR-013/FR-015)" {
@@ -967,4 +968,198 @@ write_hierarchy_config() {
   [[ "$output" == *"Drafted: user stories drafted beyond these become new Task issues beneath the same Initiative — named issues are reused, never duplicated"* ]]
   [[ "$output" != *"Epic"* ]]
   [[ "$output" != *"a Story"* ]]
+}
+
+# --- 031 Phase 2 — the resolution-state vocabulary (foundational) -----------
+
+@test "031, T005: the seven resolution-state identifiers are exhaustive and mutually exclusive (data-model.md §1)" {
+  local states
+  states="$(grep -ohE '"(no-config-file|config-unloadable|no-teams|no-personal-file|no-team-key|personal-unloadable|no-repository)"' \
+    "${CMD_DIR}/feature.sh" "${ROOT}/scripts/bash/lib/config.sh" | tr -d '"' | sort -u)"
+  local expected
+  expected="$(printf 'config-unloadable\nno-config-file\nno-personal-file\nno-repository\nno-team-key\nno-teams\npersonal-unloadable')"
+  [ "${states}" = "${expected}" ]
+}
+
+# --- 031 Phase 3 — US1: a broken configuration announces itself -------------
+
+@test "031, T010: a malformed config.yml is reported with file and located reason, exit 0, zero Jira calls (C2.1, C3.1, C3.2; AS1)" {
+  boot '{"projects":{"IJT":"team"}}'
+  printf 'projects:\n  - key: IJT\nteams:\nthis line has no delimiter\n' > "${JIRA_CONFIG_DIR}/config.yml"
+  run --separate-stderr cmd_feature feature --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "false" ]
+  [[ "$stderr" == *"${JIRA_CONFIG_DIR}/config.yml"* ]]
+  [[ "$stderr" == *"cannot parse this line"* ]]
+  [ -z "$(mock_calls)" ]
+}
+
+@test "031, T011: a schema-violating config.yml names the offending key, never the bare word 'invalid' (C2.1; AS2)" {
+  boot '{"projects":{"IJT":"team"}}'
+  printf 'projects:\n  - key: IJT\nteams: []\nunknown_top_level_key: true\n' > "${JIRA_CONFIG_DIR}/config.yml"
+  run --separate-stderr cmd_feature feature --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "false" ]
+  [[ "$stderr" == *"unknown top-level key: unknown_top_level_key"* ]]
+  [ "${stderr}" != *"invalid"* ]
+}
+
+@test "031, T013: an EMPTY config.yml and an EMPTY personal.yml stay silent, never reported as load failures (C2.5)" {
+  boot '{"projects":{"IJT":"team"}}'
+  : > "${JIRA_CONFIG_DIR}/config.yml"
+  : > "${JIRA_CONFIG_DIR}/personal.yml"
+  run --separate-stderr cmd_feature feature --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"active":false}' ]
+  [ -z "$stderr" ]
+}
+
+@test "031, T022: --dry-run output and exit code are unchanged on the config-unloadable branch (Principle XI)" {
+  boot '{"projects":{"IJT":"team"}}'
+  printf 'projects:\n  - key: IJT\nteams:\nthis line has no delimiter\n' > "${JIRA_CONFIG_DIR}/config.yml"
+  run --separate-stderr cmd_feature feature --json --dry-run "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "false" ]
+}
+
+@test "031, T022: --dry-run output and exit code are unchanged on the personal-unloadable branch (Principle XI)" {
+  printf 'team: Not_Valid\n' > "${JIRA_CONFIG_DIR}/personal.yml"
+  run --separate-stderr cmd_feature feature --json --dry-run "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "false" ]
+}
+
+# --- 031 Phase 6 — cross-cutting -----------------------------------------
+
+@test "031, T039: a credential-shaped value is reported by its located reason WITHOUT the value appearing, even at --verbose (Principle IV, C2.6)" {
+  boot '{"projects":{"IJT":"team"}}'
+  printf 'projects:\n  - key: IJT\nteams: []\nbase_url: "ATATT3xFfGF0secrettoken"\n' > "${JIRA_CONFIG_DIR}/config.yml"
+  run --separate-stderr cmd_feature feature --json --verbose "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "false" ]
+  [[ "$stderr" != *"ATATT3xFfGF0secrettoken"* ]]
+}
+
+@test "031, T040: an unloadable personal.yml still fails closed on a path that WOULD reach the network (C3.4 — C6.2 survives)" {
+  printf 'team: Not_Valid\n' > "${JIRA_CONFIG_DIR}/personal.yml"
+  boot '{"projects":{"IJT":"team"}}'
+  run config_resolve_connection "${JIRA_CONFIG_DIR}"
+  [ "$status" -eq 4 ]
+}
+
+# --- 031 Phase 4 — US2: configuration is found from the repository ----------
+
+@test "031, T025: no ancestor carries .specify/ ⇒ a report naming the directory walked from, exit 0, no fallback (C1.4, FR-008; AS3)" {
+  local isolated
+  isolated="$(cd "$(mktemp -d)" && pwd -P)"
+  cd "${isolated}"
+  unset JIRA_CONFIG_DIR
+  run --separate-stderr cmd_feature feature --json "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"active":false}' ]
+  [[ "$stderr" == *"no project found"* ]]
+  [[ "$stderr" == *"${isolated}"* ]]
+  rm -rf "${isolated}"
+}
+
+@test "031, T028: the resolved directory is the SAME regardless of the starting subdirectory — no state duplication (C1.5, FR-016)" {
+  mkdir -p "${WORK}/sub/module"
+  boot '{"projects":{"IJT":"team"}}'
+  unset JIRA_CONFIG_DIR
+
+  cd "${WORK}"
+  run --separate-stderr cmd_feature feature --json --verbose "invoice export"
+  local path_root
+  path_root="$(grep 'path consulted' <<< "$stderr")"
+  [ -n "${path_root}" ]
+
+  cd "${WORK}/sub/module"
+  run --separate-stderr cmd_feature feature --json --verbose "invoice export"
+  local path_nested
+  path_nested="$(grep 'path consulted' <<< "$stderr")"
+
+  [ "${path_root}" = "${path_nested}" ]
+  local work_physical
+  work_physical="$(cd "${WORK}" && pwd -P)"
+  [[ "${path_root}" == *"${work_physical}/.specify/jira"* ]]
+}
+
+@test "031, T031: the resolved absolute path, never the relative form, appears in a no-repository report (C1.3's spelling obligation)" {
+  local isolated
+  isolated="$(cd "$(mktemp -d)" && pwd -P)"
+  cd "${isolated}"
+  unset JIRA_CONFIG_DIR
+  run --separate-stderr cmd_feature feature --json "invoice export"
+  [[ "$stderr" == *"${isolated}"* ]]
+  [[ "$stderr" != *"'./.specify"* ]]
+  rm -rf "${isolated}"
+}
+
+# --- 031 Phase 5 — US3: an operator can ask which state produced it --------
+
+@test "031, T033: --verbose names the resolution state, the absolute path, and what would change it — no-config-file" {
+  rm -f "${JIRA_CONFIG_DIR}/config.yml"
+  run --separate-stderr cmd_feature feature --json --verbose "invoice export"
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"resolution state: no-config-file"* ]]
+  [[ "$stderr" == *"path consulted: ${JIRA_CONFIG_DIR}"* ]]
+  [[ "$stderr" == *"config.yml"* ]]
+}
+
+@test "031, T033: --verbose names the resolution state — config-unloadable" {
+  printf 'projects:\n  - key: IJT\nteams:\nthis line has no delimiter\n' > "${JIRA_CONFIG_DIR}/config.yml"
+  run --separate-stderr cmd_feature feature --json --verbose "invoice export"
+  [[ "$stderr" == *"resolution state: config-unloadable"* ]]
+  [[ "$stderr" == *"path consulted: ${JIRA_CONFIG_DIR}"* ]]
+}
+
+@test "031, T033: --verbose names the resolution state — no-teams" {
+  printf 'projects:\n  - key: IJT\nrouting_default: IJT\nteams: []\n' > "${JIRA_CONFIG_DIR}/config.yml"
+  run --separate-stderr cmd_feature feature --json --verbose "invoice export"
+  [[ "$stderr" == *"resolution state: no-teams"* ]]
+}
+
+@test "031, T033: --verbose names the resolution state — no-personal-file" {
+  run --separate-stderr cmd_feature feature --json --verbose "invoice export"
+  [[ "$stderr" == *"resolution state: no-personal-file"* ]]
+}
+
+@test "031, T033: --verbose names the resolution state — no-team-key" {
+  : > "${JIRA_CONFIG_DIR}/personal.yml"
+  run --separate-stderr cmd_feature feature --json --verbose "invoice export"
+  [[ "$stderr" == *"resolution state: no-team-key"* ]]
+}
+
+@test "031, T033: --verbose names the resolution state — personal-unloadable" {
+  printf 'team: Not_Valid\n' > "${JIRA_CONFIG_DIR}/personal.yml"
+  run --separate-stderr cmd_feature feature --json --verbose "invoice export"
+  [[ "$stderr" == *"resolution state: personal-unloadable"* ]]
+}
+
+@test "031, T033: --verbose names the resolution state — no-repository" {
+  local isolated
+  isolated="$(cd "$(mktemp -d)" && pwd -P)"
+  cd "${isolated}"
+  unset JIRA_CONFIG_DIR
+  run --separate-stderr cmd_feature feature --json --verbose "invoice export"
+  [[ "$stderr" == *"resolution state: no-repository"* ]]
+  [[ "$stderr" == *"path consulted: ${isolated}"* ]]
+  rm -rf "${isolated}"
+}
+
+@test "031, T034: WITHOUT --verbose, default and --json output carry no new line and no new key (C4.2, FR-011)" {
+  run --separate-stderr cmd_feature feature --json "invoice export"
+  [ "$output" = '{"active":false}' ]
+  [ -z "$stderr" ]
+
+  run cmd_feature feature "invoice export"
+  [ "$output" = "Feature: inactive" ]
+}
+
+@test "031, T038: --verbose introduces no new argument surface — --dry-run/--json/--use-team still parse exactly as before" {
+  select_team ijt
+  boot '{"projects":{"IJT":"team"}}'
+  run cmd_feature feature --json --verbose --dry-run "invoice export"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.active' <<< "$output")" = "true" ]
 }

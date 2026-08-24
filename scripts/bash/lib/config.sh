@@ -1309,7 +1309,11 @@ def branchpattern:
 # result {active:false} (FR-011: never required). Credential-shaped values are
 # refused without echoing; an unknown `team` produces a located error listing
 # the valid catalogue ids; `override` passes the catalogue-entry validation.
-# Prints the canonical {active, team, override} JSON on stdout.
+# Prints the canonical {active, team, override} JSON on stdout. The two
+# inactive branches also carry a `state` field (data-model.md §1:
+# `no-personal-file` / `no-team-key`) — internal vocabulary for callers that
+# want to name the resolution state (031, FR-010); every existing reader
+# extracts only the fields it already knew about and ignores the rest.
 config_personal_load() {
   # The optional [merged-config-json] defaults to valid JSON ({}) — a literal
   # backslash default would make every jq read below spray parse errors.
@@ -1317,7 +1321,7 @@ config_personal_load() {
   [[ -z "${cfg}" ]] && cfg='{}'
   local pf="${dir}/personal.yml"
   if [[ ! -f "${pf}" ]]; then
-    printf '{"active":false}'
+    printf '{"active":false,"state":"no-personal-file"}'
     return 0
   fi
 
@@ -1339,7 +1343,7 @@ config_personal_load() {
   # whose catalogue declares no teams would fail the moment personal.yml
   # exists — exactly the file the config ceremony now creates by default.
   if [[ "$(jq -r 'has("team")' <<< "${pjson}")" != "true" ]]; then
-    printf '{"active":false}'
+    printf '{"active":false,"state":"no-team-key"}'
     return 0
   fi
 
@@ -1374,6 +1378,64 @@ _cfg_report_errors() {
   done
   ((any)) && return "${EXIT_CONFIG}"
   return 0
+}
+
+# _cfg_absolutize <path> — spell <path> absolute against the working
+# directory, without ever routing it through `cd` (the target need not
+# exist — FR-008's whole point is a directory that may not).
+_cfg_absolutize() {
+  # pwd -P, not pwd: the physical, symlink-resolved cwd. Bash's own logical
+  # $PWD (what plain `pwd` reports after a `cd`) survives inside the SAME
+  # process, but a freshly spawned process — the PowerShell port, spawned as
+  # its own process by the conformance harness after the SAME `cd` — reports
+  # its OS-level cwd via getcwd(), which is always the physical path. On
+  # macOS /var is itself a symlink to /private/var, so `mktemp -d` output
+  # spelled through plain `pwd` and through a fresh process's cwd disagree —
+  # -P is what keeps this port's spelling identical to the other one's
+  # (C5.1), not merely absolute.
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    ./*) printf '%s/%s' "$(pwd -P)" "${1#./}" ;;
+    *) printf '%s/%s' "$(pwd -P)" "$1" ;;
+  esac
+}
+
+# config_resolve_dir — the configuration directory, in the FR-007/FR-014
+# priority order (contract C1.1): an explicitly set JIRA_CONFIG_DIR; else
+# SPECIFY_INIT_DIR + /.specify/jira; else the nearest ancestor of the working
+# directory that carries a .specify/ directory, plus /jira (C1.2: upward
+# only, stopping at the filesystem root — never a git invocation, research
+# D1). Prints the resolved directory, always absolute (FR-009), and returns
+# 0. Returns 1 and prints nothing when neither override is set and no
+# ancestor carries .specify/ (FR-008) — the caller reports that, it is never
+# silently swallowed here.
+#
+# "${JIRA_CONFIG_DIR}" here is compared against the literal string this same
+# library defaults it to at source time (line ~24, `: "${JIRA_CONFIG_DIR:=.
+# specify/jira}"`, shared by every command, not just `feature`) — that
+# default IS the relative fallback FR-014 exists to replace, so it is the
+# one value this function treats as "nothing was explicitly chosen" rather
+# than as an override.
+config_resolve_dir() {
+  if [[ -n "${JIRA_CONFIG_DIR:-}" && "${JIRA_CONFIG_DIR}" != '.specify/jira' ]]; then
+    _cfg_absolutize "${JIRA_CONFIG_DIR}"
+    return 0
+  fi
+  if [[ -n "${SPECIFY_INIT_DIR:-}" ]]; then
+    printf '%s/.specify/jira' "$(_cfg_absolutize "${SPECIFY_INIT_DIR}")"
+    return 0
+  fi
+  local d
+  d="$(pwd -P)"
+  while :; do
+    if [[ -d "${d}/.specify" ]]; then
+      printf '%s/.specify/jira' "${d}"
+      return 0
+    fi
+    [[ "${d}" == "/" ]] && break
+    d="$(dirname "${d}")"
+  done
+  return 1
 }
 
 # config_load [config_dir] — load config.yml (+ optional config.local.yml),
@@ -1459,8 +1521,18 @@ config_load() {
 # config files at all) — only a PRESENT and malformed one fails closed
 # (EXIT_CONFIG), because a file on disk that cannot be read correctly is a
 # fail-closed condition, not a value silently outranked (C6.2).
+#
+# [personal_optional] (031, FR-013, C3.3, research D3) — "true" ONLY for the
+# `feature` command's naming path, which reaches no network (C3.2) and so
+# outranks nothing C6.2 protects. There, an unloadable personal.yml returns 0
+# instead of EXIT_CONFIG, WITHOUT seeding JIRA_EMAIL (moot — nothing on that
+# path calls out), and its stderr is suppressed HERE so the single visible
+# report comes from the caller's own subsequent config_personal_load call,
+# not from this internal probe. Every OTHER caller (seed/mention/reconcile/
+# config, all of which reach the network) omits this argument and keeps the
+# unconditional fail-closed behaviour C6.2 requires (contract C3.4).
 config_resolve_connection() {
-  local dir="${1:-${JIRA_CONFIG_DIR}}" cfg="${2:-}"
+  local dir="${1:-${JIRA_CONFIG_DIR}}" cfg="${2:-}" personal_optional="${3:-false}"
   if [[ -z "${cfg}" ]]; then
     cfg='{}'
     if [[ -f "${dir}/config.yml" ]]; then
@@ -1485,7 +1557,11 @@ config_resolve_connection() {
     # which mentions the key. Call it anyway, for its validation side effect
     # (a malformed team or email fails closed here, EXIT_CONFIG), then read
     # the field straight from the parsed file.
-    config_personal_load "${dir}" "${cfg}" > /dev/null || return $?
+    if [[ "${personal_optional}" == "true" ]]; then
+      config_personal_load "${dir}" "${cfg}" > /dev/null 2> /dev/null || return 0
+    else
+      config_personal_load "${dir}" "${cfg}" > /dev/null || return $?
+    fi
     if [[ -z "${JIRA_EMAIL:-}" ]]; then
       local pjson email
       pjson="$(config_yaml_to_json "${pf}")" || return "${EXIT_CONFIG}"

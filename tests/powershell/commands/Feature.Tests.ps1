@@ -88,11 +88,13 @@ Describe 'Feature command' {
         @(Get-JiraMockCallLog -Mock $M | Where-Object { $_ }).Count | Should -Be 0
     }
 
-    It 'stops with a located error on an invalid personal file (exit 4)' {
+    It 'reports and passes through an unloadable personal file, not fatal (031, FR-013, C3.3)' {
         [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'personal.yml'), "team: zzz`n")
         $r = Invoke-FeatureCaptured @('feature', '--json', 'invoice export')
-        $r.ExitCode | Should -Be 4
+        $r.ExitCode | Should -Be 0
+        ($r.Out.Trim() | ConvertFrom-Json).active | Should -BeFalse
         $r.Err | Should -Match 'personal\.yml'
+        $r.Err | Should -Match 'ijt'
     }
 
     It 'attaches a mentioned same-team ticket and computes the names' {

@@ -8,11 +8,15 @@ the real ticket number instead of a placeholder that has to be renamed later.
 
 ```mermaid
 flowchart TD
-    Start(["before_specify fires"]) --> Cat{"A teams: catalogue in config.yml?"}
-    Cat -->|"no"| Pass(["active: false — pass through,<br/>the host names the feature exactly as it would without the extension"])
+    Start(["before_specify fires"]) --> Repo{"An ancestor of the working<br/>directory carries .specify/?<br/>(031)"}
+    Repo -->|"no"| Report0(["active: false — REPORTED: no project located,<br/>the directory walked from named (031)"])
+    Repo -->|"yes"| Cat{"A teams: catalogue in config.yml?"}
+    Cat -->|"absent"| Pass(["active: false — pass through,<br/>the host names the feature exactly as it would without the extension"])
+    Cat -->|"present, unloadable"| Report1(["active: false — REPORTED: file + located reason (031)"])
+    Cat -->|"valid, zero teams"| Pass
 
-    Cat -->|"yes"| Personal{"Read .specify/jira/personal.yml"}
-    Personal -->|"unreadable or invalid"| Fail(["exit 4 — a located error"])
+    Cat -->|"yes, >=1 team"| Personal{"Read .specify/jira/personal.yml"}
+    Personal -->|"unreadable or invalid"| Report2(["active: false — REPORTED: file + located reason,<br/>never fatal (031, FR-013)"])
     Personal -->|"no selection"| Cross{"A cross-team --use-team answer?"}
     Cross -->|"no"| Pass
     Cross -->|"yes"| Team
@@ -44,6 +48,29 @@ the cause. The host `specify` flow then proceeds exactly as it does today. A
 ticket named in a repository with no applicable team configuration is told so
 — the file to fix and the command that fixes it — rather than met with
 silence (029, FR-026).
+
+### Every `{active:false}` names which of seven states produced it (031)
+
+Before 031, `{active:false}` was a single, undifferentiated outcome — an
+operator whose `config.yml` had a typo saw exactly the same nothing as an
+operator who had never adopted the extension at all. The pass-through now
+carries that distinction:
+
+| State | Reported by default? |
+| --- | --- |
+| No `config.yml` at the resolved directory | silent |
+| `config.yml` present, fails to load | **reported** — file + located reason |
+| Valid `config.yml`, `teams:` declares zero entries | silent (a supported single-project setup) |
+| No `personal.yml` | silent |
+| `personal.yml` present, no `team` key | silent |
+| `personal.yml` present, fails to load | **reported** — file + located reason, never fatal |
+| No ancestor of the working directory carries `.specify/` | **reported** — the directory walked from |
+
+Two of the seven speak without being asked, because a file that exists is a
+statement its author is owed an answer about, and a file that does not exist
+is not a statement. All seven are nameable on request: `--verbose` names the
+resolution state, the absolute directory consulted, and what would change it
+— without moving the default or `--json` output by one line or one key.
 
 **The mentioned key is a naming input, and the operator is asked whether it
 is also a binding (029).** `ticket_validate` is read-only, and answering the

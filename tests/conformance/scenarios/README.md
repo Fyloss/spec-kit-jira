@@ -17,6 +17,7 @@ is a failing test, not a documented quirk.
     "faults":   { "AUTH": { "status": 401 } }
   },
   "fixture": "tests/conformance/fixtures/repo-basic",  // optional repo dir copied into the workdir
+  "cwd":     "sub/module",             // optional: invoke from this dir under the fixture, not its root (031, C1.2)
   "argv": ["config", "--json"],        // optional args to the entry point
   "env":  { "SPEC_KIT_JIRA_SITE": "x" }// optional extra environment variables
 }
