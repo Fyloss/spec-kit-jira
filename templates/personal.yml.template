@@ -1,19 +1,38 @@
 # spec-kit-jira personal team selection (.specify/jira/personal.yml).
 #
 # This file is YOURS: human-owned, OPTIONAL, and gitignored (the config
-# ceremony enforces the .gitignore coverage). No script ever writes it, and no
-# workflow requires it — without it the feature ceremony passes through and
+# ceremony enforces the .gitignore coverage). The ceremony creates it once, if
+# it is absent, and never rewrites it afterwards — every edit below is yours to
+# keep. No workflow requires it — without it the feature ceremony passes through and
 # behaves exactly as if the extension were absent.
 #
-# Like every committed config file it MUST stay credential-free: a token, an
-# email, or a real *.atlassian.net host in any value is refused (exit 4).
+# It MUST stay free of anything that grants access. An API token is refused at
+# every key here, and so is a real *.atlassian.net host (exit 4). Your email
+# address is the one exception, and only at the `email` key below — anywhere
+# else it is refused too.
+
+# Your Atlassian account email, used to authenticate. The environment variable
+# takes precedence when it is set; this file is where it lives otherwise.
+# Leaving it out is legitimate — the email then comes from the environment.
+# email: you@example.com
 
 # The catalogue team you work in — one of the `teams:` ids declared in
 # config.yml. An unknown id is a located error listing the valid ids.
+# Leaving it commented is legitimate, and is the state this file starts in:
+# no team is selected, and feature naming behaves exactly as if this file
+# were absent.
 # team: ijt
 
-# Exceptional, auditable convention override. Same validation rules as a
-# catalogue entry; every feature-creation output reports when it was used.
+# Exceptional, auditable convention override: ship under a different naming
+# convention from your team's, without editing the committed config.yml.
+# Either key may be given alone — the one you omit is inherited from your
+# team's catalogue entry. Same validation rules as that entry, and every
+# feature-creation output reports `override_used` when it fires, so it can
+# never quietly become the norm.
+#
+# <ID> is the ticket number with its project prefix removed (IJT-453 -> 453),
+# <FEATURE_NAME> the slug of your description. A `/` builds branch hierarchy
+# only; the spec folder is always one flat component.
 # override:
 #   folder_prefix: "special-"
 #   branch_pattern: "special-<ID>/<FEATURE_NAME>"

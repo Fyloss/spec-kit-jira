@@ -20,6 +20,16 @@ This repository mirrors its Spec Kit artifacts into Jira Cloud via the
   checklist embedded in the story description; recording nothing keeps
   today's behaviour unchanged. `/speckit.jira.config` asks the question once
   and records the answer.
+- **Team naming** (optional): with a `teams:` catalogue in
+  `.specify/jira/config.yml`, a feature is named by your team's convention and
+  carries its real ticket number — `ijt-453/fix-issue` rather than a number
+  chosen before the ticket existed. Which team is *yours* is recorded in
+  `.specify/jira/personal.yml`, which is gitignored, created once by
+  `/speckit.jira.config` if absent and never rewritten after that — so two
+  developers here can ship under different conventions without
+  editing a committed file. `override` in that same file changes your own
+  convention for the exceptional case, and reports itself on every run. Without
+  the file, naming is unchanged and no Jira request is made.
 - **Disable one event**: set `enabled: false` on its entry in
   `.specify/extensions.yml` and run `/speckit.jira.config` once; release it later
   with `/speckit.jira.config --enable-hook <event>`.

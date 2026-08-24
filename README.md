@@ -46,7 +46,7 @@ and `JIRA_EMAIL` are not secret and live in your shell profile (or the
 committed `config.yml` / your gitignored `personal.yml`, respectively); the
 API token is resolved from `JIRA_API_TOKEN` in the environment, or from a
 retrieval command you declare in `JIRA_PAT_COMMAND` — the steps below use the
-environment variable directly, since it needs no further setup. See
+OS keychain, which is what step 3 below sets up. See
 [CREDENTIALS.md](docs/CREDENTIALS.md) if you would rather back the token with
 the macOS Keychain or another credential store.
 
@@ -74,19 +74,40 @@ At <https://id.atlassian.com/manage-profile/security/api-tokens>, choose
 *Create API token*, name it (e.g. `spec-kit-jira`), and copy the value — Jira
 shows it once and never again.
 
-### 3. Export the token, the site URL, and your account email
+### 3. Put the token in the Keychain, and declare how to read it
 
-Add to `~/.zshrc`, substituting your own values:
+The token is the one setting that must never reach a file in your repository.
+Store it in the OS vault once, and tell the bridge the command that reads it
+back — so you never paste, echo, or hold the token yourself.
 
 ```sh
-export JIRA_API_TOKEN="your-token"
-export SPEC_KIT_JIRA_BASE_URL="https://your-site.atlassian.net"
-export JIRA_EMAIL="you@example.com"
+security add-generic-password -U -s spec-kit-jira -a "$USER" -w
 ```
 
-No trailing slash on the URL — the sink appends `/rest/api/3/…` directly.
-Reload with `source ~/.zshrc`, then check all three with `echo` — omit the
-last `echo` from any shell history you keep, since it would print the token.
+`-w` with no value prompts twice with masked input, keeping the token out of
+your shell history. Then add the retrieval command to `~/.zshrc`:
+
+```sh
+export JIRA_PAT_COMMAND="security find-generic-password -s spec-kit-jira -w"
+```
+
+Reload with `source ~/.zshrc`. The first read from a script raises a macOS
+access prompt — choose **Always Allow** to answer it once and for all.
+
+The Keychain is one option among several. `JIRA_PAT_COMMAND` accepts any
+command that prints the token on stdout and nothing else:
+
+| Secret manager | `JIRA_PAT_COMMAND` value |
+| --- | --- |
+| macOS Keychain | `security find-generic-password -s spec-kit-jira -w` |
+| 1Password CLI | `op read op://Private/spec-kit-jira/credential` |
+| `pass` | `pass show spec-kit-jira` |
+| `secret-tool` (Linux) | `secret-tool lookup service spec-kit-jira` |
+
+The site URL and your email are *not* environment variables: they belong to the
+repository's configuration, and step 5 puts them there. See
+[CREDENTIALS.md](docs/CREDENTIALS.md) for the full treatment, including
+unattended contexts.
 
 ### 4. Install the extension into the consuming repository
 
@@ -110,9 +131,34 @@ bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
 ```
 
 The ceremony discovers the project metadata, writes `.specify/jira/config.yml`,
-covers the gitignored config layer, and reports the hook registration. If it
-reports a degraded run, it names the connection setting that is missing — go
-back to the step that supplies it.
+covers the gitignored config layer, and reports the hook registration.
+
+It will report a **degraded run**, naming two settings it does not invent for
+you. Supply them now that the files exist:
+
+```yaml
+# .specify/jira/config.yml — committed, reviewed in a pull request
+base_url: "https://your-site.atlassian.net"
+```
+
+```yaml
+# .specify/jira/personal.yml — yours, gitignored
+email: "you@example.com"
+```
+
+No trailing slash on the URL, and `https://` is required — a committed
+`base_url` is refused at load time on any other scheme, except a loopback
+address. The site URL is committed because it identifies the team's Jira, not
+you; the email is gitignored because it identifies you, not the team. Re-run
+`/speckit.jira.config` and the degraded report clears.
+
+Committing the site URL is a disclosure worth choosing knowingly: it enters
+**git history irreversibly**, so every clone — past and future — can see which
+Jira the team mirrors to, including after someone removes the key. It is not a
+secret, but if your team would rather keep the site name out of history,
+export `SPEC_KIT_JIRA_BASE_URL` instead and leave the file's key unset. The
+environment variable always takes precedence, so the file value never has to
+be filled in at all.
 
 ### 6. Mirror
 
@@ -143,7 +189,7 @@ opens directly, since that ticket predates its specification folder.
 
 ## Step-by-step setup on Linux
 
-Same three settings as macOS. The token resolves from `JIRA_API_TOKEN` in the
+Same settings as macOS. The token resolves from `JIRA_API_TOKEN` in the
 environment, or from a retrieval command you declare in `JIRA_PAT_COMMAND` —
 see [CREDENTIALS.md](docs/CREDENTIALS.md) to back it with the libsecret
 keyring instead of exporting it directly.
@@ -163,17 +209,24 @@ sudo pacman -S curl jq git       # Arch
 At <https://id.atlassian.com/manage-profile/security/api-tokens>, choose
 *Create API token*, name it, and copy the value — Jira shows it once.
 
-### 3. Export the token, the site URL, and your account email
-
-Add to `~/.bashrc` (or `~/.zshrc`), then reload it:
+### 3. Put the token in the keyring, and declare how to read it
 
 ```sh
-export JIRA_API_TOKEN="your-token"
-export SPEC_KIT_JIRA_BASE_URL="https://your-site.atlassian.net"
-export JIRA_EMAIL="you@example.com"
+secret-tool store --label="spec-kit-jira" service spec-kit-jira
 ```
 
-No trailing slash on the URL — the sink appends `/rest/api/3/…` directly.
+The command reads the token from the terminal, so it never enters your shell
+history. Then add the retrieval command to `~/.bashrc` (or `~/.zshrc`) and
+reload it:
+
+```sh
+export JIRA_PAT_COMMAND="secret-tool lookup service spec-kit-jira"
+```
+
+Any of the retrieval commands in the macOS table works here too. The site URL
+and your email are not environment variables — they go into the repository's
+configuration at step 5. A machine with no keyring daemon is an unattended
+context; see the section below.
 
 ### 4. Install the extension into the consuming repository
 
@@ -184,8 +237,10 @@ bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
 
 ### 5. Bind the repository and mirror
 
-Run `/speckit.jira.config`. If it reports a degraded run, it names the missing
-connection setting. From then on every lifecycle step mirrors on its own.
+Run `/speckit.jira.config`. It will report a degraded run naming two settings:
+add `base_url` to the committed `.specify/jira/config.yml` and `email` to your
+gitignored `.specify/jira/personal.yml`, exactly as in the macOS step 5 above,
+then run it again. From then on every lifecycle step mirrors on its own.
 
 ## Step-by-step setup on Windows (PowerShell 7+)
 
@@ -194,7 +249,7 @@ JSON, so neither `curl` nor `jq` is required.
 
 Same two-rung token resolution as macOS and Linux: `JIRA_API_TOKEN` in the
 environment, or a retrieval command you declare in `JIRA_PAT_COMMAND` — the
-steps below use the environment variable directly. See
+steps below use the vault-backed command, as on the other two platforms. See
 [CREDENTIALS.md](docs/CREDENTIALS.md) to back it with a PowerShell
 SecretManagement vault instead, including the wrapper `JIRA_PAT_COMMAND` needs
 since `Get-Secret` is a cmdlet, not an executable.
@@ -214,24 +269,33 @@ the prerequisite check exits with code `5` on 5.1 and names the version.
 At <https://id.atlassian.com/manage-profile/security/api-tokens>, choose
 *Create API token*, name it, and copy the value — Jira shows it once.
 
-### 3. Set the token, the site URL, and your account email
+### 3. Put the token in a vault, and declare how to read it
+
+Store it once in PowerShell SecretManagement:
 
 ```powershell
-$token = Read-Host 'Jira API token' -AsSecureString
-[Environment]::SetEnvironmentVariable(
-    'JIRA_API_TOKEN',
-    (ConvertFrom-SecureString $token -AsPlainText),
-    'User')
-[Environment]::SetEnvironmentVariable('SPEC_KIT_JIRA_BASE_URL', 'https://your-site.atlassian.net', 'User')
-[Environment]::SetEnvironmentVariable('JIRA_EMAIL', 'you@example.com', 'User')
+Set-Secret -Name spec-kit-jira -Secret (Read-Host 'Jira API token' -AsSecureString)
 ```
 
-A user environment variable is stored in the registry in clear text — this is
-the simplest working setup, not the most protected one; see
-[CREDENTIALS.md](docs/CREDENTIALS.md) for a vault-backed alternative. No
-trailing slash on the URL. **Open a new terminal now** — a `User` variable
-does not reach sessions that were already running. Check with
-`$env:SPEC_KIT_JIRA_BASE_URL`.
+`Get-Secret` is a cmdlet, not an executable, and `JIRA_PAT_COMMAND` names a
+program to run directly, without a shell — so point it at a small wrapper
+script instead:
+
+```powershell
+'Get-Secret -Name spec-kit-jira -AsPlainText' |
+    Set-Content "$HOME\bin\get-jira-token.ps1"
+[Environment]::SetEnvironmentVariable(
+    'JIRA_PAT_COMMAND', "pwsh -NoProfile -File $HOME\bin\get-jira-token.ps1", 'User')
+```
+
+The same wrapper requirement applies from Git Bash or WSL on a Windows
+machine, since those run the Bash port.
+
+**Open a new terminal now** — a `User` variable does not reach sessions that
+were already running.
+
+The site URL and your email are not environment variables; step 5 puts them in
+the repository's configuration.
 
 ### 4. Install the extension into the consuming repository
 
@@ -242,8 +306,95 @@ specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releas
 
 ### 5. Bind the repository and mirror
 
-Run `/speckit.jira.config`. If it reports a degraded run, it names the missing
-connection setting. From then on every lifecycle step mirrors on its own.
+Run `/speckit.jira.config`. It will report a degraded run naming two settings:
+add `base_url` to the committed `.specify/jira/config.yml` and `email` to your
+gitignored `.specify/jira/personal.yml`, exactly as in the macOS step 5 above,
+then run it again. From then on every lifecycle step mirrors on its own.
+
+## Unattended: CI, containers, and cloud agents
+
+A build runner, a container, and a cloud agent have no OS vault and no keyring
+daemon, so the retrieval command above has nothing to reach. There the token
+comes from the platform's own secret store, injected as an environment
+variable:
+
+```yaml
+# GitHub Actions
+env:
+  JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+  SPEC_KIT_JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+  JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+```
+
+The environment is consulted before `JIRA_PAT_COMMAND`, so a runner needs no
+vault and a developer needs no environment variable. This is the only context
+in which the token is expected to reach a variable — on a workstation, keep it
+in the vault, where a `printenv`, a crash dump, or a shell history cannot
+reach it.
+
+This repository's own [`live.yml`](.github/workflows/live.yml) is that pattern
+in practice: it runs the double-run zero-churn suite against a real Jira site,
+with all four settings supplied from repository secrets.
+
+## Naming features by team
+
+By default a feature is named the way spec-kit names it. Declare a `teams:`
+catalogue in the committed `.specify/jira/config.yml` and each developer's
+features carry their team's convention instead — with the real ticket number in
+the branch, decided *before* the feature is created rather than renamed
+afterwards:
+
+```yaml
+# .specify/jira/config.yml — committed, reviewed in a pull request
+teams:
+  - id: ijt
+    project: IJT
+    folder_prefix: "ijt-"
+    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"
+```
+
+Which team you personally work in is not a team decision, so it does not live
+in that file. It lives in `.specify/jira/personal.yml`, which is yours and
+gitignored. `/speckit.jira.config` creates it if it is absent and never
+rewrites it afterwards, so anything you put there survives every later run:
+
+```yaml
+# .specify/jira/personal.yml — yours, gitignored
+team: ijt
+```
+
+With that, `IJT-453` and the description "fix issue" produce the branch
+`ijt-453/fix-issue`. `<ID>` is the ticket number with its project prefix
+removed; `<FEATURE_NAME>` is the slug of your description. A `/` builds branch
+hierarchy only — the spec folder stays one flat component, which spec-kit then
+numbers (`specs/001-ijt-fix-issue`).
+
+Two developers on one repository can therefore ship under different
+conventions without either of them editing a committed file. Without a
+`personal.yml`, or with the `team` line left commented, nothing changes at all:
+naming is exactly what it would be without this extension, and no Jira request
+is made.
+
+### Overriding your team's convention
+
+Rarely, your team's convention does not work for you — a constraint from your
+git host, a temporary assignment. Override it in your own file rather than
+changing your team's:
+
+```yaml
+# .specify/jira/personal.yml
+team: ijt
+override:
+  folder_prefix: "special-"
+  branch_pattern: "special-<ID>/<FEATURE_NAME>"
+```
+
+Either key may be given alone; the one you omit is inherited from the
+catalogue entry. Both are validated exactly as a catalogue entry is.
+
+The override is deliberately hard to forget: every feature-creation output
+reports `override_used`, so it announces itself on every run and can never
+quietly become the norm.
 
 ## Telling the bridge where each lifecycle step leaves a ticket
 

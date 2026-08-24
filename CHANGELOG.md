@@ -7,7 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-08-24
+
 ### Fixed
+
+- **The file the config ceremony creates for you now describes the keys it
+  accepts.** `personal.yml` gained an `email` key in 0.20.0, and the template
+  that creates the file never mentioned it — while warning that an email "in
+  any value is refused", which that same release had made false at exactly
+  that key. An operator following the file could not configure the setting the
+  extension now identifies them by, and was told the attempt would fail. The
+  template now names the key, and states the refusals that do still hold: a
+  token at every key, a real site host everywhere but `base_url`.
+
+- **The committed team configuration no longer sends secrets to a file nothing
+  reads.** Its template pointed at `.specify/jira/.env`, retired in 0.20.0;
+  only the gitignore rule survives, kept so an older installation's leftover is
+  never un-ignored and committed. The header also claimed a site host is
+  refused at every key — false at `base_url`, the key 0.20.0 moved into that
+  very file — and the key itself was absent, so the ceremony's own message
+  ("add it to config.yml") pointed at a template that never mentioned it. The
+  template now offers the key, with the `https://` requirement and the reason
+  it is committed.
+
+- **The setup instructions teach the vault, not the shell profile.** README.md
+  had each platform export the token, the site URL and the email into a shell
+  profile — the shape that preceded 0.20.0. The token step is now the OS vault
+  alone, read back through `JIRA_PAT_COMMAND`, with the retrieval command
+  spelled for `security`, `secret-tool`, `op read` and `pass`; the site URL and
+  email move to the step where the ceremony has created the files that hold
+  them. The environment variables keep their place — under CI, containers and
+  cloud agents, which is the context they exist for, since a build runner has
+  no keychain to reach.
+
+- **Four documents claimed no script ever writes `personal.yml`.** The config
+  ceremony creates it when it is absent. What is true, and more useful, is that
+  it is created once and never rewritten: an existing file is left alone, so
+  hand edits survive every later run. All four now say that.
+
+- **The per-operator naming convention is documented where a consumer meets
+  it.** `override` — which lets one developer ship under a different branch and
+  folder convention without editing the committed catalogue — appeared in no
+  README, neither this project's nor the managed block spliced into consuming
+  repositories. Both now cover the `teams:` catalogue, the gitignored selection
+  that chooses from it, and the override, including that every run using it
+  reports `override_used`.
 
 - The `before_specify` naming hook no longer reads as a licence to run the
   whole specify command. A consumer dispatch of `speckit.jira.feature` authored
@@ -1289,7 +1333,8 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.1...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.2...HEAD
+[0.20.2]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.18.1...v0.19.0
