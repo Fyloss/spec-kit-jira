@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain — **3 remain** (FR-013, FR-014, FR-015), each a scope decision with no defensible default
+- [x] No [NEEDS CLARIFICATION] markers remain — all three resolved by `/speckit-clarify`, session 2026-08-24
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic
@@ -31,19 +31,22 @@
 
 ## Notes
 
-The three open markers are deliberate, not omissions — each changes what gets
-built rather than how:
+All three markers were resolved in the clarification session of 2026-08-24:
 
-- **FR-013** decides whether an existing behaviour (an invalid personal file
-  fails the run) survives. It is the only requirement that may *remove*
-  something rather than add.
-- **FR-014** decides whether repository-root resolution replaces or
-  supplements the current path. Replacement is a behaviour change for any
-  workflow deliberately running against a nested configuration.
-- **FR-015** decides whether a zero-team catalogue is a supported setup or a
-  misconfiguration, which moves state C between two user stories.
+- **FR-014** — repository-root resolution **replaces** working-directory
+  resolution rather than supplementing it; an explicit `JIRA_CONFIG_DIR` stays
+  authoritative (FR-015), and the anchor governs the run-state the directory
+  also holds (FR-016).
+- **FR-013** — an unloadable personal file becomes a report plus pass-through,
+  matching the treatment FR-001 gives the team configuration. This *replaces*
+  shipped behaviour, which exits with a configuration error code.
+- **FR-017** — a zero-team catalogue is a supported single-project setup and
+  stays silent.
 
-FR-001 through FR-012 are answerable and testable as written; User Story 1 is
-independently shippable without resolving any marker.
+One behaviour was observed during clarification and deliberately left out of
+scope: a repository mirroring to several Jira projects with no team selected
+routes every specification to `routing_default` in silence. That belongs to the
+reconcile step, not to naming; it is recorded as an edge case and needs its own
+specification.
 
-Run `/speckit-clarify` before `/speckit-plan`.
+Ready for `/speckit-plan`.

@@ -51,6 +51,27 @@ fails is an operator statement that did not work, and it is owed an answer. A
 file that does not exist is not a statement at all, and is owed silence. That
 distinction is the whole feature.
 
+## Clarifications
+
+### Session 2026-08-24
+
+- Q: Should repository-root resolution replace working-directory resolution, or
+  be a fallback consulted only when the working-directory path finds nothing?
+  → A: Replace it. An explicitly set `JIRA_CONFIG_DIR` remains authoritative,
+  so a deliberately nested configuration stays reachable by explicit opt-in
+  rather than by accident of starting directory.
+- Q: A personal file that exists and cannot be loaded currently fails the run
+  with exit 4. Should that remain, or become a report plus pass-through?
+  → A: Report plus pass-through, exit 0 — the same treatment FR-001 gives the
+  team configuration. Both files behave alike and feature creation is never
+  blocked.
+- Q: Is a valid configuration declaring zero teams a supported reconcile-only
+  setup that must stay silent, or a configuration owed a report?
+  → A: Supported, and silent. It is the single-project setup, which works
+  end to end: with no team prefix on the folder no routing rule and no implicit
+  team route match, and `routing_default` carries every specification to the
+  one project. An operator who did intend naming is already told loudly.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - A broken configuration announces itself (Priority: P1)
@@ -89,6 +110,10 @@ alone: no other story needs to ship.
 4. **Given** a repository with a valid `config.yml` and no personal selection,
    **When** the feature command runs naming no ticket, **Then** the output is
    byte-identical to the current release.
+5. **Given** a repository whose `personal.yml` exists and cannot be loaded,
+   **When** the feature command runs, **Then** it reports the file and the
+   located reason, names the default naming it fell back to, and exits
+   successfully — where today it exits with a configuration error code.
 
 ---
 
@@ -134,7 +159,10 @@ it.
 **Why priority**: it makes every remaining state diagnosable on demand while
 leaving all default output — the output two conformance scenarios pin — exactly
 as it is. It is the cheapest possible answer to "which one was it", and it is
-opt-in by construction.
+opt-in by construction. Its value is not confined to naming: in a repository
+mirroring to several projects, an unnoticed pass-through is followed by a
+default routing that is equally silent, so being able to ask why no team
+applied is what surfaces both.
 
 **Independent Test**: run the feature command with the verbose diagnostic in a
 repository in each of the five states and confirm each is named distinctly.
@@ -166,6 +194,14 @@ repository in each of the five states and confirm each is named distinctly.
   to say which one it used.
 - A repository root that cannot be determined (no repository, or a detached
   environment) must not silently fall back to a path that happens to exist.
+- A repository mirroring to **several** Jira projects with no team selected has
+  no team prefix on its folders, so no routing rule and no implicit team route
+  match and every specification is carried to `routing_default` — silently, and
+  into one project regardless of which team the work belongs to. Observed, and
+  deliberately **out of scope**: that silence belongs to the reconcile step, not
+  to naming, and repairing it is a separate specification. It is recorded here
+  because it is the same defect class one step downstream, and because it is
+  what makes the diagnostic of FR-010 worth more than a naming convenience.
 
 ## Requirements *(mandatory)*
 
@@ -199,26 +235,38 @@ repository in each of the five states and confirm each is named distinctly.
 - **FR-011**: When the verbose diagnostic is not requested, the default and
   machine-readable outputs of every state MUST be exactly what FR-001 through
   FR-008 define, with no additional field or line.
-- **FR-012**: The behaviour of FR-001 through FR-011 MUST be identical on both
+- **FR-012**: The behaviour of every requirement here MUST be identical on both
   supported platforms, with identical exit codes and byte-identical output for
   identical inputs.
-- **FR-013**: A personal file that exists and cannot be loaded currently fails
-  the run with a configuration exit code. Whether that remains correct under a
-  non-blocking hook is [NEEDS CLARIFICATION: should an invalid `personal.yml`
-  keep failing the run (exit 4), matching its current behaviour and the
-  symmetry that a broken file is an error — or become a report plus
-  pass-through like FR-001, matching the requirement that feature creation is
-  never blocked?]
-- **FR-014**: The repository-root resolution of FR-007 [NEEDS CLARIFICATION:
-  should it REPLACE the working-directory path entirely, or be a fallback
-  consulted only when the working-directory path finds nothing? Replacement is
-  deterministic but changes behaviour for any workflow that deliberately runs
-  against a nested configuration; fallback preserves those but keeps two
-  possible answers for one repository.]
-- **FR-015**: A valid configuration declaring zero teams (state C)
-  [NEEDS CLARIFICATION: is this a supported reconcile-only setup that must stay
-  silent, or a configuration that is present-but-unusable for naming and
-  therefore owed a report under the same principle as FR-001?]
+- **FR-013**: A personal file that exists and cannot be loaded MUST receive the
+  same treatment FR-001 through FR-003 give the team configuration: a report
+  naming the file and the located reason, naming fallback to the host's
+  default, a successful exit, and no Jira request. It MUST NOT fail the run.
+  This replaces the current behaviour, which exits with a configuration error
+  code — the inverse of the asymmetry this feature exists to remove, and a
+  contradiction of the requirement that this step never blocks feature
+  creation.
+- **FR-014**: The repository-root resolution of FR-007 MUST REPLACE
+  working-directory resolution rather than supplement it. A fallback order
+  would leave two possible answers for one repository and would still select a
+  nested directory that merely happens to exist, which is the defect FR-007
+  exists to remove.
+- **FR-015**: An explicitly set `JIRA_CONFIG_DIR` MUST continue to take
+  precedence over the resolution of FR-014, so a deliberately nested
+  configuration remains reachable by explicit opt-in rather than by accident of
+  starting directory.
+- **FR-016**: The resolution of FR-014 governs the whole configuration
+  directory, including the run-state it holds alongside the two configuration
+  files. A run whose state was previously written under a working-directory
+  path MUST NOT be treated as a recognition failure when that state is no
+  longer found: recognition is re-derived, and no duplicate is created.
+- **FR-017**: A valid configuration declaring zero teams (state C) MUST remain
+  silent. It is a supported setup, not a misconfiguration: a repository that
+  mirrors specifications to a single project needs no team catalogue, and
+  reporting it would make a correctly configured repository complain on every
+  feature. The operator who did intend naming is already told loudly — a
+  personal file selecting a team absent from the catalogue fails with a located
+  error listing the valid ids, and that behaviour is unchanged.
 
 ### Key Entities
 
@@ -236,7 +284,7 @@ repository in each of the five states and confirm each is named distinctly.
 | --- | --- | --- |
 | I | The Filesystem Is the Source of Truth | Unaffected. This feature reads configuration and writes nothing to Jira; FR-003 makes every new report cost zero Jira requests, so no ticket is read, edited, or created on any path it introduces. |
 | II | Zero-Churn Idempotency | Unaffected in Jira terms, and strengthened locally: FR-007 makes the same repository state produce the same result from any working directory, which is idempotency across invocation context rather than across runs. |
-| III | Fail-Closed on Writes, Non-Blocking on Hooks | FR-003 keeps the reporting path non-blocking — a report, the host's default naming, a successful exit. FR-013 raises the one place where the current code may already violate this principle rather than quietly preserving it. |
+| III | Fail-Closed on Writes, Non-Blocking on Hooks | FR-003 keeps the reporting path non-blocking — a report, the host's default naming, a successful exit. FR-013 repairs the one place where the shipped code already violates this principle: an unloadable personal file currently fails the run, which this feature replaces with the same report-and-continue treatment. No path introduced here can fail a host command. |
 | IV | Credential Security | A credential-shaped value in a configuration file is one of the load failures FR-001 reports. FR-002 requires the located detail the loader produces, which refuses such values without echoing them; nothing this feature adds may print a value. |
 | V | Separation of Team Config / Local Binding / Secrets | Preserved exactly. FR-004 and FR-005 keep the committed catalogue and the human-owned personal selection in their existing roles, and no requirement here writes either file. |
 | VI | macOS / Linux / Windows Portability | FR-012 states it. FR-007 and FR-009 are the portability risk of this feature — repository-root resolution and absolute-path spelling are exactly where the two hosts diverge — so both are named as byte-identical obligations rather than left implicit. |
