@@ -700,6 +700,7 @@ function Invoke-JiraFeature {
       the result via the [Console] streams and returns ONLY its numeric exit
       code (mirroring the Bash port's echo -> fd1, return -> status convention).
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '', Justification = 'The empty-config.yml probe (031, FR-006/C2.5) deliberately ignores a parse failure here: a malformed file is expected to throw, and the exception is not the outcome being sought — $rawTeamParsed stays false, so the caller falls through to Import-JiraConfig, which reports the SAME failure with its own located reason a few lines below.')]
     [CmdletBinding()]
     param([Parameter(ValueFromRemainingArguments = $true)] [string[]] $Arguments = @())
 
