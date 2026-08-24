@@ -63,7 +63,7 @@ setup() {
 
 @test "README.md documents the naming surface, override included" {
   grep -qE 'personal\.yml' "${README}"
-  grep -qE '^\s*override:' "${README}"
+  grep -qE '^[[:space:]]*override:' "${README}"
   grep -qE 'folder_prefix' "${README}"
   grep -qE 'branch_pattern' "${README}"
 }
@@ -184,4 +184,36 @@ _readme_step3_blocks() {
   local flat
   flat="$(tr '\n' ' ' < "${README}")"
   grep -qE 'git history' <<< "${flat}"
+}
+
+# --- Claims the code contradicts (Copilot, PR #54) --------------------------
+
+@test "nothing claims personal.yml is never written by any script" {
+  # False: _config_personal_effect CREATES it when absent (config.sh:884). What
+  # is true, and more useful, is that it is created once and never rewritten —
+  # an existing file returns `unchanged` (config.sh:873), so hand edits survive.
+  local f
+  for f in "${README}" "${BLOCK}" "${PERSONAL}" "${ROOT}/docs/06-feature-naming.md"; do
+    run bash -c "tr '\n' ' ' < '${f}' | grep -qiE 'no script ever writes|never written by any script'"
+    [ "$status" -ne 0 ]
+  done
+}
+
+@test "nothing says the setup steps use the token variable directly" {
+  local flat
+  flat="$(tr '\n' ' ' < "${README}")"
+  ! grep -qE 'use[[:space:]]+the[[:space:]]+environment[[:space:]]+variable[[:space:]]+directly' <<< "${flat}"
+}
+
+# The section terminator must be a markdown HEADING (`## `/`### `), never any
+# line starting with `#`: these sections embed YAML whose comments open with
+# `# `, so a bare `^#` truncates the first section before its own `base_url`
+# and the guard fails against a document that is in fact correct.
+@test "all three platform step 5s name the two settings and their files" {
+  local body n
+  body="$(awk '/^### 5\./ { f = 1; next } f && /^##+ / { f = 0 } f' "${README}")"
+  n="$(grep -c 'base_url' <<< "${body}")"
+  [ "${n}" -ge 3 ]
+  n="$(grep -c 'personal\.yml' <<< "${body}")"
+  [ "${n}" -ge 3 ]
 }

@@ -1,8 +1,9 @@
 # spec-kit-jira personal team selection (.specify/jira/personal.yml).
 #
 # This file is YOURS: human-owned, OPTIONAL, and gitignored (the config
-# ceremony enforces the .gitignore coverage). No script ever writes it, and no
-# workflow requires it — without it the feature ceremony passes through and
+# ceremony enforces the .gitignore coverage). The ceremony creates it once, if
+# it is absent, and never rewrites it afterwards — every edit below is yours to
+# keep. No workflow requires it — without it the feature ceremony passes through and
 # behaves exactly as if the extension were absent.
 #
 # It MUST stay free of anything that grants access. An API token is refused at

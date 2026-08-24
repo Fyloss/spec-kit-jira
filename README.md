@@ -46,7 +46,7 @@ and `JIRA_EMAIL` are not secret and live in your shell profile (or the
 committed `config.yml` / your gitignored `personal.yml`, respectively); the
 API token is resolved from `JIRA_API_TOKEN` in the environment, or from a
 retrieval command you declare in `JIRA_PAT_COMMAND` — the steps below use the
-environment variable directly, since it needs no further setup. See
+OS keychain, which is what step 3 below sets up. See
 [CREDENTIALS.md](docs/CREDENTIALS.md) if you would rather back the token with
 the macOS Keychain or another credential store.
 
@@ -189,7 +189,7 @@ opens directly, since that ticket predates its specification folder.
 
 ## Step-by-step setup on Linux
 
-Same three settings as macOS. The token resolves from `JIRA_API_TOKEN` in the
+Same settings as macOS. The token resolves from `JIRA_API_TOKEN` in the
 environment, or from a retrieval command you declare in `JIRA_PAT_COMMAND` —
 see [CREDENTIALS.md](docs/CREDENTIALS.md) to back it with the libsecret
 keyring instead of exporting it directly.
@@ -249,7 +249,7 @@ JSON, so neither `curl` nor `jq` is required.
 
 Same two-rung token resolution as macOS and Linux: `JIRA_API_TOKEN` in the
 environment, or a retrieval command you declare in `JIRA_PAT_COMMAND` — the
-steps below use the environment variable directly. See
+steps below use the vault-backed command, as on the other two platforms. See
 [CREDENTIALS.md](docs/CREDENTIALS.md) to back it with a PowerShell
 SecretManagement vault instead, including the wrapper `JIRA_PAT_COMMAND` needs
 since `Get-Secret` is a cmdlet, not an executable.
@@ -306,8 +306,10 @@ specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releas
 
 ### 5. Bind the repository and mirror
 
-Run `/speckit.jira.config`. If it reports a degraded run, it names the missing
-connection setting. From then on every lifecycle step mirrors on its own.
+Run `/speckit.jira.config`. It will report a degraded run naming two settings:
+add `base_url` to the committed `.specify/jira/config.yml` and `email` to your
+gitignored `.specify/jira/personal.yml`, exactly as in the macOS step 5 above,
+then run it again. From then on every lifecycle step mirrors on its own.
 
 ## Unattended: CI, containers, and cloud agents
 
@@ -353,7 +355,8 @@ teams:
 
 Which team you personally work in is not a team decision, so it does not live
 in that file. It lives in `.specify/jira/personal.yml`, which is yours and
-gitignored — no script ever writes it:
+gitignored. `/speckit.jira.config` creates it if it is absent and never
+rewrites it afterwards, so anything you put there survives every later run:
 
 ```yaml
 # .specify/jira/personal.yml — yours, gitignored

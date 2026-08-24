@@ -132,7 +132,7 @@ flowchart TB
         T["teams:<br/>id · project · folder_prefix · branch_pattern"]
     end
 
-    subgraph Human["personal.yml — gitignored, human-owned, never written by any script"]
+    subgraph Human["personal.yml — gitignored, human-owned,<br/>created once if absent, never rewritten"]
         S["team: ijt"]
         O["override:<br/>folder_prefix + branch_pattern"]
     end
