@@ -389,7 +389,24 @@ mock_stop
 # documents for the mock's ephemeral port. Recorded here so the caller can
 # normalise it out of stdout before comparing; nothing in this repository
 # reads the file's own content from inside a running scenario.
-printf '%s' "${WORKDIR}" > "${OUTDIR}/workdir.path"
+#
+# On windows-latest this ONE directory has up to three distinct byte
+# spellings, and either port's own output can use any of them: the raw MSYS
+# form `mktemp -d` returns; the physically-resolved form MSYS bash reports
+# once it `cd`s in and calls `pwd -P` (needed for macOS's own /var ->
+# /private/var symlink, [[macos-var-symlink-cross-process-cwd-divergence]] —
+# on Windows this resolves the MSYS /tmp mount instead, giving `/c/Users/...`);
+# and the native form `cygpath -m` (or a freshly-spawned pwsh's own
+# `Get-Location`) reports (`C:\Users\...`). One `wd` value can only ever mask
+# one of these — record every candidate spelling this host can produce, one
+# per line, so the caller masks all of them (a no-op duplicate on
+# macOS/Linux, where they coincide).
+{
+  printf '%s\n' "${WORKDIR}"
+  (cd "${WORKDIR}" 2> /dev/null && pwd -P) || true
+  command -v cygpath > /dev/null 2>&1 && cygpath -m "${WORKDIR}" 2> /dev/null
+  true
+} | sort -u > "${OUTDIR}/workdir.path"
 
 # --- Snapshot the post-run repository tree (written files) -------------------
 rm -rf "${OUTDIR}/workdir"

@@ -208,26 +208,36 @@ _normalize_config_yaml_base_url() {
 export -f _normalize_config_yaml_base_url
 
 # _normalize_workdir_path <outdir> — masks EACH PORT'S OWN randomly-named
-# workdir (031, C1.1/C1.4) wherever it appears literally in stdout or
+# workdir (031, C1.1/C1.4) wherever it appears literally in stdout, stderr, or
 # calls.log. run-scenario.sh gives every port invocation its OWN `mktemp -d`,
 # so a value that legitimately reports an absolute path BENEATH it — the
 # resolved configuration directory a `no-repository`/`config-unloadable`
 # report names, or the `seed_material` file feature.sh writes under it — can
 # never agree across two independent runs even when the run itself is
 # byte-identical. <outdir>/workdir.path is run-scenario.sh's own record of
-# the string being masked (031, T027). Same technique as
-# _normalize_state_base_url, applied to the two OTHER places an absolute
-# path can reach: stdout and calls.log.
+# the string(s) being masked (031, T027) — ONE line per candidate spelling,
+# because on windows-latest the SAME directory can reach a port's own output
+# under up to three different byte spellings (the raw MSYS form, the
+# `pwd -P`-resolved form, and the native `cygpath -m` form — see
+# run-scenario.sh's comment above where it writes this file). Mask every
+# candidate; on macOS/Linux, where they all coincide, the extra passes are
+# harmless no-ops. Same technique as _normalize_state_base_url, applied to
+# the three places an absolute path can reach: stdout, calls.log, and stderr
+# — 031's own diagnostics (FR-009's "path consulted", the --verbose report)
+# land on stderr, and code review (PR #55) found it excluded here while the
+# comparison loop below folded it in, an inconsistency that let a
+# path-bearing divergence on stderr pass silently.
 _normalize_workdir_path() {
   local outdir="$1" wd f
   [ -f "${outdir}/workdir.path" ] || return 0
-  wd="$(cat "${outdir}/workdir.path")"
-  [ -n "${wd}" ] || return 0
-  for f in "${outdir}/stdout" "${outdir}/calls.log"; do
-    [ -f "${f}" ] || continue
-    sed -i.bak "s#${wd}#WORKDIR#g" "${f}" 2> /dev/null
-    rm -f "${f}.bak"
-  done
+  while IFS= read -r wd; do
+    [ -n "${wd}" ] || continue
+    for f in "${outdir}/stdout" "${outdir}/calls.log" "${outdir}/stderr"; do
+      [ -f "${f}" ] || continue
+      sed -i.bak "s#${wd}#WORKDIR#g" "${f}" 2> /dev/null
+      rm -f "${f}.bak"
+    done
+  done < "${outdir}/workdir.path"
 }
 export -f _normalize_workdir_path
 
@@ -247,7 +257,14 @@ run_scenario() {
   _normalize_workdir_path "${out_bash}"
   _normalize_workdir_path "${out_ps}"
   # The observable contract: stdout, exit code, Jira call sequence, and the
-  # written repository tree must be byte-identical across ports.
+  # written repository tree must be byte-identical across ports. stderr is
+  # NOT in this list — measured (code review, PR #55): turning it on for the
+  # whole corpus surfaces 9 PRE-EXISTING, 031-unrelated divergences (e.g. a
+  # credential-resolution warning bash emits that pwsh does not, for the
+  # same scenario, with byte-identical stdout/exit/calls.log either side of
+  # it) that are a separate investigation, not a regression this loop should
+  # gate on. What FR-009 actually requires — a us031-* scenario's own
+  # report, verbatim, on both ports — is asserted narrowly below instead.
   for artifact in stdout exit calls.log; do
     if ! diff -u "${out_bash}/${artifact}" "${out_ps}/${artifact}"; then
       echo "conformance divergence in ${name} (${artifact})"
@@ -255,6 +272,17 @@ run_scenario() {
       failed=1
     fi
   done
+  # 031, FR-009/C5.1 (code review, PR #55): THIS feature's own reports are a
+  # documented byte-identical obligation (tasks.md T015 — "the report is
+  # byte-identical across ports") and they land on stderr, so a corpus that
+  # excludes stderr everywhere could never have caught a divergence in the
+  # one thing 031 actually promises. Scoped to us031-* rather than every
+  # scenario — see the comment above for why the wider net is unsafe today.
+  if [[ "${name}" == us031-* ]] && ! diff -u "${out_bash}/stderr" "${out_ps}/stderr"; then
+    echo "conformance divergence in ${name} (stderr)"
+    detail="${detail}$(byte_diff "stderr" "${out_bash}/stderr" "${out_ps}/stderr")"$'\n'
+    failed=1
+  fi
   _normalize_state_base_url "${out_bash}/workdir"
   _normalize_state_base_url "${out_ps}/workdir"
   _normalize_config_yaml_base_url "${out_bash}/workdir"
