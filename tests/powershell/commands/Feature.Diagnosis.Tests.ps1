@@ -56,7 +56,12 @@ Describe 'Feature command — a broken configuration announces itself (031, US1)
         $r = Invoke-FeatureCaptured @('feature', '--json', 'invoice export')
         $r.ExitCode | Should -Be 0
         ($r.Out.Trim() | ConvertFrom-Json).active | Should -BeFalse
-        $r.Err | Should -Match ([regex]::Escape((Join-Path $env:JIRA_CONFIG_DIR 'config.yml')))
+        # '/'-concatenation, not Join-Path: mirrors what Config.psm1 actually
+        # emits — Join-Path renormalises to the host's own separator and
+        # would pass even if the code regressed to a mixed-separator report
+        # (code review, PR #55; bash's own twin test does the same literal
+        # "${JIRA_CONFIG_DIR}/config.yml" match).
+        $r.Err | Should -Match ([regex]::Escape("$env:JIRA_CONFIG_DIR/config.yml"))
         $r.Err | Should -Match 'cannot parse this line'
         @(Get-JiraMockCallLog -Mock $M | Where-Object { $_ }).Count | Should -Be 0
     }

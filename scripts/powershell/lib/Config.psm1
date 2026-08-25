@@ -1180,18 +1180,24 @@ function Import-JiraConfig {
     param([string] $ConfigDir = (Get-JiraConfigDirPath))
 
     $errors = [System.Collections.Generic.List[string]]::new()
-    # [System.IO.Path]::Combine, not Join-Path and not '/'-concatenation
+    # '/'-concatenation, not Join-Path and not Path.Combine
     # (docs/10-windows-portability.md): $team/$localF reach every located
-    # error message below. Join-Path goes through the FileSystem provider
-    # and renormalises the WHOLE string to the host's separator in both
-    # directions. Plain "$ConfigDir/…" avoids that provider, but $ConfigDir
-    # itself is already natively backslash-spelled here (Resolve-JiraConfigDir
-    # -> [System.IO.Path]::GetFullPath), so appending a literal '/' produces
-    # a MIXED-separator string instead — measured on windows-latest (031 code
-    # review). Path.Combine is a pure string op (no provider) that appends
-    # using the SAME separator $ConfigDir already carries, never mixing.
-    $team = [System.IO.Path]::Combine($ConfigDir, 'config.yml')
-    $localF = [System.IO.Path]::Combine($ConfigDir, 'config.local.yml')
+    # error message below. Join-Path goes through the FileSystem provider and
+    # renormalises the WHOLE string to the host's separator in both
+    # directions. Path.Combine looked like a safer middle ground — it was
+    # tried here (031 code review) on the assumption that $ConfigDir is
+    # always natively backslash-spelled (Resolve-JiraConfigDir ->
+    # [System.IO.Path]::GetFullPath) — but that only holds for the explicit
+    # $env:JIRA_CONFIG_DIR branch. The ancestor-walk/SPECIFY_INIT_DIR
+    # branches append a DELIBERATE forward-slash '.specify/jira' suffix
+    # there, to match the bash port's own spelling (Resolve-JiraConfigDir's
+    # own docstring); Path.Combine's native separator then plants a stray
+    # backslash exactly at that boundary — measured on windows-latest as a
+    # us031-config-unloadable conformance divergence. Plain concatenation
+    # keeps whatever $ConfigDir already is and just appends '/', matching
+    # bash's own "${dir}/config.yml" unconditionally.
+    $team = "$ConfigDir/config.yml"
+    $localF = "$ConfigDir/config.local.yml"
 
     if (-not (Test-Path -LiteralPath $team)) {
         $errors.Add("config: $team not found — run /speckit.jira.config first.")
@@ -1327,11 +1333,11 @@ function Import-JiraPersonalConfig {
         [bool] $SoftLoad = $false
     )
     $errors = [System.Collections.Generic.List[string]]::new()
-    # [System.IO.Path]::Combine, not Join-Path and not '/'-concatenation
-    # (docs/10-windows-portability.md, 031 code review — see the Import-
-    # JiraConfig comment above for the measured mixed-separator failure this
-    # replaces): $pf reaches every located error message below.
-    $pf = [System.IO.Path]::Combine($ConfigDir, 'personal.yml')
+    # '/'-concatenation, not Join-Path and not Path.Combine
+    # (docs/10-windows-portability.md — see the Import-JiraConfig comment
+    # above for why Path.Combine is wrong here too): $pf reaches every
+    # located error message below.
+    $pf = "$ConfigDir/personal.yml"
     $soft = { [pscustomobject]@{ ExitCode = 0; Json = '{"active":false,"state":"personal-unloadable"}'; Errors = $errors } }
     if (-not (Test-Path -LiteralPath $pf)) {
         return [pscustomobject]@{ ExitCode = 0; Json = '{"active":false,"state":"no-personal-file"}'; Errors = $errors }
@@ -1451,7 +1457,7 @@ function Resolve-JiraConnection {
     $cfg = $MergedJson
     if (-not $cfg) {
         $cfg = '{}'
-        $teamPath = [System.IO.Path]::Combine($ConfigDir, 'config.yml')
+        $teamPath = "$ConfigDir/config.yml"
         if (Test-Path -LiteralPath $teamPath) {
             $loaded = Import-JiraConfig -ConfigDir $ConfigDir
             if ($loaded.ExitCode -ne 0) { return [int] $loaded.ExitCode }
@@ -1470,7 +1476,7 @@ function Resolve-JiraConnection {
     # setting refuses the run whether or not the environment would have
     # supplied a valid one") — never gated on whether JIRA_EMAIL happens to
     # be set already. Only the SEEDING of the variable is conditional.
-    $pf = [System.IO.Path]::Combine($ConfigDir, 'personal.yml')
+    $pf = "$ConfigDir/personal.yml"
     if (Test-Path -LiteralPath $pf) {
         if (-not $PersonalJson) {
             # Import-JiraPersonalConfig's return object never carries `email`

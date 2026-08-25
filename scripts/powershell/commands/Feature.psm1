@@ -787,8 +787,20 @@ function Invoke-JiraFeature {
     $noConfigMsg = 'no team configuration found — .specify/jira/config.yml is missing, unreadable, or declares no teams; run /speckit.jira.config to create one'
     $noSelectionMsg = 'no team selected in .specify/jira/personal.yml — that selection is your own and no script writes it for you; run /speckit.jira.config to select one'
 
+    # $dir/config.yml and $dir/personal.yml below: '/'-concatenation, never
+    # Path.Combine or Join-Path (code review, PR #55 — measured on
+    # windows-latest). $dir (Resolve-JiraConfigDir) is not uniformly
+    # separator-spelled: the explicit-JIRA_CONFIG_DIR branch returns a plain
+    # GetFullPath (native, backslash), but the ancestor-walk/SPECIFY_INIT_DIR
+    # branches append a DELIBERATE forward-slash '.specify/jira' suffix (to
+    # match the bash port's own spelling there, Config.psm1's own docstring).
+    # Path.Combine's native separator is only right for the first branch; for
+    # the second it plants a stray backslash exactly at the .../jira boundary
+    # — the one thing conformance's workdir-masking cannot paper over, since
+    # masking only replaces the ROOT, never this suffix.
+    #
     # (1) No committed catalogue at all ⇒ pass-through (FR-017).
-    if (-not (Test-Path -LiteralPath ([System.IO.Path]::Combine($dir, 'config.yml')))) {
+    if (-not (Test-Path -LiteralPath "$dir/config.yml")) {
         if ($hasMention) {
             Write-FeatResult -Payload (ConvertTo-JiraJsonValue ([ordered]@{ active = $false; warnings = @($noConfigMsg) })) -Json $json
         }
@@ -796,7 +808,7 @@ function Invoke-JiraFeature {
             Write-FeatResult -Payload '{"active":false}' -Json $json
         }
         Write-FeatVerboseDiag -Verbose $verbose -State 'no-config-file' -Path $dir `
-            -Hint "create $([System.IO.Path]::Combine($dir, 'config.yml')) with a teams: catalogue to change this"
+            -Hint "create $dir/config.yml with a teams: catalogue to change this"
         return 0
     }
     # 031, research D2: the loader's stderr is no longer discarded here — a
@@ -827,7 +839,7 @@ function Invoke-JiraFeature {
         # doubled FULL Import-JiraConfig D2 rejected.
         $rawTeam = $null
         $rawTeamParsed = $false
-        try { $rawTeam = Read-JiraConfigYamlObject -Path ([System.IO.Path]::Combine($dir, 'config.yml')); $rawTeamParsed = $true } catch { }
+        try { $rawTeam = Read-JiraConfigYamlObject -Path "$dir/config.yml"; $rawTeamParsed = $true } catch { }
         if ($rawTeamParsed -and $null -eq $rawTeam) {
             $merged = (ConvertTo-JiraJsonValue ([ordered]@{})) | ConvertFrom-Json -Depth 100
         }
@@ -887,7 +899,7 @@ function Invoke-JiraFeature {
             Write-FeatResult -Payload '{"active":false}' -Json $json
         }
         Write-FeatVerboseDiag -Verbose $verbose -State 'no-teams' -Path $dir `
-            -Hint "add an entry to teams: in $([System.IO.Path]::Combine($dir, 'config.yml')) to change this"
+            -Hint "add an entry to teams: in $dir/config.yml to change this"
         return 0
     }
 
@@ -899,7 +911,7 @@ function Invoke-JiraFeature {
             Write-FeatResult -Payload '{"active":false}' -Json $json
         }
         Write-FeatVerboseDiag -Verbose $verbose -State 'personal-unloadable' -Path $dir `
-            -Hint "fix the error reported above in $([System.IO.Path]::Combine($dir, 'personal.yml')) to change this"
+            -Hint "fix the error reported above in $dir/personal.yml to change this"
         return 0
     }
 
@@ -912,7 +924,7 @@ function Invoke-JiraFeature {
             Write-FeatResult -Payload '{"active":false}' -Json $json
         }
         Write-FeatVerboseDiag -Verbose $verbose -State $pState -Path $dir `
-            -Hint "select a team in $([System.IO.Path]::Combine($dir, 'personal.yml')) to change this"
+            -Hint "select a team in $dir/personal.yml to change this"
         return 0
     }
 
