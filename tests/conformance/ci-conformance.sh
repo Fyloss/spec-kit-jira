@@ -229,15 +229,34 @@ export -f _normalize_config_yaml_base_url
 # path-bearing divergence on stderr pass silently.
 _normalize_workdir_path() {
   local outdir="$1" wd f
-  [ -f "${outdir}/workdir.path" ] || return 0
-  while IFS= read -r wd; do
-    [ -n "${wd}" ] || continue
-    for f in "${outdir}/stdout" "${outdir}/calls.log" "${outdir}/stderr"; do
-      [ -f "${f}" ] || continue
-      sed -i.bak "s#${wd}#WORKDIR#g" "${f}" 2> /dev/null
-      rm -f "${f}.bak"
-    done
-  done < "${outdir}/workdir.path"
+  if [ -f "${outdir}/workdir.path" ]; then
+    while IFS= read -r wd; do
+      [ -n "${wd}" ] || continue
+      for f in "${outdir}/stdout" "${outdir}/calls.log" "${outdir}/stderr"; do
+        [ -f "${f}" ] || continue
+        sed -i.bak "s#${wd}#WORKDIR#g" "${f}" 2> /dev/null
+        rm -f "${f}.bak"
+      done
+    done < "${outdir}/workdir.path"
+  fi
+  # Fallback pass, unconditional: even the three recorded candidates above
+  # missed a windows-latest divergence (us29-feature-reuse-yes-auto-accept's
+  # seed_material field, code review PR #55) — a natively-spawned pwsh.exe's
+  # own GetFullPath/Get-Location resolved the SAME mktemp -d directory to a
+  # FOURTH byte spelling none of raw/pwd-P/cygpath-m produced (short-name vs
+  # long-name, or a reparse point cygpath's string mapping never queries).
+  # Every conformance scenario resolves its config dir by discovering
+  # `.specify/jira` from the fixture (none sets JIRA_CONFIG_DIR explicitly —
+  # `grep -l JIRA_CONFIG_DIR tests/conformance/scenarios/*.json` is empty),
+  # so the STRUCTURAL pattern is a safer anchor than any enumerated spelling:
+  # collapse whatever path-like prefix immediately precedes `.specify/jira`
+  # (either separator, either side) down to `WORKDIR/.specify/jira`,
+  # regardless of which of the port's own byte spellings produced it.
+  for f in "${outdir}/stdout" "${outdir}/calls.log" "${outdir}/stderr"; do
+    [ -f "${f}" ] || continue
+    sed -i.bak -E 's#[^[:space:]"]*[/\\]\.specify[/\\]jira#WORKDIR/.specify/jira#g' "${f}" 2> /dev/null
+    rm -f "${f}.bak"
+  done
 }
 export -f _normalize_workdir_path
 
