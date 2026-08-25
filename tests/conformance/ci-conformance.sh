@@ -207,6 +207,40 @@ _normalize_config_yaml_base_url() {
 }
 export -f _normalize_config_yaml_base_url
 
+# _bre_escape <literal> — quotes a literal string for use as a sed BRE with
+# `#` as the delimiter.
+#
+# This exists for ONE character: the backslash a native Windows path is spelt
+# with. `sed "s#${wd}#WORKDIR#g"` reads `C:\Users\runneradmin\…\tmp.X` as a
+# PATTERN, and GNU sed honours its own escapes inside one — `\t` becomes a
+# TAB, `\r` a CR, `\U`/`\L`/`\A` are extensions of their own. The pattern that
+# reaches the matcher is therefore not the path, and it matches nothing. That
+# is the silent half of this defect: it makes a candidate spelling fail to
+# mask even when the candidate is exactly right, so four rounds of correcting
+# the SPELLING (e310bf6, d560d10, 745bd27, 71822ff) could not have worked,
+# and the failure looks identical either way — an unmasked path in the diff.
+#
+# Pure bash, no subprocess: this runs once per candidate per capture file,
+# inside the per-scenario fan-out the process budget doc governs
+# (docs/11-process-budget.md).
+_bre_escape() {
+  # Every character a BRE gives a meaning to, plus the `#` this script uses as
+  # the s/// delimiter. Held as a string and tested with a glob-free substring
+  # match, so the backslash never has to appear as a case pattern of its own.
+  local s="$1" out="" c i
+  local specials='\.*[]^$#'
+  for (( i = 0; i < ${#s}; i++ )); do
+    c="${s:i:1}"
+    if [ "${specials#*"${c}"}" != "${specials}" ]; then
+      out="${out}\\${c}"
+    else
+      out="${out}${c}"
+    fi
+  done
+  printf '%s' "${out}"
+}
+export -f _bre_escape
+
 # _normalize_workdir_path <outdir> — masks EACH PORT'S OWN randomly-named
 # workdir (031, C1.1/C1.4) wherever it appears literally in stdout, stderr, or
 # calls.log. run-scenario.sh gives every port invocation its OWN `mktemp -d`,
@@ -217,9 +251,8 @@ export -f _normalize_config_yaml_base_url
 # byte-identical. <outdir>/workdir.path is run-scenario.sh's own record of
 # the string(s) being masked (031, T027) — ONE line per candidate spelling,
 # because on windows-latest the SAME directory can reach a port's own output
-# under up to three different byte spellings (the raw MSYS form, the
-# `pwd -P`-resolved form, and the native `cygpath -m` form — see
-# run-scenario.sh's comment above where it writes this file). Mask every
+# under six different byte spellings (see run-scenario.sh's comment above
+# where it writes this file for the three axes they vary along). Mask every
 # candidate; on macOS/Linux, where they all coincide, the extra passes are
 # harmless no-ops. Same technique as _normalize_state_base_url, applied to
 # the three places an absolute path can reach: stdout, calls.log, and stderr
@@ -228,46 +261,46 @@ export -f _normalize_config_yaml_base_url
 # comparison loop below folded it in, an inconsistency that let a
 # path-bearing divergence on stderr pass silently.
 _normalize_workdir_path() {
-  local outdir="$1" wd f
+  local outdir="$1" wd form f
   if [ -f "${outdir}/workdir.path" ]; then
     while IFS= read -r wd; do
       [ -n "${wd}" ] || continue
-      for f in "${outdir}/stdout" "${outdir}/calls.log" "${outdir}/stderr"; do
-        [ -f "${f}" ] || continue
-        sed -i.bak "s#${wd}#WORKDIR#g" "${f}" 2> /dev/null
-        rm -f "${f}.bak"
+      # Each spelling in TWO encodings. stdout is JSON, and a native Windows
+      # path inside a JSON string has every separator DOUBLED — the port
+      # reports `C:\Users\…\tmp.X`, the capture holds `C:\\Users\\…\\tmp.X`,
+      # and the raw candidate matches neither the doubled text nor anything
+      # else. Measured on a real Windows host against
+      # us29-feature-reuse-yes-auto-accept's `seed_material`, where the
+      # structural fallback below then masked only the tail of the path (it
+      # stops at the space in the home directory) and produced a divergence
+      # that LOOKED like a fifth unrecorded spelling. A path with no backslash
+      # in it — every POSIX one, and the mixed `C:/…` form — has two identical
+      # forms, and the second pass then finds nothing left to match.
+      for form in "${wd}" "${wd//\\/\\\\}"; do
+        for f in "${outdir}/stdout" "${outdir}/calls.log" "${outdir}/stderr"; do
+          [ -f "${f}" ] || continue
+          sed -i.bak "s#$(_bre_escape "${form}")#WORKDIR#g" "${f}" 2> /dev/null
+          rm -f "${f}.bak"
+        done
       done
     done < "${outdir}/workdir.path"
   fi
-  # Fallback pass, unconditional: even the three recorded candidates above
-  # missed a windows-latest divergence (us29-feature-reuse-yes-auto-accept's
-  # seed_material field, code review PR #55) — a natively-spawned pwsh.exe's
-  # own GetFullPath/Get-Location resolved the SAME mktemp -d directory to a
-  # FOURTH byte spelling none of raw/pwd-P/cygpath-m produced (short-name vs
-  # long-name, or a reparse point cygpath's string mapping never queries).
-  # Every conformance scenario resolves its config dir by discovering
-  # `.specify/jira` from the fixture (none sets JIRA_CONFIG_DIR explicitly —
-  # `grep -l JIRA_CONFIG_DIR tests/conformance/scenarios/*.json` is empty),
-  # so the STRUCTURAL pattern is a safer anchor than any enumerated spelling:
-  # collapse whatever path-like prefix immediately precedes `.specify/jira`
-  # (either separator, either side) down to `WORKDIR/.specify/jira`,
-  # regardless of which of the port's own byte spellings produced it.
+  # Fallback pass, unconditional: every conformance scenario resolves its
+  # config dir by discovering `.specify/jira` from the fixture (none sets
+  # JIRA_CONFIG_DIR explicitly — `grep -l JIRA_CONFIG_DIR
+  # tests/conformance/scenarios/*.json` is empty), so for the paths that DO
+  # carry that suffix a structural anchor holds regardless of which byte
+  # spelling produced it: collapse whatever path-like prefix immediately
+  # precedes `.specify/jira` (either separator, either side) down to
+  # `WORKDIR/.specify/jira`. Kept as a net under the enumerated candidates,
+  # not as a substitute for them — it cannot see a workdir reported bare
+  # (us031-no-project, FR-008's no-repository state), and its `[^[:space:]"]*`
+  # prefix stops at the first space, so on a host whose temp directory sits
+  # under a home directory with a space in it, it masks only the tail. The
+  # candidate list above is what has to be right.
   for f in "${outdir}/stdout" "${outdir}/calls.log" "${outdir}/stderr"; do
     [ -f "${f}" ] || continue
     sed -i.bak -E 's#[^[:space:]"]*[/\\]\.specify[/\\]jira#WORKDIR/.specify/jira#g' "${f}" 2> /dev/null
-    rm -f "${f}.bak"
-  done
-  # us031-no-project (FR-008, the no-repository state) has no .specify/jira
-  # suffix to anchor on at all — the reported path IS the bare workdir, and
-  # the fourth candidate above still didn't cover it on windows-latest.
-  # Feature.psm1/feature.sh both spell this ONE message identically
-  # ("... no ancestor of <path> contains .specify/ ..."), so masking the
-  # exact template is a safe, narrow anchor of last resort — narrower than
-  # the .specify/jira structural pass above, but the message text itself
-  # (not a path guess) is what's stable here.
-  for f in "${outdir}/stdout" "${outdir}/calls.log" "${outdir}/stderr"; do
-    [ -f "${f}" ] || continue
-    sed -i.bak -E 's#no ancestor of [^[:space:]"]* contains#no ancestor of WORKDIR contains#g' "${f}" 2> /dev/null
     rm -f "${f}.bak"
   done
 }

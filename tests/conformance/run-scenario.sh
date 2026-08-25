@@ -390,46 +390,43 @@ mock_stop
 # normalise it out of stdout before comparing; nothing in this repository
 # reads the file's own content from inside a running scenario.
 #
-# On windows-latest this ONE directory has up to three distinct byte
-# spellings, and either port's own output can use any of them: the raw MSYS
-# form `mktemp -d` returns; the physically-resolved form MSYS bash reports
-# once it `cd`s in and calls `pwd -P` (needed for macOS's own /var ->
-# /private/var symlink, [[macos-var-symlink-cross-process-cwd-divergence]] —
-# on Windows this resolves the MSYS /tmp mount instead, giving `/c/Users/...`);
-# and the native form `cygpath -m` reports (`C:\Users\...`). One `wd` value
-# can only ever mask one of these — record every candidate spelling this
-# host can produce, one per line, so the caller masks all of them (a no-op
-# duplicate on macOS/Linux, where they coincide).
+# On windows-latest this ONE directory has SIX distinct byte spellings, and
+# either port's own output can use any of them. They vary along three
+# independent axes, and a candidate list that fixes one axis while leaving
+# another free is how this defect survived four remote round-trips:
 #
-# A fourth: `cygpath -m`'s string-mapping and a NATIVELY-SPAWNED pwsh.exe's
-# own GetFullPath/Get-Location measured DIFFERENT bytes for the identical
-# mktemp -d directory on windows-latest (code review, PR #55 —
-# us031-no-project, no .specify/jira suffix to anchor a structural mask on,
-# unlike the config-dir cases) — cygpath's mapping never queries the actual
-# filesystem, so it cannot know whatever pwsh.exe's own resolution does
-# (short-vs-long name, a reparse point, or similar). Asking pwsh itself,
-# from the SAME directory via the SAME cd a real invocation uses, is the one
-# candidate that cannot mismatch what pwsh reports, because it IS what pwsh
-# reports.
+#   syntax     MSYS (`/tmp/tmp.X`) | mixed (`C:/…`, cygpath -m) |
+#              native (`C:\…`, cygpath -w) — the Bash port reports the MSYS
+#              form, the PowerShell port the NATIVE one, and until now only
+#              the mixed form was recorded, so the two spellings that
+#              actually reach a capture were the two nobody masked.
+#   name form  short (`C:\Users\RUNNER~1\…`, what the /tmp mount is
+#              registered as, because Windows sets %TEMP% to the 8.3 form)
+#              vs long (`C:\Users\runneradmin\…`, what a natively-spawned
+#              pwsh.exe's own Get-Location resolves the SAME directory to).
+#              cygpath spells either on demand: `-l` / `-s`.
+#   physical   the `pwd -P` form MSYS bash reports once it `cd`s in — needed
+#              for macOS's own /var -> /private/var symlink,
+#              [[macos-var-symlink-cross-process-cwd-divergence]]; on Windows
+#              it resolves the MSYS /tmp mount instead, giving `/c/Users/…`.
+#
+# One `wd` value can only ever mask one spelling, so record every candidate
+# this host can produce, one per line, and let the caller mask all of them
+# (`sort -u` collapses them to a single no-op line on macOS/Linux, where they
+# all coincide).
+#
+# `cygpath -wl`, not a spawned pwsh, is what settles the long-name axis:
+# measured on a real Windows host, it reproduces `(Get-Location).Path` byte
+# for byte — including a home directory carrying BOTH an 8.3 alias and a
+# space — for a fraction of the cost of a pwsh start-up per scenario, on the
+# host where this corpus is already the whole job's wall clock.
 {
   printf '%s\n' "${WORKDIR}"
   (cd "${WORKDIR}" 2> /dev/null && pwd -P) || true
-  command -v cygpath > /dev/null 2>&1 && cygpath -m "${WORKDIR}" 2> /dev/null
-  # `-Command '(Get-Location).Path'`, tried first, never showed up as a
-  # candidate on windows-latest (code review, PR #55, still failing after
-  # the fix above) — consistent with the SAME MSYS argv-mangling this file's
-  # own header warns about (a `-File <path>` with NO trailing arguments is
-  # the one invocation shape proven immune, and is what the real invocation
-  # already uses). A tiny throwaway .ps1, `-File`d with no other argv, sidesteps it.
-  if command -v pwsh > /dev/null 2>&1; then
-    _getloc_ps1="$(mktemp)"
-    printf '(Get-Location).Path\n' > "${_getloc_ps1}"
-    if command -v cygpath > /dev/null 2>&1; then
-      (cd "${WORKDIR}" 2> /dev/null && pwsh -NoProfile -File "$(cygpath -w "${_getloc_ps1}")" 2> /dev/null) || true
-    else
-      (cd "${WORKDIR}" 2> /dev/null && pwsh -NoProfile -File "${_getloc_ps1}" 2> /dev/null) || true
-    fi
-    rm -f "${_getloc_ps1}"
+  if command -v cygpath > /dev/null 2>&1; then
+    for _spelling in -m -w -ml -wl -ms -ws; do
+      cygpath "${_spelling}" "${WORKDIR}" 2> /dev/null || true
+    done
   fi
   true
 } | sort -u > "${OUTDIR}/workdir.path"
