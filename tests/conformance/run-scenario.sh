@@ -396,15 +396,27 @@ mock_stop
 # once it `cd`s in and calls `pwd -P` (needed for macOS's own /var ->
 # /private/var symlink, [[macos-var-symlink-cross-process-cwd-divergence]] —
 # on Windows this resolves the MSYS /tmp mount instead, giving `/c/Users/...`);
-# and the native form `cygpath -m` (or a freshly-spawned pwsh's own
-# `Get-Location`) reports (`C:\Users\...`). One `wd` value can only ever mask
-# one of these — record every candidate spelling this host can produce, one
-# per line, so the caller masks all of them (a no-op duplicate on
-# macOS/Linux, where they coincide).
+# and the native form `cygpath -m` reports (`C:\Users\...`). One `wd` value
+# can only ever mask one of these — record every candidate spelling this
+# host can produce, one per line, so the caller masks all of them (a no-op
+# duplicate on macOS/Linux, where they coincide).
+#
+# A fourth: `cygpath -m`'s string-mapping and a NATIVELY-SPAWNED pwsh.exe's
+# own GetFullPath/Get-Location measured DIFFERENT bytes for the identical
+# mktemp -d directory on windows-latest (code review, PR #55 —
+# us031-no-project, no .specify/jira suffix to anchor a structural mask on,
+# unlike the config-dir cases) — cygpath's mapping never queries the actual
+# filesystem, so it cannot know whatever pwsh.exe's own resolution does
+# (short-vs-long name, a reparse point, or similar). Asking pwsh itself,
+# from the SAME directory via the SAME cd a real invocation uses, is the one
+# candidate that cannot mismatch what pwsh reports, because it IS what pwsh
+# reports.
 {
   printf '%s\n' "${WORKDIR}"
   (cd "${WORKDIR}" 2> /dev/null && pwd -P) || true
   command -v cygpath > /dev/null 2>&1 && cygpath -m "${WORKDIR}" 2> /dev/null
+  command -v pwsh > /dev/null 2>&1 \
+    && (cd "${WORKDIR}" 2> /dev/null && pwsh -NoProfile -Command '(Get-Location).Path' 2> /dev/null) || true
   true
 } | sort -u > "${OUTDIR}/workdir.path"
 
