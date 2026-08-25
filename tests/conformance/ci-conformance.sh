@@ -257,6 +257,19 @@ _normalize_workdir_path() {
     sed -i.bak -E 's#[^[:space:]"]*[/\\]\.specify[/\\]jira#WORKDIR/.specify/jira#g' "${f}" 2> /dev/null
     rm -f "${f}.bak"
   done
+  # us031-no-project (FR-008, the no-repository state) has no .specify/jira
+  # suffix to anchor on at all — the reported path IS the bare workdir, and
+  # the fourth candidate above still didn't cover it on windows-latest.
+  # Feature.psm1/feature.sh both spell this ONE message identically
+  # ("... no ancestor of <path> contains .specify/ ..."), so masking the
+  # exact template is a safe, narrow anchor of last resort — narrower than
+  # the .specify/jira structural pass above, but the message text itself
+  # (not a path guess) is what's stable here.
+  for f in "${outdir}/stdout" "${outdir}/calls.log" "${outdir}/stderr"; do
+    [ -f "${f}" ] || continue
+    sed -i.bak -E 's#no ancestor of [^[:space:]"]* contains#no ancestor of WORKDIR contains#g' "${f}" 2> /dev/null
+    rm -f "${f}.bak"
+  done
 }
 export -f _normalize_workdir_path
 
@@ -288,6 +301,13 @@ run_scenario() {
     if ! diff -u "${out_bash}/${artifact}" "${out_ps}/${artifact}"; then
       echo "conformance divergence in ${name} (${artifact})"
       detail="${detail}$(byte_diff "${artifact}" "${out_bash}/${artifact}" "${out_ps}/${artifact}")"$'\n'
+      # Diagnostic of last resort (code review, PR #55): if the workdir
+      # masking above missed this port's own byte spelling AGAIN, the next
+      # thing to know is what candidates run-scenario.sh actually recorded
+      # for it — never guess a fifth one blind.
+      if [ -f "${out_ps}/workdir.path" ]; then
+        detail="${detail}  pwsh workdir.path candidates: $(tr '\n' '|' < "${out_ps}/workdir.path")"$'\n'
+      fi
       failed=1
     fi
   done

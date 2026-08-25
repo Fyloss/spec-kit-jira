@@ -415,8 +415,22 @@ mock_stop
   printf '%s\n' "${WORKDIR}"
   (cd "${WORKDIR}" 2> /dev/null && pwd -P) || true
   command -v cygpath > /dev/null 2>&1 && cygpath -m "${WORKDIR}" 2> /dev/null
-  command -v pwsh > /dev/null 2>&1 \
-    && (cd "${WORKDIR}" 2> /dev/null && pwsh -NoProfile -Command '(Get-Location).Path' 2> /dev/null) || true
+  # `-Command '(Get-Location).Path'`, tried first, never showed up as a
+  # candidate on windows-latest (code review, PR #55, still failing after
+  # the fix above) — consistent with the SAME MSYS argv-mangling this file's
+  # own header warns about (a `-File <path>` with NO trailing arguments is
+  # the one invocation shape proven immune, and is what the real invocation
+  # already uses). A tiny throwaway .ps1, `-File`d with no other argv, sidesteps it.
+  if command -v pwsh > /dev/null 2>&1; then
+    _getloc_ps1="$(mktemp)"
+    printf '(Get-Location).Path\n' > "${_getloc_ps1}"
+    if command -v cygpath > /dev/null 2>&1; then
+      (cd "${WORKDIR}" 2> /dev/null && pwsh -NoProfile -File "$(cygpath -w "${_getloc_ps1}")" 2> /dev/null) || true
+    else
+      (cd "${WORKDIR}" 2> /dev/null && pwsh -NoProfile -File "${_getloc_ps1}" 2> /dev/null) || true
+    fi
+    rm -f "${_getloc_ps1}"
+  fi
   true
 } | sort -u > "${OUTDIR}/workdir.path"
 
