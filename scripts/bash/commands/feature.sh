@@ -650,6 +650,20 @@ _feat_emit() {
   fi
 }
 
+# _feat_verbose_diag <verbose-flag> <state> <path> <hint> — the on-request
+# diagnostic (031, US3, contract C4.1): which resolution state produced this
+# pass-through, the absolute path it consulted, and what would change it.
+# Emitted to stderr, and ONLY when <verbose-flag> is "true" — the default and
+# `--json` payloads never gain a line or a key for this (C4.2). A no-op call
+# on the active path costs nothing worth guarding separately.
+_feat_verbose_diag() {
+  local verbose="$1" state="$2" path="$3" hint="$4"
+  [[ "${verbose}" == "true" ]] || return 0
+  printf 'feature: resolution state: %s\n' "${state}" >&2
+  printf 'feature: path consulted: %s\n' "${path}" >&2
+  printf 'feature: %s\n' "${hint}" >&2
+}
+
 # _feat_render_prose <json> — render the feature result as human prose (the
 # default output). The payload is feature-shaped (contracts/
 # feature-cli-contract.md) — never a run summary, so the run-summary renderer
@@ -687,7 +701,7 @@ _feat_render_prose() {
 # returns the exit code.
 cmd_feature() {
   local parsed json="false" dry_run="false" args="" use_team="" exit_code="0" error=""
-  local parent_seen="false" parent="" stories="" reuse="" accept_defaults="false"
+  local parent_seen="false" parent="" stories="" reuse="" accept_defaults="false" verbose="false"
   parsed="$(cli_parse "$@")"
   while IFS='=' read -r key value; do
     case "${key}" in
@@ -702,6 +716,7 @@ cmd_feature() {
       parent_seen) parent_seen="${value}" ;;
       parent) parent="${value}" ;;
       stories) stories="${value}" ;;
+      verbose) verbose="${value}" ;;
     esac
   done <<< "${parsed}"
   if [[ "${exit_code}" != "0" ]]; then
@@ -744,7 +759,31 @@ cmd_feature() {
     return "$(cli_exit_code usage)"
   fi
 
-  local dir="${JIRA_CONFIG_DIR:-.specify/jira}"
+  # (0) Configuration directory (031, FR-007/FR-014, contract C1.1): an
+  # explicit JIRA_CONFIG_DIR, then SPECIFY_INIT_DIR, then the nearest
+  # ancestor of the working directory carrying .specify/ — REPLACING the
+  # relative ".specify/jira" fallback, never supplementing it. When neither
+  # override is set and no ancestor qualifies, this is reported unconditionally
+  # (not gated on has_mention — C1.4) rather than passed through in silence.
+  local dir start_dir resolution_state=""
+  # pwd -P: the physical, symlink-resolved cwd — matches config_resolve_dir's
+  # own spelling and the PowerShell twin's cross-process cwd (C5.1; see
+  # _cfg_absolutize's comment in lib/config.sh for why plain `pwd` diverges
+  # on macOS).
+  start_dir="$(pwd -P)"
+  if ! dir="$(config_resolve_dir)"; then
+    printf 'feature: no project found — no ancestor of %s contains .specify/; naming falls back to the host default\n' \
+      "${start_dir}" >&2
+    _feat_verbose_diag "${verbose}" "no-repository" "${start_dir}" \
+      "create .specify/ above the working directory, or set JIRA_CONFIG_DIR, to change this"
+    _feat_emit '{"active":false}' "${json}"
+    return 0
+  fi
+  # FR-016: the resolved directory governs run-state and seed-state as well
+  # (lib/run_state.sh, lib/seed_state.sh read JIRA_CONFIG_DIR directly) — a
+  # SINGLE export here, before anything downstream reads it, is what keeps
+  # `state/` under the same directory as the two configuration files.
+  export JIRA_CONFIG_DIR="${dir}"
 
   # 029, contract feature-question-contract.md §5 (FR-026-FR-028, research
   # R5): a mentioned ticket met with silence is the same defect class one
@@ -756,57 +795,135 @@ cmd_feature() {
 
   # (1) No committed catalogue at all ⇒ pass-through (FR-017).
   if [[ ! -f "${dir}/config.yml" ]]; then
+    resolution_state="no-config-file"
     if [[ "${has_mention}" == "true" ]]; then
       _feat_emit "$(jq -cn --arg w "${no_config_msg}" '{active:false, warnings:[$w]}')" "${json}"
     else
       _feat_emit '{"active":false}' "${json}"
     fi
+    _feat_verbose_diag "${verbose}" "${resolution_state}" "${dir}" \
+      "create ${dir}/config.yml with a teams: catalogue to change this"
     return 0
   fi
   local merged
-  if ! merged="$(config_load "${dir}" 2> /dev/null)"; then
-    if [[ "${has_mention}" == "true" ]]; then
-      _feat_emit "$(jq -cn --arg w "${no_config_msg}" '{active:false, warnings:[$w]}')" "${json}"
+  # 031, research D2: the loader's stderr is no longer discarded here — a
+  # present-but-unloadable config.yml is REPORTED (FR-001/FR-002, C2.1),
+  # whether or not a ticket was mentioned; the JSON payload below is
+  # unaffected either way (C4.2). Called ONCE: the common (successful) path
+  # pays exactly this one parse, never two (code review). config_load prints
+  # its located error as a SIDE EFFECT of parsing — unconditionally, before
+  # this function ever gets to decide whether the cause was "genuinely
+  # empty" (silent, below) or "genuinely broken" (reported) — so its stderr
+  # is captured here, not streamed live, and only replayed on the branch
+  # that actually needs it (an earlier version streamed it live and leaked
+  # a schema report for an empty file, code review caught it in testing).
+  local config_err_file
+  config_err_file="$(mktemp)"
+  if ! merged="$(config_load "${dir}" 2> "${config_err_file}")"; then
+    # An empty config.yml — 0 bytes, or comments-only, parsing to YAML's own
+    # "empty document" — carries no statement from its author (FR-006,
+    # C2.5): treated exactly like a valid catalogue declaring zero teams,
+    # never as a load failure. config_load's OWN empty-document coercion
+    # (null -> {}) happens too late to help here — a coerced {} still fails
+    # config.yml's schema (`projects must be a non-empty array`), correct
+    # for a NON-empty file missing that key but wrong for no content at all.
+    # A cheap raw re-parse, on this (rare) failure path only, is what
+    # research D2 already accepted; it is never the doubled FULL config_load
+    # D2 rejected.
+    local raw_team
+    if raw_team="$(config_yaml_to_json "${dir}/config.yml" 2> /dev/null)" && [[ "${raw_team}" == "null" ]]; then
+      merged='{}'
+      rm -f "${config_err_file}"
     else
-      _feat_emit '{"active":false}' "${json}"
+      resolution_state="config-unloadable"
+      cat "${config_err_file}" >&2
+      rm -f "${config_err_file}"
+      if [[ "${has_mention}" == "true" ]]; then
+        _feat_emit "$(jq -cn --arg w "${no_config_msg}" '{active:false, warnings:[$w]}')" "${json}"
+      else
+        _feat_emit '{"active":false}' "${json}"
+      fi
+      # config_load validates config.yml AND config.local.yml — the located
+      # error above already names whichever layer actually failed, so the
+      # hint names the directory, never a filename that may not be the one
+      # that broke (code review).
+      _feat_verbose_diag "${verbose}" "${resolution_state}" "${dir}" \
+        "fix the configuration error reported above in ${dir} to change this"
+      return 0
     fi
-    return 0
+  else
+    rm -f "${config_err_file}"
   fi
+
+  # (2) Personal selection (human-owned; validated; never written), checked
+  # NOW — before team_count, not after. A personal.yml that structurally
+  # fails to load is reported and passed through (FR-013, C3.3), but a
+  # WELL-FORMED file selecting a team absent from the catalogue still fails
+  # closed (FR-017: "that behaviour is unchanged") EVEN WHEN the catalogue
+  # is empty — exactly the scenario this ordering exists to reach. Checking
+  # this after team_count would let the zero-teams silence below swallow
+  # that located error (code review).
+  local personal personal_rc
+  personal="$(config_personal_load "${dir}" "${merged}" "true")"
+  personal_rc=$?
+  # NOT `if ! personal="$(...)"; then return $?; fi` — `!` inverts the exit
+  # status bash reports for the compound command itself, so `$?` inside that
+  # `then` block reads 0, not the failing call's real code (verified: this
+  # exact shape silently turned the FR-017 hard-fail below into an exit-0
+  # no-op, code review caught the SYMPTOM and this fixes the actual cause).
+  if [[ "${personal_rc}" -ne 0 ]]; then
+    return "${personal_rc}"
+  fi
+  local p_active p_team p_override p_state
+  p_active="$(jq -r '.active' <<< "${personal}")"
+  p_team="$(jq -r '.team // ""' <<< "${personal}")"
+  p_override="$(jq -c '.override // null' <<< "${personal}")"
+  p_state="$(jq -r '.state // ""' <<< "${personal}")"
 
   # The resolution chokepoint (030, contracts/connection-settings.md C1.5):
   # seed SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL, environment first, using the
-  # `merged` config JUST validated above — no second config_load, and no
-  # second base_url validation to silently contradict the pass-through
-  # treatment a malformed config.yml already received a few lines up.
-  config_resolve_connection "${dir}" "${merged}" || return $?
+  # `merged` config and the `personal` result JUST computed above — no
+  # second config_load, no second config_personal_load, and no second
+  # base_url/personal validation to silently contradict the pass-through
+  # treatment a malformed file already received a few lines up.
+  config_resolve_connection "${dir}" "${merged}" "${personal}" || return $?
 
   local team_count
   team_count="$(jq -r '(.teams // []) | length' <<< "${merged}")"
   if [[ "${team_count}" -eq 0 ]]; then
+    resolution_state="no-teams"
     if [[ "${has_mention}" == "true" ]]; then
       _feat_emit "$(jq -cn --arg w "${no_config_msg}" '{active:false, warnings:[$w]}')" "${json}"
     else
       _feat_emit '{"active":false}' "${json}"
     fi
+    _feat_verbose_diag "${verbose}" "${resolution_state}" "${dir}" \
+      "add an entry to teams: in ${dir}/config.yml to change this"
     return 0
   fi
 
-  # (2) Personal selection (human-owned; validated; never written). An invalid
-  #     file fails closed with a located error (exit 4).
-  local personal
-  personal="$(config_personal_load "${dir}" "${merged}")" || return $?
-  local p_active p_team p_override
-  p_active="$(jq -r '.active' <<< "${personal}")"
-  p_team="$(jq -r '.team // ""' <<< "${personal}")"
-  p_override="$(jq -c '.override // null' <<< "${personal}")"
-
-  # No selection and no cross-team answer ⇒ pass-through (FR-017).
-  if [[ "${p_active}" != "true" && -z "${use_team}" ]]; then
+  if [[ "${p_state}" == "personal-unloadable" ]]; then
+    resolution_state="personal-unloadable"
     if [[ "${has_mention}" == "true" ]]; then
       _feat_emit "$(jq -cn --arg w "${no_selection_msg}" '{active:false, warnings:[$w]}')" "${json}"
     else
       _feat_emit '{"active":false}' "${json}"
     fi
+    _feat_verbose_diag "${verbose}" "${resolution_state}" "${dir}" \
+      "fix the error reported above in ${dir}/personal.yml to change this"
+    return 0
+  fi
+
+  # No selection and no cross-team answer ⇒ pass-through (FR-017).
+  if [[ "${p_active}" != "true" && -z "${use_team}" ]]; then
+    resolution_state="${p_state}"
+    if [[ "${has_mention}" == "true" ]]; then
+      _feat_emit "$(jq -cn --arg w "${no_selection_msg}" '{active:false, warnings:[$w]}')" "${json}"
+    else
+      _feat_emit '{"active":false}' "${json}"
+    fi
+    _feat_verbose_diag "${verbose}" "${resolution_state}" "${dir}" \
+      "select a team in ${dir}/personal.yml to change this"
     return 0
   fi
 

@@ -207,6 +207,105 @@ _normalize_config_yaml_base_url() {
 }
 export -f _normalize_config_yaml_base_url
 
+# _bre_escape <literal> — quotes a literal string for use as a sed BRE with
+# `#` as the delimiter.
+#
+# This exists for ONE character: the backslash a native Windows path is spelt
+# with. `sed "s#${wd}#WORKDIR#g"` reads `C:\Users\runneradmin\…\tmp.X` as a
+# PATTERN, and GNU sed honours its own escapes inside one — `\t` becomes a
+# TAB, `\r` a CR, `\U`/`\L`/`\A` are extensions of their own. The pattern that
+# reaches the matcher is therefore not the path, and it matches nothing. That
+# is the silent half of this defect: it makes a candidate spelling fail to
+# mask even when the candidate is exactly right, so four rounds of correcting
+# the SPELLING (e310bf6, d560d10, 745bd27, 71822ff) could not have worked,
+# and the failure looks identical either way — an unmasked path in the diff.
+#
+# Pure bash, no subprocess: this runs once per candidate per capture file,
+# inside the per-scenario fan-out the process budget doc governs
+# (docs/11-process-budget.md).
+_bre_escape() {
+  # Every character a BRE gives a meaning to, plus the `#` this script uses as
+  # the s/// delimiter. Held as a string and tested with a glob-free substring
+  # match, so the backslash never has to appear as a case pattern of its own.
+  local s="$1" out="" c i
+  local specials='\.*[]^$#'
+  for (( i = 0; i < ${#s}; i++ )); do
+    c="${s:i:1}"
+    if [ "${specials#*"${c}"}" != "${specials}" ]; then
+      out="${out}\\${c}"
+    else
+      out="${out}${c}"
+    fi
+  done
+  printf '%s' "${out}"
+}
+export -f _bre_escape
+
+# _normalize_workdir_path <outdir> — masks EACH PORT'S OWN randomly-named
+# workdir (031, C1.1/C1.4) wherever it appears literally in stdout, stderr, or
+# calls.log. run-scenario.sh gives every port invocation its OWN `mktemp -d`,
+# so a value that legitimately reports an absolute path BENEATH it — the
+# resolved configuration directory a `no-repository`/`config-unloadable`
+# report names, or the `seed_material` file feature.sh writes under it — can
+# never agree across two independent runs even when the run itself is
+# byte-identical. <outdir>/workdir.path is run-scenario.sh's own record of
+# the string(s) being masked (031, T027) — ONE line per candidate spelling,
+# because on windows-latest the SAME directory can reach a port's own output
+# under six different byte spellings (see run-scenario.sh's comment above
+# where it writes this file for the three axes they vary along). Mask every
+# candidate; on macOS/Linux, where they all coincide, the extra passes are
+# harmless no-ops. Same technique as _normalize_state_base_url, applied to
+# the three places an absolute path can reach: stdout, calls.log, and stderr
+# — 031's own diagnostics (FR-009's "path consulted", the --verbose report)
+# land on stderr, and code review (PR #55) found it excluded here while the
+# comparison loop below folded it in, an inconsistency that let a
+# path-bearing divergence on stderr pass silently.
+_normalize_workdir_path() {
+  local outdir="$1" wd form f
+  if [ -f "${outdir}/workdir.path" ]; then
+    while IFS= read -r wd; do
+      [ -n "${wd}" ] || continue
+      # Each spelling in TWO encodings. stdout is JSON, and a native Windows
+      # path inside a JSON string has every separator DOUBLED — the port
+      # reports `C:\Users\…\tmp.X`, the capture holds `C:\\Users\\…\\tmp.X`,
+      # and the raw candidate matches neither the doubled text nor anything
+      # else. Measured on a real Windows host against
+      # us29-feature-reuse-yes-auto-accept's `seed_material`, where the
+      # structural fallback below then masked only the tail of the path (it
+      # stops at the space in the home directory) and produced a divergence
+      # that LOOKED like a fifth unrecorded spelling. A path with no backslash
+      # in it — every POSIX one, and the mixed `C:/…` form — has two identical
+      # forms, and the second pass then finds nothing left to match.
+      for form in "${wd}" "${wd//\\/\\\\}"; do
+        for f in "${outdir}/stdout" "${outdir}/calls.log" "${outdir}/stderr"; do
+          [ -f "${f}" ] || continue
+          sed -i.bak "s#$(_bre_escape "${form}")#WORKDIR#g" "${f}" 2> /dev/null
+          rm -f "${f}.bak"
+        done
+      done
+    done < "${outdir}/workdir.path"
+  fi
+  # Fallback pass, unconditional: every conformance scenario resolves its
+  # config dir by discovering `.specify/jira` from the fixture (none sets
+  # JIRA_CONFIG_DIR explicitly — `grep -l JIRA_CONFIG_DIR
+  # tests/conformance/scenarios/*.json` is empty), so for the paths that DO
+  # carry that suffix a structural anchor holds regardless of which byte
+  # spelling produced it: collapse whatever path-like prefix immediately
+  # precedes `.specify/jira` (either separator, either side) down to
+  # `WORKDIR/.specify/jira`. Kept as a net under the enumerated candidates,
+  # not as a substitute for them — it cannot see a workdir reported bare
+  # (us031-no-project, FR-008's no-repository state), and its `[^[:space:]"]*`
+  # prefix stops at the first space, so on a host whose temp directory sits
+  # under a home directory with a space in it, it masks only the tail. The
+  # candidate list above is what has to be right.
+  for f in "${outdir}/stdout" "${outdir}/calls.log" "${outdir}/stderr"; do
+    [ -f "${f}" ] || continue
+    sed -i.bak -E 's#[^[:space:]"]*[/\\]\.specify[/\\]jira#WORKDIR/.specify/jira#g' "${f}" 2> /dev/null
+    rm -f "${f}.bak"
+  done
+}
+export -f _normalize_workdir_path
+
 # Scenarios are independent (each gets its own mktemp workdir and an
 # OS-assigned ephemeral mock port, per run-scenario.sh), so they run
 # concurrently across cores instead of one after another. xargs -P exits 123
@@ -220,15 +319,42 @@ run_scenario() {
   out_ps="$(mktemp -d)"
   "${harness}" "${scenario}" bash "${out_bash}"
   "${harness}" "${scenario}" powershell "${out_ps}"
+  _normalize_workdir_path "${out_bash}"
+  _normalize_workdir_path "${out_ps}"
   # The observable contract: stdout, exit code, Jira call sequence, and the
-  # written repository tree must be byte-identical across ports.
+  # written repository tree must be byte-identical across ports. stderr is
+  # NOT in this list — measured (code review, PR #55): turning it on for the
+  # whole corpus surfaces 9 PRE-EXISTING, 031-unrelated divergences (e.g. a
+  # credential-resolution warning bash emits that pwsh does not, for the
+  # same scenario, with byte-identical stdout/exit/calls.log either side of
+  # it) that are a separate investigation, not a regression this loop should
+  # gate on. What FR-009 actually requires — a us031-* scenario's own
+  # report, verbatim, on both ports — is asserted narrowly below instead.
   for artifact in stdout exit calls.log; do
     if ! diff -u "${out_bash}/${artifact}" "${out_ps}/${artifact}"; then
       echo "conformance divergence in ${name} (${artifact})"
       detail="${detail}$(byte_diff "${artifact}" "${out_bash}/${artifact}" "${out_ps}/${artifact}")"$'\n'
+      # Diagnostic of last resort (code review, PR #55): if the workdir
+      # masking above missed this port's own byte spelling AGAIN, the next
+      # thing to know is what candidates run-scenario.sh actually recorded
+      # for it — never guess a fifth one blind.
+      if [ -f "${out_ps}/workdir.path" ]; then
+        detail="${detail}  pwsh workdir.path candidates: $(tr '\n' '|' < "${out_ps}/workdir.path")"$'\n'
+      fi
       failed=1
     fi
   done
+  # 031, FR-009/C5.1 (code review, PR #55): THIS feature's own reports are a
+  # documented byte-identical obligation (tasks.md T015 — "the report is
+  # byte-identical across ports") and they land on stderr, so a corpus that
+  # excludes stderr everywhere could never have caught a divergence in the
+  # one thing 031 actually promises. Scoped to us031-* rather than every
+  # scenario — see the comment above for why the wider net is unsafe today.
+  if [[ "${name}" == us031-* ]] && ! diff -u "${out_bash}/stderr" "${out_ps}/stderr"; then
+    echo "conformance divergence in ${name} (stderr)"
+    detail="${detail}$(byte_diff "stderr" "${out_bash}/stderr" "${out_ps}/stderr")"$'\n'
+    failed=1
+  fi
   _normalize_state_base_url "${out_bash}/workdir"
   _normalize_state_base_url "${out_ps}/workdir"
   _normalize_config_yaml_base_url "${out_bash}/workdir"
@@ -270,6 +396,8 @@ run_scenario() {
     off_ps="$(mktemp -d)"
     SPEC_KIT_JIRA_HARNESS_ENV="_RECOGNITION_NO_PREFETCH=1" "${harness}" "${scenario}" bash "${off_bash}"
     SPEC_KIT_JIRA_HARNESS_ENV="_RECOGNITION_NO_PREFETCH=1" "${harness}" "${scenario}" powershell "${off_ps}"
+    _normalize_workdir_path "${off_bash}"
+    _normalize_workdir_path "${off_ps}"
     for port in bash powershell; do
       if [ "${port}" = bash ]; then on_dir="${out_bash}"; off_dir="${off_bash}"; else on_dir="${out_ps}"; off_dir="${off_ps}"; fi
       for artifact in stdout stderr exit; do
@@ -343,6 +471,8 @@ run_scenario() {
     alt_ps="$(mktemp -d)"
     SPEC_KIT_JIRA_HARNESS_ENV="SPEC_KIT_JIRA_HOOK_EVENT=after_plan" "${harness}" "${scenario}" bash "${alt_bash}"
     SPEC_KIT_JIRA_HARNESS_ENV="SPEC_KIT_JIRA_HOOK_EVENT=after_plan" "${harness}" "${scenario}" powershell "${alt_ps}"
+    _normalize_workdir_path "${alt_bash}"
+    _normalize_workdir_path "${alt_ps}"
     for artifact in stdout exit calls.log; do
       if ! diff -u "${alt_bash}/${artifact}" "${alt_ps}/${artifact}"; then
         echo "conformance divergence in ${name} (after_plan variant, ${artifact})"

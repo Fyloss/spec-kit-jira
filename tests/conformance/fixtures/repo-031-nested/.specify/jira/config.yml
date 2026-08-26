@@ -1,0 +1,20 @@
+# 031 — a valid catalogue consulted from a nested working directory
+# (tests/conformance/scenarios/us031-nested-invocation.json).
+projects:
+  - key: IJT
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: ''
+    project: IJT
+routing_default: IJT
+teams:
+  - id: ijt
+    project: IJT
+    folder_prefix: "ijt-"
+    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"
+privacy:
+  allowlist: []

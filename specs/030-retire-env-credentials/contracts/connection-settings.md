@@ -172,6 +172,27 @@ therefore before any network call.
 would have supplied a valid one. A file on disk that cannot be read correctly is
 a fail-closed condition, not a value to be silently outranked.
 
+**C6.2a — amendment, 2026-08-24 (spec 031).** C6.2 governs every path that can
+reach the network. It does NOT govern a path whose outcome is to make no
+request at all.
+
+The condition C6.2 exists to prevent is a malformed file being *silently
+outranked* by an environment value, after which the run proceeds — under an
+identity nobody chose — to talk to Jira. FR-018's own wording carries that
+intent: it refuses "before any network call". A run that declines the file,
+reports it by name with its located reason, names the fallback it took, and
+issues zero requests outranks nothing and reaches nothing. The fail-closed
+property this clause protects is intact; only the exit code differs.
+
+So on such a path — feature naming with no team resolved, whose defining
+property is that it contacts nothing — an unloadable `personal.yml` is
+reported and the run exits successfully, per 031 FR-013. On every other path
+C6.2 stands unchanged.
+
+This is recorded here rather than reinterpreted in the consuming spec: a
+reader arriving at C6.2 from `lib/config.sh`, which cites it by name, must find
+the exception where the rule is, not in another feature's research notes.
+
 ---
 
 ## §7 Test obligations

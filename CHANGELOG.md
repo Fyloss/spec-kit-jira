@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.3] - 2026-08-24
+
+### Fixed
+
+- **A pass-through now says which of seven states produced it.** Running
+  `feature` from anywhere but the repository root used to resolve
+  `.specify/jira` against the wrong directory and quietly name your feature
+  as if nothing were configured — and a `config.yml` or `personal.yml` with a
+  typo was met with the exact same silence as never having adopted the
+  extension at all. You are now told: a broken file is reported by name and
+  reason instead of discarded (`personal.yml` no longer stops the run either
+  — exit 0, not 4); the configuration directory is found from your
+  repository, not your shell, so the same repository names the same feature
+  from any starting directory; and a repository with no `.specify/` above it
+  says so, rather than passing through as if it were configured. A
+  correctly-configured repository, or one that has never adopted the
+  extension, sees no output change of any kind. `--verbose` names which of
+  the seven states applied and what would change it, on request only.
+
 ## [0.20.2] - 2026-08-24
 
 ### Fixed
@@ -1333,7 +1352,8 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.2...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.3...HEAD
+[0.20.3]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.2...v0.20.3
 [0.20.2]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.19.0...v0.20.0

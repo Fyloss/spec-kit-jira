@@ -1270,3 +1270,61 @@ YAML
   [ "$status" -eq 0 ]
   [ "$(jq -r '.active' <<< "$output")" = "false" ]
 }
+
+# =============================================================================
+# 031 Phase 4 — configuration is found from the repository, not the shell
+# (config_resolve_dir, contract C1.1/C1.2, FR-007/FR-014/FR-015)
+# =============================================================================
+
+@test "031, T023: resolution order is JIRA_CONFIG_DIR, then SPECIFY_INIT_DIR, then the nearest ancestor carrying .specify/ (C1.1, FR-014, FR-015)" {
+  local rootA rootB explicit out
+  # Resolved through pwd -P: config_resolve_dir spells the WALK and
+  # SPECIFY_INIT_DIR branches through the physical cwd (see its own comment
+  # in lib/config.sh), so the expectation must match on a host where mktemp's
+  # own directory sits under a symlink (macOS /var -> /private/var).
+  rootA="$(cd "$(mktemp -d)" && pwd -P)"
+  mkdir -p "${rootA}/.specify" "${rootA}/sub"
+  rootB="$(cd "$(mktemp -d)" && pwd -P)"
+  mkdir -p "${rootB}/.specify"
+  # NOT resolved — an explicit JIRA_CONFIG_DIR is honoured verbatim (C1.1),
+  # never silently rewritten, on either port.
+  explicit="$(mktemp -d)"
+
+  # (a) neither override set ⇒ the nearest ancestor's .specify/ wins.
+  out="$(cd "${rootA}/sub" && unset JIRA_CONFIG_DIR SPECIFY_INIT_DIR && config_resolve_dir)"
+  [ "${out}" = "${rootA}/.specify/jira" ]
+
+  # (b) SPECIFY_INIT_DIR wins over an ancestor the walk WOULD otherwise find
+  #     (rootA/.specify/, reachable from rootA/sub) — proving priority, not
+  #     mere availability.
+  out="$(cd "${rootA}/sub" && unset JIRA_CONFIG_DIR && SPECIFY_INIT_DIR="${rootB}" config_resolve_dir)"
+  [ "${out}" = "${rootB}/.specify/jira" ]
+
+  # (c) an explicit JIRA_CONFIG_DIR wins over both.
+  out="$(cd "${rootA}/sub" && JIRA_CONFIG_DIR="${explicit}" SPECIFY_INIT_DIR="${rootB}" config_resolve_dir)"
+  [ "${out}" = "${explicit}" ]
+
+  rm -rf "${rootA}" "${rootB}" "${explicit}"
+}
+
+@test "031, T024: the walk goes upward only and stops at the filesystem root (C1.2)" {
+  local root out status_
+  root="$(mktemp -d)"
+  mkdir -p "${root}/a/b/c"
+  # A decoy .specify/ only reachable by DESCENDING from a/b/c — proves the
+  # walk never descends, only ever goes up.
+  mkdir -p "${root}/a/b/c/decoy/.specify"
+  status_=0
+  out="$(cd "${root}/a/b/c" && unset JIRA_CONFIG_DIR SPECIFY_INIT_DIR && config_resolve_dir)" || status_=$?
+  [ "${status_}" -eq 1 ]
+  [ -z "${out}" ]
+  rm -rf "${root}"
+}
+
+@test "031: config_resolve_dir always returns an absolute path, even for a relative explicit override (FR-009)" {
+  local somedir out
+  somedir="$(cd "$(mktemp -d)" && pwd -P)"
+  out="$(cd "${somedir}" && JIRA_CONFIG_DIR="./relative-jira" config_resolve_dir)"
+  [ "${out}" = "${somedir}/relative-jira" ]
+  rm -rf "${somedir}"
+}

@@ -1,0 +1,19 @@
+# 031 — a valid-looking catalogue with one deliberately unparsable line
+# (no personal.yml — the personal-unloadable case is a separate fixture).
+projects:
+  - key: IJT
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: ''
+    project: IJT
+routing_default: IJT
+teams:
+  - id: ijt
+    project: IJT
+this line has no delimiter
+privacy:
+  allowlist: []

@@ -65,6 +65,29 @@ Rules that hold across all three:
   never an opaque id where a logical name exists. A tech lead should be able to
   review their team's config without opening the documentation.
 
+## Where `.specify/jira/` itself is found (031)
+
+Every path above is written relative to a directory this section names: the
+`feature` command resolves it in this order, first hit wins.
+
+1. **An explicitly set `JIRA_CONFIG_DIR`** — always wins, so a deliberately
+   nested configuration stays reachable by explicit opt-in.
+2. **`SPECIFY_INIT_DIR` + `/.specify/jira`**, when the host sets it.
+3. **The nearest ancestor of the working directory that carries a
+   `.specify/` directory**, plus `/jira` — the same marker the host itself
+   uses to locate the project, walking upward only and stopping at the
+   filesystem root. Never a `git` invocation.
+
+This REPLACES resolving `.specify/jira` against the process's own working
+directory rather than supplementing it: a repository invoked from a nested
+checkout — a submodule, a monorepo subdirectory, an editor terminal opened
+below the root — now resolves the SAME configuration a run from the
+repository root would, instead of silently finding nothing. When none of the
+three apply, the run says so explicitly rather than falling back to a
+relative path that may simply not exist from wherever the process started.
+The same resolved directory governs `state/` as well as the two configuration
+files, so relocating the anchor relocates run-state with it.
+
 ## Credential resolution — two rungs, in order
 
 ```mermaid

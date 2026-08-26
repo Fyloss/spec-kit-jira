@@ -198,8 +198,12 @@ setup() {
   # cross-check table), personal.yml's team-optional ceremony (created,
   # no-teams, created-then-loads, unchanged, dry-run, degraded,
   # idempotent), and the unattended env-only path (209 -> 231).
+  # 031 adds five: a config.yml and a personal.yml that each exist but fail
+  # to load (config-unloadable, personal-unloadable), a valid zero-team
+  # catalogue's silence (zero-team-catalogue), and path resolution's two
+  # divergence-surface cases (nested-invocation, no-project) (231 -> 236).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 231 ]
+  [ "${count}" -eq 236 ]
 }
 
 # Everything the conformance job declares, as one block.

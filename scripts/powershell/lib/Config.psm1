@@ -1124,6 +1124,51 @@ function Merge-CfgObject {
     return $Right
 }
 
+function Resolve-JiraConfigDir {
+    <#
+    .SYNOPSIS
+      The configuration directory, in the FR-007/FR-014 priority order
+      (contract C1.1): an explicitly set JIRA_CONFIG_DIR; else
+      SPECIFY_INIT_DIR + /.specify/jira; else the nearest ancestor of the
+      working directory carrying a .specify/ directory, plus /jira (C1.2:
+      upward only, stopping at the filesystem root — never a git invocation,
+      research D1). Mirror of config_resolve_dir. Returns the resolved
+      directory, always absolute (FR-009), or $null when neither override is
+      set and no ancestor carries .specify/ (FR-008) — the caller reports
+      that, it is never silently swallowed here.
+
+      Every returned path is built by STRING CONCATENATION with '/', and
+      every intermediate step uses [System.IO.Path] (a pure string API), NEVER
+      Join-Path / Split-Path — both renormalise every separator to the host's
+      own in both directions, and a path built here is what a report later
+      spells out verbatim (docs/10-windows-portability.md).
+    #>
+    [CmdletBinding()]
+    param()
+    # The explicit basePath argument is load-bearing: [System.IO.Path]::GetFullPath
+    # with ONE argument resolves against [Environment]::CurrentDirectory, the
+    # .NET PROCESS's own cwd — which Set-Location does NOT keep in sync with
+    # PowerShell's OWN location (Get-Location). Every relative-path resolution
+    # here is therefore anchored explicitly to (Get-Location).Path.
+    $cwd = (Get-Location).Path
+    if ($env:JIRA_CONFIG_DIR) {
+        return [System.IO.Path]::GetFullPath($env:JIRA_CONFIG_DIR, $cwd)
+    }
+    if ($env:SPECIFY_INIT_DIR) {
+        return "$([System.IO.Path]::GetFullPath($env:SPECIFY_INIT_DIR, $cwd))/.specify/jira"
+    }
+    $d = [System.IO.Path]::GetFullPath($cwd)
+    while ($true) {
+        if (Test-Path -LiteralPath "$d/.specify" -PathType Container) {
+            return "$d/.specify/jira"
+        }
+        $parent = [System.IO.Path]::GetDirectoryName($d)
+        if ([string]::IsNullOrEmpty($parent) -or $parent -eq $d) { break }
+        $d = $parent
+    }
+    return $null
+}
+
 function Import-JiraConfig {
     <#
     .SYNOPSIS
@@ -1135,8 +1180,24 @@ function Import-JiraConfig {
     param([string] $ConfigDir = (Get-JiraConfigDirPath))
 
     $errors = [System.Collections.Generic.List[string]]::new()
-    $team = Join-Path $ConfigDir 'config.yml'
-    $localF = Join-Path $ConfigDir 'config.local.yml'
+    # '/'-concatenation, not Join-Path and not Path.Combine
+    # (docs/10-windows-portability.md): $team/$localF reach every located
+    # error message below. Join-Path goes through the FileSystem provider and
+    # renormalises the WHOLE string to the host's separator in both
+    # directions. Path.Combine looked like a safer middle ground — it was
+    # tried here (031 code review) on the assumption that $ConfigDir is
+    # always natively backslash-spelled (Resolve-JiraConfigDir ->
+    # [System.IO.Path]::GetFullPath) — but that only holds for the explicit
+    # $env:JIRA_CONFIG_DIR branch. The ancestor-walk/SPECIFY_INIT_DIR
+    # branches append a DELIBERATE forward-slash '.specify/jira' suffix
+    # there, to match the bash port's own spelling (Resolve-JiraConfigDir's
+    # own docstring); Path.Combine's native separator then plants a stray
+    # backslash exactly at that boundary — measured on windows-latest as a
+    # us031-config-unloadable conformance divergence. Plain concatenation
+    # keeps whatever $ConfigDir already is and just appends '/', matching
+    # bash's own "${dir}/config.yml" unconditionally.
+    $team = "$ConfigDir/config.yml"
+    $localF = "$ConfigDir/config.local.yml"
 
     if (-not (Test-Path -LiteralPath $team)) {
         $errors.Add("config: $team not found — run /speckit.jira.config first.")
@@ -1163,6 +1224,15 @@ function Import-JiraConfig {
         [Console]::Error.WriteLine($errors[-1])
         return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() }
     }
+    # An EMPTY config.yml parses to $null — a legitimate state (031, FR-006/
+    # C2.5), not an error. The Bash twin already coerces this
+    # (config_load's `[[ "${team_json}" == "null" ]] && team_json="{}"`);
+    # this port was missing the SAME coercion the LOCAL layer already has a
+    # few lines down — every downstream schema/credential check below
+    # assumes an object and throws ParameterBindingValidationException on
+    # $null otherwise (code review: newly exercised once the `feature`
+    # command started calling this unconditionally on every config.yml).
+    if ($null -eq $teamObj) { $teamObj = [ordered]@{} }
 
     if (& $fail 'credential' $team (Get-JiraConfigCredentialError $teamObj -ExemptPaths @('base_url'))) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() } }
     if (& $fail 'schema' $team (Test-JiraTeamConfig $teamObj)) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() } }
@@ -1237,17 +1307,40 @@ function Import-JiraPersonalConfig {
       Load the human-owned personal team selection (.specify/jira/personal.yml).
       NEVER writes the file. Absent file => {active:false}. An invalid file or an
       unknown team fails closed (ExitCode 4). Mirror of config_personal_load.
-      Returns { ExitCode; Json; Errors }.
+      Returns { ExitCode; Json; Errors }. The three inactive branches also carry
+      a `state` field (data-model.md §1: `no-personal-file` / `no-team-key` /
+      `personal-unloadable`) — internal vocabulary for callers naming the
+      resolution state (031, FR-010); every existing reader extracts only the
+      fields it already knew about and ignores the rest.
+
+      -SoftLoad (031, FR-013 vs FR-017 — research D3 and the C6.2a amendment
+      both narrow non-blocking treatment to a file that CANNOT BE LOADED at
+      all: a parse failure, a credential-shaped value, or a schema violation.
+      Set to $true ONLY by the `feature` command's naming path, it turns
+      exactly THOSE three failures into
+      {"active":false,"state":"personal-unloadable"} (ExitCode 0, reported via
+      the same stderr lines this function already writes) instead of
+      ExitCode 4. The catalogue-membership check below is NEVER softened —
+      it is not a load failure, it is a well-formed file naming something
+      that does not exist, and FR-017 requires that this "behaviour is
+      unchanged": a located error, ExitCode 4, whether or not the catalogue
+      itself is empty.
     #>
     [CmdletBinding()]
     param(
         [string] $ConfigDir = (Get-JiraConfigDirPath),
-        [string] $MergedJson = '{}'
+        [string] $MergedJson = '{}',
+        [bool] $SoftLoad = $false
     )
     $errors = [System.Collections.Generic.List[string]]::new()
-    $pf = Join-Path $ConfigDir 'personal.yml'
+    # '/'-concatenation, not Join-Path and not Path.Combine
+    # (docs/10-windows-portability.md — see the Import-JiraConfig comment
+    # above for why Path.Combine is wrong here too): $pf reaches every
+    # located error message below.
+    $pf = "$ConfigDir/personal.yml"
+    $soft = { [pscustomobject]@{ ExitCode = 0; Json = '{"active":false,"state":"personal-unloadable"}'; Errors = $errors } }
     if (-not (Test-Path -LiteralPath $pf)) {
-        return [pscustomobject]@{ ExitCode = 0; Json = '{"active":false}'; Errors = $errors }
+        return [pscustomobject]@{ ExitCode = 0; Json = '{"active":false,"state":"no-personal-file"}'; Errors = $errors }
     }
 
     $fail = {
@@ -1259,8 +1352,21 @@ function Import-JiraPersonalConfig {
 
     try { $pObj = Read-JiraConfigYamlObject -Path $pf }
     catch {
+        if ($SoftLoad) {
+            $errors.Add($_.Exception.Message)
+            [Console]::Error.WriteLine($_.Exception.Message)
+            return (& $soft)
+        }
         return (& $fail $_.Exception.Message)
     }
+    # An EMPTY personal.yml parses to $null — a normal state (the ceremony
+    # writes only comments and a `# team:` line left commented, and an
+    # operator may blank it further). The Bash twin already coerces this
+    # (config_personal_load's `[[ "${pjson}" == "null" ]] && pjson="{}"`);
+    # this port was missing the SAME coercion (code review: newly exercised
+    # once the `feature` command started reaching an empty personal.yml on
+    # the same run as an empty config.yml).
+    if ($null -eq $pObj) { $pObj = [ordered]@{} }
 
     $emit = {
         param($label, $lines)
@@ -1273,8 +1379,14 @@ function Import-JiraPersonalConfig {
         }
         return $any
     }
-    if (& $emit 'credential' (Get-JiraConfigCredentialError $pObj -ExemptPaths @('email'))) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors } }
-    if (& $emit 'personal' (Test-JiraPersonalObject $pObj)) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors } }
+    if (& $emit 'credential' (Get-JiraConfigCredentialError $pObj -ExemptPaths @('email'))) {
+        if ($SoftLoad) { return (& $soft) }
+        return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors }
+    }
+    if (& $emit 'personal' (Test-JiraPersonalObject $pObj)) {
+        if ($SoftLoad) { return (& $soft) }
+        return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors }
+    }
 
     # An absent `team` key is "no team selected" — identical to an absent file
     # (030, FR-027, contracts/connection-settings.md C4.1/C4.4). The
@@ -1283,9 +1395,11 @@ function Import-JiraPersonalConfig {
     # personal.yml exists — exactly the file the config ceremony now creates
     # by default.
     if (-not ($pObj -is [System.Collections.IDictionary] -and $pObj.Contains('team'))) {
-        return [pscustomobject]@{ ExitCode = 0; Json = '{"active":false}'; Errors = $errors }
+        return [pscustomobject]@{ ExitCode = 0; Json = '{"active":false,"state":"no-team-key"}'; Errors = $errors }
     }
 
+    # The selected team must exist in the committed catalogue (FR-011,
+    # FR-017 — NEVER gated on -SoftLoad, see the function header).
     $cfg = $MergedJson | ConvertFrom-Json -Depth 100
     $team = [string](Get-CfgProp $pObj 'team')
     $ids = [System.Collections.Generic.List[string]]::new()
@@ -1316,16 +1430,34 @@ function Resolve-JiraConnection {
       Import-JiraConfig call. An OMITTED config.yml is tolerated (US4:
       env-only, unattended, no config files at all); a PRESENT and malformed
       one fails closed (ExitCode 4, C6.2).
+
+      -PersonalJson, when supplied (031), is the caller's OWN, ALREADY-computed
+      Import-JiraPersonalConfig result — used AS-IS to decide whether
+      email-seeding applies, no second Import-JiraPersonalConfig call. Only
+      the `feature` command's naming path supplies this: it validates
+      personal.yml itself, earlier, with -SoftLoad (FR-013, C3.3) — a load
+      failure there is a pass-through, never reaches this function at all, so
+      by the time this call happens personal.yml is KNOWN to be either
+      well-formed-and-inactive or well-formed-and-active; either way it needs
+      no re-validation, only its `email` field (which
+      Import-JiraPersonalConfig's return object never carries). A catalogue-
+      membership failure (FR-017) is NOT swallowable this way — it is checked
+      by the caller BEFORE this function is ever reached, so it always fails
+      closed there, unconditionally (contract C3.4: every OTHER caller —
+      Seed/Mention/Reconcile/Config, all of which reach the network — omits
+      this argument and gets the full, unconditional Import-JiraPersonalConfig
+      validation below).
     #>
     [CmdletBinding()]
     param(
         [string] $ConfigDir = (Get-JiraConfigDirPath),
-        [string] $MergedJson = ''
+        [string] $MergedJson = '',
+        [string] $PersonalJson = ''
     )
     $cfg = $MergedJson
     if (-not $cfg) {
         $cfg = '{}'
-        $teamPath = Join-Path $ConfigDir 'config.yml'
+        $teamPath = "$ConfigDir/config.yml"
         if (Test-Path -LiteralPath $teamPath) {
             $loaded = Import-JiraConfig -ConfigDir $ConfigDir
             if ($loaded.ExitCode -ne 0) { return [int] $loaded.ExitCode }
@@ -1344,16 +1476,33 @@ function Resolve-JiraConnection {
     # setting refuses the run whether or not the environment would have
     # supplied a valid one") — never gated on whether JIRA_EMAIL happens to
     # be set already. Only the SEEDING of the variable is conditional.
-    $pf = Join-Path $ConfigDir 'personal.yml'
+    $pf = "$ConfigDir/personal.yml"
     if (Test-Path -LiteralPath $pf) {
-        # Import-JiraPersonalConfig's return object never carries `email`
-        # — every branch of it is pinned to data-model.md §3's five-state
-        # table, none of which mentions the key. Call it anyway, for its
-        # validation side effect (a malformed team or email fails closed
-        # here, ExitCode 4), then read the field straight from the parsed
-        # file.
-        $loadedP = Import-JiraPersonalConfig -ConfigDir $ConfigDir -MergedJson $cfg
-        if ($loadedP.ExitCode -ne 0) { return [int] $loadedP.ExitCode }
+        if (-not $PersonalJson) {
+            # Import-JiraPersonalConfig's return object never carries `email`
+            # — every branch of it is pinned to data-model.md §3's five-state
+            # table, none of which mentions the key. Call it anyway, for its
+            # validation side effect (a malformed team or email fails closed
+            # here, ExitCode 4), then read the field straight from the parsed
+            # file.
+            $loadedP = Import-JiraPersonalConfig -ConfigDir $ConfigDir -MergedJson $cfg
+            if ($loadedP.ExitCode -ne 0) { return [int] $loadedP.ExitCode }
+        }
+        else {
+            # Not direct dot access: Set-StrictMode makes .state throw on the
+            # active-result shape, which never carries that property (code
+            # review — this exact bug broke every successful `feature` run).
+            $suppliedObj = $PersonalJson | ConvertFrom-Json -Depth 100
+            $suppliedStateProp = $suppliedObj.PSObject.Properties['state']
+            $suppliedState = if ($suppliedStateProp) { $suppliedStateProp.Value } else { $null }
+            if ($suppliedState -eq 'personal-unloadable') {
+                # The caller already knows this file is broken and already
+                # reported it (031). Nothing downstream on that pass-through
+                # path makes a Jira request, so there is no email worth
+                # seeding from a file that cannot be re-parsed anyway.
+                return 0
+            }
+        }
         if (-not $env:JIRA_EMAIL) {
             try { $pObj = Read-JiraConfigYamlObject -Path $pf } catch { return $script:ExitConfig }
             $email = [string](Get-CfgProp $pObj 'email')
@@ -1690,7 +1839,7 @@ function Remove-JiraHooksDisabled {
     return 'released'
 }
 
-Export-ModuleMember -Function Get-JiraConfigDirPath, Get-JiraExtensionVersion, Assert-JiraSingleVersionSource, `
+Export-ModuleMember -Function Get-JiraConfigDirPath, Resolve-JiraConfigDir, Get-JiraExtensionVersion, Assert-JiraSingleVersionSource, `
     ConvertFrom-JiraConfigYaml, ConvertTo-JiraConfigYaml, Read-JiraConfigYamlObject, `
     Get-JiraConfigCredentialError, Test-JiraTeamConfig, Test-JiraLocalConfig, Test-JiraConfigFieldError, Import-JiraConfig, `
     Test-JiraPersonalObject, Import-JiraPersonalConfig, Resolve-JiraConnection, `

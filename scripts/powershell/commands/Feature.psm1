@@ -624,6 +624,19 @@ function Write-FeatResult {
     }
 }
 
+function Write-FeatVerboseDiag {
+    # The on-request diagnostic (031, US3, contract C4.1): which resolution
+    # state produced this pass-through, the absolute path it consulted, and
+    # what would change it. Mirror of _feat_verbose_diag. Written to stderr,
+    # and ONLY when $Verbose is $true — the default and --json payloads never
+    # gain a line or a key for this (C4.2).
+    param([bool] $Verbose, [string] $State, [string] $Path, [string] $Hint)
+    if (-not $Verbose) { return }
+    [Console]::Error.WriteLine("feature: resolution state: $State")
+    [Console]::Error.WriteLine("feature: path consulted: $Path")
+    [Console]::Error.WriteLine("feature: $Hint")
+}
+
 function ConvertTo-JiraFeatureProse {
     # Render the feature result as human prose (the default output). The
     # payload is feature-shaped (contracts/feature-cli-contract.md) — never a
@@ -687,6 +700,7 @@ function Invoke-JiraFeature {
       the result via the [Console] streams and returns ONLY its numeric exit
       code (mirroring the Bash port's echo -> fd1, return -> status convention).
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '', Justification = 'The empty-config.yml probe (031, FR-006/C2.5) deliberately ignores a parse failure here: a malformed file is expected to throw, and the exception is not the outcome being sought — $rawTeamParsed stays false, so the caller falls through to Import-JiraConfig, which reports the SAME failure with its own located reason a few lines below.')]
     [CmdletBinding()]
     param([Parameter(ValueFromRemainingArguments = $true)] [string[]] $Arguments = @())
 
@@ -707,6 +721,7 @@ function Invoke-JiraFeature {
     $parentRaw = if ($state.ContainsKey('parent')) { $state['parent'] } else { '' }
     $storiesJoined = if ($state.ContainsKey('stories')) { $state['stories'] } else { '' }
     $reuse = if ($state.ContainsKey('reuse')) { $state['reuse'] } else { '' }
+    $verbose = $state['verbose'] -eq 'true'
 
     # 029, contract mention-grammar.md §1-§3: the mention evaluation is a pure
     # string operation on argv alone, needing no configuration — it moves to
@@ -742,7 +757,27 @@ function Invoke-JiraFeature {
         return (Get-JiraExitCode 'usage')
     }
 
-    $dir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
+    # (0) Configuration directory (031, FR-007/FR-014, contract C1.1): an
+    # explicit JIRA_CONFIG_DIR, then SPECIFY_INIT_DIR, then the nearest
+    # ancestor of the working directory carrying .specify/ — REPLACING the
+    # relative ".specify/jira" fallback, never supplementing it. When neither
+    # override is set and no ancestor qualifies, this is reported
+    # unconditionally (not gated on $hasMention — C1.4) rather than passed
+    # through in silence.
+    $startDir = (Get-Location).Path
+    $dir = Resolve-JiraConfigDir
+    if (-not $dir) {
+        [Console]::Error.WriteLine("feature: no project found — no ancestor of $startDir contains .specify/; naming falls back to the host default")
+        Write-FeatVerboseDiag -Verbose $verbose -State 'no-repository' -Path $startDir `
+            -Hint 'create .specify/ above the working directory, or set JIRA_CONFIG_DIR, to change this'
+        Write-FeatResult -Payload '{"active":false}' -Json $json
+        return 0
+    }
+    # FR-016: the resolved directory governs run-state and seed-state as well
+    # — a SINGLE assignment here, before anything downstream reads it, is
+    # what keeps `state/` under the same directory as the two configuration
+    # files.
+    $env:JIRA_CONFIG_DIR = $dir
 
     # 029, contract feature-question-contract.md §5 (FR-026-FR-028, research
     # R5): a mentioned ticket met with silence is the same defect class one
@@ -752,38 +787,109 @@ function Invoke-JiraFeature {
     $noConfigMsg = 'no team configuration found — .specify/jira/config.yml is missing, unreadable, or declares no teams; run /speckit.jira.config to create one'
     $noSelectionMsg = 'no team selected in .specify/jira/personal.yml — that selection is your own and no script writes it for you; run /speckit.jira.config to select one'
 
+    # $dir/config.yml and $dir/personal.yml below: '/'-concatenation, never
+    # Path.Combine or Join-Path (code review, PR #55 — measured on
+    # windows-latest). $dir (Resolve-JiraConfigDir) is not uniformly
+    # separator-spelled: the explicit-JIRA_CONFIG_DIR branch returns a plain
+    # GetFullPath (native, backslash), but the ancestor-walk/SPECIFY_INIT_DIR
+    # branches append a DELIBERATE forward-slash '.specify/jira' suffix (to
+    # match the bash port's own spelling there, Config.psm1's own docstring).
+    # Path.Combine's native separator is only right for the first branch; for
+    # the second it plants a stray backslash exactly at the .../jira boundary
+    # — the one thing conformance's workdir-masking cannot paper over, since
+    # masking only replaces the ROOT, never this suffix.
+    #
     # (1) No committed catalogue at all ⇒ pass-through (FR-017).
-    if (-not (Test-Path -LiteralPath (Join-Path $dir 'config.yml'))) {
+    if (-not (Test-Path -LiteralPath "$dir/config.yml")) {
         if ($hasMention) {
             Write-FeatResult -Payload (ConvertTo-JiraJsonValue ([ordered]@{ active = $false; warnings = @($noConfigMsg) })) -Json $json
         }
         else {
             Write-FeatResult -Payload '{"active":false}' -Json $json
         }
+        Write-FeatVerboseDiag -Verbose $verbose -State 'no-config-file' -Path $dir `
+            -Hint "create $dir/config.yml with a teams: catalogue to change this"
         return 0
     }
-    # The Bash twin silences this load's stderr (2>/dev/null): a failed read is
-    # a silent pass-through, never a block.
+    # 031, research D2: the loader's stderr is no longer discarded here — a
+    # present-but-unloadable config.yml is REPORTED (FR-001/FR-002, C2.1),
+    # whether or not a ticket was mentioned; the JSON payload below is
+    # unaffected either way (C4.2). Called ONCE: the common (successful)
+    # path pays exactly this one parse, never two (code review).
+    # Import-JiraConfig writes its located error to [Console]::Error as a
+    # SIDE EFFECT of parsing — unconditionally, before this function ever
+    # gets to decide whether the cause was "genuinely empty" (silent, below)
+    # or "genuinely broken" (reported) — so it is captured here, not
+    # streamed live, and only replayed on the branch that actually needs it.
     $errSink = [System.IO.StringWriter]::new()
     $origErr = [Console]::Error
     [Console]::SetError($errSink)
     try { $cfg = Import-JiraConfig -ConfigDir $dir }
     finally { [Console]::SetError($origErr) }
     if ($cfg.ExitCode -ne 0) {
-        if ($hasMention) {
-            Write-FeatResult -Payload (ConvertTo-JiraJsonValue ([ordered]@{ active = $false; warnings = @($noConfigMsg) })) -Json $json
+        # An empty config.yml — 0 bytes, or comments-only, parsing to $null —
+        # carries no statement from its author (FR-006, C2.5): treated
+        # exactly like a valid catalogue declaring zero teams, never as a
+        # load failure. Import-JiraConfig's OWN empty-document coercion
+        # happens too late to help here — a coerced {} still fails
+        # config.yml's schema (`projects must be a non-empty array`),
+        # correct for a NON-empty file missing that key but wrong for no
+        # content at all. A cheap raw re-parse, on this (rare) failure path
+        # only, is what research D2 already accepted; it is never the
+        # doubled FULL Import-JiraConfig D2 rejected.
+        $rawTeam = $null
+        $rawTeamParsed = $false
+        try { $rawTeam = Read-JiraConfigYamlObject -Path "$dir/config.yml"; $rawTeamParsed = $true } catch { }
+        if ($rawTeamParsed -and $null -eq $rawTeam) {
+            $merged = (ConvertTo-JiraJsonValue ([ordered]@{})) | ConvertFrom-Json -Depth 100
         }
         else {
-            Write-FeatResult -Payload '{"active":false}' -Json $json
+            if ($hasMention) {
+                Write-FeatResult -Payload (ConvertTo-JiraJsonValue ([ordered]@{ active = $false; warnings = @($noConfigMsg) })) -Json $json
+            }
+            else {
+                Write-FeatResult -Payload '{"active":false}' -Json $json
+            }
+            [Console]::Error.Write($errSink.ToString())
+            # Import-JiraConfig validates config.yml AND config.local.yml —
+            # the located error above already names whichever layer actually
+            # failed, so the hint names the directory, never a filename that
+            # may not be the one that broke (code review).
+            Write-FeatVerboseDiag -Verbose $verbose -State 'config-unloadable' -Path $dir `
+                -Hint "fix the configuration error reported above in $dir to change this"
+            return 0
         }
-        return 0
     }
-    $merged = $cfg.Json | ConvertFrom-Json -Depth 100
+    else {
+        $merged = $cfg.Json | ConvertFrom-Json -Depth 100
+    }
+
+    # (2) Personal selection (human-owned; validated; never written), checked
+    # NOW — before team_count, not after. A personal.yml that structurally
+    # fails to load is reported and passed through (FR-013, C3.3), but a
+    # WELL-FORMED file selecting a team absent from the catalogue still
+    # fails closed (FR-017: "that behaviour is unchanged") EVEN WHEN the
+    # catalogue is empty — exactly the scenario this ordering exists to
+    # reach. Checking this after team_count would let the zero-teams
+    # silence below swallow that located error (code review).
+    $mergedJsonForPersonal = if ($cfg.ExitCode -eq 0) { $cfg.Json } else { ConvertTo-JiraJsonValue ([ordered]@{}) }
+    $personal = Import-JiraPersonalConfig -ConfigDir $dir -MergedJson $mergedJsonForPersonal -SoftLoad $true
+    if ($personal.ExitCode -ne 0) { return [int] $personal.ExitCode }
+    $pObj = $personal.Json | ConvertFrom-Json -Depth 100
+    $pActive = [bool](Get-FeatProp $pObj 'active')
+    $pTeam = [string](Get-FeatProp $pObj 'team')
+    $pOverride = Get-FeatProp $pObj 'override'
+    $pState = [string](Get-FeatProp $pObj 'state')
+
     # The resolution chokepoint (030, plan.md §Key design decision): seed
-    # SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml / personal.yml,
-    # environment first.
-    $chokepointRc = Resolve-JiraConnection -ConfigDir $dir -MergedJson $cfg.Json
+    # SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml and the `$personal`
+    # result JUST computed above — no second Import-JiraConfig, no second
+    # Import-JiraPersonalConfig, and no second base_url/personal validation
+    # to silently contradict the pass-through treatment a malformed file
+    # already received a few lines up.
+    $chokepointRc = Resolve-JiraConnection -ConfigDir $dir -MergedJson $mergedJsonForPersonal -PersonalJson $personal.Json
     if ($chokepointRc -ne 0) { return [int] $chokepointRc }
+
     $teams = @((Get-FeatProp $merged 'teams') | Where-Object { $null -ne $_ })
     if ($teams.Count -eq 0) {
         if ($hasMention) {
@@ -792,17 +898,22 @@ function Invoke-JiraFeature {
         else {
             Write-FeatResult -Payload '{"active":false}' -Json $json
         }
+        Write-FeatVerboseDiag -Verbose $verbose -State 'no-teams' -Path $dir `
+            -Hint "add an entry to teams: in $dir/config.yml to change this"
         return 0
     }
 
-    # (2) Personal selection (human-owned; validated; never written). An invalid
-    #     file fails closed with a located error (exit 4).
-    $personal = Import-JiraPersonalConfig -ConfigDir $dir -MergedJson $cfg.Json
-    if ($personal.ExitCode -ne 0) { return [int] $personal.ExitCode }
-    $pObj = $personal.Json | ConvertFrom-Json -Depth 100
-    $pActive = [bool](Get-FeatProp $pObj 'active')
-    $pTeam = [string](Get-FeatProp $pObj 'team')
-    $pOverride = Get-FeatProp $pObj 'override'
+    if ($pState -eq 'personal-unloadable') {
+        if ($hasMention) {
+            Write-FeatResult -Payload (ConvertTo-JiraJsonValue ([ordered]@{ active = $false; warnings = @($noSelectionMsg) })) -Json $json
+        }
+        else {
+            Write-FeatResult -Payload '{"active":false}' -Json $json
+        }
+        Write-FeatVerboseDiag -Verbose $verbose -State 'personal-unloadable' -Path $dir `
+            -Hint "fix the error reported above in $dir/personal.yml to change this"
+        return 0
+    }
 
     # No selection and no cross-team answer ⇒ pass-through (FR-017).
     if (-not $pActive -and [string]::IsNullOrEmpty($useTeam)) {
@@ -812,6 +923,8 @@ function Invoke-JiraFeature {
         else {
             Write-FeatResult -Payload '{"active":false}' -Json $json
         }
+        Write-FeatVerboseDiag -Verbose $verbose -State $pState -Path $dir `
+            -Hint "select a team in $dir/personal.yml to change this"
         return 0
     }
 

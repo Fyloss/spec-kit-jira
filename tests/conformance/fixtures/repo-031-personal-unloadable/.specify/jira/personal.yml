@@ -1,0 +1,3 @@
+# 031 — parses fine, but the team value violates the schema (must match
+# ^[a-z][a-z0-9]*$), so config_personal_load fails to load it.
+team: Not_Valid

@@ -23,6 +23,15 @@ _JIRA_LIB_CONFIG=1
 
 # Exit code table is shared across lib modules; `:=` keeps re-sourcing safe.
 : "${EXIT_CONFIG:=4}"
+
+# Captured BEFORE the `:=` default two lines down mutates JIRA_CONFIG_DIR —
+# the one place this library can still tell "the caller set this" apart from
+# "nobody did, so here is a relative fallback every reader assumes" (031,
+# C1.1). config_resolve_dir needs this precisely because the VALUE alone is
+# ambiguous once that default has run: an operator's environment setting
+# JIRA_CONFIG_DIR before this process even starts is indistinguishable, by
+# value, from the sentinel this line is about to assign.
+: "${_JIRA_CONFIG_DIR_EXPLICIT:=$([[ -n "${JIRA_CONFIG_DIR:-}" ]] && echo true || echo false)}"
 : "${JIRA_CONFIG_DIR:=.specify/jira}"
 
 # The template's literal placeholder project key (templates/config.yml.template):
@@ -1304,34 +1313,56 @@ def branchpattern:
 ] | flatten | .[]'
 # kcov-excl-stop
 
-# config_personal_load [config_dir] [merged-config-json] — load the human-owned
-# personal team selection. NEVER writes the file. Absent file => the inactive
-# result {active:false} (FR-011: never required). Credential-shaped values are
-# refused without echoing; an unknown `team` produces a located error listing
-# the valid catalogue ids; `override` passes the catalogue-entry validation.
-# Prints the canonical {active, team, override} JSON on stdout.
+# config_personal_load [config_dir] [merged-config-json] [soft_load] — load
+# the human-owned personal team selection. NEVER writes the file. Absent
+# file => the inactive result {active:false} (FR-011: never required).
+# Credential-shaped values are refused without echoing; an unknown `team`
+# produces a located error listing the valid catalogue ids; `override`
+# passes the catalogue-entry validation. Prints the canonical {active, team,
+# override} JSON on stdout. The three inactive branches also carry a `state`
+# field (data-model.md §1: `no-personal-file` / `no-team-key` /
+# `personal-unloadable`) — internal vocabulary for callers that want to name
+# the resolution state (031, FR-010); every existing reader extracts only
+# the fields it already knew about and ignores the rest.
+#
+# [soft_load] (031, FR-013 vs FR-017 — research D3 and the C6.2a amendment
+# both narrow non-blocking treatment to a file that CANNOT BE LOADED at all:
+# a parse failure, a credential-shaped value, or a schema violation. Set to
+# "true" ONLY by the `feature` command's naming path, it turns exactly THOSE
+# three failures into {"active":false,"state":"personal-unloadable"} (exit 0,
+# reported via the same stderr lines this function already prints) instead
+# of EXIT_CONFIG. The catalogue-membership check below is NEVER softened —
+# it is not a load failure, it is a well-formed file naming something that
+# does not exist, and FR-017 requires that this "behaviour is unchanged":
+# a located error, exit 4, whether or not the catalogue itself is empty.
 config_personal_load() {
   # The optional [merged-config-json] defaults to valid JSON ({}) — a literal
   # backslash default would make every jq read below spray parse errors.
-  local dir="${1:-${JIRA_CONFIG_DIR}}" cfg="${2:-}"
+  local dir="${1:-${JIRA_CONFIG_DIR}}" cfg="${2:-}" soft_load="${3:-false}"
   [[ -z "${cfg}" ]] && cfg='{}'
   local pf="${dir}/personal.yml"
   if [[ ! -f "${pf}" ]]; then
-    printf '{"active":false}'
+    printf '{"active":false,"state":"no-personal-file"}'
     return 0
   fi
 
   local pjson
   if ! pjson="$(config_yaml_to_json "${pf}")"; then
+    [[ "${soft_load}" == "true" ]] && { printf '{"active":false,"state":"personal-unloadable"}'; return 0; }
     return "${EXIT_CONFIG}"
   fi
   # See the identical guard in config_load — an empty personal.yml is a
   # normal state (the ceremony writes only comments and a `# team:` line
   # left commented, and an operator may blank it further).
   [[ "${pjson}" == "null" ]] && pjson="{}"
-  printf '%s' "${pjson}" | _cfg_credential_errors "email" | _cfg_report_errors "credential" "${pf}" || return "${EXIT_CONFIG}"
-  printf '%s' "${pjson}" | jq -r "${_CFG_PERSONAL_ERRORS_JQ}" 2> /dev/null \
-    | _cfg_report_errors "personal" "${pf}" || return "${EXIT_CONFIG}"
+  if ! printf '%s' "${pjson}" | _cfg_credential_errors "email" | _cfg_report_errors "credential" "${pf}"; then
+    [[ "${soft_load}" == "true" ]] && { printf '{"active":false,"state":"personal-unloadable"}'; return 0; }
+    return "${EXIT_CONFIG}"
+  fi
+  if ! printf '%s' "${pjson}" | jq -r "${_CFG_PERSONAL_ERRORS_JQ}" 2> /dev/null | _cfg_report_errors "personal" "${pf}"; then
+    [[ "${soft_load}" == "true" ]] && { printf '{"active":false,"state":"personal-unloadable"}'; return 0; }
+    return "${EXIT_CONFIG}"
+  fi
 
   # An absent `team` key is "no team selected" — identical to an absent file
   # (030, FR-027, contracts/connection-settings.md C4.1/C4.4). The catalogue-
@@ -1339,11 +1370,12 @@ config_personal_load() {
   # whose catalogue declares no teams would fail the moment personal.yml
   # exists — exactly the file the config ceremony now creates by default.
   if [[ "$(jq -r 'has("team")' <<< "${pjson}")" != "true" ]]; then
-    printf '{"active":false}'
+    printf '{"active":false,"state":"no-team-key"}'
     return 0
   fi
 
-  # The selected team must exist in the committed catalogue (FR-011).
+  # The selected team must exist in the committed catalogue (FR-011,
+  # FR-017 — NEVER gated on [soft_load], see the function header).
   local team ids
   team="$(jq -r '.team // ""' <<< "${pjson}")"
   if ! jq -e --arg t "${team}" '([.teams[]?.id] | index($t)) != null' <<< "${cfg}" > /dev/null; then
@@ -1374,6 +1406,108 @@ _cfg_report_errors() {
   done
   ((any)) && return "${EXIT_CONFIG}"
   return 0
+}
+
+# _cfg_absolutize <path> — spell <path> absolute against the working
+# directory, without ever routing it through `cd` (the target need not
+# exist — FR-008's whole point is a directory that may not).
+_cfg_absolutize() {
+  # pwd -P, not pwd: the physical, symlink-resolved cwd. Bash's own logical
+  # $PWD (what plain `pwd` reports after a `cd`) survives inside the SAME
+  # process, but a freshly spawned process — the PowerShell port, spawned as
+  # its own process by the conformance harness after the SAME `cd` — reports
+  # its OS-level cwd via getcwd(), which is always the physical path. On
+  # macOS /var is itself a symlink to /private/var, so `mktemp -d` output
+  # spelled through plain `pwd` and through a fresh process's cwd disagree —
+  # -P is what keeps this port's spelling identical to the other one's
+  # (C5.1), not merely absolute.
+  local combined
+  case "$1" in
+    /*) combined="$1" ;;
+    *) combined="$(pwd -P)/$1" ;;
+  esac
+  _cfg_normalize_path "${combined}"
+}
+
+# _cfg_normalize_path <absolute-path> — collapse "." and ".." segments
+# LEXICALLY, never touching the filesystem — the same normalisation
+# [System.IO.Path]::GetFullPath applies on the PowerShell port for the SAME
+# explicit-override inputs (JIRA_CONFIG_DIR / SPECIFY_INIT_DIR). Without
+# this, a caller supplying "foo/../.specify/jira" spells two different
+# strings on the two ports for the identical logical location — pure string
+# concatenation preserves the literal "foo/..", GetFullPath collapses it —
+# breaking FR-009/C5.1's byte-identical-path requirement (031, code review).
+# Bash 3.2-compatible: no negative array indices.
+_cfg_normalize_path() {
+  local input="${1#/}" part
+  local -a segments=() out=()
+  local IFS='/'
+  # shellcheck disable=SC2206
+  segments=(${input})
+  for part in "${segments[@]}"; do
+    case "${part}" in
+      '' | '.') continue ;;
+      '..')
+        if [[ ${#out[@]} -gt 0 ]]; then
+          unset "out[$((${#out[@]} - 1))]"
+          out=("${out[@]}")
+        fi
+        ;;
+      *) out+=("${part}") ;;
+    esac
+  done
+  local result="" seg
+  for seg in "${out[@]}"; do
+    result="${result}/${seg}"
+  done
+  printf '%s' "${result:-/}"
+}
+
+# config_resolve_dir — the configuration directory, in the FR-007/FR-014
+# priority order (contract C1.1): an explicitly set JIRA_CONFIG_DIR; else
+# SPECIFY_INIT_DIR + /.specify/jira; else the nearest ancestor of the working
+# directory that carries a .specify/ directory, plus /jira (C1.2: upward
+# only, stopping at the filesystem root — never a git invocation, research
+# D1). Prints the resolved directory, always absolute (FR-009), and returns
+# 0. Returns 1 and prints nothing when neither override is set and no
+# ancestor carries .specify/ (FR-008) — the caller reports that, it is never
+# silently swallowed here.
+#
+# "${JIRA_CONFIG_DIR}" here is compared against the literal string this same
+# library defaults it to at source time (line ~24, `: "${JIRA_CONFIG_DIR:=.
+# specify/jira}"`, shared by every command, not just `feature`) — that
+# default IS the relative fallback FR-014 exists to replace, so it is the
+# one value this function treats as "nothing was explicitly chosen" rather
+# than as an override.
+config_resolve_dir() {
+  # Explicit wins on EITHER signal: the marker captured before this library's
+  # own default ran (an operator's environment, set before this process even
+  # started — code review), OR a value that plainly differs from the
+  # sentinel (the common case: a test or caller exporting a real path AFTER
+  # sourcing). Only "re-exported to the exact literal default string, after
+  # sourcing" stays ambiguous — a degenerate input no real caller has reason
+  # to construct, since it asks for exactly the behaviour that would apply
+  # anyway had it never been set.
+  if [[ "${_JIRA_CONFIG_DIR_EXPLICIT}" == "true" ]] \
+    || [[ -n "${JIRA_CONFIG_DIR:-}" && "${JIRA_CONFIG_DIR}" != '.specify/jira' ]]; then
+    _cfg_absolutize "${JIRA_CONFIG_DIR}"
+    return 0
+  fi
+  if [[ -n "${SPECIFY_INIT_DIR:-}" ]]; then
+    printf '%s/.specify/jira' "$(_cfg_absolutize "${SPECIFY_INIT_DIR}")"
+    return 0
+  fi
+  local d
+  d="$(pwd -P)"
+  while :; do
+    if [[ -d "${d}/.specify" ]]; then
+      printf '%s/.specify/jira' "${d}"
+      return 0
+    fi
+    [[ "${d}" == "/" ]] && break
+    d="$(dirname "${d}")"
+  done
+  return 1
 }
 
 # config_load [config_dir] — load config.yml (+ optional config.local.yml),
@@ -1459,8 +1593,23 @@ config_load() {
 # config files at all) — only a PRESENT and malformed one fails closed
 # (EXIT_CONFIG), because a file on disk that cannot be read correctly is a
 # fail-closed condition, not a value silently outranked (C6.2).
+#
+# [personal_json], when supplied (031), is the caller's OWN, ALREADY-computed
+# config_personal_load result — used AS-IS to decide whether email-seeding
+# applies, no second config_personal_load call. Only the `feature` command's
+# naming path supplies this: it validates personal.yml itself, earlier, with
+# [soft_load]=true (FR-013, C3.3) — a load failure there is a pass-through,
+# never reaches this function at all, so by the time this call happens
+# personal.yml is KNOWN to be either well-formed-and-inactive or well-formed-
+# and-active; either way it needs no re-validation, only its `email` field
+# (which config_personal_load's return object never carries). A catalogue-
+# membership failure (FR-017) is NOT swallowable this way — it is checked by
+# the caller BEFORE this function is ever reached, so it always fails closed
+# there, unconditionally (contract C3.4: every OTHER caller — seed/mention/
+# reconcile/config, all of which reach the network — omits this argument and
+# gets the full, unconditional config_personal_load validation below).
 config_resolve_connection() {
-  local dir="${1:-${JIRA_CONFIG_DIR}}" cfg="${2:-}"
+  local dir="${1:-${JIRA_CONFIG_DIR}}" cfg="${2:-}" personal_json="${3:-}"
   if [[ -z "${cfg}" ]]; then
     cfg='{}'
     if [[ -f "${dir}/config.yml" ]]; then
@@ -1480,12 +1629,20 @@ config_resolve_connection() {
   # set already. Only the SEEDING of the variable is conditional.
   local pf="${dir}/personal.yml"
   if [[ -f "${pf}" ]]; then
-    # config_personal_load's return object never carries `email` — every
-    # branch of it is pinned to data-model.md §3's five-state table, none of
-    # which mentions the key. Call it anyway, for its validation side effect
-    # (a malformed team or email fails closed here, EXIT_CONFIG), then read
-    # the field straight from the parsed file.
-    config_personal_load "${dir}" "${cfg}" > /dev/null || return $?
+    if [[ -z "${personal_json}" ]]; then
+      # config_personal_load's return object never carries `email` — every
+      # branch of it is pinned to data-model.md §3's five-state table, none of
+      # which mentions the key. Call it anyway, for its validation side effect
+      # (a malformed team or email fails closed here, EXIT_CONFIG), then read
+      # the field straight from the parsed file.
+      config_personal_load "${dir}" "${cfg}" > /dev/null || return $?
+    elif [[ "$(jq -r '.state // ""' <<< "${personal_json}")" == "personal-unloadable" ]]; then
+      # The caller already knows this file is broken and already reported it
+      # (031). Nothing downstream on that pass-through path makes a Jira
+      # request, so there is no email worth seeding from a file that cannot
+      # be re-parsed anyway.
+      return 0
+    fi
     if [[ -z "${JIRA_EMAIL:-}" ]]; then
       local pjson email
       pjson="$(config_yaml_to_json "${pf}")" || return "${EXIT_CONFIG}"
