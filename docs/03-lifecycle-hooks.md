@@ -57,9 +57,9 @@ sequenceDiagram
     participant Registry as .specify/extensions.yml
     participant Bridge as spec-kit-jira
 
-    Dev->>Specify: specify extension add jira --from ...
+    Dev->>Specify: specify extension add jira-mirror --from ...
     Specify->>Manifest: read schema, commands, hooks
-    Specify->>Specify: copy extension into .specify/extensions/jira/
+    Specify->>Specify: copy extension into .specify/extensions/jira-mirror/
     Note over Specify,Registry: .extensionignore keeps specs/, tests/,<br/>.specify/ and .github/ out of the install
     Specify->>Registry: purge this extension's old entries, write the seven declared hooks
     Registry-->>Specify: registry updated
@@ -98,7 +98,7 @@ sequenceDiagram
         Agent-->>Dev: nothing at all — the step is inert
     else
         Note over Agent,Bridge: the target is ALWAYS the active feature's own<br/>spec.md — never plan.md, the artifact this<br/>host command just produced (017, the target guard)
-        Agent->>Bridge: .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile spec.md --json
+        Agent->>Bridge: .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh reconcile spec.md --json
         Bridge->>Jira: read, then write only what changed
         Jira-->>Bridge: responses
         Bridge-->>Agent: run summary JSON + exit code

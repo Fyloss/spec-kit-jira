@@ -100,7 +100,7 @@ hooks:
         foreach ($e in $script:Events) {
             $cmd = @(Get-HarnessEntriesFor -Repo $script:Repo -LifecycleEvent $e | Where-Object { $_.Extension -eq 'jira' })[0].Command
             $cmd | Should -Not -BeNullOrEmpty
-            Test-Path -LiteralPath (Join-Path $script:Repo ".specify/extensions/jira/commands/$cmd.md") |
+            Test-Path -LiteralPath (Join-Path $script:Repo ".specify/extensions/jira-mirror/commands/$cmd.md") |
                 Should -BeTrue -Because "event $e names $cmd, which must be installed"
         }
     }

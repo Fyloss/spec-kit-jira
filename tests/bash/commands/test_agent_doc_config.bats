@@ -40,7 +40,7 @@ setup() {
   # The re-invocation is named in the repository-relative per-port form: the
   # install puts nothing on PATH, so a bare executable name would be unrunnable
   # (003 FR-014, FR-018).
-  grep -q '.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config <KEY>' "${DOC}"
+  grep -q '.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh config <KEY>' "${DOC}"
 }
 
 # --- T089a [Phase 6, 011] — the field-defaults ceremony, normatively --------

@@ -30,7 +30,7 @@ BeforeAll {
         foreach ($e in (Get-JiraHookEventList)) {
             $cmd = Get-JiraHookCommandFor -LifecycleEvent $e
             [void]$sb.AppendLine("  ${e}:")
-            [void]$sb.AppendLine('    - extension: jira')
+            [void]$sb.AppendLine('    - extension: jira-mirror')
             [void]$sb.AppendLine("      command: $cmd")
             [void]$sb.AppendLine('      enabled: true')
             [void]$sb.AppendLine('      optional: false')
@@ -124,7 +124,7 @@ Describe 'Hook health reporting' {
         [System.IO.File]::WriteAllText($env:SPEC_KIT_JIRA_EXTENSIONS_YML, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
         $obj = Invoke-ReconcileSummary @('reconcile', '--dry-run', '--json', $Spec) | ConvertFrom-Json
         @($obj.hook_health.duplicated) | Should -Contain 'after_plan'
-        $obj.hook_health.repair_hint | Should -Match ([regex]::Escape('extension: jira'))
+        $obj.hook_health.repair_hint | Should -Match ([regex]::Escape('extension: jira-mirror'))
     }
 
     It 'reports an unreadable registry as unreadable, never as missing hooks (FR-024)' {

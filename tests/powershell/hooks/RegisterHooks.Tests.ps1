@@ -25,7 +25,7 @@ BeforeAll {
         foreach ($e in (Get-JiraHookEventList)) {
             $cmd = Get-JiraHookCommandFor -LifecycleEvent $e
             [void]$sb.AppendLine("  ${e}:")
-            [void]$sb.AppendLine('    - extension: jira')
+            [void]$sb.AppendLine('    - extension: jira-mirror')
             [void]$sb.AppendLine("      command: $cmd")
             [void]$sb.AppendLine('      enabled: true')
             [void]$sb.AppendLine('      optional: false')
@@ -62,21 +62,21 @@ Describe 'The closed set of seven declared events' {
 
 Describe 'Recognition: ours vs leftover vs foreign' {
     It 'recognises an entry as ours when extension is jira' {
-        Test-JiraHookEntryOwnership -EntryJson '{"extension":"jira","command":"speckit.jira.reconcile"}' | Should -BeTrue
+        Test-JiraHookEntryOwnership -EntryJson '{"extension":"jira-mirror","command":"speckit.jira.reconcile"}' | Should -BeTrue
         Test-JiraHookEntryOwnership -EntryJson '{"extension":"git","command":"speckit.git.commit"}' | Should -BeFalse
     }
 
     It 'recognises an entry as leftover when extension is absent and command is one of ours (FR-028)' {
         Test-JiraHookEntryIsLeftover -EntryJson '{"command":"speckit.jira.reconcile","enabled":true,"optional":true}' | Should -BeTrue
         Test-JiraHookEntryIsLeftover -EntryJson '{"command":"speckit.jira.feature","enabled":true}' | Should -BeTrue
-        Test-JiraHookEntryIsLeftover -EntryJson '{"extension":"jira","command":"speckit.jira.reconcile"}' | Should -BeFalse
+        Test-JiraHookEntryIsLeftover -EntryJson '{"extension":"jira-mirror","command":"speckit.jira.reconcile"}' | Should -BeFalse
         Test-JiraHookEntryIsLeftover -EntryJson '{"command":"other.ext.thing"}' | Should -BeFalse
     }
 }
 
 Describe 'The canonical eight-field shape, asserted on read' {
     BeforeAll {
-        $script:Canonical = '{"extension":"jira","command":"speckit.jira.reconcile","enabled":true,"optional":false,"priority":10,"prompt":"Execute speckit.jira.reconcile?","description":"Mirror.","condition":null}'
+        $script:Canonical = '{"extension":"jira-mirror","command":"speckit.jira.reconcile","enabled":true,"optional":false,"priority":10,"prompt":"Execute speckit.jira.reconcile?","description":"Mirror.","condition":null}'
     }
 
     It 'accepts the canonical entry' {
@@ -189,7 +189,7 @@ Describe 'Leftover pre-manifest entries (FR-028)' {
         $hint | Should -Match 'after_plan'
         $hint | Should -Match 'before_specify'
         $hint | Should -Match ([regex]::Escape('.specify/extensions.yml'))
-        $hint | Should -Match ([regex]::Escape('extension: jira'))
+        $hint | Should -Match ([regex]::Escape('extension: jira-mirror'))
     }
 
     It 'writes NOTHING while classifying (FR-022)' {
@@ -238,14 +238,14 @@ Describe 'Unreadable (FR-024)' {
     }
 
     It 'names a YAML anchor as the construct that defeated the reader' {
-        [System.IO.File]::WriteAllText($script:Ext, "defaults: &defaults`n  enabled: true`nhooks:`n  after_plan:`n    - extension: jira`n", (New-Object System.Text.UTF8Encoding($false)))
+        [System.IO.File]::WriteAllText($script:Ext, "defaults: &defaults`n  enabled: true`nhooks:`n  after_plan:`n    - extension: jira-mirror`n", (New-Object System.Text.UTF8Encoding($false)))
         $h = Get-JiraHookHealth -Path $script:Ext | ConvertFrom-Json -Depth 100
         $h.unreadable | Should -BeTrue
         $h.repair_hint | Should -Match 'anchor'
     }
 
     It 'names a flow collection as the construct that defeated the reader' {
-        [System.IO.File]::WriteAllText($script:Ext, "hooks:`n  after_plan: [{extension: jira, command: speckit.jira.reconcile}]`n", (New-Object System.Text.UTF8Encoding($false)))
+        [System.IO.File]::WriteAllText($script:Ext, "hooks:`n  after_plan: [{extension: jira-mirror, command: speckit.jira.reconcile}]`n", (New-Object System.Text.UTF8Encoding($false)))
         $h = Get-JiraHookHealth -Path $script:Ext | ConvertFrom-Json -Depth 100
         $h.repair_hint | Should -Match 'flow'
     }

@@ -1117,7 +1117,7 @@ YAML
   #
   #     hooks:
   #       before_specify:
-  #       - extension: jira        <- indent 2, same as the key
+  #       - extension: jira-mirror        <- indent 2, same as the key
   #
   # This reader required a GREATER indent, so it stopped at the key and returned
   # null for its value. The consequence was not subtle: the hook registry of every
@@ -1130,11 +1130,11 @@ YAML
     '  auto_execute_hooks: true' \
     'hooks:' \
     '  before_specify:' \
-    '  - extension: jira' \
+    '  - extension: jira-mirror' \
     '    command: speckit.jira.feature' \
     '    enabled: true' \
     '  after_plan:' \
-    '  - extension: jira' \
+    '  - extension: jira-mirror' \
     '    command: speckit.jira.reconcile' \
     > "${DIR}/pyyaml.yml"
   json="$(config_yaml_to_json "${DIR}/pyyaml.yml")"

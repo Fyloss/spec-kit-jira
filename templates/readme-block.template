@@ -2,9 +2,9 @@
 ## Jira mirror (spec-kit-jira)
 
 This repository mirrors its Spec Kit artifacts into Jira Cloud via the
-[spec-kit-jira](https://github.com/Fyloss/spec-kit-jira) extension (v{{VERSION}}).
+[spec-kit-jira](https://github.com/Fyloss/spec-kit-jira-mirror) extension (v{{VERSION}}).
 
-- **Install**: `specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip`
+- **Install**: `specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip`
   registers the seven lifecycle hooks and activates them. No further step is
   needed to wire them up. This address is outside spec-kit's configured
   extension catalog, so the host asks to confirm an `⚠ Untrusted Source`
@@ -78,7 +78,7 @@ value once — copy it before closing the dialog. Then follow your platform belo
 
 4. **Install and bind.** Run the *Install* command above, check the bridge
    answers with
-   `bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help`, then run
+   `bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh --help`, then run
    `/speckit.jira.config`.
 
 #### Linux
@@ -145,7 +145,7 @@ Credential Manager will not work — nothing reads from there.
 
 4. **Install and bind.** Run the *Install* command above, check the bridge
    answers with
-   `.specify\extensions\jira\scripts\powershell\spec-kit-jira.ps1 --help`, then
+   `.specify\extensions\jira-mirror\scripts\powershell\spec-kit-jira.ps1 --help`, then
    run `/speckit.jira.config`.
 
 If `/speckit.jira.config` reports a degraded run, it names the connection

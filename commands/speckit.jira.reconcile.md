@@ -18,14 +18,14 @@ command finds, **the host spec-kit command completes normally** — see step 4.
 ## Invoking the bridge — normative
 
 The install places **nothing** on `PATH`: `specify extension add` copies the
-extension into the consuming repository's `.specify/extensions/jira/` and
+extension into the consuming repository's `.specify/extensions/jira-mirror/` and
 installs no machine-wide executable. Invoke the entry point by its
 **repository-relative path**, selecting the port from the host:
 
 | Host | Entry point |
 | --- | --- |
-| macOS, Linux | `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` |
-| Windows | `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1` |
+| macOS, Linux | `.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh` |
+| Windows | `.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1` |
 
 You MUST NOT invoke a bare `spec-kit-jira` command name. No such command exists
 in a consuming repository, and assuming it does is what produced the reported
@@ -62,13 +62,13 @@ works either way (026 FR-016).
    | `/speckit.analyze` | `after_analyze` | `after_analyze` |
 
    ```text
-   SPEC_KIT_JIRA_HOOK_EVENT=after_specify bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile <spec-file> --json
+   SPEC_KIT_JIRA_HOOK_EVENT=after_specify bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh reconcile <spec-file> --json
    ```
 
    On Windows:
 
    ```text
-   $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_specify'; .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 reconcile <spec-file> --json
+   $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_specify'; .specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1 reconcile <spec-file> --json
    ```
 
 3. **Interpret the outcome and report exactly one line** — never more than one
@@ -115,11 +115,11 @@ own explanation of the situation:
 
 ```text
 Jira bridge not available: the entry point
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh (or, on Windows,
+.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1) was not found.
 This spec-kit command completed normally and nothing was mirrored to Jira. To
 restore the bridge, reinstall the extension with
-`specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force`
+`specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip --force`
 (it will ask you to confirm an untrusted-source prompt — answer y).
 ```
 

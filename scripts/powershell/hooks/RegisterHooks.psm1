@@ -10,7 +10,7 @@
 # back would fail tests/powershell/ci/NoRegistryWrite.Tests.ps1.
 #
 # Recognition has two rules, and they are not the same rule:
-#   * ours     — the entry carries `extension: jira`, the ownership key the host
+#   * ours     — the entry carries `extension: jira-mirror`, the ownership key the host
 #                install writes and matches on when it purges and re-adds;
 #   * leftover — the entry carries one of our commands and NO `extension` field:
 #                the four-field shape every pre-manifest version of this
@@ -29,7 +29,7 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') # YAML reader (READ
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force # canonical serialiser
 
 # The owning-extension id the host writes into every entry it registers for us.
-$script:HookExtensionId = 'jira'
+$script:HookExtensionId = 'jira-mirror'
 
 # The reconcile command the six after_* events fire.
 $script:HookCommand = 'speckit.jira.reconcile'
@@ -42,7 +42,7 @@ $script:HookExitConfig = 4
 
 # The remedies the report names. Each literal is runnable exactly as spelled —
 # tests/powershell/ci/MessageCommandLiterals.Tests.ps1 asserts it (FR-018).
-$script:HookInstallCommand = 'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'
+$script:HookInstallCommand = 'specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip --force'
 $script:HookReleaseCommand = '/speckit.jira.config --enable-hook'
 
 function Get-JiraHookEventList {
@@ -265,7 +265,7 @@ function Get-JiraHookRepairHint {
         # user-facing message in this port names paths with '/' — the form the
         # Bash twin always produces (Constitution VI, NFR-1).
         $displayPath = $Path -replace '\\', '/'
-        $clauses.Add("duplicated: $($Duplicated -join ', ') — a pre-manifest entry names our command with no owning extension, so the official install adds a second entry beside it instead of replacing it; remove the entry that has no `"extension: jira`" field under each named event, by hand, from $displayPath")
+        $clauses.Add("duplicated: $($Duplicated -join ', ') — a pre-manifest entry names our command with no owning extension, so the official install adds a second entry beside it instead of replacing it; remove the entry that has no `"extension: jira-mirror`" field under each named event, by hand, from $displayPath")
     }
     if ($clauses.Count -eq 0) { return '' }
     return ($clauses -join '; ')

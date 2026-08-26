@@ -152,7 +152,7 @@ run_in_work() {
   [[ "$output" == *"Provisional teams: ijt, wex"* ]]
   # The re-run guidance names the bridge in the repository-relative per-port form
   # (003 FR-014, FR-018) — a bare `spec-kit-jira` names nothing after install.
-  [[ "$output" == *"Rerun: define SPEC_KIT_JIRA_BASE_URL, then re-run: .specify/extensions/jira/scripts/bash/spec-kit-jira.sh config (on Windows: .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 config)"* ]]
+  [[ "$output" == *"Rerun: define SPEC_KIT_JIRA_BASE_URL, then re-run: .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh config (on Windows: .specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1 config)"* ]]
 }
 
 # =============================================================================
@@ -206,8 +206,8 @@ run_in_work() {
   local guidance
   guidance="$(jq -r '.rerun_guidance' <<< "$(grep '^{' <<< "$output")")"
   # The repository-relative per-port form, never a bare executable name.
-  [[ "${guidance}" == *".specify/extensions/jira/scripts/bash/spec-kit-jira.sh config"* ]]
-  [[ "${guidance}" == *".specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 config"* ]]
+  [[ "${guidance}" == *".specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh config"* ]]
+  [[ "${guidance}" == *".specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1 config"* ]]
   run grep -qE '(^|[^/])spec-kit-jira[[:space:]]+config' <<< "${guidance}"
   [ "$status" -ne 0 ]
 }

@@ -41,7 +41,7 @@ setup() {
   printf '%s\n' \
     'hooks:' \
     '  after_implement:' \
-    '  - extension: jira' \
+    '  - extension: jira-mirror' \
     '    command: speckit.jira.reconcile' \
     '    enabled: true' > "${SPEC_KIT_JIRA_EXTENSIONS_YML}"
 }

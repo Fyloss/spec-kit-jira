@@ -11,10 +11,10 @@ no build step, no download step.
 
 This repository is a [Spec Kit extension](https://github.com/github/spec-kit/tree/main/extensions).
 Install it into a consuming repository with the official Spec Kit command,
-which creates `.specify/extensions/jira/` there automatically:
+which creates `.specify/extensions/jira-mirror/` there automatically:
 
 ```sh
-specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
+specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip
 # or, while developing the extension itself:
 specify extension add --dev <path-to-spec-kit-jira> --force
 ```
@@ -112,16 +112,16 @@ unattended contexts.
 ### 4. Install the extension into the consuming repository
 
 ```sh
-specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
+specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip
 ```
 
 Answer `y` at the `⚠ Untrusted Source` confirmation prompt this address raises.
 
-This copies the extension to `.specify/extensions/jira/` **and registers and
+This copies the extension to `.specify/extensions/jira-mirror/` **and registers and
 activates the seven lifecycle hooks**. Verify the bridge answers:
 
 ```sh
-bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh --help
 ```
 
 ### 5. Bind the repository to a Jira project
@@ -231,8 +231,8 @@ context; see the section below.
 ### 4. Install the extension into the consuming repository
 
 ```sh
-specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
-bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip
+bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh --help
 ```
 
 ### 5. Bind the repository and mirror
@@ -300,8 +300,8 @@ the repository's configuration.
 ### 4. Install the extension into the consuming repository
 
 ```powershell
-specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
-.specify\extensions\jira\scripts\powershell\spec-kit-jira.ps1 --help
+specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip
+.specify\extensions\jira-mirror\scripts\powershell\spec-kit-jira.ps1 --help
 ```
 
 ### 5. Bind the repository and mirror
@@ -335,6 +335,49 @@ reach it.
 This repository's own [`live.yml`](.github/workflows/live.yml) is that pattern
 in practice: it runs the double-run zero-churn suite against a real Jira site,
 with all four settings supplied from repository secrets.
+
+## How the bridge resolves issue types, hierarchy, and workflow
+
+Nothing about your Jira schema is compiled into this extension. Both project
+styles are supported, and which one you have is **detected, never assumed**.
+
+**Project style.** `/speckit.jira.config` reads the style off the project
+itself: `style: next-gen` or `simplified: true` means team-managed,
+`style: classic` or `simplified: false` means company-managed. The rule is
+three-valued on purpose — if neither signal is present, or the two contradict
+each other, the bridge substitutes no default. It stops with exit `4` and names
+the flag that settles it:
+
+```sh
+--style PROJ=team_managed    # or --style PROJ=company_managed
+```
+
+**Issue types and hierarchy.** The tiers come from your project's own create
+metadata, read per project, and are derived from `hierarchyLevel` rather than
+from any type name: the lowest non-sub-task level is the child tier, the next
+level above it is the parent tier. That is why Epic/Story/Sub-task and a SAFe
+Capability/Feature/Story ladder resolve through the same code path with nothing
+renamed — and why a level holding two equally plausible candidates yields no
+candidate at all instead of a guess. Resolved ids are recorded in your config,
+so later runs do not re-discover them.
+
+**The one rule that is keyed on style.** A team-managed project supports only an
+Epic-tier parent and Sub-task children. A hierarchy level configured *above* the
+discovered top tier is therefore impossible there, and is refused at config time
+with exit `4`, naming the offending level and the style. The top tier is taken
+from what was discovered in your project — never from a type name written into
+the script. Company-managed projects carry no such restriction.
+
+**Workflow.** Statuses and their categories are read from your project, and a
+transition is chosen by status **category**, never by status name, so a renamed
+or localised workflow resolves without configuration. Which status each
+lifecycle step should land on is yours to declare, per project and per role —
+see [Telling the bridge where each lifecycle step leaves a
+ticket](#telling-the-bridge-where-each-lifecycle-step-leaves-a-ticket). By
+default no ticket moves at all.
+
+**Priorities** are derived from the project's own create metadata — the values
+that project actually accepts — and deliberately not from a rule keyed on style.
 
 ## Naming features by team
 

@@ -193,7 +193,7 @@ Describe 'Message discipline (T049 / T088, 003 US5)' {
         $r.Err | Should -Not -Match 'missing required command'
         # The remedy is the official install, in the form a URL-installing
         # consumer actually has (026 FR-016, C2.4) — not `--dev`.
-        $r.Err | Should -Match ([regex]::Escape('specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'))
+        $r.Err | Should -Match ([regex]::Escape('specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip --force'))
     }
 
     It 'emits exactly ONE message per run (FR-016)' {

@@ -117,7 +117,7 @@ teardown() {
   for e in "${EVENTS[@]}"; do
     cmd="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira" {print $2}')"
     [ -n "${cmd}" ]
-    file="${REPO}/.specify/extensions/jira/commands/${cmd}.md"
+    file="${REPO}/.specify/extensions/jira-mirror/commands/${cmd}.md"
     [ -f "${file}" ] || {
       printf 'event %s names %s, which is not installed at %s\n' "${e}" "${cmd}" "${file}" >&2
       return 1

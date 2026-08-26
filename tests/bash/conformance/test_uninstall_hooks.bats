@@ -67,9 +67,9 @@ teardown() {
 
 @test "the extension tree is gone, so nothing could run even if an entry survived" {
   harness_install "${REPO}"
-  [ -d "${REPO}/.specify/extensions/jira" ]
+  [ -d "${REPO}/.specify/extensions/jira-mirror" ]
   harness_uninstall "${REPO}"
-  [ ! -d "${REPO}/.specify/extensions/jira" ]
+  [ ! -d "${REPO}/.specify/extensions/jira-mirror" ]
 }
 
 @test "a reinstall after removal registers the seven events again (FR-005)" {

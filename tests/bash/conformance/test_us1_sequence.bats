@@ -62,7 +62,7 @@ run_ceremony() {
   (
     cd "${REPO}" || exit 1
     unset SPEC_KIT_JIRA_BASE_URL
-    ./.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config --json > /dev/null 2>&1 || true
+    ./.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh config --json > /dev/null 2>&1 || true
   )
 }
 

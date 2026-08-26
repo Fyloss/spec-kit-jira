@@ -32,8 +32,8 @@ extension:
 
 | Host | Entry point |
 | --- | --- |
-| macOS, Linux | `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` |
-| Windows | `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1` |
+| macOS, Linux | `.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh` |
+| Windows | `.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1` |
 
 Invoke the Bash entry point **through the interpreter** (`bash <path>`), not
 by bare path.
@@ -46,11 +46,11 @@ own explanation of the situation:
 
 ```text
 Jira bridge not available: the entry point
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh (or, on Windows,
+.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1) was not found.
 This spec-kit command completed normally and nothing was mirrored to Jira. To
 restore the bridge, reinstall the extension with
-`specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force`
+`specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip --force`
 (it will ask you to confirm an untrusted-source prompt — answer y).
 ```
 
@@ -99,7 +99,7 @@ decomposition or ask the operator to re-invoke with different designators.
 2. **Invoke the bridge**:
 
    ```text
-   bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh seed <path-to-spec.md> --json
+   bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh seed <path-to-spec.md> --json
    ```
 
 3. **`REF-EXISTS` / any refusal class** ⇒ relay the message and remediation
@@ -115,7 +115,7 @@ decomposition or ask the operator to re-invoke with different designators.
    - **Operator confirms** ⇒ re-invoke:
 
      ```text
-     bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh seed <path-to-spec.md> --confirm --json
+     bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh seed <path-to-spec.md> --confirm --json
      ```
 
 5. **Success** ⇒ report the bindings, creates, and any re-parenting exactly

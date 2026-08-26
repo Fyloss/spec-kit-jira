@@ -137,8 +137,8 @@ declared_commands() {
   local bad
   bad="$(grep -nE 'specify extension add[[:space:]]+[^`]' "${SCOPE[@]}" \
     | grep -vE 'specify extension add --dev <path-to-spec-kit-jira> --force' \
-    | grep -vE 'specify extension add jira --from https://github\.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira\.zip( --force)?' \
-    | grep -vE 'specify extension add jira --from https://github\.com/Fyloss/spec-kit-jira/releases/download/v<X\.Y\.Z>/spec-kit-jira-<X\.Y\.Z>\.zip' || true)"
+    | grep -vE 'specify extension add jira-mirror --from https://github\.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira\.zip( --force)?' \
+    | grep -vE 'specify extension add jira-mirror --from https://github\.com/Fyloss/spec-kit-jira-mirror/releases/download/v<X\.Y\.Z>/spec-kit-jira-<X\.Y\.Z>\.zip' || true)"
   if [[ -n "${bad}" ]]; then
     printf 'host install command not in its runnable form:\n%s\n' "${bad}" >&2
     return 1
@@ -160,7 +160,7 @@ declared_commands() {
 
   # missing -> the official install command, in its runnable form.
   hint="$(register_hooks_health "${work}/absent.yml" | jq -r '.repair_hint')"
-  [[ "${hint}" == *"specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force"* ]]
+  [[ "${hint}" == *"specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip --force"* ]]
 
   # held disabled -> the release flag on a declared command.
   printf 'hooks: {}\n' > "${work}/e.yml"

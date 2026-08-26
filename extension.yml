@@ -1,7 +1,7 @@
 # spec-kit-jira extension manifest — official spec-kit extension schema
 # (github/spec-kit extensions/EXTENSION-DEVELOPMENT-GUIDE.md). `specify
 # extension add` copies this repository's extension content into the consuming
-# repository's `.specify/extensions/jira/` (dev-only material is excluded by
+# repository's `.specify/extensions/jira-mirror/` (dev-only material is excluded by
 # `.extensionignore`).
 #
 # The nested `extension.version` field below is the SINGLE source of truth for
@@ -12,19 +12,19 @@
 schema_version: "1.0"
 
 extension:
-  id: jira
-  name: Jira Reconcile Engine
-  version: 0.20.3
+  id: jira-mirror
+  name: Jira Mirror
+  version: 0.21.0
   description: >-
-    Mirrors a repository's Spec Kit artifacts (spec.md, plan.md, tasks.md) into
-    Jira Cloud as a self-healing, idempotent, fail-closed bridge. Twin native
-    ports: Bash (macOS/Linux) and PowerShell 7+ (Windows).
+    Spec Kit ↔ Jira bridge for team-managed and company-managed projects:
+    configurable workflows & hierarchies (Scrum/SAFe), multi-project,
+    idempotent and fail-closed. macOS/Linux/Windows.
   category: integration
   effect: read-write
   author: Fyloss
-  repository: https://github.com/Fyloss/spec-kit-jira
+  repository: https://github.com/Fyloss/spec-kit-jira-mirror
   license: MIT
-  homepage: https://github.com/Fyloss/spec-kit-jira
+  homepage: https://github.com/Fyloss/spec-kit-jira-mirror
 
 requires:
   speckit_version: ">=0.13.0"

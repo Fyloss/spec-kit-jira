@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-26
+
+### Changed
+
+- **BREAKING — the extension id is now `jira-mirror`, and it installs to
+  `.specify/extensions/jira-mirror/`.** The id `jira` is already held in the
+  Spec Kit community catalog by another extension, so this one could not be
+  published under it (Constitution XII: the catalog id must be verified
+  available before publication). The id is also the ownership key the host
+  writes into every `.specify/extensions.yml` entry it registers for us, so the
+  rename moves the install directory and the registry key together.
+
+  **Migration — remove the old installation before adding the new one:**
+
+  ```sh
+  specify extension remove jira --force
+  specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip
+  ```
+
+  Removing first is not optional housekeeping. The two ids are distinct owners
+  as far as the registry is concerned: an entry left behind under
+  `extension: jira` is neither recognised as ours nor classified as an
+  ownerless leftover, so the bridge will neither report nor purge it, and it
+  names the same command the new entry names. Skipping the removal leaves both
+  entries in place and every lifecycle event fires the reconcile twice. The
+  second run is idempotent and writes nothing to Jira (Constitution II), so the
+  cost is a duplicated prompt and a wasted run rather than damage — but it will
+  not clear up on its own.
+
+  Nothing else about the extension changes. The four commands keep their names
+  (`/speckit.jira.config`, `/speckit.jira.feature`, `/speckit.jira.reconcile`,
+  `/speckit.jira.seed`), your configuration under `.specify/jira/` is untouched
+  — it has never lived inside the extension folder (Constitution V) — and the
+  environment variables and credential resolution are unchanged.
+
+- The catalog display name is now **Jira Mirror**, and the manifest
+  description states the differentiator the old one left implicit: both project
+  styles, configurable workflows and hierarchies, multi-project.
+
+- **The repository moved to
+  [`Fyloss/spec-kit-jira-mirror`](https://github.com/Fyloss/spec-kit-jira-mirror).**
+  Every address in this repository — the manifest's `repository` and `homepage`,
+  the install commands, the remedies the bridge prints — now names it. GitHub
+  redirects the old address, so an existing clone, bookmark, or pinned install
+  URL keeps working; nothing is required of you. The published release **asset**
+  is still `spec-kit-jira.zip` (and `spec-kit-jira-<version>.zip` when pinned) —
+  the file name is independent of the repository name and did not change.
+
+### Added
+
+- README now documents how the bridge resolves issue types, hierarchy and
+  workflow against a team-managed versus a company-managed project.
+
 ## [0.20.3] - 2026-08-24
 
 ### Fixed
@@ -1352,33 +1405,34 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.3...HEAD
-[0.20.3]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.2...v0.20.3
-[0.20.2]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.1...v0.20.2
-[0.20.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.20.0...v0.20.1
-[0.20.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.19.0...v0.20.0
-[0.19.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.18.1...v0.19.0
-[0.18.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.18.0...v0.18.1
-[0.18.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.17.0...v0.18.0
-[0.17.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.16.0...v0.17.0
-[0.16.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.15.0...v0.16.0
-[0.15.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.14.0...v0.15.0
-[0.14.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.13.0...v0.14.0
-[0.13.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.12.1...v0.13.0
-[0.12.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.12.0...v0.12.1
-[0.12.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.2...v0.12.0
-[0.11.2]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.1...v0.11.2
-[0.11.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.11.0...v0.11.1
-[0.11.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.2...v0.11.0
-[0.10.2]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.1...v0.10.2
-[0.10.1]: https://github.com/Fyloss/spec-kit-jira/compare/v0.10.0...v0.10.1
-[0.10.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.9.0...v0.10.0
-[0.9.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.8.0...v0.9.0
-[0.8.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.7.0...v0.8.0
-[0.7.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/Fyloss/spec-kit-jira/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/Fyloss/spec-kit-jira/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.20.3...v0.21.0
+[0.20.3]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.20.2...v0.20.3
+[0.20.2]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.20.1...v0.20.2
+[0.20.1]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.20.0...v0.20.1
+[0.20.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.19.0...v0.20.0
+[0.19.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.18.1...v0.19.0
+[0.18.1]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.18.0...v0.18.1
+[0.18.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.17.0...v0.18.0
+[0.17.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.16.0...v0.17.0
+[0.16.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.15.0...v0.16.0
+[0.15.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.13.0...v0.14.0
+[0.13.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.12.1...v0.13.0
+[0.12.1]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.12.0...v0.12.1
+[0.12.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.11.2...v0.12.0
+[0.11.2]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.11.1...v0.11.2
+[0.11.1]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.11.0...v0.11.1
+[0.11.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.10.2...v0.11.0
+[0.10.2]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.10.1...v0.10.2
+[0.10.1]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.10.0...v0.10.1
+[0.10.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/Fyloss/spec-kit-jira-mirror/releases/tag/v0.1.0

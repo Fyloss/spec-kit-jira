@@ -93,13 +93,13 @@ harness_install() {
   )
 }
 
-# harness_uninstall <repo> — run `specify extension remove jira`. `--force`
+# harness_uninstall <repo> — run `specify extension remove jira-mirror`. `--force`
 # skips the interactive confirmation, which would otherwise hang a test run.
 harness_uninstall() {
   local repo="$1"
   (
     cd "${repo}" || exit 1
-    specify extension remove jira --force > "${repo}/.harness-uninstall.log" 2>&1
+    specify extension remove jira-mirror --force > "${repo}/.harness-uninstall.log" 2>&1
   )
 }
 

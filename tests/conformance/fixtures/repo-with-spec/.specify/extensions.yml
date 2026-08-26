@@ -12,7 +12,7 @@ settings:
   auto_execute_hooks: true
 hooks:
   before_specify:
-  - extension: jira
+  - extension: jira-mirror
     command: speckit.jira.feature
     enabled: true
     optional: false
@@ -21,7 +21,7 @@ hooks:
     description: Resolve the Jira ticket and name the feature before creation.
     condition: null
   after_specify:
-  - extension: jira
+  - extension: jira-mirror
     command: speckit.jira.reconcile
     enabled: true
     optional: false
@@ -30,7 +30,7 @@ hooks:
     description: Mirror the new specification into Jira Cloud.
     condition: null
   after_clarify:
-  - extension: jira
+  - extension: jira-mirror
     command: speckit.jira.reconcile
     enabled: true
     optional: false
@@ -47,7 +47,7 @@ hooks:
     prompt: Execute speckit.git.commit?
     description: Commit the plan.
     condition: null
-  - extension: jira
+  - extension: jira-mirror
     command: speckit.jira.reconcile
     enabled: true
     optional: false
@@ -56,7 +56,7 @@ hooks:
     description: Mirror the implementation plan into Jira Cloud.
     condition: null
   after_tasks:
-  - extension: jira
+  - extension: jira-mirror
     command: speckit.jira.reconcile
     enabled: true
     optional: false
@@ -65,7 +65,7 @@ hooks:
     description: Mirror the task breakdown into Jira Cloud.
     condition: null
   after_implement:
-  - extension: jira
+  - extension: jira-mirror
     command: speckit.jira.reconcile
     enabled: true
     optional: false
@@ -74,7 +74,7 @@ hooks:
     description: Mirror the implementation outcome into Jira Cloud.
     condition: null
   after_analyze:
-  - extension: jira
+  - extension: jira-mirror
     command: speckit.jira.reconcile
     enabled: true
     optional: false

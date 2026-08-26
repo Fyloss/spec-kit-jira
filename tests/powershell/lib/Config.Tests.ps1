@@ -934,7 +934,7 @@ Describe 'Block sequences at the parent key indentation (003 T011 regression)' {
             '  auto_execute_hooks: true'
             'hooks:'
             '  before_specify:'
-            '  - extension: jira'
+            '  - extension: jira-mirror'
             '    command: speckit.jira.feature'
             '    enabled: true'
         ) -join "`n"

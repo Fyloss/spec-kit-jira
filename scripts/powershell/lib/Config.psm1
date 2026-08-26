@@ -422,7 +422,7 @@ function Read-CfgMapping {
             #
             #     hooks:
             #       before_specify:
-            #       - extension: jira        <- same indent as the key
+            #       - extension: jira-mirror        <- same indent as the key
             #
             # Requiring a greater indent made this reader stop at the key and
             # return null for its value, so the registry of every real

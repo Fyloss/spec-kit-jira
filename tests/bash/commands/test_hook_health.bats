@@ -64,7 +64,7 @@ canonical_registry() {
     for e in "${HOOK_EVENTS[@]}"; do
       cmd="$(register_hooks_command_for "${e}")"
       printf '  %s:\n' "${e}"
-      printf '    - extension: jira\n'
+      printf '    - extension: jira-mirror\n'
       printf '      command: %s\n' "${cmd}"
       printf '      enabled: true\n'
       printf '      optional: false\n'
@@ -131,7 +131,7 @@ canonical_registry() {
   run cmd_reconcile reconcile --dry-run --json "${SPEC}"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.hook_health.duplicated[0]' <<< "$output")" = "after_plan" ]
-  [[ "$(jq -r '.hook_health.repair_hint' <<< "$output")" == *"extension: jira"* ]]
+  [[ "$(jq -r '.hook_health.repair_hint' <<< "$output")" == *"extension: jira-mirror"* ]]
 }
 
 @test "an unreadable registry reports unreadable, never missing hooks (FR-024)" {

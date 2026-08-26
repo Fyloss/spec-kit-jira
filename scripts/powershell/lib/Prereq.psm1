@@ -15,11 +15,11 @@ $script:ExitPrereq = 5
 $script:RequiredCommands = @('git')
 
 # The bridge's repository-relative entry points, per port (003 FR-014, R6). The
-# install copies the extension into `.specify/extensions/jira/` and puts NOTHING
+# install copies the extension into `.specify/extensions/jira-mirror/` and puts NOTHING
 # on PATH, so these paths — not a bare executable name — are what "the bridge"
 # means in every message.
-$script:PrereqBridgeBash = '.specify/extensions/jira/scripts/bash/spec-kit-jira.sh'
-$script:PrereqBridgePwsh = '.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1'
+$script:PrereqBridgeBash = '.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh'
+$script:PrereqBridgePwsh = '.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1'
 
 function Get-JiraMissingBridgeEntry {
     <#
@@ -91,7 +91,7 @@ function Test-JiraPrereq {
     # missing tool the operator should go and install.
     $bridge = Get-JiraMissingBridgeEntry
     if ($bridge) {
-        Write-Warning ("spec-kit-jira: the bridge entry point {0} was not found — the extension install is incomplete. Restore it with: {1} (it will ask you to confirm an untrusted-source prompt — answer y)" -f $bridge, 'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force')
+        Write-Warning ("spec-kit-jira: the bridge entry point {0} was not found — the extension install is incomplete. Restore it with: {1} (it will ask you to confirm an untrusted-source prompt — answer y)" -f $bridge, 'specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip --force')
         return $script:ExitPrereq
     }
 

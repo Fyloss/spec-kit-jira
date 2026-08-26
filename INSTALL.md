@@ -46,12 +46,12 @@ for why that is a choice to make knowingly, not merely a convenience.
 ## Install & configure
 
 1. Install the extension with the official Spec Kit command — it creates
-   `.specify/extensions/jira/` in your repository automatically (and never
+   `.specify/extensions/jira-mirror/` in your repository automatically (and never
    writes into Spec Kit core's `.specify/scripts/` or `.specify/templates/`,
    FR-055/SC-009):
 
    ```sh
-   specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
+   specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip
    # or, while developing the extension itself:
    specify extension add --dev <path-to-spec-kit-jira> --force
    ```
@@ -60,7 +60,7 @@ for why that is a choice to make knowingly, not merely a convenience.
    substitute the version for the placeholder:
 
    ```sh
-   specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/download/v<X.Y.Z>/spec-kit-jira-<X.Y.Z>.zip
+   specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/download/v<X.Y.Z>/spec-kit-jira-<X.Y.Z>.zip
    ```
 
    Both release addresses are outside spec-kit's configured extension catalog, so
@@ -120,7 +120,7 @@ got all four wrong:
   | Report | What it means, and what to do |
   | --- | --- |
   | `healthy` | All seven events present and enabled |
-  | `incomplete` | An event has no entry. Re-run `specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force` (confirm the untrusted-source prompt with `y`) |
+  | `incomplete` | An event has no entry. Re-run `specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip --force` (confirm the untrusted-source prompt with `y`) |
   | `held_disabled` | You disabled an event. No mirroring runs for it, whatever the registry says. Release it with `/speckit.jira.config --enable-hook <event>` |
   | `duplicated` | A leftover entry from a version before manifest-declared hooks. Neither the install nor the extension can remove it — the report gives you the exact edit |
   | `unreadable` | The registry could not be read. The file is named; no claim is made about the hooks |
@@ -144,7 +144,7 @@ each one, and every lifecycle step fires twice.
 
 The extension reports this as `duplicated` and names each affected event. Removing
 it is a one-time manual edit: open `.specify/extensions.yml` and delete, under
-each named event, the entry that has **no** `extension: jira` line. The remaining
+each named event, the entry that has **no** `extension: jira-mirror` line. The remaining
 entry is the canonical one the install wrote.
 
 ### Upgrading to the parent-hierarchy release
@@ -200,14 +200,14 @@ zero-churn guarantee as any other settled ticket.
 ## Verifying the install
 
 - Inspect `.specify/extensions.yml` straight after installing: seven events, one
-  `jira` entry each, `enabled: true`, `optional: false`.
+  `jira-mirror` entry each, `enabled: true`, `optional: false`.
 - Run the bridge by its repository-relative path with nothing done in between —
   the install places nothing on your `PATH`, by design:
 
   ```sh
-  bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+  bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh --help
   # on Windows:
-  .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 --help
+  .specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1 --help
   ```
 
 - Re-run `/speckit.jira.config` on an unchanged project: the produced
@@ -234,7 +234,7 @@ zero-churn guarantee as any other settled ticket.
   manifest, or simply invoking it directly:
 
   ```sh
-  bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh seed --help
+  bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh seed --help
   ```
 
   See the README's "Seeding a specification from existing Jira issues" for

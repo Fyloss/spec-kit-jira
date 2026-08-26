@@ -22,11 +22,11 @@ BeforeAll {
     # so it matches whatever line endings the checkout produced.
     $script:BlockLines = @(
         'Jira bridge not available: the entry point'
-        '.specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,'
-        '.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.'
+        '.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh (or, on Windows,'
+        '.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1) was not found.'
         'This spec-kit command completed normally and nothing was mirrored to Jira. To'
         'restore the bridge, reinstall the extension with'
-        '`specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force`'
+        '`specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip --force`'
         '(it will ask you to confirm an untrusted-source prompt — answer y).'
     )
     $script:Block = $script:BlockLines -join "`n"
@@ -71,7 +71,7 @@ Describe 'The fallback block (FR-030)' {
     It 'contains only literals that are runnable as written (FR-018)' {
         Test-Path -LiteralPath (Join-Path $script:Root 'scripts/bash/spec-kit-jira.sh') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $script:Root 'scripts/powershell/spec-kit-jira.ps1') | Should -BeTrue
-        $script:Block | Should -Match ([regex]::Escape('specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'))
+        $script:Block | Should -Match ([regex]::Escape('specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira.zip --force'))
         # Nothing in the block names an assistant command, so there is nothing for
         # the assistant to misremember — the failure mode that produced
         # `/speckit-jira-conifg`.

@@ -77,7 +77,7 @@ hooks:
   - extension: git          # the other extension's entry, and it stays put
     command: speckit.git.commit
     enabled: true
-  - extension: jira
+  - extension: jira-mirror
     command: speckit.jira.reconcile
     enabled: true
     optional: false
@@ -86,7 +86,7 @@ hooks:
     description: Mirror the implementation plan into Jira Cloud.
     condition: null
   before_specify:
-  - extension: jira
+  - extension: jira-mirror
     command: speckit.jira.feature
     enabled: true
     optional: false
@@ -133,7 +133,7 @@ assert_untouched() {
     cmd=speckit.jira.reconcile
     {
       printf '  %s:\n' "${e}"
-      printf '  - extension: jira\n    command: %s\n    enabled: true\n' "${cmd}"
+      printf '  - extension: jira-mirror\n    command: %s\n    enabled: true\n' "${cmd}"
       printf '    optional: false\n    priority: 10\n'
       printf '    prompt: Execute %s?\n' "${cmd}"
       printf '    description: Mirror.\n    condition: null\n'
@@ -174,7 +174,7 @@ assert_untouched() {
     '# a file we cannot read, and must not touch' \
     'hooks:' \
     '  after_plan: &anchor' \
-    '    - extension: jira' > "${EXT}"
+    '    - extension: jira-mirror' > "${EXT}"
   assert_untouched "unreadable"
 }
 

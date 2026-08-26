@@ -42,8 +42,8 @@ setup() {
 }
 
 @test "step 2 invokes the bridge by repository-relative path with --json (FR-014)" {
-  grep -qF '.specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile' "${DOC}"
-  grep -qF '.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 reconcile' "${DOC}"
+  grep -qF '.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh reconcile' "${DOC}"
+  grep -qF '.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1 reconcile' "${DOC}"
   grep -qF -- '--json' "${DOC}"
 }
 

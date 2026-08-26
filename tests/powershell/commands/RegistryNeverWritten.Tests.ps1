@@ -32,7 +32,7 @@ hooks:
   - extension: git          # the other extension's entry, and it stays put
     command: speckit.git.commit
     enabled: true
-  - extension: jira
+  - extension: jira-mirror
     command: speckit.jira.reconcile
     enabled: true
     optional: false
@@ -41,7 +41,7 @@ hooks:
     description: Mirror the implementation plan into Jira Cloud.
     condition: null
   before_specify:
-  - extension: jira
+  - extension: jira-mirror
     command: speckit.jira.feature
     enabled: true
     optional: false
@@ -101,7 +101,7 @@ Describe 'The registry is never written (FR-022, SC-007, SC-012)' {
     It 'leaves a healthy registry byte-identical (SC-007)' {
         $complete = $script:Seed
         foreach ($e in @('after_specify', 'after_clarify', 'after_tasks', 'after_implement', 'after_analyze')) {
-            $complete += "  ${e}:`n  - extension: jira`n    command: speckit.jira.reconcile`n    enabled: true`n    optional: false`n    priority: 10`n    prompt: Execute speckit.jira.reconcile?`n    description: Mirror.`n    condition: null`n"
+            $complete += "  ${e}:`n  - extension: jira-mirror`n    command: speckit.jira.reconcile`n    enabled: true`n    optional: false`n    priority: 10`n    prompt: Execute speckit.jira.reconcile?`n    description: Mirror.`n    condition: null`n"
         }
         [System.IO.File]::WriteAllText($script:Ext, $complete, (New-Object System.Text.UTF8Encoding($false)))
         $before = Get-Content -Raw -LiteralPath $script:Ext
@@ -138,7 +138,7 @@ Describe 'The registry is never written (FR-022, SC-007, SC-012)' {
     }
 
     It 'leaves an unreadable registry byte-identical — reported, never rewritten (FR-024)' {
-        $broken = "# a file we cannot read, and must not touch`nhooks:`n  after_plan: &anchor`n    - extension: jira`n"
+        $broken = "# a file we cannot read, and must not touch`nhooks:`n  after_plan: &anchor`n    - extension: jira-mirror`n"
         [System.IO.File]::WriteAllText($script:Ext, $broken, (New-Object System.Text.UTF8Encoding($false)))
         Invoke-EveryCommand -Spec $script:Spec
         (Get-Content -Raw -LiteralPath $script:Ext) | Should -BeExactly $broken

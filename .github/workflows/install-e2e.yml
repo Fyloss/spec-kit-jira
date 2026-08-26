@@ -178,7 +178,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "${{ runner.temp }}/consumer"
-          printf 'y\n' | specify extension add jira \
+          printf 'y\n' | specify extension add jira-mirror \
             --from "http://127.0.0.1:${{ steps.serve.outputs.port }}/spec-kit-jira.zip"
 
       - name: The installed tree equals the derived surface, member for member (C4.4)
@@ -187,7 +187,7 @@ jobs:
           set -euo pipefail
           # shellcheck source=packaging/lib/surface.sh
           source packaging/lib/surface.sh
-          installed="$(cd "${{ runner.temp }}/consumer/.specify/extensions/jira" && find . -type f | sed 's|^\./||' | LC_ALL=C sort)"
+          installed="$(cd "${{ runner.temp }}/consumer/.specify/extensions/jira-mirror" && find . -type f | sed 's|^\./||' | LC_ALL=C sort)"
           expected="$(packaging_derive_surface | LC_ALL=C sort)"
           diff <(printf '%s\n' "${expected}") <(printf '%s\n' "${installed}")
 
@@ -197,14 +197,14 @@ jobs:
         run: |
           set -euo pipefail
           cd "${{ runner.temp }}/consumer"
-          bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+          bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh --help
 
       - name: The bridge answers --help (PowerShell port, C4.2)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Set-Location "${{ runner.temp }}/consumer"
-          & ./.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 --help
+          & ./.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1 --help
 
       - name: All seven lifecycle events are registered and enabled (C4.4)
         shell: bash
