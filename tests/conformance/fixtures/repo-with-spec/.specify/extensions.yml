@@ -6,7 +6,7 @@
 # any command ever re-serialises this file these lines disappear — which is
 # exactly why the writer was removed rather than narrowed (003 FR-022, R3).
 installed:
-- jira
+- jira-mirror
 - git
 settings:
   auto_execute_hooks: true

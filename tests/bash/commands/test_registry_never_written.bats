@@ -68,7 +68,7 @@ seed_registry() {
 # Our team's hook registry. Please keep the comments — they are the only record
 # of why after_implement is off.
 installed:
-- jira
+- jira-mirror
 - git
 settings:
   auto_execute_hooks: true

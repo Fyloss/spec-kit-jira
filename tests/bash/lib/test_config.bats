@@ -1125,7 +1125,7 @@ YAML
   # file unreadable on a perfectly healthy repository.
   printf '%s\n' \
     'installed:' \
-    '- jira' \
+    '- jira-mirror' \
     'settings:' \
     '  auto_execute_hooks: true' \
     'hooks:' \
@@ -1138,7 +1138,7 @@ YAML
     '    command: speckit.jira-mirror.reconcile' \
     > "${DIR}/pyyaml.yml"
   json="$(config_yaml_to_json "${DIR}/pyyaml.yml")"
-  [ "$(jq -r '.installed[0]' <<< "$json")" = "jira" ]
+  [ "$(jq -r '.installed[0]' <<< "$json")" = "jira-mirror" ]
   [ "$(jq -r '.settings.auto_execute_hooks' <<< "$json")" = "true" ]
   [ "$(jq -r '.hooks.before_specify | length' <<< "$json")" -eq 1 ]
   [ "$(jq -r '.hooks.before_specify[0].command' <<< "$json")" = "speckit.jira-mirror.feature" ]

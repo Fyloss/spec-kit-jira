@@ -929,7 +929,7 @@ Describe 'Block sequences at the parent key indentation (003 T011 regression)' {
         $d = New-TempConfigDir
         $yaml = @(
             'installed:'
-            '- jira'
+            '- jira-mirror'
             'settings:'
             '  auto_execute_hooks: true'
             'hooks:'
@@ -940,7 +940,7 @@ Describe 'Block sequences at the parent key indentation (003 T011 regression)' {
         ) -join "`n"
         Set-Content -Path (Join-Path $d 'pyyaml.yml') -Value ($yaml + "`n") -NoNewline
         $json = ConvertFrom-JiraConfigYaml -Path (Join-Path $d 'pyyaml.yml') | ConvertFrom-Json
-        $json.installed[0] | Should -BeExactly 'jira'
+        $json.installed[0] | Should -BeExactly 'jira-mirror'
         $json.settings.auto_execute_hooks | Should -BeTrue
         @($json.hooks.before_specify).Count | Should -Be 1
         @($json.hooks.before_specify)[0].command | Should -BeExactly 'speckit.jira-mirror.feature'
