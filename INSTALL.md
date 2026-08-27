@@ -46,12 +46,13 @@ for why that is a choice to make knowingly, not merely a convenience.
 ## Install & configure
 
 1. Install the extension with the official Spec Kit command — it creates
-   `.specify/extensions/jira/` in your repository automatically (and never
-   writes into Spec Kit core's `.specify/scripts/` or `.specify/templates/`,
+   `.specify/extensions/jira-mirror/` in your repository automatically (and
+   never writes into Spec Kit core's `.specify/scripts/` or
+   `.specify/templates/`,
    FR-055/SC-009):
 
    ```sh
-   specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
+   specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip
    # or, while developing the extension itself:
    specify extension add --dev <path-to-spec-kit-jira> --force
    ```
@@ -60,7 +61,7 @@ for why that is a choice to make knowingly, not merely a convenience.
    substitute the version for the placeholder:
 
    ```sh
-   specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/download/v<X.Y.Z>/spec-kit-jira-<X.Y.Z>.zip
+   specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/download/v<X.Y.Z>/spec-kit-jira-mirror-<X.Y.Z>.zip
    ```
 
    Both release addresses are outside spec-kit's configured extension catalog, so
@@ -75,7 +76,7 @@ for why that is a choice to make knowingly, not merely a convenience.
    anything reaches Jira:
 
    ```
-   /speckit.jira.config
+   /speckit.jira-mirror.config
    ```
 
    It binds the repository to a Jira project (metadata discovery), manages the
@@ -86,7 +87,7 @@ for why that is a choice to make knowingly, not merely a convenience.
    automatically at each Spec Kit lifecycle step, or run a reconcile manually.
    A bound repository needs **no environment variables** for this: the target
    project, the issue type, and the priority are all resolved from
-   `.specify/jira/config.yml` and the binding `/speckit.jira.config` recorded.
+   `.specify/jira/config.yml` and the binding `/speckit.jira-mirror.config` recorded.
    The `SPEC_KIT_JIRA_PROJECT_KEY` and `SPEC_KIT_JIRA_PLAN_CONTEXT` variables
    remain supported as explicit overrides, taking precedence over the
    config-derived values when set.
@@ -120,20 +121,20 @@ got all four wrong:
   | Report | What it means, and what to do |
   | --- | --- |
   | `healthy` | All seven events present and enabled |
-  | `incomplete` | An event has no entry. Re-run `specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force` (confirm the untrusted-source prompt with `y`) |
-  | `held_disabled` | You disabled an event. No mirroring runs for it, whatever the registry says. Release it with `/speckit.jira.config --enable-hook <event>` |
+  | `incomplete` | An event has no entry. Re-run `specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force` (confirm the untrusted-source prompt with `y`) |
+  | `held_disabled` | You disabled an event. No mirroring runs for it, whatever the registry says. Release it with `/speckit.jira-mirror.config --enable-hook <event>` |
   | `duplicated` | A leftover entry from a version before manifest-declared hooks. Neither the install nor the extension can remove it — the report gives you the exact edit |
   | `unreadable` | The registry could not be read. The file is named; no claim is made about the hooks |
 
 ### Disabling one event
 
 Set `enabled: false` on its entry in `.specify/extensions.yml` and run
-`/speckit.jira.config` once. The ceremony records your decision in the gitignored
+`/speckit.jira-mirror.config` once. The ceremony records your decision in the gitignored
 `.specify/jira/config.local.yml`, and from then on no mirroring runs for that
 event **even though a later `specify extension add` will set `enabled: true` back
 in the registry** — the official install rewrites that field unconditionally and
 this extension may not correct it. Release the event with
-`/speckit.jira.config --enable-hook <event>`.
+`/speckit.jira-mirror.config --enable-hook <event>`.
 
 ### Upgrading from a release that registered its own hooks
 
@@ -144,12 +145,12 @@ each one, and every lifecycle step fires twice.
 
 The extension reports this as `duplicated` and names each affected event. Removing
 it is a one-time manual edit: open `.specify/extensions.yml` and delete, under
-each named event, the entry that has **no** `extension: jira` line. The remaining
-entry is the canonical one the install wrote.
+each named event, the entry that has **no** `extension: jira-mirror` line. The
+remaining entry is the canonical one the install wrote.
 
 ### Upgrading to the parent-hierarchy release
 
-Every installation that ran `/speckit.jira.config` on a release before the
+Every installation that ran `/speckit.jira-mirror.config` on a release before the
 parent hierarchy shipped is bound, but its `.specify/jira/config.local.yml`
 records issue types as a plain name-to-id map with no hierarchy level and no
 sub-task flag — the shape this release replaces. The first `reconcile` after
@@ -157,11 +158,11 @@ upgrading refuses with:
 
 > `reconcile: the local binding for <PROJECT> predates parent support and does
 > not record issue-type hierarchy. The project is bound — its binding is
-> simply a version behind. Run /speckit.jira.config to refresh it (zero
+> simply a version behind. Run /speckit.jira-mirror.config to refresh it (zero
 > writes)`
 
 This is expected, and it happens before the first read, so nothing is written
-and nothing is lost. Run `/speckit.jira.config` once — the ceremony
+and nothing is lost. Run `/speckit.jira-mirror.config` once — the ceremony
 rediscovers the project's issue types in the new shape, may ask which type
 mirrors a user story when the base hierarchy level holds more than one
 candidate, and then `reconcile` proceeds normally. Tickets already mirrored
@@ -205,12 +206,12 @@ zero-churn guarantee as any other settled ticket.
   the install places nothing on your `PATH`, by design:
 
   ```sh
-  bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+  bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh --help
   # on Windows:
-  .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 --help
+  .specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1 --help
   ```
 
-- Re-run `/speckit.jira.config` on an unchanged project: the produced
+- Re-run `/speckit.jira-mirror.config` on an unchanged project: the produced
   `config.local.yml` is **byte-identical** (determinism, SC-004), and
   `.specify/extensions.yml` is byte-identical too — comments included.
 - Re-run a reconcile on an unchanged corpus: **zero writes** of every kind
@@ -227,14 +228,14 @@ zero-churn guarantee as any other settled ticket.
   absence of errors.
 - A forced reinstall preserves the team config and re-registers the seven events
   without duplicating them.
-- `/speckit.jira.seed` is a **command**, not one of the seven hook events above
+- `/speckit.jira-mirror.seed` is a **command**, not one of the seven hook events above
   — a confirmation prompt cannot live in a lifecycle hook, so it does not
   appear in `.specify/extensions.yml`'s `hooks:` block. Confirm it is
   reachable instead by checking `provides.commands` in the extension's own
   manifest, or simply invoking it directly:
 
   ```sh
-  bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh seed --help
+  bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh seed --help
   ```
 
   See the README's "Seeding a specification from existing Jira issues" for

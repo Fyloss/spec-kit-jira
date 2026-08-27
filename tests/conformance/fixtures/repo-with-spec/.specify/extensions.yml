@@ -6,36 +6,36 @@
 # any command ever re-serialises this file these lines disappear — which is
 # exactly why the writer was removed rather than narrowed (003 FR-022, R3).
 installed:
-- jira
+- jira-mirror
 - git
 settings:
   auto_execute_hooks: true
 hooks:
   before_specify:
-  - extension: jira
-    command: speckit.jira.feature
+  - extension: jira-mirror
+    command: speckit.jira-mirror.feature
     enabled: true
     optional: false
     priority: 10
-    prompt: Execute speckit.jira.feature?
+    prompt: Execute speckit.jira-mirror.feature?
     description: Resolve the Jira ticket and name the feature before creation.
     condition: null
   after_specify:
-  - extension: jira
-    command: speckit.jira.reconcile
+  - extension: jira-mirror
+    command: speckit.jira-mirror.reconcile
     enabled: true
     optional: false
     priority: 10
-    prompt: Execute speckit.jira.reconcile?
+    prompt: Execute speckit.jira-mirror.reconcile?
     description: Mirror the new specification into Jira Cloud.
     condition: null
   after_clarify:
-  - extension: jira
-    command: speckit.jira.reconcile
+  - extension: jira-mirror
+    command: speckit.jira-mirror.reconcile
     enabled: true
     optional: false
     priority: 10
-    prompt: Execute speckit.jira.reconcile?
+    prompt: Execute speckit.jira-mirror.reconcile?
     description: Mirror the recorded clarifications into Jira Cloud.
     condition: null
   after_plan:
@@ -47,38 +47,38 @@ hooks:
     prompt: Execute speckit.git.commit?
     description: Commit the plan.
     condition: null
-  - extension: jira
-    command: speckit.jira.reconcile
+  - extension: jira-mirror
+    command: speckit.jira-mirror.reconcile
     enabled: true
     optional: false
     priority: 10
-    prompt: Execute speckit.jira.reconcile?
+    prompt: Execute speckit.jira-mirror.reconcile?
     description: Mirror the implementation plan into Jira Cloud.
     condition: null
   after_tasks:
-  - extension: jira
-    command: speckit.jira.reconcile
+  - extension: jira-mirror
+    command: speckit.jira-mirror.reconcile
     enabled: true
     optional: false
     priority: 10
-    prompt: Execute speckit.jira.reconcile?
+    prompt: Execute speckit.jira-mirror.reconcile?
     description: Mirror the task breakdown into Jira Cloud.
     condition: null
   after_implement:
-  - extension: jira
-    command: speckit.jira.reconcile
+  - extension: jira-mirror
+    command: speckit.jira-mirror.reconcile
     enabled: true
     optional: false
     priority: 10
-    prompt: Execute speckit.jira.reconcile?
+    prompt: Execute speckit.jira-mirror.reconcile?
     description: Mirror the implementation outcome into Jira Cloud.
     condition: null
   after_analyze:
-  - extension: jira
-    command: speckit.jira.reconcile
+  - extension: jira-mirror
+    command: speckit.jira-mirror.reconcile
     enabled: true
     optional: false
     priority: 10
-    prompt: Execute speckit.jira.reconcile?
+    prompt: Execute speckit.jira-mirror.reconcile?
     description: Mirror the analysis outcome into Jira Cloud.
     condition: null

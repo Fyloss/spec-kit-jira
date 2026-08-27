@@ -16,7 +16,7 @@
 # base_url: "https://your-site.atlassian.net"
 
 # Keys use business language (what the team decides), not Jira internals. The
-# `/speckit.jira.config` command fills the discovered ids into config.local.yml.
+# `/speckit.jira-mirror.config` command fills the discovered ids into config.local.yml.
 
 # Which Jira project(s) this repository mirrors into.
 projects:
@@ -84,7 +84,7 @@ projects:
     # refused (exit 4). A `task` mapping applies only where tasks are
     # mirrored as sub-tasks.
     #
-    # `/speckit.jira.config` proposes a draft over the statuses discovered in
+    # `/speckit.jira-mirror.config` proposes a draft over the statuses discovered in
     # YOUR project and records the answer you confirm. Edit it by hand at any
     # time — the ceremony never rewrites a mapping it finds, and deleting the
     # key restores the no-movement behaviour.
@@ -139,7 +139,7 @@ privacy:
 
 # Values this bridge sends when it CREATES a ticket of the named type — the
 # answer to "a mandatory Jira field the bridge cannot supply on its own"
-# (011). Written by `/speckit.jira.config`, inside the marker-delimited
+# (011). Written by `/speckit.jira-mirror.config`, inside the marker-delimited
 # managed region below; edit a value by hand if you like, but keep it
 # between the markers — an entry outside them is a duplicate top-level key
 # and the next read refuses it (exit 4). Removing an entry stops the bridge
@@ -170,7 +170,7 @@ privacy:
 # sub-task per task; `checklist` writes one checklist into each story
 # instead. OPTIONAL — absence is a third state, not a default: it keeps
 # today's behaviour exactly (one sub-task per task when a `task` role is
-# declared above, no task tier otherwise). Written by `/speckit.jira.config`,
+# declared above, no task tier otherwise). Written by `/speckit.jira-mirror.config`,
 # which asks the question once, per project, and never re-asks once a value
 # is recorded. Edit a value here by hand if you like — keep it between the
 # markers; an entry outside them is a duplicate top-level key and the next

@@ -1,6 +1,6 @@
 # 6. Feature naming — the ticket-first ceremony
 
-`/speckit.jira.feature` is the `before_specify` hook. It resolves the Jira
+`/speckit.jira-mirror.feature` is the `before_specify` hook. It resolves the Jira
 ticket **before** naming anything, so the branch and the spec folder can carry
 the real ticket number instead of a placeholder that has to be renamed later.
 
@@ -144,7 +144,7 @@ makes the folder and runs no git, the extension's makes the branch and no
 folder. Anything invoking one by bare name is ambiguous. Widening this hook to create the branch itself is what let a
 single dispatch absorb the whole specify command in the 2026-08-22 consumer
 incident; the boundary is stated normatively in
-`commands/speckit.jira.feature.md`.
+`commands/speckit.jira-mirror.feature.md`.
 
 The module carries no key-shaped literal and no tracker vocabulary at all; a
 boundary grep in the suite proves it. `naming_ticket_number` does not know what
@@ -179,7 +179,7 @@ so it can never quietly become the norm.
 
 ## Naming from named issues — the designator flags (027)
 
-`--parent` and `--story` extend `/speckit.jira.feature` past the mentioned-key
+`--parent` and `--story` extend `/speckit.jira-mirror.feature` past the mentioned-key
 case above: instead of naming (or leaving unnamed) a single ticket, the
 operator can name a whole set of **existing** Jira issues that already carry
 the human intent for this feature, and seed `spec.md` from their content
@@ -204,13 +204,13 @@ flowchart TD
     Refusals -->|"any fires"| Refuse1
     Refusals --> Record["write the seeded-not-bound record + hand the agent<br/>the seed material (summary, description, status, current parent)"]
     Record --> Draft(["the agent drafts spec.md from that material,<br/>pinning each story-role issue after its heading"])
-    Draft --> Seed(["/speckit.jira.seed — moment 2, see below"])
+    Draft --> Seed(["/speckit.jira-mirror.seed — moment 2, see below"])
 ```
 
 A key or a browser URL resolves to an existing issue and is **adopted**, never
 created. A specification-role designator supplied as free text is never
 resolved against Jira at all (no lookup of any kind) — it is always the title
-of a parent to **create**, deferred to `/speckit.jira.seed --confirm`.
+of a parent to **create**, deferred to `/speckit.jira-mirror.seed --confirm`.
 
 ## The two-moment flow
 
@@ -221,9 +221,9 @@ indistinguishable from a hang").
 ```mermaid
 sequenceDiagram
     participant Host as spec-kit host
-    participant M1 as speckit.jira.feature<br/>(before_specify hook)
+    participant M1 as speckit.jira-mirror.feature<br/>(before_specify hook)
     participant Agent
-    participant M2 as speckit.jira.seed<br/>(agent-invoked, no hook)
+    participant M2 as speckit.jira-mirror.seed<br/>(agent-invoked, no hook)
     participant Jira
 
     Host->>M1: before_specify
@@ -244,11 +244,11 @@ sequenceDiagram
 A decline (or an unattended run) leaves the **seeded-not-bound** state exactly
 as it was: the folder and `spec.md` exist, the pinning markers are still
 `pin=`, and no identity marker exists on either side. Re-invoking
-`speckit.jira.seed` with the same designator set resumes at the gate — it
+`speckit.jira-mirror.seed` with the same designator set resumes at the gate — it
 re-reads Jira to recompute the plan (a story closed or re-parented in the
 meantime shows up), but it **never** re-drafts `spec.md`. A different
 designator set refuses `REF-RESEED`.
 
-See `commands/speckit.jira.seed.md` for the full agent-facing procedure and
+See `commands/speckit.jira-mirror.seed.md` for the full agent-facing procedure and
 `docs/08-safety-model.md` for the seeded-not-bound state machine and the
 pinning marker's consume-at-binding mechanics.

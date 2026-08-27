@@ -91,7 +91,7 @@ Describe 'The ceremony records the disable decision (T026, 003 US2)' {
                 $cmd = Get-JiraHookCommandFor -LifecycleEvent $e
                 $enabled = if ($e -eq 'after_implement') { 'false' } else { 'true' }
                 [void]$sb.AppendLine("  ${e}:")
-                [void]$sb.AppendLine('  - extension: jira')
+                [void]$sb.AppendLine('  - extension: jira-mirror')
                 [void]$sb.AppendLine("    command: $cmd")
                 [void]$sb.AppendLine("    enabled: $enabled")
                 [void]$sb.AppendLine('    optional: false')

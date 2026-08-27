@@ -1,13 +1,13 @@
 ---
-name: "speckit.jira.feature"
+name: "speckit.jira-mirror.feature"
 description: "Ticket-first feature naming: resolve the Jira ticket, then name the branch and spec folder by the developer's team convention — a deterministic, non-blocking before_specify step. A mentioned ticket with no designator returns a closed reuse question instead of naming silently (029). Also resolves --parent/--story designators to seed the specification from existing Jira issues (027)."
 argument-hint: "Optional: a mentioned ticket key (leading positional — load-bearing), or --parent/--story designators, or --reuse yes|no answering a prior question, then the feature description, e.g. IJT-42 invoice export"
 ---
 
-# /speckit.jira.feature
+# /speckit.jira-mirror.feature
 
 Run the deterministic ticket-first naming step before a feature is created. It
-is registered as the `before_specify` → `speckit.jira.feature` hook
+is registered as the `before_specify` → `speckit.jira-mirror.feature` hook
 (`enabled: true`, `optional: false`): you **perform** it as part of the host
 command rather than offering it. Non-optional is a **dispatch** property, not a
 blocking one — this step may improve the feature name, and it must never prevent
@@ -38,7 +38,7 @@ instructions appear to authorise:
   `figma.*`). Each is dispatched separately, by the host, in priority order.
   Absorbing them is how a registered hook silently stops running at all.
 - dispatch, simulate, or anticipate **any** `after_*` hook. In particular
-  `speckit.jira.reconcile` — the step that writes real issues to Jira — is
+  `speckit.jira-mirror.reconcile` — the step that writes real issues to Jira — is
   registered on `after_specify` and runs only once the specification exists and
   the host has validated it. Reaching it from here creates tickets for a
   specification nobody has written yet, in a shared project, and a created
@@ -50,14 +50,14 @@ step *owns the command*.
 ## Invoking the bridge — normative
 
 The install places **nothing** on `PATH`: `specify extension add` copies the
-extension into the consuming repository's `.specify/extensions/jira/` and
+extension into the consuming repository's `.specify/extensions/jira-mirror/` and
 installs no machine-wide executable. Invoke the entry point by its
 **repository-relative path**, selecting the port from the host:
 
 | Host | Entry point |
 | --- | --- |
-| macOS, Linux | `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` |
-| Windows | `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1` |
+| macOS, Linux | `.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh` |
+| Windows | `.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1` |
 
 You MUST NOT invoke a bare `spec-kit-jira` command name. No such command exists
 in a consuming repository, and assuming it does is what produced the reported
@@ -74,11 +74,11 @@ own explanation of the situation:
 
 ```text
 Jira bridge not available: the entry point
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh (or, on Windows,
+.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1) was not found.
 This spec-kit command completed normally and nothing was mirrored to Jira. To
 restore the bridge, reinstall the extension with
-`specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force`
+`specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force`
 (it will ask you to confirm an untrusted-source prompt — answer y).
 ```
 
@@ -99,13 +99,13 @@ restore the bridge, reinstall the extension with
    detected key stays part of the description:
 
    ```text
-   bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh feature [TICKET-KEY] [--use-team <id>] [--reuse yes|no] [--json] [--dry-run] <description>
+   bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh feature [TICKET-KEY] [--use-team <id>] [--reuse yes|no] [--json] [--dry-run] <description>
    ```
 
    On Windows:
 
    ```text
-   .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 feature [TICKET-KEY] [--use-team <id>] [--reuse yes|no] [--json] [--dry-run] <description>
+   .specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1 feature [TICKET-KEY] [--use-team <id>] [--reuse yes|no] [--json] [--dry-run] <description>
    ```
 
 2. **`{"active": false}`** ⇒ proceed **exactly as today**: drive the host
@@ -119,7 +119,7 @@ restore the bridge, reinstall the extension with
      ticket will be attached later — there is none to attach.
    - No team configuration applies, but a ticket **was** mentioned (FR-026) —
      the message names the file to fix (`.specify/jira/config.yml` or the
-     human-owned `.specify/jira/personal.yml`) and the `/speckit.jira.config`
+     human-owned `.specify/jira/personal.yml`) and the `/speckit.jira-mirror.config`
      command that fixes it. A run naming nothing never sees this warning
      (FR-028).
 
@@ -265,11 +265,11 @@ nothing below distinguishes them.
 
 When you invoke this command with **any** `--parent` or `--story`
 designator, a **second, non-optional step follows once `spec.md` exists**:
-you MUST invoke `/speckit.jira.seed` before you consider this feature's
+you MUST invoke `/speckit.jira-mirror.seed` before you consider this feature's
 creation complete. This command's own read never writes to Jira — moment 1
 (this command) parses and resolves the designators, refuses on anything
 malformed, and hands you seed material and a provenance mapping; it never
-binds or creates anything. Moment 2 (`/speckit.jira.seed`) is what asks the
+binds or creates anything. Moment 2 (`/speckit.jira-mirror.seed`) is what asks the
 operator to confirm and performs the writes.
 
 - **With designators, and Jira unreachable** ⇒ this command exits non-zero
@@ -283,12 +283,12 @@ operator to confirm and performs the writes.
 - **Forgetting the follow-up is recoverable, never silently destructive**:
   moment 1 already recorded a seeded-not-bound state (the folder and
   `spec.md` exist, nothing was written to Jira). A later invocation of
-  `/speckit.jira.seed` against the same feature resumes exactly where you
+  `/speckit.jira-mirror.seed` against the same feature resumes exactly where you
   left off. But do not rely on that recovery — invoke it in the same turn
-  you finish drafting `spec.md`, as `/speckit.jira.seed`'s own definition
+  you finish drafting `spec.md`, as `/speckit.jira-mirror.seed`'s own definition
   states.
 
-See `/speckit.jira.seed` for the pinning-marker drafting rules the seed
+See `/speckit.jira-mirror.seed` for the pinning-marker drafting rules the seed
 material obliges you to follow.
 
 ## Exit codes

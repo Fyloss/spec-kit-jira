@@ -47,7 +47,7 @@ Describe 'The operator release flag' {
         # A registry the install wrote, with every entry enabled — the state after
         # a reinstall has blown away the operator's `enabled: false`.
         [System.IO.File]::WriteAllText($env:SPEC_KIT_JIRA_EXTENSIONS_YML,
-            "hooks:`n  after_implement:`n  - extension: jira`n    command: speckit.jira.reconcile`n    enabled: true`n",
+            "hooks:`n  after_implement:`n  - extension: jira-mirror`n    command: speckit.jira-mirror.reconcile`n    enabled: true`n",
             (New-Object System.Text.UTF8Encoding($false)))
     }
     AfterEach {

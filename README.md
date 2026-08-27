@@ -11,10 +11,10 @@ no build step, no download step.
 
 This repository is a [Spec Kit extension](https://github.com/github/spec-kit/tree/main/extensions).
 Install it into a consuming repository with the official Spec Kit command,
-which creates `.specify/extensions/jira/` there automatically:
+which creates `.specify/extensions/jira-mirror/` there automatically:
 
 ```sh
-specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
+specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip
 # or, while developing the extension itself:
 specify extension add --dev <path-to-spec-kit-jira> --force
 ```
@@ -27,7 +27,7 @@ answer `y`. With no stdin available (e.g. piped into a non-interactive script) i
 Then run the one-command install ceremony in the consuming repository:
 
 ```text
-/speckit.jira.config
+/speckit.jira-mirror.config
 ```
 
 See [INSTALL.md](INSTALL.md) for prerequisites (Bash ≥ 4 or PowerShell 7+,
@@ -38,6 +38,55 @@ specs: the target project, issue type, and priority are all resolved from
 `.specify/jira/config.yml` and the discovered binding — see
 [INSTALL.md's mirroring step](INSTALL.md#install--configure) for the override
 variables that remain supported.
+
+## How the bridge fits your project — team-managed and company-managed
+
+Nothing about your Jira is compiled into the extension: no default issue-type
+name, no status name, no field id. `/speckit.jira-mirror.config` **detects the project
+style first**, then follows the path that style allows, and records what it
+found in the gitignored `.specify/jira/config.local.yml`. The committed
+`config.yml` holds only what your team decides.
+
+**Issue types and hierarchy.** The issue types, their hierarchy levels and their
+sub-task flags come from the project's own create metadata. Three mirror roles —
+`specification`, `story`, `task` — are resolved in one pass with the precedence
+*declared → operator → derived*: a role is derived only where the level offers
+exactly one non-sub-task candidate, otherwise the ceremony asks once and records
+your answer under `hierarchy:` in `config.yml`. A project offering both `Epic`
+and `Service Category` above `Story` is a question, never a guess, and an
+unresolved role refuses at configuration time with zero writes.
+
+**What a team-managed project may not do, refused before any ticket exists.** A
+company-managed project may declare levels above the Epic tier, and the bridge
+uses them if the instance declares them. A team-managed project has only an
+Epic-tier parent and sub-task children — so a configured mapping that asks for a
+level above that tier is refused at config time (exit `4`, zero writes) rather
+than at the first reconcile, which would already have created tickets it cannot
+parent. The "Epic tier" is the top non-sub-task hierarchy level **as discovered**
+in your project, never a name compiled into the script.
+
+**Fields.** Field discovery reads the project's own field schema, not the global
+field catalogue — the distinction that matters for a team-managed project, where
+the estimation field is project-scoped rather than the instance-wide custom
+field. Numeric candidates are ranked by documented signals and the top one is
+*proposed for confirmation*, never assumed. The flagged field is identified by
+shape, not by id.
+
+**Workflow.** Statuses and their categories are read from the project, and
+`phase_status_map` in `config.yml` says where each spec-kit lifecycle event
+should leave a ticket, per role, by the destination status name spelled exactly
+as your project spells it. The move is then resolved against the ticket's **real
+available transitions** — never against a declared workflow: a ticket moves only
+when exactly one available transition lands on that status and is not gated on a
+field the bridge does not hold. Two candidates, a gated one, or none reachable
+in a single move each withhold the move and warn once, naming the ticket and the
+reason. A project that declares no mapping is never moved at all, and statuses
+listed under `halted_statuses` are surfaced and left alone — no transition, no
+content write.
+
+The whole binding is re-derivable: a forced reinstall wipes and rewrites the
+extension folder without touching a single setting, because the configuration
+lives at `.specify/jira/`, outside it.
 
 ## Step-by-step setup on macOS
 
@@ -112,22 +161,22 @@ unattended contexts.
 ### 4. Install the extension into the consuming repository
 
 ```sh
-specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
+specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip
 ```
 
 Answer `y` at the `⚠ Untrusted Source` confirmation prompt this address raises.
 
-This copies the extension to `.specify/extensions/jira/` **and registers and
-activates the seven lifecycle hooks**. Verify the bridge answers:
+This copies the extension to `.specify/extensions/jira-mirror/` **and registers
+and activates the seven lifecycle hooks**. Verify the bridge answers:
 
 ```sh
-bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh --help
 ```
 
 ### 5. Bind the repository to a Jira project
 
 ```text
-/speckit.jira.config
+/speckit.jira-mirror.config
 ```
 
 The ceremony discovers the project metadata, writes `.specify/jira/config.yml`,
@@ -150,7 +199,7 @@ No trailing slash on the URL, and `https://` is required — a committed
 `base_url` is refused at load time on any other scheme, except a loopback
 address. The site URL is committed because it identifies the team's Jira, not
 you; the email is gitignored because it identifies you, not the team. Re-run
-`/speckit.jira.config` and the degraded report clears.
+`/speckit.jira-mirror.config` and the degraded report clears.
 
 Committing the site URL is a disclosure worth choosing knowingly: it enters
 **git history irreversibly**, so every clone — past and future — can see which
@@ -231,13 +280,13 @@ context; see the section below.
 ### 4. Install the extension into the consuming repository
 
 ```sh
-specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
-bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help
+specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip
+bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh --help
 ```
 
 ### 5. Bind the repository and mirror
 
-Run `/speckit.jira.config`. It will report a degraded run naming two settings:
+Run `/speckit.jira-mirror.config`. It will report a degraded run naming two settings:
 add `base_url` to the committed `.specify/jira/config.yml` and `email` to your
 gitignored `.specify/jira/personal.yml`, exactly as in the macOS step 5 above,
 then run it again. From then on every lifecycle step mirrors on its own.
@@ -300,13 +349,13 @@ the repository's configuration.
 ### 4. Install the extension into the consuming repository
 
 ```powershell
-specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip
-.specify\extensions\jira\scripts\powershell\spec-kit-jira.ps1 --help
+specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip
+.specify\extensions\jira-mirror\scripts\powershell\spec-kit-jira.ps1 --help
 ```
 
 ### 5. Bind the repository and mirror
 
-Run `/speckit.jira.config`. It will report a degraded run naming two settings:
+Run `/speckit.jira-mirror.config`. It will report a degraded run naming two settings:
 add `base_url` to the committed `.specify/jira/config.yml` and `email` to your
 gitignored `.specify/jira/personal.yml`, exactly as in the macOS step 5 above,
 then run it again. From then on every lifecycle step mirrors on its own.
@@ -355,7 +404,7 @@ teams:
 
 Which team you personally work in is not a team decision, so it does not live
 in that file. It lives in `.specify/jira/personal.yml`, which is yours and
-gitignored. `/speckit.jira.config` creates it if it is absent and never
+gitignored. `/speckit.jira-mirror.config` creates it if it is absent and never
 rewrites it afterwards, so anything you put there survives every later run:
 
 ```yaml
@@ -430,7 +479,7 @@ mirrored as sub-tasks). A mapping whose keys are all events is the story role's 
 the original role-blind shape, still valid. Mixing the two key sets in one
 mapping is refused with exit `4`.
 
-`/speckit.jira.config` proposes a draft over the statuses discovered in your own
+`/speckit.jira-mirror.config` proposes a draft over the statuses discovered in your own
 project and records the answer you confirm; `halted_statuses` — the statuses at
 which a ticket is surfaced and otherwise left completely alone — stays
 hand-written. Both are yours to edit afterwards: the ceremony never rewrites a
@@ -479,7 +528,7 @@ which user story came from which issue. Nothing has been written to Jira yet.
 Once you are ready to bind it, the agent runs:
 
 ```text
-/speckit.jira.seed specs/<your-feature>/spec.md
+/speckit.jira-mirror.seed specs/<your-feature>/spec.md
 ```
 
 This shows you the exact write plan — which issues will be adopted, which
@@ -527,13 +576,13 @@ dropping the rest of the file:
 ```
 config: <file>:<line>: cannot parse this line as a mapping entry: <content>
 config: a key must be followed by ": " — quote the key if it contains a colon, e.g. "Blocked: waiting": "10001"
-config: re-run /speckit.jira.config to regenerate <file> from the Jira instance.
+config: re-run /speckit.jira-mirror.config to regenerate <file> from the Jira instance.
 ```
 
 This exits `4` on a direct run. Inside a lifecycle hook, the same three lines
 are followed by one `WARNING:` and the host command still completes normally
 — nothing is mirrored until the file is fixed or regenerated. Re-running
-`/speckit.jira.config` rewrites `config.local.yml` from scratch, which
+`/speckit.jira-mirror.config` rewrites `config.local.yml` from scratch, which
 resolves the great majority of cases; a hand-edited `config.yml` or
 `personal.yml` needs the named line corrected by hand.
 
@@ -549,7 +598,7 @@ by `.extensionignore`.
 | Path | Role |
 |------|------|
 | `extension.yml` | Manifest — the single source of truth for the version |
-| `commands/` | Agent command definitions (`/speckit.jira.config`) |
+| `commands/` | Agent command definitions (`/speckit.jira-mirror.config`) |
 | `scripts/bash/`, `scripts/powershell/` | The twin ports (module-for-module mirrors) |
 | `templates/` | Config scaffold and managed README block template |
 | `specs/`, `tests/`, `.specify/`, `.github/` | Development only — never installed |

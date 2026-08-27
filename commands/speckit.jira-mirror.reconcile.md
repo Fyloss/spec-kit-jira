@@ -1,10 +1,10 @@
 ---
-name: "speckit.jira.reconcile"
+name: "speckit.jira-mirror.reconcile"
 description: "Mirror the current feature's spec-kit artifacts into Jira — a deterministic, non-blocking reconcile fired by every after_* lifecycle event."
 argument-hint: "Optional: a spec file path; defaults to the active feature's spec.md"
 ---
 
-# /speckit.jira.reconcile
+# /speckit.jira-mirror.reconcile
 
 Mirror the current feature's spec-kit artifacts into Jira Cloud. This command is
 what all six `after_*` lifecycle hooks fire (`after_specify`, `after_clarify`,
@@ -18,14 +18,14 @@ command finds, **the host spec-kit command completes normally** — see step 4.
 ## Invoking the bridge — normative
 
 The install places **nothing** on `PATH`: `specify extension add` copies the
-extension into the consuming repository's `.specify/extensions/jira/` and
+extension into the consuming repository's `.specify/extensions/jira-mirror/` and
 installs no machine-wide executable. Invoke the entry point by its
 **repository-relative path**, selecting the port from the host:
 
 | Host | Entry point |
 | --- | --- |
-| macOS, Linux | `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` |
-| Windows | `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1` |
+| macOS, Linux | `.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh` |
+| Windows | `.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1` |
 
 You MUST NOT invoke a bare `spec-kit-jira` command name. No such command exists
 in a consuming repository, and assuming it does is what produced the reported
@@ -62,13 +62,13 @@ works either way (026 FR-016).
    | `/speckit.analyze` | `after_analyze` | `after_analyze` |
 
    ```text
-   SPEC_KIT_JIRA_HOOK_EVENT=after_specify bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile <spec-file> --json
+   SPEC_KIT_JIRA_HOOK_EVENT=after_specify bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh reconcile <spec-file> --json
    ```
 
    On Windows:
 
    ```text
-   $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_specify'; .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 reconcile <spec-file> --json
+   $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_specify'; .specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1 reconcile <spec-file> --json
    ```
 
 3. **Interpret the outcome and report exactly one line** — never more than one
@@ -95,8 +95,8 @@ At most **one** message per host command run, naming the **true** cause:
 | Cause | Distinguishing signal | What to say |
 | --- | --- | --- |
 | Rejected target | Exit `1`, message says a file "is not a feature specification" | Relay the entry point's own message verbatim — it names the rejected path and, when one exists, the correct `spec.md` for that folder. This is a caller defect (this procedure invoked the wrong artifact), not a degraded Jira state |
-| Not yet configured | The bridge exits `0` and reports no binding | At most three lines: this repository is not yet bound to a Jira project; run `/speckit.jira.config` |
-| Binding predates this release | Exit `4`, message says the binding "predates parent support" | The project is already bound; its local binding is a version behind. Run `/speckit.jira.config` to refresh it (see INSTALL.md, "Upgrading to the parent-hierarchy release") |
+| Not yet configured | The bridge exits `0` and reports no binding | At most three lines: this repository is not yet bound to a Jira project; run `/speckit.jira-mirror.config` |
+| Binding predates this release | Exit `4`, message says the binding "predates parent support" | The project is already bound; its local binding is a version behind. Run `/speckit.jira-mirror.config` to refresh it (see INSTALL.md, "Upgrading to the parent-hierarchy release") |
 | Credentials absent, or a declared retrieval command failed | Exit `4`, no token from either resolution rung | The token resolved through neither `JIRA_API_TOKEN` nor a declared `JIRA_PAT_COMMAND`; a declared command that failed names the reason (missing, non-zero exit, timeout, empty output) |
 | Credentials rejected | Exit `3` | Jira rejected the credentials — they exist but are not accepted |
 | Prerequisite missing | Exit `5` | The named prerequisite is missing; relay the entry point's own message |
@@ -115,11 +115,11 @@ own explanation of the situation:
 
 ```text
 Jira bridge not available: the entry point
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh (or, on Windows,
+.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1) was not found.
 This spec-kit command completed normally and nothing was mirrored to Jira. To
 restore the bridge, reinstall the extension with
-`specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force`
+`specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force`
 (it will ask you to confirm an untrusted-source prompt — answer y).
 ```
 
@@ -127,8 +127,8 @@ restore the bridge, reinstall the extension with
 
 Every command name you put in a message must be runnable exactly as spelled:
 
-- an assistant command of this extension is one of `/speckit.jira.config`,
-  `/speckit.jira.feature`, `/speckit.jira.reconcile` — never recalled from
+- an assistant command of this extension is one of `/speckit.jira-mirror.config`,
+  `/speckit.jira-mirror.feature`, `/speckit.jira-mirror.reconcile` — never recalled from
   memory, never abbreviated;
 - an invocation of the bridge is always one of the two repository-relative paths
   in the table above;
@@ -170,7 +170,7 @@ from `plan.md`'s `## Summary` prose. It never carries a list of user stories:
 Jira already shows the children under their parent in its own issue view.
 
 The child issue type is whichever type the project's binding records (an
-operator answer, recorded once by `/speckit.jira.config`); the parent type is
+operator answer, recorded once by `/speckit.jira-mirror.config`); the parent type is
 derived from the project's issue-type hierarchy — the level immediately above
 the child's, when exactly one type occupies it. A project with no level above
 the child's, or two or more candidates at that level, refuses before any write,
@@ -394,11 +394,11 @@ waits.
 - `--verbose` — extra diagnostics (the token never appears, even here).
 - `--help` — usage; exits `0`.
 
-The shared command-line parser also accepts `speckit.jira.config`'s own flags —
+The shared command-line parser also accepts `speckit.jira-mirror.config`'s own flags —
 `--style`, `--child-type`, `--issue-type`, `--field-default`, `--task-mirror`,
 `--use-team`, `--enable-hook` — on `reconcile` without refusing them. They have
 **no effect** here: `reconcile` never reads the values this parser stores for
-them. Pass them to `speckit.jira.config` instead, where they are documented
+them. Pass them to `speckit.jira-mirror.config` instead, where they are documented
 and acted on.
 
 ## Exit codes

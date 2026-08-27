@@ -1,8 +1,8 @@
 # spec-kit-jira extension manifest — official spec-kit extension schema
 # (github/spec-kit extensions/EXTENSION-DEVELOPMENT-GUIDE.md). `specify
 # extension add` copies this repository's extension content into the consuming
-# repository's `.specify/extensions/jira/` (dev-only material is excluded by
-# `.extensionignore`).
+# repository's `.specify/extensions/jira-mirror/` (dev-only material is excluded
+# by `.extensionignore`).
 #
 # The nested `extension.version` field below is the SINGLE source of truth for
 # the extension version (FR-021/FR-022). The version literal appears NOWHERE
@@ -12,45 +12,45 @@
 schema_version: "1.0"
 
 extension:
-  id: jira
-  name: Jira Reconcile Engine
-  version: 0.20.3
+  id: jira-mirror
+  name: Jira Mirror
+  version: 0.21.0
   description: >-
-    Mirrors a repository's Spec Kit artifacts (spec.md, plan.md, tasks.md) into
-    Jira Cloud as a self-healing, idempotent, fail-closed bridge. Twin native
-    ports: Bash (macOS/Linux) and PowerShell 7+ (Windows).
+    Spec Kit ↔ Jira bridge for team-managed and company-managed projects:
+    configurable workflows & hierarchies (Scrum/SAFe), multi-project, idempotent
+    and fail-closed. macOS/Linux/Windows.
   category: integration
   effect: read-write
   author: Fyloss
-  repository: https://github.com/Fyloss/spec-kit-jira
+  repository: https://github.com/Fyloss/spec-kit-jira-mirror
   license: MIT
-  homepage: https://github.com/Fyloss/spec-kit-jira
+  homepage: https://github.com/Fyloss/spec-kit-jira-mirror
 
 requires:
   speckit_version: ">=0.13.0"
 
 provides:
   commands:
-    - name: speckit.jira.config
-      file: commands/speckit.jira.config.md
+    - name: speckit.jira-mirror.config
+      file: commands/speckit.jira-mirror.config.md
       description: >-
         Deterministic install ceremony — per-project metadata discovery, the
         managed README block, and a read-only verification of the lifecycle
         hooks the install registered, reported as separate effects.
-    - name: speckit.jira.feature
-      file: commands/speckit.jira.feature.md
+    - name: speckit.jira-mirror.feature
+      file: commands/speckit.jira-mirror.feature.md
       description: >-
         Ticket-first feature naming — resolve or create the Jira ticket, then
         name the branch and flat spec folder by the developer's selected team
         convention; non-blocking before_specify step.
-    - name: speckit.jira.reconcile
-      file: commands/speckit.jira.reconcile.md
+    - name: speckit.jira-mirror.reconcile
+      file: commands/speckit.jira-mirror.reconcile.md
       description: >-
         Mirror the current feature's spec-kit artifacts into Jira — the
         deterministic, non-blocking reconcile every after_* lifecycle event
         fires.
-    - name: speckit.jira.seed
-      file: commands/speckit.jira.seed.md
+    - name: speckit.jira-mirror.seed
+      file: commands/speckit.jira-mirror.seed.md
       description: >-
         Seed a specification from named, existing Jira issues — validate the
         drafted pinning, confirm the write plan, then bind, create, and
@@ -82,31 +82,31 @@ provides:
 # self-cleaning; adding an eighth requires a spec (Principle XV, research R9).
 hooks:
   before_specify:
-    command: speckit.jira.feature
+    command: speckit.jira-mirror.feature
     optional: false
     description: Resolve the Jira ticket and name the feature before creation.
   after_specify:
-    command: speckit.jira.reconcile
+    command: speckit.jira-mirror.reconcile
     optional: false
     description: Mirror the new specification into Jira Cloud.
   after_clarify:
-    command: speckit.jira.reconcile
+    command: speckit.jira-mirror.reconcile
     optional: false
     description: Mirror the recorded clarifications into Jira Cloud.
   after_plan:
-    command: speckit.jira.reconcile
+    command: speckit.jira-mirror.reconcile
     optional: false
     description: Mirror the implementation plan into Jira Cloud.
   after_tasks:
-    command: speckit.jira.reconcile
+    command: speckit.jira-mirror.reconcile
     optional: false
     description: Mirror the task breakdown into Jira Cloud.
   after_implement:
-    command: speckit.jira.reconcile
+    command: speckit.jira-mirror.reconcile
     optional: false
     description: Mirror the implementation outcome into Jira Cloud.
   after_analyze:
-    command: speckit.jira.reconcile
+    command: speckit.jira-mirror.reconcile
     optional: false
     description: Mirror the analysis outcome into Jira Cloud.
 

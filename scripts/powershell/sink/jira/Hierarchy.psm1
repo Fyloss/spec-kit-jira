@@ -383,7 +383,7 @@ function Get-JiraRolePromotionNote {
 function Get-JiraHierarchyChildTypeUnresolvedMessage {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $ProjectKey)
-    return "reconcile: project $ProjectKey has no recorded issue type for user stories. Run /speckit.jira.config to record it (zero writes)"
+    return "reconcile: project $ProjectKey has no recorded issue type for user stories. Run /speckit.jira-mirror.config to record it (zero writes)"
 }
 
 function Get-JiraHierarchyParentLinkUnavailableMessage {
@@ -395,7 +395,7 @@ function Get-JiraHierarchyParentLinkUnavailableMessage {
 function Get-JiraHierarchyBindingShapeStaleMessage {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $ProjectKey)
-    return "reconcile: the local binding for $ProjectKey predates parent support and does not record issue-type hierarchy. The project is bound — its binding is simply a version behind. Run /speckit.jira.config to refresh it (zero writes)"
+    return "reconcile: the local binding for $ProjectKey predates parent support and does not record issue-type hierarchy. The project is bound — its binding is simply a version behind. Run /speckit.jira-mirror.config to refresh it (zero writes)"
 }
 
 function Get-JiraHierarchyMandatoryFieldsMessage {
@@ -404,7 +404,7 @@ function Get-JiraHierarchyMandatoryFieldsMessage {
       Contract §5, §3.6, FR-016. Input: array of {type_name; fields:[...]}.
       One refusal naming every unsatisfiable field of every written type,
       followed — when ProjectKey is given — by one copy-pasteable
-      `speckit.jira.config --field-default …` line per field that records a
+      `speckit.jira-mirror.config --field-default …` line per field that records a
       default for it permanently (011, US3). The value is left as a
       placeholder; only the KEY=Type=Label positions are known here. The
       KEY=Type=Label=Value token is single-quoted: labels routinely carry a
@@ -423,7 +423,7 @@ function Get-JiraHierarchyMandatoryFieldsMessage {
 
     $remedies = foreach ($u in @($Unsatisfiable)) {
         foreach ($label in @($u.fields)) {
-            "  speckit.jira.config $ProjectKey --field-default '$ProjectKey=$($u.type_name)=$label=<value>'"
+            "  speckit.jira-mirror.config $ProjectKey --field-default '$ProjectKey=$($u.type_name)=$label=<value>'"
         }
     }
     return (@($refusal, 'Record a default for each to fix this permanently:') + @($remedies)) -join "`n"
@@ -568,7 +568,7 @@ function Get-JiraHierarchyTaskUnsatisfiableMessage {
     if ([string]::IsNullOrEmpty($ProjectKey)) { return $refusal }
 
     $remedies = foreach ($label in @($Fields)) {
-        "  speckit.jira.config $ProjectKey --field-default '$ProjectKey=$TypeName=$label=<value>'"
+        "  speckit.jira-mirror.config $ProjectKey --field-default '$ProjectKey=$TypeName=$label=<value>'"
     }
     return (@($refusal, 'Record a default for each to fix this permanently:') + @($remedies)) -join "`n"
 }
@@ -599,7 +599,7 @@ function Get-JiraHierarchyTaskFieldUnsatisfiableLine {
     param([Parameter(Mandatory)] [string] $LogicalName, [string] $ProjectKey = '', [string] $TypeName = '')
     $line = "Issue type `"$TypeName`" requires `"$LogicalName`", which has no recorded default."
     if (-not [string]::IsNullOrEmpty($ProjectKey)) {
-        $line += " Record one to fix this permanently: speckit.jira.config $ProjectKey --field-default '$ProjectKey=$TypeName=$LogicalName=<value>'."
+        $line += " Record one to fix this permanently: speckit.jira-mirror.config $ProjectKey --field-default '$ProjectKey=$TypeName=$LogicalName=<value>'."
     }
     $line += ' Nothing was written for this task (zero writes).'
     return $line

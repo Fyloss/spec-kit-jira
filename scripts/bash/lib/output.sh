@@ -187,7 +187,7 @@ output_warn() {
 # =============================================================================
 #
 # `specify extension add` copies this repository into the consuming repository's
-# `.specify/extensions/jira/` and installs NOTHING on the machine — no binary, no
+# `.specify/extensions/jira-mirror/` and installs NOTHING on the machine — no binary, no
 # PATH entry, no profile edit. A message that tells the operator to run a bare
 # `spec-kit-jira` therefore names a command that does not exist, which is exactly
 # the reported "spec-kit-jira CLI not installed" symptom.
@@ -197,8 +197,8 @@ output_warn() {
 # output (Constitution VI), so a message cannot name only the port it happens to
 # be running on without breaking the conformance diff — and the operator reading
 # it may well be on the other one.
-JIRA_BRIDGE_BASH_ENTRY='.specify/extensions/jira/scripts/bash/spec-kit-jira.sh'
-JIRA_BRIDGE_PWSH_ENTRY='.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1'
+JIRA_BRIDGE_BASH_ENTRY='.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh'
+JIRA_BRIDGE_PWSH_ENTRY='.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1'
 
 # output_bridge_invocation <args...> — the runnable, per-port invocation of the
 # bridge with the given arguments. Every literal it produces is runnable exactly

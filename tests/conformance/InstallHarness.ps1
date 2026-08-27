@@ -102,7 +102,7 @@ function Uninstall-HarnessExtension {
     # test run. Mirror of harness_uninstall.
     param([Parameter(Mandatory)] [string] $Repo)
     Push-Location $Repo
-    try { & specify extension remove jira --force 2>&1 | Out-File -FilePath (Join-Path $Repo '.harness-uninstall.log') }
+    try { & specify extension remove jira-mirror --force 2>&1 | Out-File -FilePath (Join-Path $Repo '.harness-uninstall.log') }
     finally { Pop-Location }
 }
 

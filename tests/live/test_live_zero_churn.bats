@@ -268,7 +268,7 @@ teardown() {
   # The type id must be resolved for real against the scratch project's own
   # config.local.yml in a live run — SPEC_KIT_JIRA_PROJECT_KEY alone is not
   # enough for a CREATE, only for reconcile's routing override. A real run
-  # of this test needs /speckit.jira.config to have bound the scratch
+  # of this test needs /speckit.jira-mirror.config to have bound the scratch
   # project first, and its resolved specification-role type id read from
   # config.local.yml here rather than hand-supplied.
   # shellcheck source=/dev/null
@@ -276,7 +276,7 @@ teardown() {
   local ptid
   ptid="$(jq -r --arg k "${SPEC_KIT_JIRA_PROJECT_KEY}" '.resolved_ids[$k].parent_type.id // empty' \
     <<< "$(_cfg_local_json "${JIRA_CONFIG_DIR}" 2> /dev/null)" 2> /dev/null)"
-  [ -n "${ptid}" ] || skip "config.local.yml not bound for ${SPEC_KIT_JIRA_PROJECT_KEY} — run /speckit.jira.config against the scratch project first"
+  [ -n "${ptid}" ] || skip "config.local.yml not bound for ${SPEC_KIT_JIRA_PROJECT_KEY} — run /speckit.jira-mirror.config against the scratch project first"
   local routing
   routing="$(jq -cn --arg proj "${SPEC_KIT_JIRA_PROJECT_KEY}" --arg ptid "${ptid}" \
     '{project:$proj, declared_type_specification:"", declared_type_story:"", terminal_statuses_csv:"", parent_type_id:$ptid}')"

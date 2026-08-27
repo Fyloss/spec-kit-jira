@@ -37,7 +37,7 @@ Describe 'The official install registers the hooks' {
         if (-not $script:Available) { Set-ItResult -Skipped -Because $script:Skip; return }
         Install-HarnessExtension -Repo $script:Repo
         foreach ($e in $script:Events) {
-            $ours = @(Get-HarnessEntriesFor -Repo $script:Repo -LifecycleEvent $e | Where-Object { $_.Extension -eq 'jira' })
+            $ours = @(Get-HarnessEntriesFor -Repo $script:Repo -LifecycleEvent $e | Where-Object { $_.Extension -eq 'jira-mirror' })
             $ours.Count | Should -Be 1 -Because "event $e must carry exactly one jira entry"
             $ours[0].Enabled | Should -BeTrue
             # Non-optional so the agent PERFORMS the hook rather than offering it.
@@ -60,7 +60,7 @@ Describe 'The official install registers the hooks' {
         Install-HarnessExtension -Repo $script:Repo -Force
         Install-HarnessExtension -Repo $script:Repo -Force
         foreach ($e in $script:Events) {
-            $ours = @(Get-HarnessEntriesFor -Repo $script:Repo -LifecycleEvent $e | Where-Object { $_.Extension -eq 'jira' })
+            $ours = @(Get-HarnessEntriesFor -Repo $script:Repo -LifecycleEvent $e | Where-Object { $_.Extension -eq 'jira-mirror' })
             $ours.Count | Should -Be 1 -Because "event $e must still carry exactly one jira entry"
         }
     }
@@ -88,7 +88,7 @@ hooks:
         $foreign[0].Command | Should -BeExactly 'speckit.git.commit'
         $foreign[0].Enabled | Should -BeTrue
         # Ours was added beside it, not instead of it.
-        @($entries | Where-Object { $_.Extension -eq 'jira' }).Count | Should -Be 1
+        @($entries | Where-Object { $_.Extension -eq 'jira-mirror' }).Count | Should -Be 1
     }
 
     It 'names only commands the extension installs (FR-009, SC-002)' {
@@ -98,9 +98,9 @@ hooks:
         # installed tree.
         Install-HarnessExtension -Repo $script:Repo
         foreach ($e in $script:Events) {
-            $cmd = @(Get-HarnessEntriesFor -Repo $script:Repo -LifecycleEvent $e | Where-Object { $_.Extension -eq 'jira' })[0].Command
+            $cmd = @(Get-HarnessEntriesFor -Repo $script:Repo -LifecycleEvent $e | Where-Object { $_.Extension -eq 'jira-mirror' })[0].Command
             $cmd | Should -Not -BeNullOrEmpty
-            Test-Path -LiteralPath (Join-Path $script:Repo ".specify/extensions/jira/commands/$cmd.md") |
+            Test-Path -LiteralPath (Join-Path $script:Repo ".specify/extensions/jira-mirror/commands/$cmd.md") |
                 Should -BeTrue -Because "event $e names $cmd, which must be installed"
         }
     }

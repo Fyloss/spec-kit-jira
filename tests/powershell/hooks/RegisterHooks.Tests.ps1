@@ -25,7 +25,7 @@ BeforeAll {
         foreach ($e in (Get-JiraHookEventList)) {
             $cmd = Get-JiraHookCommandFor -LifecycleEvent $e
             [void]$sb.AppendLine("  ${e}:")
-            [void]$sb.AppendLine('    - extension: jira')
+            [void]$sb.AppendLine('    - extension: jira-mirror')
             [void]$sb.AppendLine("      command: $cmd")
             [void]$sb.AppendLine('      enabled: true')
             [void]$sb.AppendLine('      optional: false')
@@ -53,30 +53,30 @@ Describe 'The closed set of seven declared events' {
     }
 
     It 'maps before_specify to the feature command and every after_* to reconcile' {
-        Get-JiraHookCommandFor -LifecycleEvent 'before_specify' | Should -BeExactly 'speckit.jira.feature'
+        Get-JiraHookCommandFor -LifecycleEvent 'before_specify' | Should -BeExactly 'speckit.jira-mirror.feature'
         foreach ($e in @('after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')) {
-            Get-JiraHookCommandFor -LifecycleEvent $e | Should -BeExactly 'speckit.jira.reconcile'
+            Get-JiraHookCommandFor -LifecycleEvent $e | Should -BeExactly 'speckit.jira-mirror.reconcile'
         }
     }
 }
 
 Describe 'Recognition: ours vs leftover vs foreign' {
     It 'recognises an entry as ours when extension is jira' {
-        Test-JiraHookEntryOwnership -EntryJson '{"extension":"jira","command":"speckit.jira.reconcile"}' | Should -BeTrue
+        Test-JiraHookEntryOwnership -EntryJson '{"extension":"jira-mirror","command":"speckit.jira-mirror.reconcile"}' | Should -BeTrue
         Test-JiraHookEntryOwnership -EntryJson '{"extension":"git","command":"speckit.git.commit"}' | Should -BeFalse
     }
 
     It 'recognises an entry as leftover when extension is absent and command is one of ours (FR-028)' {
-        Test-JiraHookEntryIsLeftover -EntryJson '{"command":"speckit.jira.reconcile","enabled":true,"optional":true}' | Should -BeTrue
-        Test-JiraHookEntryIsLeftover -EntryJson '{"command":"speckit.jira.feature","enabled":true}' | Should -BeTrue
-        Test-JiraHookEntryIsLeftover -EntryJson '{"extension":"jira","command":"speckit.jira.reconcile"}' | Should -BeFalse
+        Test-JiraHookEntryIsLeftover -EntryJson '{"command":"speckit.jira-mirror.reconcile","enabled":true,"optional":true}' | Should -BeTrue
+        Test-JiraHookEntryIsLeftover -EntryJson '{"command":"speckit.jira-mirror.feature","enabled":true}' | Should -BeTrue
+        Test-JiraHookEntryIsLeftover -EntryJson '{"extension":"jira-mirror","command":"speckit.jira-mirror.reconcile"}' | Should -BeFalse
         Test-JiraHookEntryIsLeftover -EntryJson '{"command":"other.ext.thing"}' | Should -BeFalse
     }
 }
 
 Describe 'The canonical eight-field shape, asserted on read' {
     BeforeAll {
-        $script:Canonical = '{"extension":"jira","command":"speckit.jira.reconcile","enabled":true,"optional":false,"priority":10,"prompt":"Execute speckit.jira.reconcile?","description":"Mirror.","condition":null}'
+        $script:Canonical = '{"extension":"jira-mirror","command":"speckit.jira-mirror.reconcile","enabled":true,"optional":false,"priority":10,"prompt":"Execute speckit.jira-mirror.reconcile?","description":"Mirror.","condition":null}'
     }
 
     It 'accepts the canonical entry' {
@@ -95,7 +95,7 @@ Describe 'The canonical eight-field shape, asserted on read' {
     }
 
     It 'requires the EXPANDED prompt default, never a {command} placeholder (research R2)' {
-        $bad = $script:Canonical -replace 'Execute speckit\.jira\.reconcile\?', 'Execute {command}?'
+        $bad = $script:Canonical -replace 'Execute speckit\.jira-mirror\.reconcile\?', 'Execute {command}?'
         Get-JiraHookEntryShapeError -EntryJson $bad | Should -Match 'prompt'
         (Get-JiraHookEntryShapeError -EntryJson $script:Canonical) | Should -BeNullOrEmpty
     }
@@ -172,7 +172,7 @@ Describe 'Leftover pre-manifest entries (FR-028)' {
 
     It 'classifies a leftover — our command, no extension field — as duplicated' {
         $json = ConvertFrom-JiraConfigYaml -Path $script:Ext | ConvertFrom-Json -Depth 100
-        $json.hooks.after_plan = @($json.hooks.after_plan) + @([pscustomobject]@{ command = 'speckit.jira.reconcile'; enabled = $true })
+        $json.hooks.after_plan = @($json.hooks.after_plan) + @([pscustomobject]@{ command = 'speckit.jira-mirror.reconcile'; enabled = $true })
         Write-RegistryFromJson -Path $script:Ext -Json (ConvertTo-JiraJsonValue $json)
         $h = Get-JiraHookHealth -Path $script:Ext | ConvertFrom-Json -Depth 100
         $h.duplicated | Should -Contain 'after_plan'
@@ -182,14 +182,14 @@ Describe 'Leftover pre-manifest entries (FR-028)' {
 
     It 'names every affected event and a copy-pasteable manual edit' {
         $json = ConvertFrom-JiraConfigYaml -Path $script:Ext | ConvertFrom-Json -Depth 100
-        $json.hooks.after_plan = @($json.hooks.after_plan) + @([pscustomobject]@{ command = 'speckit.jira.reconcile'; enabled = $true })
-        $json.hooks.before_specify = @($json.hooks.before_specify) + @([pscustomobject]@{ command = 'speckit.jira.feature'; enabled = $true })
+        $json.hooks.after_plan = @($json.hooks.after_plan) + @([pscustomobject]@{ command = 'speckit.jira-mirror.reconcile'; enabled = $true })
+        $json.hooks.before_specify = @($json.hooks.before_specify) + @([pscustomobject]@{ command = 'speckit.jira-mirror.feature'; enabled = $true })
         Write-RegistryFromJson -Path $script:Ext -Json (ConvertTo-JiraJsonValue $json)
         $hint = (Get-JiraHookHealth -Path $script:Ext | ConvertFrom-Json -Depth 100).repair_hint
         $hint | Should -Match 'after_plan'
         $hint | Should -Match 'before_specify'
         $hint | Should -Match ([regex]::Escape('.specify/extensions.yml'))
-        $hint | Should -Match ([regex]::Escape('extension: jira'))
+        $hint | Should -Match ([regex]::Escape('extension: jira-mirror'))
     }
 
     It 'writes NOTHING while classifying (FR-022)' {
@@ -238,14 +238,14 @@ Describe 'Unreadable (FR-024)' {
     }
 
     It 'names a YAML anchor as the construct that defeated the reader' {
-        [System.IO.File]::WriteAllText($script:Ext, "defaults: &defaults`n  enabled: true`nhooks:`n  after_plan:`n    - extension: jira`n", (New-Object System.Text.UTF8Encoding($false)))
+        [System.IO.File]::WriteAllText($script:Ext, "defaults: &defaults`n  enabled: true`nhooks:`n  after_plan:`n    - extension: jira-mirror`n", (New-Object System.Text.UTF8Encoding($false)))
         $h = Get-JiraHookHealth -Path $script:Ext | ConvertFrom-Json -Depth 100
         $h.unreadable | Should -BeTrue
         $h.repair_hint | Should -Match 'anchor'
     }
 
     It 'names a flow collection as the construct that defeated the reader' {
-        [System.IO.File]::WriteAllText($script:Ext, "hooks:`n  after_plan: [{extension: jira, command: speckit.jira.reconcile}]`n", (New-Object System.Text.UTF8Encoding($false)))
+        [System.IO.File]::WriteAllText($script:Ext, "hooks:`n  after_plan: [{extension: jira-mirror, command: speckit.jira-mirror.reconcile}]`n", (New-Object System.Text.UTF8Encoding($false)))
         $h = Get-JiraHookHealth -Path $script:Ext | ConvertFrom-Json -Depth 100
         $h.repair_hint | Should -Match 'flow'
     }

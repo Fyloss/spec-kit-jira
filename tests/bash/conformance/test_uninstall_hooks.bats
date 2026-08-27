@@ -36,7 +36,7 @@ teardown() {
   harness_uninstall "${REPO}"
   local e n
   for e in "${EVENTS[@]}"; do
-    n="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira"' | wc -l | tr -d ' ')"
+    n="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira-mirror"' | wc -l | tr -d ' ')"
     [ "${n}" -eq 0 ] || {
       printf 'event %s still carries %s jira entries after uninstall\n' "${e}" "${n}" >&2
       return 1
@@ -67,9 +67,9 @@ teardown() {
 
 @test "the extension tree is gone, so nothing could run even if an entry survived" {
   harness_install "${REPO}"
-  [ -d "${REPO}/.specify/extensions/jira" ]
+  [ -d "${REPO}/.specify/extensions/jira-mirror" ]
   harness_uninstall "${REPO}"
-  [ ! -d "${REPO}/.specify/extensions/jira" ]
+  [ ! -d "${REPO}/.specify/extensions/jira-mirror" ]
 }
 
 @test "a reinstall after removal registers the seven events again (FR-005)" {
@@ -79,7 +79,7 @@ teardown() {
   harness_install "${REPO}"
   local e n
   for e in "${EVENTS[@]}"; do
-    n="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira"' | wc -l | tr -d ' ')"
+    n="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira-mirror"' | wc -l | tr -d ' ')"
     [ "${n}" -eq 1 ]
   done
 }

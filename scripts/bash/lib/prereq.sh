@@ -18,11 +18,11 @@ _JIRA_LIB_PREREQ=1
 PREREQ_REQUIRED_CMDS=(curl jq git)
 
 # The bridge's repository-relative entry points, per port (003 FR-014, R6). The
-# install copies the extension into `.specify/extensions/jira/` and puts NOTHING
+# install copies the extension into `.specify/extensions/jira-mirror/` and puts NOTHING
 # on PATH, so these paths — not a bare executable name — are what "the bridge"
 # means in every message.
-PREREQ_BRIDGE_BASH='.specify/extensions/jira/scripts/bash/spec-kit-jira.sh'
-PREREQ_BRIDGE_PWSH='.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1'
+PREREQ_BRIDGE_BASH='.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh'
+PREREQ_BRIDGE_PWSH='.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1'
 
 # prereq_bridge_missing [extension-root] — print the entry point that is absent
 # or not executable, or nothing when both ports are intact.
@@ -103,7 +103,7 @@ prereq_check() {
   bridge="$(prereq_bridge_missing)"
   if [[ -n "${bridge}" ]]; then
     printf 'spec-kit-jira: the bridge entry point %s was not found — the extension install is incomplete. Restore it with: %s (it will ask you to confirm an untrusted-source prompt — answer y)\n' \
-      "${bridge}" 'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force' >&2
+      "${bridge}" 'specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force' >&2
     return "${EXIT_PREREQ}"
   fi
 

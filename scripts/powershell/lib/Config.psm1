@@ -242,7 +242,7 @@ function New-CfgParseFailure {
     $content = Protect-CfgLine $script:CfgLines[$Index]
     $script:CfgErr = "config: ${script:CfgFile}:${line}: cannot parse this line as a mapping entry: $content`n" +
     'config: a key must be followed by ": " — quote the key if it contains a colon, e.g. "Blocked: waiting": "10001"' + "`n" +
-    "config: re-run /speckit.jira.config to regenerate ${script:CfgFile} from the Jira instance."
+    "config: re-run /speckit.jira-mirror.config to regenerate ${script:CfgFile} from the Jira instance."
 }
 
 function New-CfgDuplicateKeyFailure {
@@ -257,7 +257,7 @@ function New-CfgDuplicateKeyFailure {
     $redactedKey = Protect-CfgLine $Key
     $script:CfgErr = "config: ${script:CfgFile}:${line}: duplicate key ${redactedKey} — already defined at line ${FirstLine}`n" +
     'config: two entries cannot claim the same name; delete or rename one of them.' + "`n" +
-    "config: re-run /speckit.jira.config to regenerate ${script:CfgFile} from the Jira instance."
+    "config: re-run /speckit.jira-mirror.config to regenerate ${script:CfgFile} from the Jira instance."
 }
 
 $script:CfgKey = $null
@@ -422,7 +422,7 @@ function Read-CfgMapping {
             #
             #     hooks:
             #       before_specify:
-            #       - extension: jira        <- same indent as the key
+            #       - extension: jira-mirror <- same indent as the key
             #
             # Requiring a greater indent made this reader stop at the key and
             # return null for its value, so the registry of every real
@@ -1200,7 +1200,7 @@ function Import-JiraConfig {
     $localF = "$ConfigDir/config.local.yml"
 
     if (-not (Test-Path -LiteralPath $team)) {
-        $errors.Add("config: $team not found — run /speckit.jira.config first.")
+        $errors.Add("config: $team not found — run /speckit.jira-mirror.config first.")
         [Console]::Error.WriteLine($errors[-1])
         return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() }
     }

@@ -2,14 +2,14 @@
 ## Jira mirror (spec-kit-jira)
 
 This repository mirrors its Spec Kit artifacts into Jira Cloud via the
-[spec-kit-jira](https://github.com/Fyloss/spec-kit-jira) extension (v{{VERSION}}).
+[spec-kit-jira](https://github.com/Fyloss/spec-kit-jira-mirror) extension (v{{VERSION}}).
 
-- **Install**: `specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip`
+- **Install**: `specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip`
   registers the seven lifecycle hooks and activates them. No further step is
   needed to wire them up. This address is outside spec-kit's configured
   extension catalog, so the host asks to confirm an `⚠ Untrusted Source`
   prompt — answer `y`.
-- **Configure**: run `/speckit.jira.config` to bind this repository to a Jira
+- **Configure**: run `/speckit.jira-mirror.config` to bind this repository to a Jira
   project. It also verifies the hook registration — it never modifies
   `.specify/extensions.yml`, which the official install alone writes.
 - **Mirror**: `spec.md` / `plan.md` / `tasks.md` reconcile into Jira as part of
@@ -18,21 +18,21 @@ This repository mirrors its Spec Kit artifacts into Jira Cloud via the
 - **Task mirror**: each project chooses, per `task_mirror` in `config.yml`,
   whether its task list reaches Jira as one sub-task per task or as a single
   checklist embedded in the story description; recording nothing keeps
-  today's behaviour unchanged. `/speckit.jira.config` asks the question once
+  today's behaviour unchanged. `/speckit.jira-mirror.config` asks the question once
   and records the answer.
 - **Team naming** (optional): with a `teams:` catalogue in
   `.specify/jira/config.yml`, a feature is named by your team's convention and
   carries its real ticket number — `ijt-453/fix-issue` rather than a number
   chosen before the ticket existed. Which team is *yours* is recorded in
   `.specify/jira/personal.yml`, which is gitignored, created once by
-  `/speckit.jira.config` if absent and never rewritten after that — so two
+  `/speckit.jira-mirror.config` if absent and never rewritten after that — so two
   developers here can ship under different conventions without
   editing a committed file. `override` in that same file changes your own
   convention for the exceptional case, and reports itself on every run. Without
   the file, naming is unchanged and no Jira request is made.
 - **Disable one event**: set `enabled: false` on its entry in
-  `.specify/extensions.yml` and run `/speckit.jira.config` once; release it later
-  with `/speckit.jira.config --enable-hook <event>`.
+  `.specify/extensions.yml` and run `/speckit.jira-mirror.config` once; release it later
+  with `/speckit.jira-mirror.config --enable-hook <event>`.
 - **Prerequisites**: Bash ≥ 4 (macOS ships 3.2 — install a newer Bash), or
   PowerShell 7+ on Windows, plus `curl`, `jq`, and `git`.
 
@@ -78,8 +78,8 @@ value once — copy it before closing the dialog. Then follow your platform belo
 
 4. **Install and bind.** Run the *Install* command above, check the bridge
    answers with
-   `bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh --help`, then run
-   `/speckit.jira.config`.
+   `bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh --help`, then run
+   `/speckit.jira-mirror.config`.
 
 #### Linux
 
@@ -145,10 +145,10 @@ Credential Manager will not work — nothing reads from there.
 
 4. **Install and bind.** Run the *Install* command above, check the bridge
    answers with
-   `.specify\extensions\jira\scripts\powershell\spec-kit-jira.ps1 --help`, then
-   run `/speckit.jira.config`.
+   `.specify\extensions\jira-mirror\scripts\powershell\spec-kit-jira.ps1 --help`, then
+   run `/speckit.jira-mirror.config`.
 
-If `/speckit.jira.config` reports a degraded run, it names the connection
+If `/speckit.jira-mirror.config` reports a degraded run, it names the connection
 setting that is missing — return to the step that supplies it.
 
 If the lifecycle hooks do not see your variables, the agent's shell did not load

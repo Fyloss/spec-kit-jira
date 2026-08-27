@@ -3,7 +3,7 @@
 #
 # The branch-prefix inference defect lived at the AGENT level: the command
 # definition gave the model no key source, so it improvised from the branch
-# name. The rewritten commands/speckit.jira.config.md MUST carry normative,
+# name. The rewritten commands/speckit.jira-mirror.config.md MUST carry normative,
 # grep-testable wording: key/style NEVER inferred from git state in a connected
 # run; every branch-derived output belongs to the degraded mode only and is
 # provisional; exactly the two new closed questions (style, project key).
@@ -11,7 +11,7 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  DOC="${ROOT}/commands/speckit.jira.config.md"
+  DOC="${ROOT}/commands/speckit.jira-mirror.config.md"
 }
 
 @test "the definition forbids git-state inference in a connected run (FR-007)" {
@@ -40,7 +40,7 @@ setup() {
   # The re-invocation is named in the repository-relative per-port form: the
   # install puts nothing on PATH, so a bare executable name would be unrunnable
   # (003 FR-014, FR-018).
-  grep -q '.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config <KEY>' "${DOC}"
+  grep -q '.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh config <KEY>' "${DOC}"
 }
 
 # --- T089a [Phase 6, 011] — the field-defaults ceremony, normatively --------

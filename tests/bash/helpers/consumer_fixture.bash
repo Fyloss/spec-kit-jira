@@ -13,8 +13,8 @@
 #   fixture_require || skip "${FIXTURE_SKIP_REASON}"
 #   repo="$(fixture_new_repo)"
 #   read -r port pid < <(fixture_serve "${dir_containing_the_artifact}")
-#   printf 'y\n' | (cd "${repo}" && specify extension add jira \
-#     --from "http://127.0.0.1:${port}/spec-kit-jira.zip")
+#   printf 'y\n' | (cd "${repo}" && specify extension add jira-mirror \
+#     --from "http://127.0.0.1:${port}/spec-kit-jira-mirror.zip")
 #   fixture_stop_server "${pid}"
 #   fixture_cleanup "${repo}"
 #

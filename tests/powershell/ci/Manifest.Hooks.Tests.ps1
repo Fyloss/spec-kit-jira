@@ -76,9 +76,9 @@ Describe 'Coverage (research R9)' {
     }
 
     It 'fires the feature command from before_specify and reconcile from every after_*' {
-        Get-HookCommandFor -LifecycleEvent 'before_specify' | Should -BeExactly 'speckit.jira.feature'
+        Get-HookCommandFor -LifecycleEvent 'before_specify' | Should -BeExactly 'speckit.jira-mirror.feature'
         foreach ($e in @('after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')) {
-            Get-HookCommandFor -LifecycleEvent $e | Should -BeExactly 'speckit.jira.reconcile'
+            Get-HookCommandFor -LifecycleEvent $e | Should -BeExactly 'speckit.jira-mirror.reconcile'
         }
     }
 

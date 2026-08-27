@@ -38,11 +38,11 @@ setup() {
   # C2.4) rather than `--dev`, which such a consumer cannot run.
   read -r -d '' BLOCK << 'EOF' || true
 Jira bridge not available: the entry point
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh (or, on Windows,
+.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1) was not found.
 This spec-kit command completed normally and nothing was mirrored to Jira. To
 restore the bridge, reinstall the extension with
-`specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force`
+`specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force`
 (it will ask you to confirm an untrusted-source prompt — answer y).
 EOF
 }
@@ -93,14 +93,14 @@ EOF
 
 @test "every literal inside the block is runnable as written (FR-030, FR-018)" {
   # The two per-port entry points exist at the paths the block names...
-  [[ "${BLOCK}" == *'.specify/extensions/jira/scripts/bash/spec-kit-jira.sh'* ]]
-  [[ "${BLOCK}" == *'.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1'* ]]
+  [[ "${BLOCK}" == *'.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh'* ]]
+  [[ "${BLOCK}" == *'.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1'* ]]
   [ -f "${ROOT}/scripts/bash/spec-kit-jira.sh" ]
   [ -f "${ROOT}/scripts/powershell/spec-kit-jira.ps1" ]
 
   # ...and the reinstall command is the official one, in the form a
   # URL-installing consumer actually has (not `--dev`, which they do not).
-  [[ "${BLOCK}" == *'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'* ]]
+  [[ "${BLOCK}" == *'specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force'* ]]
 
   # Nothing in the block names an assistant command, so there is nothing for the
   # assistant to misremember — the failure mode that produced `/speckit-jira-conifg`.

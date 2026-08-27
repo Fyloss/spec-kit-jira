@@ -33,7 +33,7 @@ STUB
 case "$1 $2" in
   "release view")
     if [[ "$*" == *"--json"* ]]; then
-      printf "spec-kit-jira.zip\n"
+      printf "spec-kit-jira-mirror.zip\n"
       exit 0
     fi
     exit 0
@@ -43,7 +43,7 @@ esac
 '
   PATH="${STUB_DIR}:${PATH}" run "${PUBLISH}" "v${VERSION}" "${WORK}/archive.zip"
   [ "$status" -ne 0 ]
-  [[ "$output" == *'spec-kit-jira.zip'* ]]
+  [[ "$output" == *'spec-kit-jira-mirror.zip'* ]]
   [[ "$output" == *'refusing to overwrite'* ]]
 }
 
@@ -52,7 +52,7 @@ esac
 case "$1 $2" in
   "release view")
     if [[ "$*" == *"--json"* ]]; then
-      printf "spec-kit-jira-'"${VERSION}"'.zip\n"
+      printf "spec-kit-jira-mirror-'"${VERSION}"'.zip\n"
       exit 0
     fi
     exit 0
@@ -62,7 +62,7 @@ esac
 '
   PATH="${STUB_DIR}:${PATH}" run "${PUBLISH}" "v${VERSION}" "${WORK}/archive.zip"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"spec-kit-jira-${VERSION}.zip"* ]]
+  [[ "$output" == *"spec-kit-jira-mirror-${VERSION}.zip"* ]]
   [[ "$output" == *'refusing to overwrite'* ]]
 }
 
@@ -96,7 +96,7 @@ case "$1 $2" in
     exit 0
     ;;
   "release upload")
-    if [[ "$4" == *"spec-kit-jira.zip" ]]; then
+    if [[ "$4" == *"spec-kit-jira-mirror.zip" ]]; then
       exit 0
     fi
     echo "upload failed" >&2
@@ -111,5 +111,5 @@ esac
 '
   PATH="${STUB_DIR}:${PATH}" run "${PUBLISH}" "v${VERSION}" "${WORK}/archive.zip"
   [ "$status" -ne 0 ]
-  grep -qF "v${VERSION} spec-kit-jira.zip" "${DELETE_LOG}"
+  grep -qF "v${VERSION} spec-kit-jira-mirror.zip" "${DELETE_LOG}"
 }

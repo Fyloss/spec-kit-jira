@@ -155,7 +155,7 @@ _md_work() {
   [ "$(wc -l <<< "$output" | tr -d ' ')" -le 3 ]
   [[ "$output" == *"not bound to a Jira project yet"* ]]
   # It names the configuration command, spelled as it is registered (FR-018).
-  [[ "$output" == *"/speckit.jira.config"* ]]
+  [[ "$output" == *"/speckit.jira-mirror.config"* ]]
   # And it does NOT read as a failure: the host command succeeded.
   [[ "$output" == *"completed normally"* ]]
   rm -rf "${MDWORK}"
@@ -193,7 +193,7 @@ _md_work() {
   [[ "$output" != *"missing required command"* ]]
   # The remedy is the official install, in the form a URL-installing consumer
   # actually has (026 FR-016, C2.4) — not `--dev`, which they do not.
-  [[ "$output" == *"specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force"* ]]
+  [[ "$output" == *"specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force"* ]]
   rm -rf "${MDWORK}"
 }
 
@@ -233,7 +233,7 @@ _md_work() {
   [[ "$output" == *"This spec-kit command completed normally"* ]]
   # And it names only commands runnable as spelled — never the removed flag.
   [[ "$output" != *"repair-hooks"* ]]
-  [[ "$output" == *"/speckit.jira.config"* ]]
+  [[ "$output" == *"/speckit.jira-mirror.config"* ]]
   unset SPEC_KIT_JIRA_HOOK_CONTEXT
   rm -rf "${MDWORK}"
 }

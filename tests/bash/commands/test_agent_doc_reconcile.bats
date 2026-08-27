@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # T033 [US3] — The reconcile command definition (FR-010, FR-015 – FR-020, FR-030).
 #
-# Six lifecycle events registered a hook naming `speckit.jira.reconcile`. The
+# Six lifecycle events registered a hook naming `speckit.jira-mirror.reconcile`. The
 # command did not exist — no file, no manifest entry, nothing installed — so
 # every registered `after_*` hook pointed at something the assistant could not
 # resolve (research R7). This suite is the regression for that: the document
@@ -14,7 +14,7 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  DOC="${ROOT}/commands/speckit.jira.reconcile.md"
+  DOC="${ROOT}/commands/speckit.jira-mirror.reconcile.md"
 }
 
 @test "the document exists — the whole point of research R7" {
@@ -24,7 +24,7 @@ setup() {
 @test "front matter names the command exactly as the hooks reference it (FR-010)" {
   local frontmatter
   frontmatter="$(awk 'NR > 1 && /^---[[:space:]]*$/ { exit } NR > 1 { print }' "${DOC}")"
-  grep -qE '^name:[[:space:]]*"speckit\.jira\.reconcile"[[:space:]]*$' <<< "${frontmatter}"
+  grep -qE '^name:[[:space:]]*"speckit\.jira-mirror\.reconcile"[[:space:]]*$' <<< "${frontmatter}"
   grep -qE '^description:' <<< "${frontmatter}"
   grep -qE '^argument-hint:' <<< "${frontmatter}"
 }
@@ -42,8 +42,8 @@ setup() {
 }
 
 @test "step 2 invokes the bridge by repository-relative path with --json (FR-014)" {
-  grep -qF '.specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile' "${DOC}"
-  grep -qF '.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 reconcile' "${DOC}"
+  grep -qF '.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh reconcile' "${DOC}"
+  grep -qF '.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1 reconcile' "${DOC}"
   grep -qF -- '--json' "${DOC}"
 }
 
@@ -81,8 +81,8 @@ setup() {
 
 @test "the document forbids recalling a command name from memory (FR-018)" {
   grep -qi 'never recalled from' "${DOC}"
-  grep -q '/speckit.jira.config' "${DOC}"
-  grep -q '/speckit.jira.reconcile' "${DOC}"
+  grep -q '/speckit.jira-mirror.config' "${DOC}"
+  grep -q '/speckit.jira-mirror.reconcile' "${DOC}"
 }
 
 @test "the exit-code section states none of them reaches the host (FR-015)" {

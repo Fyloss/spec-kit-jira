@@ -204,7 +204,7 @@ _verify_corroborate_with_dev_install() {
       > "${repo}/.verify-dev-install.log" 2>&1
   )
 
-  local reference_dir="${repo}/.specify/extensions/jira"
+  local reference_dir="${repo}/.specify/extensions/jira-mirror"
   if [[ ! -d "${reference_dir}" ]]; then
     _verify_report "verify-artifact: the --dev corroboration install failed; see ${repo}/.verify-dev-install.log"
     rm -rf "${repo}"

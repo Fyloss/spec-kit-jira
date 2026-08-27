@@ -75,12 +75,12 @@ hook_events() {
 @test "before_specify fires the feature command; every after_* fires reconcile" {
   local cmd
   cmd="$(manifest_block hooks | awk '/^  before_specify:/ { f = 1; next } f && /^  [A-Za-z_]+:/ { f = 0 } f && /command:/ { print $2; exit }')"
-  [ "${cmd}" = "speckit.jira.feature" ]
+  [ "${cmd}" = "speckit.jira-mirror.feature" ]
 
   local e
   for e in after_specify after_clarify after_plan after_tasks after_implement after_analyze; do
     cmd="$(manifest_block hooks | awk -v ev="  ${e}:" '$0 ~ "^" ev { f = 1; next } f && /^  [A-Za-z_]+:/ { f = 0 } f && /command:/ { print $2; exit }')"
-    [ "${cmd}" = "speckit.jira.reconcile" ]
+    [ "${cmd}" = "speckit.jira-mirror.reconcile" ]
   done
 }
 

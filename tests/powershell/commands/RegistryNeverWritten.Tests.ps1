@@ -23,7 +23,7 @@ BeforeAll {
 # Our team's hook registry. Please keep the comments — they are the only record
 # of why after_implement is off.
 installed:
-- jira
+- jira-mirror
 - git
 settings:
   auto_execute_hooks: true
@@ -32,21 +32,21 @@ hooks:
   - extension: git          # the other extension's entry, and it stays put
     command: speckit.git.commit
     enabled: true
-  - extension: jira
-    command: speckit.jira.reconcile
+  - extension: jira-mirror
+    command: speckit.jira-mirror.reconcile
     enabled: true
     optional: false
     priority: 10
-    prompt: Execute speckit.jira.reconcile?
+    prompt: Execute speckit.jira-mirror.reconcile?
     description: Mirror the implementation plan into Jira Cloud.
     condition: null
   before_specify:
-  - extension: jira
-    command: speckit.jira.feature
+  - extension: jira-mirror
+    command: speckit.jira-mirror.feature
     enabled: true
     optional: false
     priority: 10
-    prompt: Execute speckit.jira.feature?
+    prompt: Execute speckit.jira-mirror.feature?
     description: Resolve the Jira ticket and name the feature before creation.
     condition: null
 '@
@@ -101,7 +101,7 @@ Describe 'The registry is never written (FR-022, SC-007, SC-012)' {
     It 'leaves a healthy registry byte-identical (SC-007)' {
         $complete = $script:Seed
         foreach ($e in @('after_specify', 'after_clarify', 'after_tasks', 'after_implement', 'after_analyze')) {
-            $complete += "  ${e}:`n  - extension: jira`n    command: speckit.jira.reconcile`n    enabled: true`n    optional: false`n    priority: 10`n    prompt: Execute speckit.jira.reconcile?`n    description: Mirror.`n    condition: null`n"
+            $complete += "  ${e}:`n  - extension: jira-mirror`n    command: speckit.jira-mirror.reconcile`n    enabled: true`n    optional: false`n    priority: 10`n    prompt: Execute speckit.jira-mirror.reconcile?`n    description: Mirror.`n    condition: null`n"
         }
         [System.IO.File]::WriteAllText($script:Ext, $complete, (New-Object System.Text.UTF8Encoding($false)))
         $before = Get-Content -Raw -LiteralPath $script:Ext
@@ -130,7 +130,7 @@ Describe 'The registry is never written (FR-022, SC-007, SC-012)' {
     }
 
     It 'leaves a leftover pre-manifest entry in place — reported, never removed (FR-028)' {
-        $seeded = $script:Seed + "  after_tasks:`n  - command: speckit.jira.reconcile`n    enabled: true`n    optional: true`n"
+        $seeded = $script:Seed + "  after_tasks:`n  - command: speckit.jira-mirror.reconcile`n    enabled: true`n    optional: true`n"
         [System.IO.File]::WriteAllText($script:Ext, $seeded, (New-Object System.Text.UTF8Encoding($false)))
         $before = Get-Content -Raw -LiteralPath $script:Ext
         Invoke-EveryCommand -Spec $script:Spec
@@ -138,7 +138,7 @@ Describe 'The registry is never written (FR-022, SC-007, SC-012)' {
     }
 
     It 'leaves an unreadable registry byte-identical — reported, never rewritten (FR-024)' {
-        $broken = "# a file we cannot read, and must not touch`nhooks:`n  after_plan: &anchor`n    - extension: jira`n"
+        $broken = "# a file we cannot read, and must not touch`nhooks:`n  after_plan: &anchor`n    - extension: jira-mirror`n"
         [System.IO.File]::WriteAllText($script:Ext, $broken, (New-Object System.Text.UTF8Encoding($false)))
         Invoke-EveryCommand -Spec $script:Spec
         (Get-Content -Raw -LiteralPath $script:Ext) | Should -BeExactly $broken

@@ -222,7 +222,7 @@ flowchart TD
     Kind -->|"anything else"| Refuse
 
     Ok --> Dup{"Key already seen<br/>at this level?"}
-    Dup -->|"yes"| Refuse["FAIL CLOSED — exit 4<br/>name the file, the line, and the content<br/>suggest quoting a key containing a colon<br/>suggest re-running /speckit.jira.config"]
+    Dup -->|"yes"| Refuse["FAIL CLOSED — exit 4<br/>name the file, the line, and the content<br/>suggest quoting a key containing a colon<br/>suggest re-running /speckit.jira-mirror.config"]
     Dup -->|"no"| Line
 
     Refuse -.->|"inside a lifecycle hook"| Warn["The same three lines + one WARNING<br/>the host command still completes normally"]

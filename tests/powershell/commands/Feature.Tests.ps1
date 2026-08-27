@@ -709,14 +709,14 @@ Describe 'Feature command' {
         $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--json', 'invoice export')
         $obj = $r.Out.Trim() | ConvertFrom-Json
         $obj.warnings[0] | Should -Match '\.specify/jira/config\.yml'
-        $obj.warnings[0] | Should -Match '/speckit\.jira\.config'
+        $obj.warnings[0] | Should -Match '/speckit\.jira-mirror\.config'
         Write-HierarchyConfig
         Remove-Item -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'personal.yml') -ErrorAction SilentlyContinue
         Start-TestMock '{"projects":{"IJT":"team"}}'
         $r = Invoke-FeatureCaptured @('feature', 'IJT-42', '--json', 'invoice export')
         $obj = $r.Out.Trim() | ConvertFrom-Json
         $obj.warnings[0] | Should -Match '\.specify/jira/personal\.yml'
-        $obj.warnings[0] | Should -Match '/speckit\.jira\.config'
+        $obj.warnings[0] | Should -Match '/speckit\.jira-mirror\.config'
 
         # 7/8/9. the three usage errors
         Select-Team ijt
@@ -791,7 +791,7 @@ Describe 'Feature command' {
         $obj = $r.Out.Trim() | ConvertFrom-Json
         $obj.active | Should -BeFalse
         $obj.warnings[0] | Should -Match '\.specify/jira/config\.yml'
-        $obj.warnings[0] | Should -Match '/speckit\.jira\.config'
+        $obj.warnings[0] | Should -Match '/speckit\.jira-mirror\.config'
     }
 
     It 'US6: an unreadable config.yml + a mentioned ticket names the file and the command (FR-026)' {
@@ -821,7 +821,7 @@ Describe 'Feature command' {
         $obj.active | Should -BeFalse
         $obj.warnings[0] | Should -Match '\.specify/jira/personal\.yml'
         $obj.warnings[0] | Should -Match 'your own'
-        $obj.warnings[0] | Should -Match '/speckit\.jira\.config'
+        $obj.warnings[0] | Should -Match '/speckit\.jira-mirror\.config'
     }
 
     It 'US6: the same four states with NO mention stay byte-identical to the baseline (FR-028)' {

@@ -158,7 +158,7 @@ Describe 'Message discipline (T049 / T088, 003 US5)' {
         @($r.Err.TrimEnd("`n") -split "`n").Count | Should -BeLessOrEqual 3
         $r.Err | Should -Match 'not bound to a Jira project yet'
         # It names the configuration command, spelled as it is registered (FR-018)...
-        $r.Err | Should -Match ([regex]::Escape('/speckit.jira.config'))
+        $r.Err | Should -Match ([regex]::Escape('/speckit.jira-mirror.config'))
         # ...and does not read as a failure: the host command succeeded.
         $r.Err | Should -Match 'completed normally'
     }
@@ -193,7 +193,7 @@ Describe 'Message discipline (T049 / T088, 003 US5)' {
         $r.Err | Should -Not -Match 'missing required command'
         # The remedy is the official install, in the form a URL-installing
         # consumer actually has (026 FR-016, C2.4) — not `--dev`.
-        $r.Err | Should -Match ([regex]::Escape('specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'))
+        $r.Err | Should -Match ([regex]::Escape('specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force'))
     }
 
     It 'emits exactly ONE message per run (FR-016)' {
@@ -222,7 +222,7 @@ Describe 'Message discipline (T049 / T088, 003 US5)' {
         $r.Err | Should -Match 'This spec-kit command completed normally'
         # It names only commands runnable as spelled — never the removed flag.
         $r.Err | Should -Not -Match 'repair-hooks'
-        $r.Err | Should -Match ([regex]::Escape('/speckit.jira.config'))
+        $r.Err | Should -Match ([regex]::Escape('/speckit.jira-mirror.config'))
     }
 
     It 'says NOTHING for a disabled event — not even that it was skipped (FR-020)' {

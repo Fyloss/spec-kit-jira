@@ -3,7 +3,7 @@
 # research R6).
 #
 # `specify extension add` copies this repository into the consuming repository's
-# `.specify/extensions/jira/` and installs NOTHING on the machine: no binary, no
+# `.specify/extensions/jira-mirror/` and installs NOTHING on the machine: no binary, no
 # PATH entry, no shell profile edit. Yet both command documents used to instruct
 # the assistant to run `spec-kit-jira config` and `spec-kit-jira feature` as bare
 # names. In a consuming repository no such command exists — which is precisely
@@ -18,8 +18,8 @@ setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
   DOCS_DIR="${ROOT}/commands"
   mapfile -t DOCS < <(find "${DOCS_DIR}" -name '*.md' -type f | LC_ALL=C sort)
-  BASH_ENTRY='.specify/extensions/jira/scripts/bash/spec-kit-jira.sh'
-  PWSH_ENTRY='.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1'
+  BASH_ENTRY='.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh'
+  PWSH_ENTRY='.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1'
 }
 
 @test "there are four command documents, one per declared command" {
@@ -68,8 +68,8 @@ setup() {
 @test "both named entry points exist at the paths the documents spell (FR-012)" {
   # The paths are relative to the INSTALLED extension root, which is this
   # repository's root at development time.
-  [ -f "${ROOT}/${BASH_ENTRY#.specify/extensions/jira/}" ]
-  [ -f "${ROOT}/${PWSH_ENTRY#.specify/extensions/jira/}" ]
+  [ -f "${ROOT}/${BASH_ENTRY#.specify/extensions/jira-mirror/}" ]
+  [ -f "${ROOT}/${PWSH_ENTRY#.specify/extensions/jira-mirror/}" ]
 }
 
 @test "every command document invokes the Bash entry point through the interpreter (026 FR-016, C2.3)" {

@@ -124,7 +124,7 @@ Describe 'Config degraded mode' {
         $r.Out | Should -Match '  gitignore: created'
         $r.Out | Should -Match '  personal: created'
         $r.Out | Should -Match 'Provisional teams: ijt, wex'
-        $r.Out | Should -Match ([regex]::Escape('Rerun: define SPEC_KIT_JIRA_BASE_URL, then re-run: .specify/extensions/jira/scripts/bash/spec-kit-jira.sh config (on Windows: .specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 config)'))
+        $r.Out | Should -Match ([regex]::Escape('Rerun: define SPEC_KIT_JIRA_BASE_URL, then re-run: .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh config (on Windows: .specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1 config)'))
     }
 }
 
@@ -185,8 +185,8 @@ Describe 'Degraded causes are told apart (T047, 003 US5)' {
         $r = Invoke-ConfigCaptured @('config', '--json')
         $guidance = ($r.Out.Trim() | ConvertFrom-Json).rerun_guidance
         # The repository-relative per-port form, never a bare executable name.
-        $guidance | Should -Match ([regex]::Escape('.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config'))
-        $guidance | Should -Match ([regex]::Escape('.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1 config'))
+        $guidance | Should -Match ([regex]::Escape('.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh config'))
+        $guidance | Should -Match ([regex]::Escape('.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1 config'))
         $guidance | Should -Not -Match '(^|[^/])spec-kit-jira\s+config'
     }
 
@@ -212,7 +212,7 @@ Describe 'Degraded causes are told apart (T047, 003 US5)' {
         Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
         $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
         [System.IO.File]::WriteAllText($env:SPEC_KIT_JIRA_EXTENSIONS_YML,
-            "defaults: &defaults`n  enabled: true`nhooks:`n  after_plan:`n    - extension: jira`n",
+            "defaults: &defaults`n  enabled: true`nhooks:`n  after_plan:`n    - extension: jira-mirror`n",
             (New-Object System.Text.UTF8Encoding($false)))
         $obj = (Invoke-ConfigCaptured @('config', '--json')).Out.Trim() | ConvertFrom-Json
         $obj.effects.hooks.status | Should -BeExactly 'unreadable'

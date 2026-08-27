@@ -127,7 +127,7 @@ resumed exactly like an acceptance: re-invoke with `--accept-defaults`; there
 is no decline flag. When no answer can be obtained and a required field
 stays unsatisfiable, the run refuses for that specification with the
 pre-existing exit code and a message carrying the copy-pasteable
-`speckit.jira.config --field-default …` remedy line.
+`speckit.jira-mirror.config --field-default …` remedy line.
 
 A field that is merely *defaultable*, with nothing recorded against it, is
 never a trigger — a project that recorded nothing sees no question and no
@@ -363,7 +363,7 @@ messages rather than one generic error:
 | Situation | Outcome |
 |---|---|
 | No local binding file at all | Not bound yet — notice, exit `0` |
-| Binding exists, this project is not in it | Run `/speckit.jira.config` to discover it — exit `4` |
+| Binding exists, this project is not in it | Run `/speckit.jira-mirror.config` to discover it — exit `4` |
 | Binding predates parent support | The project *is* bound, its binding is a version behind — refresh it, exit `4` |
 | Binding unreadable | Fail closed, zero writes — exit `4` |
 

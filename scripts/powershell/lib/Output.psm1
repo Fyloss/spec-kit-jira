@@ -135,7 +135,7 @@ function Write-JiraWarning {
 # =============================================================================
 #
 # `specify extension add` copies this repository into the consuming repository's
-# `.specify/extensions/jira/` and installs NOTHING on the machine — no binary, no
+# `.specify/extensions/jira-mirror/` and installs NOTHING on the machine — no binary, no
 # PATH entry, no profile edit. A message that tells the operator to run a bare
 # `spec-kit-jira` therefore names a command that does not exist, which is exactly
 # the reported "spec-kit-jira CLI not installed" symptom.
@@ -144,8 +144,8 @@ function Write-JiraWarning {
 # output (Constitution VI), so a message cannot name only the port it happens to
 # be running on without breaking the conformance diff — and the operator reading
 # it may well be on the other one.
-$script:JiraBridgeBashEntry = '.specify/extensions/jira/scripts/bash/spec-kit-jira.sh'
-$script:JiraBridgePwshEntry = '.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1'
+$script:JiraBridgeBashEntry = '.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh'
+$script:JiraBridgePwshEntry = '.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1'
 
 function Get-JiraBridgeInvocation {
     <#

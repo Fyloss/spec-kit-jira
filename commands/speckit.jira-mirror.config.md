@@ -1,10 +1,10 @@
 ---
-name: "speckit.jira.config"
+name: "speckit.jira-mirror.config"
 description: "Configure the Jira reconcile bridge: discover project metadata, verify the lifecycle hooks the install registered, and manage the README block — a deterministic, model-independent ceremony."
 argument-hint: "Optional: a project key to (re)bind, e.g. PROJ"
 ---
 
-# /speckit.jira.config
+# /speckit.jira-mirror.config
 
 Run the single installation ceremony for the Jira reconcile bridge. The ceremony
 is **fully deterministic and model-independent** (US1, FR-001): every step below
@@ -32,17 +32,17 @@ an API read or a closed question.
 ## Invoking the bridge — normative
 
 The install places **nothing** on `PATH`: `specify extension add` copies the
-extension into the consuming repository's `.specify/extensions/jira/` and
+extension into the consuming repository's `.specify/extensions/jira-mirror/` and
 installs no machine-wide executable. Invoke the entry point by its
 **repository-relative path**, selecting the port from the host:
 
 | Host | Entry point |
 | --- | --- |
-| macOS, Linux | `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` |
-| Windows | `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1` |
+| macOS, Linux | `.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh` |
+| Windows | `.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1` |
 
 ```text
-bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh config [PROJECT_KEY] [flags]
+bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh config [PROJECT_KEY] [flags]
 ```
 
 You MUST NOT invoke a bare `spec-kit-jira` command name. No such command exists
@@ -60,11 +60,11 @@ own explanation of the situation:
 
 ```text
 Jira bridge not available: the entry point
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh (or, on Windows,
+.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1) was not found.
 This spec-kit command completed normally and nothing was mirrored to Jira. To
 restore the bridge, reinstall the extension with
-`specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force`
+`specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force`
 (it will ask you to confirm an untrusted-source prompt — answer y).
 ```
 
@@ -108,7 +108,7 @@ and never trigger the degraded mode — do not retry into it.
 ## Algorithm (ordered, each step is read / config-read / closed question)
 
 1. **Config read** — read `.specify/jira/config.yml`. If absent, create it from
-   `.specify/extensions/jira/templates/config.yml.template` and ask the operator
+   `.specify/extensions/jira-mirror/templates/config.yml.template` and ask the operator
    the closed questions it documents (each key is an enumeration):
    - `priority_map`: for each of **P1 / P2 / P3**, pick a priority **from the
      discovered priority list** (step 4).
@@ -122,7 +122,7 @@ and never trigger the degraded mode — do not retry into it.
    `GET /project/search` read (key, name, style). Ask the operator to choose
    **from that list only**, persist the choice into `config.yml`, and re-invoke
    the entry point by its repository-relative path with the chosen key:
-   `bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh config <KEY>` (on
+   `bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh config <KEY>` (on
    Windows, the `powershell/spec-kit-jira.ps1` twin). An unknown or
    unresolvable key fails closed
    with the transport's exit code — never substitute another key (FR-006).
@@ -275,7 +275,7 @@ and never trigger the degraded mode — do not retry into it.
       ungated; ambiguous, gated, and unreachable each withhold the move and warn
       once, at reconcile time, naming the ticket. And it only takes effect on a
       reconcile run that carries the lifecycle event — the
-      `SPEC_KIT_JIRA_HOOK_EVENT` variable the `/speckit.jira.reconcile`
+      `SPEC_KIT_JIRA_HOOK_EVENT` variable the `/speckit.jira-mirror.reconcile`
       definition requires you to set.
 12. **Persist (deterministic write)** — the resolved-id table (logical name → id
     for issue types — with hierarchy level and sub-task flag — priorities,
@@ -319,8 +319,8 @@ It reports one of five states, and names what the operator should do:
 | State | Meaning and remedy |
 | --- | --- |
 | `healthy` | All seven events present and enabled; nothing to do |
-| `incomplete` | One or more events have no entry. Re-run the official install: `specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force` (confirm the untrusted-source prompt with `y`) |
-| `held_disabled` | The operator disabled one or more events. No bridge step runs for them, whatever the registry currently says. Release one with `/speckit.jira.config --enable-hook <event>` |
+| `incomplete` | One or more events have no entry. Re-run the official install: `specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force` (confirm the untrusted-source prompt with `y`) |
+| `held_disabled` | The operator disabled one or more events. No bridge step runs for them, whatever the registry currently says. Release one with `/speckit.jira-mirror.config --enable-hook <event>` |
 | `duplicated` | A leftover entry from a version that predates manifest-declared hooks: our command with no owning `extension` field. Neither the install nor this extension can remove it, so the report gives the exact manual edit |
 | `unreadable` | The registry could not be read. The file is named as the cause; **no claim is made about the hooks** |
 

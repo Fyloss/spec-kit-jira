@@ -68,7 +68,7 @@ seed_registry() {
 # Our team's hook registry. Please keep the comments — they are the only record
 # of why after_implement is off.
 installed:
-- jira
+- jira-mirror
 - git
 settings:
   auto_execute_hooks: true
@@ -77,21 +77,21 @@ hooks:
   - extension: git          # the other extension's entry, and it stays put
     command: speckit.git.commit
     enabled: true
-  - extension: jira
-    command: speckit.jira.reconcile
+  - extension: jira-mirror
+    command: speckit.jira-mirror.reconcile
     enabled: true
     optional: false
     priority: 10
-    prompt: Execute speckit.jira.reconcile?
+    prompt: Execute speckit.jira-mirror.reconcile?
     description: Mirror the implementation plan into Jira Cloud.
     condition: null
   before_specify:
-  - extension: jira
-    command: speckit.jira.feature
+  - extension: jira-mirror
+    command: speckit.jira-mirror.feature
     enabled: true
     optional: false
     priority: 10
-    prompt: Execute speckit.jira.feature?
+    prompt: Execute speckit.jira-mirror.feature?
     description: Resolve the Jira ticket and name the feature before creation.
     condition: null
 YAML
@@ -130,10 +130,10 @@ assert_untouched() {
   # Complete the registry so the state is genuinely healthy.
   local e cmd
   for e in after_specify after_clarify after_tasks after_implement after_analyze; do
-    cmd=speckit.jira.reconcile
+    cmd=speckit.jira-mirror.reconcile
     {
       printf '  %s:\n' "${e}"
-      printf '  - extension: jira\n    command: %s\n    enabled: true\n' "${cmd}"
+      printf '  - extension: jira-mirror\n    command: %s\n    enabled: true\n' "${cmd}"
       printf '    optional: false\n    priority: 10\n'
       printf '    prompt: Execute %s?\n' "${cmd}"
       printf '    description: Mirror.\n    condition: null\n'
@@ -164,7 +164,7 @@ assert_untouched() {
   # cannot purge and we may not either.
   {
     printf '  after_tasks:\n'
-    printf '  - command: speckit.jira.reconcile\n    enabled: true\n    optional: true\n'
+    printf '  - command: speckit.jira-mirror.reconcile\n    enabled: true\n    optional: true\n'
   } >> "${EXT}"
   assert_untouched "duplicated"
 }
@@ -174,7 +174,7 @@ assert_untouched() {
     '# a file we cannot read, and must not touch' \
     'hooks:' \
     '  after_plan: &anchor' \
-    '    - extension: jira' > "${EXT}"
+    '    - extension: jira-mirror' > "${EXT}"
   assert_untouched "unreadable"
 }
 

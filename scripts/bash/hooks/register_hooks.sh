@@ -16,8 +16,9 @@
 # owned by the manifest, we no longer need to write it at all.
 #
 # Recognition has two rules, and they are not the same rule:
-#   * ours     — the entry carries `extension: jira`, the ownership key the host
-#                install writes and matches on when it purges and re-adds;
+#   * ours     — the entry carries `extension: jira-mirror`, the ownership key
+#                the host install writes and matches on when it purges and
+#                re-adds;
 #   * leftover — the entry carries one of our commands and NO `extension` field:
 #                the four-field shape every pre-manifest version of this
 #                extension wrote. The install's purge predicate is literally
@@ -40,7 +41,7 @@ source "${_register_hooks_dir}/../lib/output.sh" # json_canonical
 : "${EXIT_CONFIG:=4}"
 
 # The owning-extension id the host writes into every entry it registers for us.
-HOOK_EXTENSION_ID='jira'
+HOOK_EXTENSION_ID='jira-mirror'
 
 # The seven declared lifecycle events (research R9) — one closed set, in
 # manifest declaration order. The set has ONE source: lib/config.sh declares it
@@ -51,16 +52,16 @@ HOOK_EXTENSION_ID='jira'
 HOOK_EVENTS=("${JIRA_HOOK_EVENT_NAMES[@]}")
 
 # The reconcile command the six after_* events fire.
-HOOK_COMMAND='speckit.jira.reconcile'
+HOOK_COMMAND='speckit.jira-mirror.reconcile'
 
 # The feature-naming command the before_specify event fires (002 US3, FR-013).
 HOOK_BEFORE_EVENT='before_specify'
-HOOK_BEFORE_COMMAND='speckit.jira.feature'
+HOOK_BEFORE_COMMAND='speckit.jira-mirror.feature'
 
 # The remedies the report names. Each literal is runnable exactly as spelled —
 # tests/bash/ci/test_message_command_literals.bats asserts it (FR-018).
-HOOK_INSTALL_COMMAND='specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'
-HOOK_RELEASE_COMMAND='/speckit.jira.config --enable-hook'
+HOOK_INSTALL_COMMAND='specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force'
+HOOK_RELEASE_COMMAND='/speckit.jira-mirror.config --enable-hook'
 
 # register_hooks_command_for <event> — the command that event must name.
 register_hooks_command_for() {
@@ -188,7 +189,7 @@ _register_hooks_unreadable() {
   local path="$1" detail="$2" hint
   hint="unreadable: ${path} could not be read"
   [[ -n "${detail}" ]] && hint="${hint} (${detail})"
-  hint="${hint} — no claim is made about the hooks; fix the file, then re-run /speckit.jira.config"
+  hint="${hint} — no claim is made about the hooks; fix the file, then re-run /speckit.jira-mirror.config"
   jq -cn --arg h "${hint}" '{
     present: [], missing: [], disabled: [], held_disabled: [], duplicated: [],
     unreadable: true, repair_hint: $h
@@ -224,7 +225,7 @@ _register_hooks_hint() {
 
   list="$(jq -r 'join(", ")' <<< "${dup}")"
   if [[ -n "${list}" ]]; then
-    clauses+=("duplicated: ${list} — a pre-manifest entry names our command with no owning extension, so the official install adds a second entry beside it instead of replacing it; remove the entry that has no \"extension: jira\" field under each named event, by hand, from ${path}")
+    clauses+=("duplicated: ${list} — a pre-manifest entry names our command with no owning extension, so the official install adds a second entry beside it instead of replacing it; remove the entry that has no \"extension: jira-mirror\" field under each named event, by hand, from ${path}")
   fi
 
   ((${#clauses[@]} == 0)) && return 0

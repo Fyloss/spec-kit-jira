@@ -784,8 +784,8 @@ function Invoke-JiraFeature {
     # layer earlier. Gated on $hasMention so a run naming nothing stays
     # byte-identical to the current release (FR-028); never issues a Jira
     # request (FR-027).
-    $noConfigMsg = 'no team configuration found — .specify/jira/config.yml is missing, unreadable, or declares no teams; run /speckit.jira.config to create one'
-    $noSelectionMsg = 'no team selected in .specify/jira/personal.yml — that selection is your own and no script writes it for you; run /speckit.jira.config to select one'
+    $noConfigMsg = 'no team configuration found — .specify/jira/config.yml is missing, unreadable, or declares no teams; run /speckit.jira-mirror.config to create one'
+    $noSelectionMsg = 'no team selected in .specify/jira/personal.yml — that selection is your own and no script writes it for you; run /speckit.jira-mirror.config to select one'
 
     # $dir/config.yml and $dir/personal.yml below: '/'-concatenation, never
     # Path.Combine or Join-Path (code review, PR #55 — measured on

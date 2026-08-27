@@ -492,7 +492,7 @@ EOF
   [ -z "$out" ]
   [ "$(sed -n 1p "${DIR}/err.txt")" = "config: ${DIR}/bad.yml:3: cannot parse this line as a mapping entry: this line has no delimiter" ]
   [ "$(sed -n 2p "${DIR}/err.txt")" = 'config: a key must be followed by ": " — quote the key if it contains a colon, e.g. "Blocked: waiting": "10001"' ]
-  [ "$(sed -n 3p "${DIR}/err.txt")" = "config: re-run /speckit.jira.config to regenerate ${DIR}/bad.yml from the Jira instance." ]
+  [ "$(sed -n 3p "${DIR}/err.txt")" = "config: re-run /speckit.jira-mirror.config to regenerate ${DIR}/bad.yml from the Jira instance." ]
   [ "$(wc -l < "${DIR}/err.txt" | tr -d ' ')" = "3" ]
 }
 
@@ -1117,7 +1117,7 @@ YAML
   #
   #     hooks:
   #       before_specify:
-  #       - extension: jira        <- indent 2, same as the key
+  #       - extension: jira-mirror        <- indent 2, same as the key
   #
   # This reader required a GREATER indent, so it stopped at the key and returned
   # null for its value. The consequence was not subtle: the hook registry of every
@@ -1125,25 +1125,25 @@ YAML
   # file unreadable on a perfectly healthy repository.
   printf '%s\n' \
     'installed:' \
-    '- jira' \
+    '- jira-mirror' \
     'settings:' \
     '  auto_execute_hooks: true' \
     'hooks:' \
     '  before_specify:' \
-    '  - extension: jira' \
-    '    command: speckit.jira.feature' \
+    '  - extension: jira-mirror' \
+    '    command: speckit.jira-mirror.feature' \
     '    enabled: true' \
     '  after_plan:' \
-    '  - extension: jira' \
-    '    command: speckit.jira.reconcile' \
+    '  - extension: jira-mirror' \
+    '    command: speckit.jira-mirror.reconcile' \
     > "${DIR}/pyyaml.yml"
   json="$(config_yaml_to_json "${DIR}/pyyaml.yml")"
-  [ "$(jq -r '.installed[0]' <<< "$json")" = "jira" ]
+  [ "$(jq -r '.installed[0]' <<< "$json")" = "jira-mirror" ]
   [ "$(jq -r '.settings.auto_execute_hooks' <<< "$json")" = "true" ]
   [ "$(jq -r '.hooks.before_specify | length' <<< "$json")" -eq 1 ]
-  [ "$(jq -r '.hooks.before_specify[0].command' <<< "$json")" = "speckit.jira.feature" ]
+  [ "$(jq -r '.hooks.before_specify[0].command' <<< "$json")" = "speckit.jira-mirror.feature" ]
   [ "$(jq -r '.hooks.before_specify[0].enabled' <<< "$json")" = "true" ]
-  [ "$(jq -r '.hooks.after_plan[0].command' <<< "$json")" = "speckit.jira.reconcile" ]
+  [ "$(jq -r '.hooks.after_plan[0].command' <<< "$json")" = "speckit.jira-mirror.reconcile" ]
 }
 
 @test "both sequence indentations produce the SAME parse — the forms are equivalent" {
