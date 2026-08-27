@@ -19,8 +19,8 @@ setup() {
   source "${ROOT}/tests/conformance/install-harness.sh"
   harness_require || skip "${HARNESS_SKIP_REASON}"
   REPO="$(harness_new_repo)"
-  BASH_ENTRY=".specify/extensions/jira/scripts/bash/spec-kit-jira.sh"
-  PWSH_ENTRY=".specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1"
+  BASH_ENTRY=".specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh"
+  PWSH_ENTRY=".specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1"
 }
 
 teardown() {
@@ -101,7 +101,7 @@ snapshot_environment() {
     }
   done <<< "${output}"
   # And the extension tree is present, which is what "inside the repository" means.
-  [ -d "${REPO}/.specify/extensions/jira" ]
+  [ -d "${REPO}/.specify/extensions/jira-mirror" ]
 }
 
 @test "no machine-wide executable named spec-kit-jira was created (FR-008)" {
@@ -122,7 +122,7 @@ snapshot_environment() {
   run bash -c "cd '${REPO}' && bash ${BASH_ENTRY} reconcile --json specs/001-x/spec.md 2>&1"
   [ "$status" -eq 0 ]
   [[ "$output" == *"not bound to a Jira project yet"* ]]
-  [[ "$output" == *"/speckit.jira.config"* ]]
+  [[ "$output" == *"/speckit.jira-mirror.config"* ]]
   # At most three lines (FR-019, US5 scenario 3).
   [ "$(wc -l <<< "$output" | tr -d ' ')" -le 3 ]
 }

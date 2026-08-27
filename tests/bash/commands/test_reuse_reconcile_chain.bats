@@ -28,7 +28,7 @@ setup() {
   WORK="$(mktemp -d)"
   export JIRA_CONFIG_DIR="${WORK}/.specify/jira"
   helper_seed_config "${JIRA_CONFIG_DIR}" IJT ijt
-  # reconcile needs the resolved numeric ids a real /speckit.jira.config run
+  # reconcile needs the resolved numeric ids a real /speckit.jira-mirror.config run
   # would have discovered — copied from the proven repo-with-seed-teams
   # fixture rather than re-derived, since this file's own job is the
   # feature->seed->reconcile composition, not type-id discovery.

@@ -23,7 +23,7 @@ and without ever destroying what a human wrote there.
 
 **Both ends of the scale, with the same install.** A solo developer with one
 Jira project, three issue types, and a two-column board must be able to run
-`/speckit.jira.config` and be mirroring within minutes, without reading a
+`/speckit.jira-mirror.config` and be mirroring within minutes, without reading a
 mapping reference. An enterprise running dozens of projects across several
 teams, with custom fields, mandatory fields, bespoke workflows, and a
 hierarchy several tiers deep, must be able to describe all of that in
@@ -159,8 +159,8 @@ Shipped, and described in detail in the [system documentation](README.md):
   already belongs to another spec, fetches its content so the drafted spec
   starts informed, and thereafter treats the description as human-authored.
 - **Seeds a whole specification from named Jira issues**, not just one.
-  `/speckit.jira.feature --parent … --story …` resolves a set of existing
-  issues before anything is named, and `/speckit.jira.seed` drafts `spec.md`
+  `/speckit.jira-mirror.feature --parent … --story …` resolves a set of existing
+  issues before anything is named, and `/speckit.jira-mirror.seed` drafts `spec.md`
   from their own summaries and descriptions, validates the pinning marker
   bijection, and — only after an explicit confirmation of the rendered write
   plan — binds, adopts, creates a not-yet-existing parent from free text, and
@@ -293,18 +293,18 @@ on the parent, on the story that consumes them, or on both.
 
 ### 6. Completing a ticket a human created, without overwriting them
 
-*Shipped* — the managed-panel splice, `speckit.jira.feature`'s own mentioned-key
+*Shipped* — the managed-panel splice, `speckit.jira-mirror.feature`'s own mentioned-key
 naming, and now `specs/027-seed-spec-from-jira/` together deliver this in full,
 and for more than one ticket at a time: an operator names an existing epic and
 its stories — by key, by browser URL, or (for a not-yet-existing parent) by
-free-text title — and `speckit.jira.seed` drafts `spec.md` from their own
+free-text title — and `speckit.jira-mirror.seed` drafts `spec.md` from their own
 summaries and descriptions, pins each named story to the section it seeded, and
 binds, adopts, creates, and re-parents only after an explicit confirmation.
 Every one of those tickets keeps the managed-panel guarantee this entry
 originally asked for: the extension fills its own delimited region and leaves
 every human-written byte alone, permanently.
 
-Unlike `mention` (below), `speckit.jira.seed` is declared in `extension.yml`'s
+Unlike `mention` (below), `speckit.jira-mirror.seed` is declared in `extension.yml`'s
 `provides.commands` and reachable today — this is the entry that closed the
 gap between "built" and "usable" this section used to describe, just through a
 newer, broader command rather than through `mention` itself.
@@ -313,9 +313,9 @@ What remains, and is still *envisioned*: `commands/mention.sh` is implemented
 in both ports and adopts a **single** already-named ticket mid-conversation
 (distinct from seeding a whole new specification from several), but it is
 still **not exposed as an agent command** — `extension.yml` declares
-`speckit.jira.config`, `speckit.jira.feature`, `speckit.jira.reconcile`, and
-`speckit.jira.seed`, not `speckit.jira.mention`. Surfacing it as
-`/speckit.jira.mention`, with the accompanying command definition and
+`speckit.jira-mirror.config`, `speckit.jira-mirror.feature`, `speckit.jira-mirror.reconcile`, and
+`speckit.jira-mirror.seed`, not `speckit.jira-mirror.mention`. Surfacing it as
+`/speckit.jira-mirror.mention`, with the accompanying command definition and
 lifecycle wiring, is the same unreachable-capability gap this entry has
 recorded since before 027, now narrower in scope than it once was.
 
@@ -431,7 +431,7 @@ but the environment a growing share of spec-kit work happens in.
 
 ### 9. A choice of transport: the REST API or the Jira MCP server
 
-*Envisioned.* `/speckit.jira.config` asks one more question — how should the
+*Envisioned.* `/speckit.jira-mirror.config` asks one more question — how should the
 bridge reach Jira? — and the consumer answers **the Jira REST API**, as today,
 or **the Jira MCP server**, Atlassian's implementation of the Model Context
 Protocol (MCP), the open protocol through which a host exposes tools and data

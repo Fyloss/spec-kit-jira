@@ -14,7 +14,7 @@ lifecycle step, without ever failing the spec-kit command that triggered it.
 flowchart LR
     Dev["Developer"] -->|"/speckit.plan, /speckit.tasks, ..."| Host["Spec Kit host<br/>+ coding agent"]
 
-    Host -->|"lifecycle hook fires"| Cmd["Agent command<br/>speckit.jira.reconcile"]
+    Host -->|"lifecycle hook fires"| Cmd["Agent command<br/>speckit.jira-mirror.reconcile"]
     Cmd -->|"invokes by repo-relative path"| Entry["Bridge entry point<br/>spec-kit-jira.sh / .ps1"]
 
     subgraph Bridge["The bridge — twin native ports"]
@@ -41,7 +41,7 @@ flowchart LR
 | 1 | [System context](01-system-context.md) | Who talks to what, and where each piece of state lives |
 | 2 | [Module architecture](02-module-architecture.md) | The four layers, the engine/sink boundary, module-by-module map |
 | 3 | [Lifecycle hooks](03-lifecycle-hooks.md) | How the extension gets wired in and when it fires |
-| 4 | [The config ceremony](04-config-ceremony.md) | What `/speckit.jira.config` discovers and writes |
+| 4 | [The config ceremony](04-config-ceremony.md) | What `/speckit.jira-mirror.config` discovers and writes |
 | 5 | [The reconcile flow](05-reconcile-flow.md) | The mirroring pipeline, step by step |
 | 6 | [Feature naming](06-feature-naming.md) | Ticket-first branch and folder naming |
 | 7 | [Configuration and secrets](07-configuration-and-secrets.md) | The three config layers and credential resolution |

@@ -55,8 +55,8 @@ main() {
 
   # Two names, one archive (A4): both copies carry identical bytes because
   # both come from the SAME built file, never from separate builds.
-  local stable_name="spec-kit-jira.zip"
-  local pinned_name="spec-kit-jira-${version}.zip"
+  local stable_name="spec-kit-jira-mirror.zip"
+  local pinned_name="spec-kit-jira-mirror-${version}.zip"
   cp "${archive}" "${WORK_DIR}/${stable_name}"
   cp "${archive}" "${WORK_DIR}/${pinned_name}"
 

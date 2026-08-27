@@ -34,7 +34,7 @@ teardown() {
   harness_install "${REPO}"
   local e lines
   for e in "${EVENTS[@]}"; do
-    lines="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira"')"
+    lines="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira-mirror"')"
     [ "$(wc -l <<< "${lines}" | tr -d ' ')" -eq 1 ] || {
       printf 'event %s has %s jira entries:\n%s\n' "${e}" "$(wc -l <<< "${lines}")" "${lines}" >&2
       return 1
@@ -62,7 +62,7 @@ teardown() {
   harness_install "${REPO}" --force
   local e n
   for e in "${EVENTS[@]}"; do
-    n="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira"' | wc -l | tr -d ' ')"
+    n="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira-mirror"' | wc -l | tr -d ' ')"
     [ "${n}" -eq 1 ] || {
       printf 'event %s has %s jira entries after two reinstalls\n' "${e}" "${n}" >&2
       return 1
@@ -92,7 +92,7 @@ teardown() {
   [ "$(awk -F'\t' '{print $3}' <<< "${foreign}")" = "true" ]
 
   # ...and ours was added beside it, not instead of it.
-  [ "$(harness_entries_for "${REPO}" after_plan | awk -F'\t' '$1 == "jira"' | wc -l | tr -d ' ')" -eq 1 ]
+  [ "$(harness_entries_for "${REPO}" after_plan | awk -F'\t' '$1 == "jira-mirror"' | wc -l | tr -d ' ')" -eq 1 ]
 }
 
 @test "the install strips nothing on reinstall (FR-005)" {
@@ -115,9 +115,9 @@ teardown() {
   harness_install "${REPO}"
   local e cmd file
   for e in "${EVENTS[@]}"; do
-    cmd="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira" {print $2}')"
+    cmd="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira-mirror" {print $2}')"
     [ -n "${cmd}" ]
-    file="${REPO}/.specify/extensions/jira/commands/${cmd}.md"
+    file="${REPO}/.specify/extensions/jira-mirror/commands/${cmd}.md"
     [ -f "${file}" ] || {
       printf 'event %s names %s, which is not installed at %s\n' "${e}" "${cmd}" "${file}" >&2
       return 1

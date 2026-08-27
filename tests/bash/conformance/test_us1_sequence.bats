@@ -40,7 +40,7 @@ teardown() {
 assert_invariant() {
   local step="$1" e n
   for e in "${EVENTS[@]}"; do
-    n="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira"' | wc -l | tr -d ' ')"
+    n="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira-mirror"' | wc -l | tr -d ' ')"
     [ "${n}" -le 1 ] || {
       printf 'after step %s: event %s has %s jira entries\n' "${step}" "${e}" "${n}" >&2
       return 1
@@ -62,7 +62,7 @@ run_ceremony() {
   (
     cd "${REPO}" || exit 1
     unset SPEC_KIT_JIRA_BASE_URL
-    ./.specify/extensions/jira/scripts/bash/spec-kit-jira.sh config --json > /dev/null 2>&1 || true
+    ./.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh config --json > /dev/null 2>&1 || true
   )
 }
 
@@ -93,7 +93,7 @@ run_ceremony() {
   # been satisfied by having none.
   local e n
   for e in "${EVENTS[@]}"; do
-    n="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira"' | wc -l | tr -d ' ')"
+    n="$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira-mirror"' | wc -l | tr -d ' ')"
     [ "${n}" -eq 1 ]
   done
 }

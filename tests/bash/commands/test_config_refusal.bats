@@ -130,7 +130,7 @@ _refusal_summary() {
   # Valid YAML, outside this reader's subset. The distinction matters: this file
   # is not broken, and telling the operator it is would send them to fix nothing.
   _refusal_work
-  _refusal_registry 'defaults: &defaults' '  enabled: true' 'hooks:' '  after_plan:' '    - extension: jira'
+  _refusal_registry 'defaults: &defaults' '  enabled: true' 'hooks:' '  after_plan:' '    - extension: jira-mirror'
   run cmd_config config --json
   [ "$(jq -r '.effects.hooks.status' <<< "$(_refusal_summary)")" = "unreadable" ]
   [[ "$(jq -r '.effects.hooks.detail' <<< "$(_refusal_summary)")" == *"anchor"* ]]
@@ -139,7 +139,7 @@ _refusal_summary() {
 
 @test "a flow collection is distinguished in prose and NAMED (FR-024, Edge Cases)" {
   _refusal_work
-  _refusal_registry 'hooks:' '  after_plan: [{extension: jira, command: speckit.jira.reconcile}]'
+  _refusal_registry 'hooks:' '  after_plan: [{extension: jira-mirror, command: speckit.jira-mirror.reconcile}]'
   run cmd_config config --json
   [[ "$(jq -r '.effects.hooks.detail' <<< "$(_refusal_summary)")" == *"flow collection"* ]]
   rm -rf "${WORK}"

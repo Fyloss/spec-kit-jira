@@ -12,7 +12,7 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  BASH_ENTRY='.specify/extensions/jira/scripts/bash/spec-kit-jira.sh'
+  BASH_ENTRY='.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh'
   DOCS=("${ROOT}/README.md" "${ROOT}/INSTALL.md" "${ROOT}/templates/readme-block.template")
 }
 

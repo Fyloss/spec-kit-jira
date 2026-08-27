@@ -1,17 +1,17 @@
 ---
-name: "speckit.jira.seed"
+name: "speckit.jira-mirror.seed"
 description: "Seed a specification from named, existing Jira issues — validate the drafted pinning, confirm the write plan, then bind, create, and re-parent. Agent-invoked; bound to no hook event."
 argument-hint: "A spec file path, and --confirm once the operator has approved the write plan"
 ---
 
-# /speckit.jira.seed
+# /speckit.jira-mirror.seed
 
 This is **moment 2** of seeding a specification from existing Jira issues
 (research R1). It is **not** a lifecycle hook — it cannot be, because a
 confirmation prompt cannot live in a hook (Constitution IV: "there is nobody
 to answer a prompt and a wait is indistinguishable from a hang"). You invoke
 it yourself, deliberately, after you have drafted `spec.md` from the seed
-material `speckit.jira.feature` handed you at `before_specify`.
+material `speckit.jira-mirror.feature` handed you at `before_specify`.
 
 **This invocation is mandatory whenever moment 1 handed you seed material.**
 If you forget it, nothing is lost — moment 1 already recorded a
@@ -21,7 +21,7 @@ this command. Do not silently skip it.
 
 **Moment 1 is reached two ways now (029).** The operator either typed
 `--parent`/`--story` from the start, or pasted a bare ticket key and answered
-`speckit.jira.feature`'s reuse question with `yes` — the bridge then derives
+`speckit.jira-mirror.feature`'s reuse question with `yes` — the bridge then derives
 the same designators from the roles it already computed. Both land here
 identically; nothing below distinguishes them.
 
@@ -32,8 +32,8 @@ extension:
 
 | Host | Entry point |
 | --- | --- |
-| macOS, Linux | `.specify/extensions/jira/scripts/bash/spec-kit-jira.sh` |
-| Windows | `.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1` |
+| macOS, Linux | `.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh` |
+| Windows | `.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1` |
 
 Invoke the Bash entry point **through the interpreter** (`bash <path>`), not
 by bare path.
@@ -46,11 +46,11 @@ own explanation of the situation:
 
 ```text
 Jira bridge not available: the entry point
-.specify/extensions/jira/scripts/bash/spec-kit-jira.sh (or, on Windows,
-.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1) was not found.
+.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh (or, on Windows,
+.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1) was not found.
 This spec-kit command completed normally and nothing was mirrored to Jira. To
 restore the bridge, reinstall the extension with
-`specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force`
+`specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force`
 (it will ask you to confirm an untrusted-source prompt — answer y).
 ```
 
@@ -71,7 +71,7 @@ after the heading of the user story it seeded:
 <!-- speckit-jira pin=KEY -->
 ```
 
-`KEY` is the designated issue's key exactly as `speckit.jira.feature`
+`KEY` is the designated issue's key exactly as `speckit.jira-mirror.feature`
 resolved it (available in the seed material moment 1 handed you). Rules:
 
 - **One marker per named issue, one issue per marker** — a bijection. Do not
@@ -99,7 +99,7 @@ decomposition or ask the operator to re-invoke with different designators.
 2. **Invoke the bridge**:
 
    ```text
-   bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh seed <path-to-spec.md> --json
+   bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh seed <path-to-spec.md> --json
    ```
 
 3. **`REF-EXISTS` / any refusal class** ⇒ relay the message and remediation
@@ -115,7 +115,7 @@ decomposition or ask the operator to re-invoke with different designators.
    - **Operator confirms** ⇒ re-invoke:
 
      ```text
-     bash .specify/extensions/jira/scripts/bash/spec-kit-jira.sh seed <path-to-spec.md> --confirm --json
+     bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh seed <path-to-spec.md> --confirm --json
      ```
 
 5. **Success** ⇒ report the bindings, creates, and any re-parenting exactly
@@ -154,7 +154,7 @@ decomposition or ask the operator to re-invoke with different designators.
   recorded is used as-is. Resupply them only to re-state that set as an
   explicit safety check — a different set than the recorded one refuses
   `REF-RESEED` before any read (S-3/S-4). Same grammar as
-  `speckit.jira.feature`'s own flags.
+  `speckit.jira-mirror.feature`'s own flags.
 - `--dry-run` — predicts the identical action set with zero writes,
   including never writing or deleting the seed record.
 - `--json` — emit the canonical machine-readable result.

@@ -24,10 +24,10 @@ setup() {
   grep -qxF 'extension.yml' <<< "$output"
   grep -qxF 'scripts/bash/spec-kit-jira.sh' <<< "$output"
   grep -qxF 'scripts/powershell/spec-kit-jira.ps1' <<< "$output"
-  grep -qxF 'commands/speckit.jira.config.md' <<< "$output"
-  grep -qxF 'commands/speckit.jira.feature.md' <<< "$output"
-  grep -qxF 'commands/speckit.jira.reconcile.md' <<< "$output"
-  grep -qxF 'commands/speckit.jira.seed.md' <<< "$output"
+  grep -qxF 'commands/speckit.jira-mirror.config.md' <<< "$output"
+  grep -qxF 'commands/speckit.jira-mirror.feature.md' <<< "$output"
+  grep -qxF 'commands/speckit.jira-mirror.reconcile.md' <<< "$output"
+  grep -qxF 'commands/speckit.jira-mirror.seed.md' <<< "$output"
 }
 
 @test "the derived surface contains nothing under a development-only directory" {

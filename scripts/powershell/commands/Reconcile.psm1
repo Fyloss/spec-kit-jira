@@ -262,7 +262,7 @@ function Get-JiraReconcileFieldDefaultNote {
       every field this run actually sent that came from a recorded default or
       a this-run answer (never a bridge-supplied field), one provenance line
       naming the field, the value, and its source; for an `operator-answer`
-      source, one further line with the `/speckit.jira.config --field-default
+      source, one further line with the `/speckit.jira-mirror.config --field-default
       …` command that would make the override permanent (FR-021).
       Deduplicated by (type, field) — reported once per run, not once per
       creation. When at least one field was filled AND the confirmation
@@ -340,7 +340,7 @@ function Get-JiraReconcileFieldDefaultNote {
         if ($e.source -ne 'operator-answer') { continue }
         $label = Resolve-RfdnLabel $e.tid $e.fid
         $typeName = Resolve-RfdnTypeName $e.tid
-        $lines.Add("config: project ${ProjectKey}: make this override permanent — /speckit.jira.config $ProjectKey --field-default '$ProjectKey=$typeName=$label=$($e.value)'")
+        $lines.Add("config: project ${ProjectKey}: make this override permanent — /speckit.jira-mirror.config $ProjectKey --field-default '$ProjectKey=$typeName=$label=$($e.value)'")
     }
     if ($entries.Count -gt 0) {
         if ($DryRun) {
@@ -744,7 +744,7 @@ function Invoke-JiraReconcileRun {
         Write-JiraReconcileNotice -Lines @(
             'Jira mirror skipped: this repository is not bound to a Jira project yet.',
             'Nothing was mirrored, and this spec-kit command completed normally.',
-            'To bind it, run /speckit.jira.config.')
+            'To bind it, run /speckit.jira-mirror.config.')
         return 0
     }
 
@@ -757,7 +757,7 @@ function Invoke-JiraReconcileRun {
     $bridgeMissing = Get-JiraMissingBridgeEntry
     if ($bridgeMissing) {
         Write-JiraReconcileNotice -Lines @(
-            "Jira mirror skipped: the bridge entry point $bridgeMissing was not found; the extension install is incomplete. This spec-kit command completed normally and nothing was mirrored to Jira. Restore it with: specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force (it will ask you to confirm an untrusted-source prompt — answer y)")
+            "Jira mirror skipped: the bridge entry point $bridgeMissing was not found; the extension install is incomplete. This spec-kit command completed normally and nothing was mirrored to Jira. Restore it with: specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force (it will ask you to confirm an untrusted-source prompt — answer y)")
         return 0
     }
 
@@ -833,7 +833,7 @@ function Invoke-JiraReconcileRun {
             Write-JiraReconcileNotice -Lines @(
                 'Jira mirror skipped: this repository is not bound to a Jira project yet.',
                 'Nothing was mirrored, and this spec-kit command completed normally.',
-                'To bind it, run /speckit.jira.config.')
+                'To bind it, run /speckit.jira-mirror.config.')
             return 0
         }
         $loaded = Import-JiraConfig -ConfigDir $cfgDir
@@ -862,7 +862,7 @@ function Invoke-JiraReconcileRun {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the resolved project key is missing or syntactically invalid (zero writes)')
     }
     if (Test-JiraPlaceholderKey -Key $projectKey) {
-        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: the project is still set to the shipped placeholder `"$projectKey`" — run /speckit.jira.config to bind a real project (zero writes)")
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: the project is still set to the shipped placeholder `"$projectKey`" — run /speckit.jira-mirror.config to bind a real project (zero writes)")
     }
 
     # US3 unknown-project: a routing rule (or routing_default/team route) named
@@ -1519,17 +1519,17 @@ function Invoke-JiraReconcileRun {
         Write-JiraReconcileNotice -Lines @(
             'Jira mirror skipped: this repository is not bound to a Jira project yet.',
             'Nothing was mirrored, and this spec-kit command completed normally.',
-            'To bind it, run /speckit.jira.config.')
+            'To bind it, run /speckit.jira-mirror.config.')
         return 0
     }
     elseif ($planCtxResult.ExitCode -eq 3) {
-        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: the project `"$projectKey`" has not been bound yet — run /speckit.jira.config to discover its issue types and priorities (zero writes)")
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: the project `"$projectKey`" has not been bound yet — run /speckit.jira-mirror.config to discover its issue types and priorities (zero writes)")
     }
     elseif ($planCtxResult.ExitCode -eq 6) {
-        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: the local binding for $projectKey predates parent support and does not record issue-type hierarchy. The project is bound — its binding is simply a version behind. Run /speckit.jira.config to refresh it (zero writes)")
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: the local binding for $projectKey predates parent support and does not record issue-type hierarchy. The project is bound — its binding is simply a version behind. Run /speckit.jira-mirror.config to refresh it (zero writes)")
     }
     elseif ($planCtxResult.ExitCode -eq 7) {
-        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: project $projectKey has no recorded issue type for user stories. Run /speckit.jira.config to record it (zero writes)")
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: project $projectKey has no recorded issue type for user stories. Run /speckit.jira-mirror.config to record it (zero writes)")
     }
     elseif ($planCtxResult.ExitCode -eq $script:ReconcileExitConfig) {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the local Jira binding could not be read (zero writes)')
@@ -2079,7 +2079,7 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
                 project           = $projectKey
                 fields            = $fdFields
                 creations_pending = $fdCreationsPending
-                resume_with       = "/speckit.jira.reconcile $specFile --accept-defaults"
+                resume_with       = "/speckit.jira-mirror.reconcile $specFile --accept-defaults"
             }
             $fdConfirmationJson = ConvertTo-JiraJsonValue $fdConfirmation
             # Write + an explicit "`n", never WriteLine: WriteLine's terminator
@@ -2305,7 +2305,7 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
             9 { 'the privacy guard blocked the write' }
             default { 'the mirror did not complete' }
         }
-        [Console]::Error.WriteLine("WARNING: Jira mirror not completed — $cause (exit $rc). This spec-kit command completed normally. Run /speckit.jira.config to re-check the binding.")
+        [Console]::Error.WriteLine("WARNING: Jira mirror not completed — $cause (exit $rc). This spec-kit command completed normally. Run /speckit.jira-mirror.config to re-check the binding.")
         $rc = 0
     }
 

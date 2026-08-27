@@ -7,7 +7,7 @@
 # ours, classifies every declared event, and reports. It never writes.
 #
 # Recognition has two rules and they are not the same rule:
-#   * ours      — the entry carries `extension: jira`, the ownership key the host
+#   * ours      — the entry carries `extension: jira-mirror`, the ownership key the host
 #                 install writes and matches on when it purges and re-adds;
 #   * leftover  — the entry carries one of our commands and NO `extension` field,
 #                 the shape every pre-manifest version of this extension wrote.
@@ -18,7 +18,7 @@
 #
 # The canonical entry has EIGHT fields, and `prompt` is the host's EXPANDED
 # default — the host builds it with an f-string, so the file receives
-# "Execute speckit.jira.reconcile?" and never a "{command}" placeholder
+# "Execute speckit.jira-mirror.reconcile?" and never a "{command}" placeholder
 # (research R2, verified at specify_cli/extensions/__init__.py:3866).
 
 setup() {
@@ -45,7 +45,7 @@ canonical_registry() {
     for e in "${HOOK_EVENTS[@]}"; do
       cmd="$(register_hooks_command_for "${e}")"
       printf '  %s:\n' "${e}"
-      printf '    - extension: jira\n'
+      printf '    - extension: jira-mirror\n'
       printf '      command: %s\n' "${cmd}"
       printf '      enabled: true\n'
       printf '      optional: false\n'
@@ -70,10 +70,10 @@ canonical_registry() {
 }
 
 @test "before_specify names the feature command; every after_* names reconcile" {
-  [ "$(register_hooks_command_for before_specify)" = "speckit.jira.feature" ]
+  [ "$(register_hooks_command_for before_specify)" = "speckit.jira-mirror.feature" ]
   local e
   for e in after_specify after_clarify after_plan after_tasks after_implement after_analyze; do
-    [ "$(register_hooks_command_for "$e")" = "speckit.jira.reconcile" ]
+    [ "$(register_hooks_command_for "$e")" = "speckit.jira-mirror.reconcile" ]
   done
 }
 
@@ -82,7 +82,7 @@ canonical_registry() {
 # =============================================================================
 
 @test "an entry is recognised as ours when extension is jira" {
-  run register_hooks_entry_is_ours '{"extension":"jira","command":"speckit.jira.reconcile"}'
+  run register_hooks_entry_is_ours '{"extension":"jira-mirror","command":"speckit.jira-mirror.reconcile"}'
   [ "$status" -eq 0 ]
   run register_hooks_entry_is_ours '{"extension":"git","command":"speckit.git.commit"}'
   [ "$status" -ne 0 ]
@@ -90,12 +90,12 @@ canonical_registry() {
 
 @test "an entry is recognised as leftover when extension is absent and command is one of ours (FR-028)" {
   # The four-field shape every pre-manifest version of this extension wrote.
-  run register_hooks_entry_is_leftover '{"command":"speckit.jira.reconcile","description":"x","enabled":true,"optional":true}'
+  run register_hooks_entry_is_leftover '{"command":"speckit.jira-mirror.reconcile","description":"x","enabled":true,"optional":true}'
   [ "$status" -eq 0 ]
-  run register_hooks_entry_is_leftover '{"command":"speckit.jira.feature","enabled":true}'
+  run register_hooks_entry_is_leftover '{"command":"speckit.jira-mirror.feature","enabled":true}'
   [ "$status" -eq 0 ]
   # Ours by ownership is NOT leftover — the install can purge it.
-  run register_hooks_entry_is_leftover '{"extension":"jira","command":"speckit.jira.reconcile"}'
+  run register_hooks_entry_is_leftover '{"extension":"jira-mirror","command":"speckit.jira-mirror.reconcile"}'
   [ "$status" -ne 0 ]
   # Another extension's entry is never ours, with or without the field.
   run register_hooks_entry_is_leftover '{"command":"other.ext.thing"}'
@@ -108,7 +108,7 @@ canonical_registry() {
 
 @test "the canonical eight-field shape is asserted on read (contracts/hook-registry-entry.md)" {
   local entry
-  entry='{"extension":"jira","command":"speckit.jira.reconcile","enabled":true,"optional":false,"priority":10,"prompt":"Execute speckit.jira.reconcile?","description":"Mirror.","condition":null}'
+  entry='{"extension":"jira-mirror","command":"speckit.jira-mirror.reconcile","enabled":true,"optional":false,"priority":10,"prompt":"Execute speckit.jira-mirror.reconcile?","description":"Mirror.","condition":null}'
   run register_hooks_entry_shape_errors "${entry}"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -118,7 +118,7 @@ canonical_registry() {
   local f
   for f in extension command enabled optional priority prompt description condition; do
     local entry
-    entry="$(jq -c --arg f "$f" 'del(.[$f])' <<< '{"extension":"jira","command":"speckit.jira.reconcile","enabled":true,"optional":false,"priority":10,"prompt":"Execute speckit.jira.reconcile?","description":"d","condition":null}')"
+    entry="$(jq -c --arg f "$f" 'del(.[$f])' <<< '{"extension":"jira-mirror","command":"speckit.jira-mirror.reconcile","enabled":true,"optional":false,"priority":10,"prompt":"Execute speckit.jira-mirror.reconcile?","description":"d","condition":null}')"
     run register_hooks_entry_shape_errors "${entry}"
     [ "$status" -ne 0 ]
     [[ "$output" == *"$f"* ]]
@@ -127,19 +127,19 @@ canonical_registry() {
 
 @test "prompt must be the host's EXPANDED default, never a {command} placeholder (research R2)" {
   local entry
-  entry='{"extension":"jira","command":"speckit.jira.reconcile","enabled":true,"optional":false,"priority":10,"prompt":"Execute {command}?","description":"d","condition":null}'
+  entry='{"extension":"jira-mirror","command":"speckit.jira-mirror.reconcile","enabled":true,"optional":false,"priority":10,"prompt":"Execute {command}?","description":"d","condition":null}'
   run register_hooks_entry_shape_errors "${entry}"
   [ "$status" -ne 0 ]
   [[ "$output" == *"prompt"* ]]
   # The exact string the host writes, with the command substituted.
-  entry="$(jq -c '.prompt = "Execute speckit.jira.reconcile?"' <<< "${entry}")"
+  entry="$(jq -c '.prompt = "Execute speckit.jira-mirror.reconcile?"' <<< "${entry}")"
   run register_hooks_entry_shape_errors "${entry}"
   [ "$status" -eq 0 ]
 }
 
 @test "a non-empty condition is a shape deviation — it suppresses agent dispatch (research R8)" {
   local entry
-  entry='{"extension":"jira","command":"speckit.jira.reconcile","enabled":true,"optional":false,"priority":10,"prompt":"Execute speckit.jira.reconcile?","description":"d","condition":"configured"}'
+  entry='{"extension":"jira-mirror","command":"speckit.jira-mirror.reconcile","enabled":true,"optional":false,"priority":10,"prompt":"Execute speckit.jira-mirror.reconcile?","description":"d","condition":"configured"}'
   run register_hooks_entry_shape_errors "${entry}"
   [ "$status" -ne 0 ]
   [[ "$output" == *"condition"* ]]
@@ -210,7 +210,7 @@ canonical_registry() {
   canonical_registry
   local seeded
   seeded="$(config_yaml_to_json "${EXT}" \
-    | jq -c '.hooks.after_plan += [{"command":"speckit.jira.reconcile","description":"old","enabled":true,"optional":true}]')"
+    | jq -c '.hooks.after_plan += [{"command":"speckit.jira-mirror.reconcile","description":"old","enabled":true,"optional":true}]')"
   printf '%s' "$seeded" | config_to_yaml > "${EXT}"
   local h
   h="$(register_hooks_health "${EXT}")"
@@ -223,8 +223,8 @@ canonical_registry() {
   canonical_registry
   local seeded
   seeded="$(config_yaml_to_json "${EXT}" \
-    | jq -c '.hooks.after_plan += [{"command":"speckit.jira.reconcile","enabled":true}]
-             | .hooks.before_specify += [{"command":"speckit.jira.feature","enabled":true}]')"
+    | jq -c '.hooks.after_plan += [{"command":"speckit.jira-mirror.reconcile","enabled":true}]
+             | .hooks.before_specify += [{"command":"speckit.jira-mirror.feature","enabled":true}]')"
   printf '%s' "$seeded" | config_to_yaml > "${EXT}"
   local hint
   hint="$(register_hooks_health "${EXT}" | jq -r '.repair_hint')"
@@ -232,13 +232,13 @@ canonical_registry() {
   [[ "$hint" == *"before_specify"* ]]
   # The remedy is a manual edit, because neither the host nor we can perform it.
   [[ "$hint" == *".specify/extensions.yml"* ]]
-  [[ "$hint" == *"extension: jira"* ]]
+  [[ "$hint" == *"extension: jira-mirror"* ]]
 }
 
 @test "classifying a registry with leftovers writes NOTHING (FR-022)" {
   canonical_registry
   local seeded before after
-  seeded="$(config_yaml_to_json "${EXT}" | jq -c '.hooks.after_plan += [{"command":"speckit.jira.reconcile"}]')"
+  seeded="$(config_yaml_to_json "${EXT}" | jq -c '.hooks.after_plan += [{"command":"speckit.jira-mirror.reconcile"}]')"
   printf '%s' "$seeded" | config_to_yaml > "${EXT}"
   before="$(shasum -a 256 < "${EXT}")"
   register_hooks_health "${EXT}" > /dev/null || true
@@ -281,7 +281,7 @@ canonical_registry() {
     '  enabled: true' \
     'hooks:' \
     '  after_plan:' \
-    '    - extension: jira' > "${EXT}"
+    '    - extension: jira-mirror' > "${EXT}"
   run register_hooks_health "${EXT}"
   [ "$status" -eq 4 ]
   [ "$(jq -r '.unreadable' <<< "$output")" = "true" ]
@@ -289,7 +289,7 @@ canonical_registry() {
 }
 
 @test "a flow collection is reported as unreadable with the construct NAMED (FR-024)" {
-  printf '%s\n' 'hooks:' '  after_plan: [{extension: jira, command: speckit.jira.reconcile}]' > "${EXT}"
+  printf '%s\n' 'hooks:' '  after_plan: [{extension: jira-mirror, command: speckit.jira-mirror.reconcile}]' > "${EXT}"
   run register_hooks_health "${EXT}"
   [ "$status" -eq 4 ]
   [[ "$(jq -r '.repair_hint' <<< "$output")" == *"flow"* ]]
@@ -338,7 +338,7 @@ canonical_registry() {
   canonical_registry
   local seeded
   seeded="$(config_yaml_to_json "${EXT}" \
-    | jq -c '.hooks.after_plan += [{"command":"speckit.jira.reconcile"}]
+    | jq -c '.hooks.after_plan += [{"command":"speckit.jira-mirror.reconcile"}]
              | .hooks.after_implement[0].enabled = false')"
   printf '%s' "$seeded" | config_to_yaml > "${EXT}"
   local b p ps_abs

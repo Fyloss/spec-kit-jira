@@ -210,7 +210,7 @@ _reconcile_phase_order() {
 # a this-run answer (never a bridge-supplied field — those are not part of
 # `resolved-defaults-json`), one provenance line naming the field, the value,
 # and its source; for a source of `operator-answer`, one further line with the
-# `/speckit.jira.config --field-default …` command that would make the
+# `/speckit.jira-mirror.config --field-default …` command that would make the
 # override permanent (FR-021). Deduplicated by (type, field) — reported once
 # per run, not once per creation (mirrors FR-011's "each field once"). When at
 # least one field was filled AND the confirmation question never fired because
@@ -258,7 +258,7 @@ _reconcile_field_default_notes() {
     | ( $entries[]
         | "config: project \($pkey): \(labelFor(.tid; .fid)) (\(typeName(.tid))) = \"\(.value)\" — sent from \(.source)" ),
       ( $entries[] | select(.source == "operator-answer")
-        | "config: project \($pkey): make this override permanent — /speckit.jira.config \($pkey) --field-default '\''\($pkey)=\(typeName(.tid))=\(labelFor(.tid; .fid))=\(.value)'\''" ),
+        | "config: project \($pkey): make this override permanent — /speckit.jira-mirror.config \($pkey) --field-default '\''\($pkey)=\(typeName(.tid))=\(labelFor(.tid; .fid))=\(.value)'\''" ),
       ( if ($entries | length) == 0 then empty
         elif $dry == "true" then
           "config: project \($pkey): this is a preview (--dry-run) — no question was asked and nothing was written"
@@ -627,7 +627,7 @@ _reconcile_run() {
     _reconcile_notice \
       'Jira mirror skipped: this repository is not bound to a Jira project yet.' \
       'Nothing was mirrored, and this spec-kit command completed normally.' \
-      'To bind it, run /speckit.jira.config.'
+      'To bind it, run /speckit.jira-mirror.config.'
     return 0
   fi
 
@@ -641,7 +641,7 @@ _reconcile_run() {
   bridge_missing="$(prereq_bridge_missing)"
   if [[ -n "${bridge_missing}" ]]; then
     _reconcile_notice \
-      "Jira mirror skipped: the bridge entry point ${bridge_missing} was not found; the extension install is incomplete. This spec-kit command completed normally and nothing was mirrored to Jira. Restore it with: specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force (it will ask you to confirm an untrusted-source prompt — answer y)"
+      "Jira mirror skipped: the bridge entry point ${bridge_missing} was not found; the extension install is incomplete. This spec-kit command completed normally and nothing was mirrored to Jira. Restore it with: specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force (it will ask you to confirm an untrusted-source prompt — answer y)"
     return 0
   fi
 
@@ -710,7 +710,7 @@ _reconcile_run() {
       _reconcile_notice \
         'Jira mirror skipped: this repository is not bound to a Jira project yet.' \
         'Nothing was mirrored, and this spec-kit command completed normally.' \
-        'To bind it, run /speckit.jira.config.'
+        'To bind it, run /speckit.jira-mirror.config.'
       return 0
     fi
     if ! cfg="$(config_load "${cfg_dir}")"; then
@@ -738,7 +738,7 @@ _reconcile_run() {
     return $?
   fi
   if config_key_is_placeholder "${project_key}"; then
-    _reconcile_fault "${EXIT_CONFIG}" "reconcile: the project is still set to the shipped placeholder \"${project_key}\" — run /speckit.jira.config to bind a real project (zero writes)"
+    _reconcile_fault "${EXIT_CONFIG}" "reconcile: the project is still set to the shipped placeholder \"${project_key}\" — run /speckit.jira-mirror.config to bind a real project (zero writes)"
     return $?
   fi
 
@@ -1393,16 +1393,16 @@ _reconcile_run() {
     _reconcile_notice \
       'Jira mirror skipped: this repository is not bound to a Jira project yet.' \
       'Nothing was mirrored, and this spec-kit command completed normally.' \
-      'To bind it, run /speckit.jira.config.'
+      'To bind it, run /speckit.jira-mirror.config.'
     return 0
   elif [[ "${rc_pc}" -eq 3 ]]; then
-    _reconcile_fault "${EXIT_CONFIG}" "reconcile: the project \"${project_key}\" has not been bound yet — run /speckit.jira.config to discover its issue types and priorities (zero writes)"
+    _reconcile_fault "${EXIT_CONFIG}" "reconcile: the project \"${project_key}\" has not been bound yet — run /speckit.jira-mirror.config to discover its issue types and priorities (zero writes)"
     return $?
   elif [[ "${rc_pc}" -eq 6 ]]; then
-    _reconcile_fault "${EXIT_CONFIG}" "reconcile: the local binding for ${project_key} predates parent support and does not record issue-type hierarchy. The project is bound — its binding is simply a version behind. Run /speckit.jira.config to refresh it (zero writes)"
+    _reconcile_fault "${EXIT_CONFIG}" "reconcile: the local binding for ${project_key} predates parent support and does not record issue-type hierarchy. The project is bound — its binding is simply a version behind. Run /speckit.jira-mirror.config to refresh it (zero writes)"
     return $?
   elif [[ "${rc_pc}" -eq 7 ]]; then
-    _reconcile_fault "${EXIT_CONFIG}" "reconcile: project ${project_key} has no recorded issue type for user stories. Run /speckit.jira.config to record it (zero writes)"
+    _reconcile_fault "${EXIT_CONFIG}" "reconcile: project ${project_key} has no recorded issue type for user stories. Run /speckit.jira-mirror.config to record it (zero writes)"
     return $?
   elif [[ "${rc_pc}" -eq "${EXIT_CONFIG}" ]]; then
     _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the local Jira binding could not be read (zero writes)'
@@ -1857,7 +1857,7 @@ _reconcile_run() {
       local fd_confirmation fd_creations_pending
       fd_creations_pending=$((created + fd_task_creates_pending))
       fd_confirmation="$(jq -cn --arg proj "${project_key}" --argjson f "${fd_fields}" --argjson cp "${fd_creations_pending}" \
-        --arg rw "/speckit.jira.reconcile ${spec_file} --accept-defaults" \
+        --arg rw "/speckit.jira-mirror.reconcile ${spec_file} --accept-defaults" \
         '{status:"confirmation-pending", project:$proj, fields:$f, creations_pending:$cp, resume_with:$rw}' | json_canonical)"
       if [[ "${json}" == "true" ]]; then
         printf '%s\n' "${fd_confirmation}"
@@ -2058,7 +2058,7 @@ _reconcile_run() {
       9) cause="the privacy guard blocked the write" ;;
       *) cause="the mirror did not complete" ;;
     esac
-    printf 'WARNING: Jira mirror not completed — %s (exit %s). This spec-kit command completed normally. Run /speckit.jira.config to re-check the binding.\n' \
+    printf 'WARNING: Jira mirror not completed — %s (exit %s). This spec-kit command completed normally. Run /speckit.jira-mirror.config to re-check the binding.\n' \
       "${cause}" "${rc}" >&2
     rc=0
   fi

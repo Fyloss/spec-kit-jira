@@ -14,7 +14,7 @@ extension inert from install.
 ```mermaid
 flowchart LR
     subgraph Before["Before the host command"]
-        BS["before_specify"] --> F["/speckit.jira.feature"]
+        BS["before_specify"] --> F["/speckit.jira-mirror.feature"]
     end
 
     subgraph After["After the host command"]
@@ -26,7 +26,7 @@ flowchart LR
         A6["after_analyze"]
     end
 
-    A1 --> R["/speckit.jira.reconcile"]
+    A1 --> R["/speckit.jira-mirror.reconcile"]
     A2 --> R
     A3 --> R
     A4 --> R
@@ -44,7 +44,7 @@ question instead: exit `0`, and deliberately **no** `branch_name` and **no**
 result and just proceeds has nothing to proceed with. That is new for any
 reader who assumed this hook always produces a name; see
 `docs/06-feature-naming.md` for the full decision flow and
-`commands/speckit.jira.feature.md` for the ceremony that answers it.
+`commands/speckit.jira-mirror.feature.md` for the ceremony that answers it.
 
 ## Installation — who writes what
 
@@ -57,14 +57,14 @@ sequenceDiagram
     participant Registry as .specify/extensions.yml
     participant Bridge as spec-kit-jira
 
-    Dev->>Specify: specify extension add jira --from ...
+    Dev->>Specify: specify extension add jira-mirror --from ...
     Specify->>Manifest: read schema, commands, hooks
-    Specify->>Specify: copy extension into .specify/extensions/jira/
+    Specify->>Specify: copy extension into .specify/extensions/jira-mirror/
     Note over Specify,Registry: .extensionignore keeps specs/, tests/,<br/>.specify/ and .github/ out of the install
     Specify->>Registry: purge this extension's old entries, write the seven declared hooks
     Registry-->>Specify: registry updated
 
-    Dev->>Bridge: /speckit.jira.config
+    Dev->>Bridge: /speckit.jira-mirror.config
     Bridge->>Registry: READ ONLY — classify every event
     Bridge-->>Dev: report present / missing / disabled / duplicated / leftover
 ```
@@ -90,7 +90,7 @@ sequenceDiagram
 
     Dev->>Host: /speckit.plan
     Host->>Host: produce plan.md
-    Host->>Agent: EXECUTE_COMMAND speckit.jira.reconcile
+    Host->>Agent: EXECUTE_COMMAND speckit.jira-mirror.reconcile
     Note over Agent: optional false means the step HAPPENS,<br/>not that its failure propagates
 
     Agent->>Agent: read .specify/feature.json for the active feature
@@ -98,7 +98,7 @@ sequenceDiagram
         Agent-->>Dev: nothing at all — the step is inert
     else
         Note over Agent,Bridge: the target is ALWAYS the active feature's own<br/>spec.md — never plan.md, the artifact this<br/>host command just produced (017, the target guard)
-        Agent->>Bridge: .specify/extensions/jira/scripts/bash/spec-kit-jira.sh reconcile spec.md --json
+        Agent->>Bridge: .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh reconcile spec.md --json
         Bridge->>Jira: read, then write only what changed
         Jira-->>Bridge: responses
         Bridge-->>Agent: run summary JSON + exit code
@@ -127,7 +127,7 @@ flowchart TD
 
     Run --> Code{"Exit code"}
     Code -->|"1, rejected target"| Cause0["Rejected target (017)<br/>relay the entry point's own message —<br/>this is a caller defect, not a degraded Jira state"]
-    Code -->|"0, no binding"| Cause1["Not yet configured<br/>run /speckit.jira.config"]
+    Code -->|"0, no binding"| Cause1["Not yet configured<br/>run /speckit.jira-mirror.config"]
     Code -->|"5"| Cause4["Prerequisite missing<br/>relay the entry point's own message"]
     Code -->|"4"| Cause2["Credentials absent, or a declared<br/>JIRA_PAT_COMMAND failed (030) —<br/>reported as a WARNING, host still never fails"]
     Code -->|"3"| Cause3["Credentials rejected by Jira"]
@@ -135,7 +135,7 @@ flowchart TD
     Code -->|"0, mirrored"| Ok["Report created / updated / recognised / skipped"]
 ```
 
-The last row of the table in `commands/speckit.jira.reconcile.md` is the only
+The last row of the table in `commands/speckit.jira-mirror.reconcile.md` is the only
 cause the bridge cannot report on, because in that state it never starts and
 produces nothing. Everything the developer sees then comes from the agent —
 which is why that text is fixed in the command document rather than composed

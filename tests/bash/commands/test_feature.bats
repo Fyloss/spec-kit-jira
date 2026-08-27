@@ -85,7 +85,7 @@ boot() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.active' <<< "$output")" = "false" ]
   [[ "$(jq -r '.warnings[0]' <<< "$output")" == *".specify/jira/config.yml"* ]]
-  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"/speckit.jira.config"* ]]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"/speckit.jira-mirror.config"* ]]
 }
 
 @test "US6: an unreadable config.yml + a mentioned ticket names the file and the command (FR-026)" {
@@ -111,7 +111,7 @@ boot() {
   [ "$(jq -r '.active' <<< "$output")" = "false" ]
   [[ "$(jq -r '.warnings[0]' <<< "$output")" == *".specify/jira/personal.yml"* ]]
   [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"your own"* ]]
-  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"/speckit.jira.config"* ]]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"/speckit.jira-mirror.config"* ]]
 }
 
 @test "US6: the same four states with NO mention stay byte-identical to the baseline (FR-028)" {
@@ -418,13 +418,13 @@ boot() {
   rm -f "${JIRA_CONFIG_DIR}/config.yml"
   run cmd_feature feature IJT-42 --json "invoice export"
   [[ "$(jq -r '.warnings[0]' <<< "$output")" == *".specify/jira/config.yml"* ]]
-  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"/speckit.jira.config"* ]]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"/speckit.jira-mirror.config"* ]]
   write_hierarchy_config
   rm -f "${JIRA_CONFIG_DIR}/personal.yml"
   boot '{"projects":{"IJT":"team"}}'
   run cmd_feature feature IJT-42 --json "invoice export"
   [[ "$(jq -r '.warnings[0]' <<< "$output")" == *".specify/jira/personal.yml"* ]]
-  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"/speckit.jira.config"* ]]
+  [[ "$(jq -r '.warnings[0]' <<< "$output")" == *"/speckit.jira-mirror.config"* ]]
 
   # 7/8/9. the three usage errors
   select_team ijt

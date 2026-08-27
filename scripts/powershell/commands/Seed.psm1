@@ -1,4 +1,4 @@
-# commands/Seed.psm1 — Moment 2: `speckit.jira.seed`. Mirror of
+# commands/Seed.psm1 — Moment 2: `speckit.jira-mirror.seed`. Mirror of
 # commands/seed.sh (027, research R1/R7, contract seed-cli-contract.md §4/§5).
 #
 # `-Parent`/`-Story` are accepted here too (contract §2, "feature and seed
@@ -606,7 +606,7 @@ function Invoke-JiraSeed {
         $routingObj = $routingJson | ConvertFrom-Json -Depth 100
         $ptidCheck = if ($routingObj.PSObject.Properties.Name -contains 'parent_type_id') { [string]$routingObj.parent_type_id } else { '' }
         if (-not $ptidCheck) {
-            [Console]::Error.WriteLine('seed: the specification-role issue type could not be resolved for this project — run /speckit.jira.config to bind it, then re-invoke')
+            [Console]::Error.WriteLine('seed: the specification-role issue type could not be resolved for this project — run /speckit.jira-mirror.config to bind it, then re-invoke')
             return (Get-JiraExitCode 'config')
         }
     }

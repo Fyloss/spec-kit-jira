@@ -12,7 +12,7 @@ flowchart TB
     subgraph Repo["Consuming repository"]
         direction TB
         SpecKit["Spec Kit host<br/>slash commands + hook dispatch"]
-        Ext["spec-kit-jira<br/>.specify/extensions/jira/"]
+        Ext["spec-kit-jira<br/>.specify/extensions/jira-mirror/"]
         Artifacts[("spec.md · plan.md · tasks.md")]
         TeamCfg[(".specify/jira/config.yml<br/>committed")]
         LocalCfg[(".specify/jira/config.local.yml<br/>gitignored")]
@@ -86,8 +86,8 @@ Two consequences worth internalising:
 
 - **Configuration never lives inside the extension folder.** It lives in
   `.specify/jira/` at the repository root, so `specify extension add --force`
-  can wipe and reinstall `.specify/extensions/jira/` without touching a single
-  setting.
+  can wipe and reinstall `.specify/extensions/jira-mirror/` without touching a
+  single setting.
 
 ## Runtime prerequisites
 

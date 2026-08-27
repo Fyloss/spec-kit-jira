@@ -2,7 +2,7 @@
 # Twin of tests/bash/ci/test_hook_command_resolution.bats.
 #
 # The second half of the reported defect. `extension.yml` declared two commands;
-# the registrar registered `speckit.jira.reconcile` under all six after_* events.
+# the registrar registered `speckit.jira-mirror.reconcile` under all six after_* events.
 # That command had NO file, NO manifest entry, and was not installed — so even a
 # correctly registered, correctly dispatched hook resolved to nothing.
 #
@@ -76,17 +76,17 @@ Describe 'Hook command resolution (SC-002)' {
         }
     }
 
-    It 'declares, files and references speckit.jira.reconcile (FR-010, FR-011)' {
+    It 'declares, files and references speckit.jira-mirror.reconcile (FR-010, FR-011)' {
         # The command that did not exist. Named explicitly because it is THE
         # finding of research R7 and the co-requisite of the manifest hook block.
-        (Get-DeclaredCommands) | Should -Contain 'speckit.jira.reconcile'
-        Test-Path -LiteralPath (Join-Path $script:Root 'commands/speckit.jira.reconcile.md') | Should -BeTrue
-        (Get-HookCommands) | Should -Contain 'speckit.jira.reconcile'
+        (Get-DeclaredCommands) | Should -Contain 'speckit.jira-mirror.reconcile'
+        Test-Path -LiteralPath (Join-Path $script:Root 'commands/speckit.jira-mirror.reconcile.md') | Should -BeTrue
+        (Get-HookCommands) | Should -Contain 'speckit.jira-mirror.reconcile'
     }
 
     It 'uses the canonical speckit.<ext>.<name> form, never the auto-lifted short form' {
         foreach ($cmd in (Get-HookCommands)) {
-            $cmd | Should -BeLike 'speckit.jira.*'
+            $cmd | Should -BeLike 'speckit.jira-mirror.*'
         }
     }
 

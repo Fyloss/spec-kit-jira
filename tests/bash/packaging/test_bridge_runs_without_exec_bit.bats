@@ -33,16 +33,16 @@ teardown() {
 }
 
 @test "a bridge with a lost executable bit is not reported as missing, and runs via bash <path> (C2.1/C2.2)" {
-  "${BUILDER}" "${WORK}/spec-kit-jira.zip" > /dev/null
+  "${BUILDER}" "${WORK}/spec-kit-jira-mirror.zip" > /dev/null
 
   read -r port pid < <(fixture_serve "${WORK}")
   PID="${pid}"
 
   REPO="$(fixture_new_repo)"
-  run bash -c "cd '${REPO}' && printf 'y\n' | specify extension add jira --from 'http://127.0.0.1:${port}/spec-kit-jira.zip'"
+  run bash -c "cd '${REPO}' && printf 'y\n' | specify extension add jira-mirror --from 'http://127.0.0.1:${port}/spec-kit-jira-mirror.zip'"
   [ "$status" -eq 0 ]
 
-  entry="${REPO}/.specify/extensions/jira/scripts/bash/spec-kit-jira.sh"
+  entry="${REPO}/.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh"
   [ -f "${entry}" ]
 
   # Simulate the floor host: the exec bit does not survive extraction there.
@@ -54,7 +54,7 @@ teardown() {
   [ "$output" = "644" ]
 
   # The prerequisite gate must NOT report the bridge as missing.
-  run bash -c "cd '${REPO}' && SPEC_KIT_JIRA_EXTENSION_ROOT='${REPO}/.specify/extensions/jira' bash -c 'source \"${ROOT}/scripts/bash/lib/prereq.sh\"; prereq_bridge_missing'"
+  run bash -c "cd '${REPO}' && SPEC_KIT_JIRA_EXTENSION_ROOT='${REPO}/.specify/extensions/jira-mirror' bash -c 'source \"${ROOT}/scripts/bash/lib/prereq.sh\"; prereq_bridge_missing'"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 

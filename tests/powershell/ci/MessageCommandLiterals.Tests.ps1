@@ -57,11 +57,11 @@ BeforeAll {
 }
 
 Describe '(a) Assistant commands' {
-    It 'matches every /speckit.jira.* literal to a declared command name' {
+    It 'matches every /speckit.jira-mirror.* literal to a declared command name' {
         $declared = Get-DeclaredCommands
         $declared.Count | Should -BeGreaterThan 0
         foreach ($row in (Select-ScopeLine)) {
-            foreach ($m in [regex]::Matches($row.Text, '/?speckit\.jira\.[a-z0-9_-]+')) {
+            foreach ($m in [regex]::Matches($row.Text, '/?speckit\.jira-mirror\.[a-z0-9_-]+')) {
                 $name = $m.Value.TrimStart('/')
                 if ($declared -notcontains $name) {
                     throw "message names an undeclared command '$name' at $($row.File):$($row.Line)"
@@ -119,9 +119,9 @@ Describe '(c) Host commands' {
         # third spelling nobody can execute.
         $runnable = @(
             'specify extension add --dev <path-to-spec-kit-jira> --force'
-            'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'
-            'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip'
-            'specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/download/v<X.Y.Z>/spec-kit-jira-<X.Y.Z>.zip'
+            'specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force'
+            'specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip'
+            'specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/download/v<X.Y.Z>/spec-kit-jira-mirror-<X.Y.Z>.zip'
         )
         foreach ($row in (Select-ScopeLine)) {
             if ($row.Text -match 'specify extension add\s+[^`]') {
@@ -148,14 +148,14 @@ Describe 'The literals the reader emits at runtime' {
         try {
             # missing -> the official install command, in its runnable form.
             $h = Get-JiraHookHealth -Path (Join-Path $work 'absent.yml') | ConvertFrom-Json
-            $h.repair_hint | Should -Match ([regex]::Escape('specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force'))
+            $h.repair_hint | Should -Match ([regex]::Escape('specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force'))
 
             # held disabled -> the release flag on a declared command.
             $empty = Join-Path $work 'e.yml'
             [System.IO.File]::WriteAllText($empty, "hooks: {}`n", (New-Object System.Text.UTF8Encoding($false)))
             $h = Get-JiraHookHealth -Path $empty -DisabledJson '["after_plan"]' | ConvertFrom-Json
-            $h.repair_hint | Should -Match ([regex]::Escape('/speckit.jira.config --enable-hook after_plan'))
-            (Get-DeclaredCommands) | Should -Contain 'speckit.jira.config'
+            $h.repair_hint | Should -Match ([regex]::Escape('/speckit.jira-mirror.config --enable-hook after_plan'))
+            (Get-DeclaredCommands) | Should -Contain 'speckit.jira-mirror.config'
 
             # No hint may contain a bare bridge invocation.
             $h.repair_hint | Should -Not -Match '(^|[^/])spec-kit-jira(\.sh|\.ps1)?\s+(config|reconcile)'

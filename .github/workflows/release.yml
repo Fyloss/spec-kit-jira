@@ -26,15 +26,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build the artifact and capture its manifest
-        run: packaging/build-artifact.sh "${{ runner.temp }}/spec-kit-jira.zip" | tee "${{ runner.temp }}/spec-kit-jira.manifest"
+        run: packaging/build-artifact.sh "${{ runner.temp }}/spec-kit-jira-mirror.zip" | tee "${{ runner.temp }}/spec-kit-jira-mirror.manifest"
 
       # Blocks publication on failure — no override path (C2.3, C2.6).
       - name: Verify the artifact
         run: |
-          packaging/verify-artifact.sh bounds "${{ runner.temp }}/spec-kit-jira.zip" "${{ runner.temp }}/spec-kit-jira.manifest"
-          packaging/verify-artifact.sh completeness-purity "${{ runner.temp }}/spec-kit-jira.zip"
+          packaging/verify-artifact.sh bounds "${{ runner.temp }}/spec-kit-jira-mirror.zip" "${{ runner.temp }}/spec-kit-jira-mirror.manifest"
+          packaging/verify-artifact.sh completeness-purity "${{ runner.temp }}/spec-kit-jira-mirror.zip"
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: packaging/publish-artifact.sh "${{ github.ref_name }}" "${{ runner.temp }}/spec-kit-jira.zip"
+        run: packaging/publish-artifact.sh "${{ github.ref_name }}" "${{ runner.temp }}/spec-kit-jira-mirror.zip"

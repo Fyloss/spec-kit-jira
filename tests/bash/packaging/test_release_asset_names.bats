@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# T041 [026] [US2] — `publish-artifact.sh` derives `spec-kit-jira.zip` and
-# `spec-kit-jira-<version>.zip` from ONE archive, the two carry identical
+# T041 [026] [US2] — `publish-artifact.sh` derives `spec-kit-jira-mirror.zip`
+# and `spec-kit-jira-mirror-<version>.zip` from ONE archive, the two carry identical
 # bytes, and the version comes only from the manifest (contracts/publication.md
 # C2.4, A4).
 
@@ -55,12 +55,12 @@ teardown() {
   PATH="${STUB_DIR}:${PATH}" run "${PUBLISH}" "v${VERSION}" "${WORK}/archive.zip"
   [ "$status" -eq 0 ]
 
-  [ -f "${UPLOAD_DIR}/spec-kit-jira.zip" ]
-  [ -f "${UPLOAD_DIR}/spec-kit-jira-${VERSION}.zip" ]
+  [ -f "${UPLOAD_DIR}/spec-kit-jira-mirror.zip" ]
+  [ -f "${UPLOAD_DIR}/spec-kit-jira-mirror-${VERSION}.zip" ]
 
   local sum_stable sum_pinned sum_source
-  sum_stable="$(shasum -a 256 "${UPLOAD_DIR}/spec-kit-jira.zip" | awk '{print $1}')"
-  sum_pinned="$(shasum -a 256 "${UPLOAD_DIR}/spec-kit-jira-${VERSION}.zip" | awk '{print $1}')"
+  sum_stable="$(shasum -a 256 "${UPLOAD_DIR}/spec-kit-jira-mirror.zip" | awk '{print $1}')"
+  sum_pinned="$(shasum -a 256 "${UPLOAD_DIR}/spec-kit-jira-mirror-${VERSION}.zip" | awk '{print $1}')"
   sum_source="$(shasum -a 256 "${WORK}/archive.zip" | awk '{print $1}')"
   [ "${sum_stable}" = "${sum_source}" ]
   [ "${sum_pinned}" = "${sum_source}" ]

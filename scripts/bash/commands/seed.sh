@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# commands/seed.sh — Moment 2: `speckit.jira.seed` (027, research R1/R7,
+# commands/seed.sh — Moment 2: `speckit.jira-mirror.seed` (027, research R1/R7,
 # contract seed-cli-contract.md §4/§5).
 #
 # Agent-invoked, bound to NO hook event (Constitution IV forbids a prompt in
@@ -571,7 +571,7 @@ cmd_seed() {
   if [[ "${mode}" == "create" && -z "${parent_bound_key}" ]]; then
     local ptid; ptid="$(jq -r '.parent_type_id // ""' <<< "${routing}")"
     if [[ -z "${ptid}" ]]; then
-      printf 'seed: the specification-role issue type could not be resolved for this project — run /speckit.jira.config to bind it, then re-invoke\n' >&2
+      printf 'seed: the specification-role issue type could not be resolved for this project — run /speckit.jira-mirror.config to bind it, then re-invoke\n' >&2
       return "$(cli_exit_code config)"
     fi
   fi

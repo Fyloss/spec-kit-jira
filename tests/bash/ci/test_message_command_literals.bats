@@ -54,13 +54,13 @@ declared_commands() {
 # (a) Assistant commands
 # =============================================================================
 
-@test "every /speckit.jira.* literal matches a declared command name (FR-018 class a)" {
+@test "every /speckit.jira-mirror.* literal matches a declared command name (FR-018 class a)" {
   local declared hits name file
   declared="$(declared_commands)"
   [ -n "${declared}" ]
 
   # Every command-shaped literal in the dotted form, with or without the slash.
-  hits="$(grep -ohE '/?speckit\.jira\.[a-z0-9_-]+' "${SCOPE[@]}" | sed 's|^/||' | LC_ALL=C sort -u)"
+  hits="$(grep -ohE '/?speckit\.jira-mirror\.[a-z0-9_-]+' "${SCOPE[@]}" | sed 's|^/||' | LC_ALL=C sort -u)"
   while IFS= read -r name; do
     [[ -z "${name}" ]] && continue
     grep -qxF "${name}" <<< "${declared}" || {
@@ -137,8 +137,8 @@ declared_commands() {
   local bad
   bad="$(grep -nE 'specify extension add[[:space:]]+[^`]' "${SCOPE[@]}" \
     | grep -vE 'specify extension add --dev <path-to-spec-kit-jira> --force' \
-    | grep -vE 'specify extension add jira --from https://github\.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira\.zip( --force)?' \
-    | grep -vE 'specify extension add jira --from https://github\.com/Fyloss/spec-kit-jira/releases/download/v<X\.Y\.Z>/spec-kit-jira-<X\.Y\.Z>\.zip' || true)"
+    | grep -vE 'specify extension add jira-mirror --from https://github\.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror\.zip( --force)?' \
+    | grep -vE 'specify extension add jira-mirror --from https://github\.com/Fyloss/spec-kit-jira-mirror/releases/download/v<X\.Y\.Z>/spec-kit-jira-mirror-<X\.Y\.Z>\.zip' || true)"
   if [[ -n "${bad}" ]]; then
     printf 'host install command not in its runnable form:\n%s\n' "${bad}" >&2
     return 1
@@ -160,13 +160,13 @@ declared_commands() {
 
   # missing -> the official install command, in its runnable form.
   hint="$(register_hooks_health "${work}/absent.yml" | jq -r '.repair_hint')"
-  [[ "${hint}" == *"specify extension add jira --from https://github.com/Fyloss/spec-kit-jira/releases/latest/download/spec-kit-jira.zip --force"* ]]
+  [[ "${hint}" == *"specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force"* ]]
 
   # held disabled -> the release flag on a declared command.
   printf 'hooks: {}\n' > "${work}/e.yml"
   hint="$(register_hooks_health "${work}/e.yml" '["after_plan"]' | jq -r '.repair_hint')"
-  [[ "${hint}" == *"/speckit.jira.config --enable-hook after_plan"* ]]
-  grep -qxF 'speckit.jira.config' <<< "${declared}"
+  [[ "${hint}" == *"/speckit.jira-mirror.config --enable-hook after_plan"* ]]
+  grep -qxF 'speckit.jira-mirror.config' <<< "${declared}"
 
   # No hint may contain a bare bridge invocation.
   run grep -qE '(^|[^/])spec-kit-jira(\.sh|\.ps1)?[[:space:]]+(config|reconcile)' <<< "${hint}"

@@ -16,7 +16,7 @@ routing_default: FD
 
 # --- spec-kit-jira:field_defaults:begin ---
 # Recorded defaults for custom fields on ticket creation (011), written by
-# `/speckit.jira.config`. Edit a value here by hand if you like — keep it
+# `/speckit.jira-mirror.config`. Edit a value here by hand if you like — keep it
 # between these markers; an entry outside them is a duplicate top-level key
 # and the next read refuses it (exit 4).
 "field_defaults":

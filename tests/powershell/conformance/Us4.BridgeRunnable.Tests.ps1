@@ -16,8 +16,8 @@
 BeforeAll {
     $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     . (Join-Path $script:Root 'tests/conformance/InstallHarness.ps1')
-    $script:BashEntry = '.specify/extensions/jira/scripts/bash/spec-kit-jira.sh'
-    $script:PwshEntry = '.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1'
+    $script:BashEntry = '.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh'
+    $script:PwshEntry = '.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1'
     $script:Available = Test-HarnessAvailable
     $script:Skip = Get-HarnessSkipReason
     # Set even on the skip path below — AfterEach reads it under Set-StrictMode,

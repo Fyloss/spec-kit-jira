@@ -135,8 +135,8 @@ teardown() {
   printf '%s\n' \
     'hooks:' \
     '  after_specify:' \
-    '    - extension: jira' \
-    '      command: speckit.jira.reconcile' \
+    '    - extension: jira-mirror' \
+    '      command: speckit.jira-mirror.reconcile' \
     '      enabled: true' > "${SPEC_KIT_JIRA_EXTENSIONS_YML}"
   config_hooks_disabled_add after_specify "${JIRA_CONFIG_DIR}" > /dev/null
 

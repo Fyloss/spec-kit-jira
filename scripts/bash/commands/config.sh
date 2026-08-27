@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # commands/config.sh — The config command: the deterministic install ceremony.
 #
-# `cmd_config` (US1, T044/T046) orchestrates the single `/speckit.jira.config`
+# `cmd_config` (US1, T044/T046) orchestrates the single `/speckit.jira-mirror.config`
 # run: it reads the committed team config, discovers each project's metadata by
 # API read (US2), persists the resolved-id table into the machine-owned
 # config.local.yml with a DETERMINISTIC canonical serialisation (byte-identical
@@ -616,7 +616,7 @@ _config_field_defaults_block() {
   cat <<BLOCK
 ${_CONFIG_FIELD_DEFAULTS_BEGIN}
 # Recorded defaults for custom fields on ticket creation (011), written by
-# \`/speckit.jira.config\`. Edit a value here by hand if you like — keep it
+# \`/speckit.jira-mirror.config\`. Edit a value here by hand if you like — keep it
 # between these markers; an entry outside them is a duplicate top-level key
 # and the next read refuses it (exit 4).
 ${yaml}
@@ -693,7 +693,7 @@ _config_task_mirror_block() {
   cat <<BLOCK
 ${_CONFIG_TASK_MIRROR_BEGIN}
 # How each project's task list reaches Jira (022), written by
-# \`/speckit.jira.config\`. \`subtask\` creates one sub-task per task;
+# \`/speckit.jira-mirror.config\`. \`subtask\` creates one sub-task per task;
 # \`checklist\` writes one checklist into each story instead. Edit a value
 # here by hand if you like — keep it between these markers; an entry outside
 # them is a duplicate top-level key and the next read refuses it (exit 4).

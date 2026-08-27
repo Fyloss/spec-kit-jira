@@ -2,7 +2,7 @@
 # T031 [US3] — Every registered hook resolves to a real command (FR-009, SC-002).
 #
 # The second half of the reported defect. `extension.yml` declared two commands;
-# the registrar registered `speckit.jira.reconcile` under all six after_* events.
+# the registrar registered `speckit.jira-mirror.reconcile` under all six after_* events.
 # That command had NO file, NO manifest entry, and was not installed. Every
 # registered after_* hook pointed at a command the agent could not resolve — so
 # even a correctly registered, correctly dispatched hook resolved to nothing.
@@ -93,13 +93,13 @@ hook_commands() {
   [ "${i}" -eq 4 ]
 }
 
-@test "speckit.jira.reconcile is declared, filed and referenced (FR-010, FR-011)" {
+@test "speckit.jira-mirror.reconcile is declared, filed and referenced (FR-010, FR-011)" {
   # The command that did not exist. Named explicitly because it is THE finding of
   # research R7 and the co-requisite of the manifest's hook block.
-  run grep -qxF 'speckit.jira.reconcile' <<< "$(declared_commands)"
+  run grep -qxF 'speckit.jira-mirror.reconcile' <<< "$(declared_commands)"
   [ "$status" -eq 0 ]
-  [ -f "${ROOT}/commands/speckit.jira.reconcile.md" ]
-  run grep -qxF 'speckit.jira.reconcile' <<< "$(hook_commands)"
+  [ -f "${ROOT}/commands/speckit.jira-mirror.reconcile.md" ]
+  run grep -qxF 'speckit.jira-mirror.reconcile' <<< "$(hook_commands)"
   [ "$status" -eq 0 ]
 }
 
@@ -107,7 +107,7 @@ hook_commands() {
   local cmd
   while IFS= read -r cmd; do
     [[ -z "${cmd}" ]] && continue
-    [[ "${cmd}" == speckit.jira.* ]] || {
+    [[ "${cmd}" == speckit.jira-mirror.* ]] || {
       printf 'hook command is not in canonical speckit.<ext>.<name> form: %s\n' "${cmd}" >&2
       return 1
     }

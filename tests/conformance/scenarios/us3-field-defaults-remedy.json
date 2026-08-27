@@ -1,6 +1,6 @@
 {
   "name": "us3-field-defaults-remedy",
-  "description": "011, US3 independent test: the mandatory-field fixture with nothing recorded, invoked with --accept-defaults so the operator is declared unreachable (contract §3.10) — the run refuses for that specification with zero writes, the pre-existing exit code, and a message that names each unsatisfiable field by its Jira label and carries the copy-pasteable `speckit.jira.config --field-default …` line that records it permanently (FR-016, contract §3.6).",
+  "description": "011, US3 independent test: the mandatory-field fixture with nothing recorded, invoked with --accept-defaults so the operator is declared unreachable (contract §3.10) — the run refuses for that specification with zero writes, the pre-existing exit code, and a message that names each unsatisfiable field by its Jira label and carries the copy-pasteable `speckit.jira-mirror.config --field-default …` line that records it permanently (FR-016, contract §3.6).",
   "mock": { "projects": { "PM": "company" }, "createmetaFields": { "10101": "parent-mandatory" } },
   "fixture": "tests/conformance/fixtures/repo-with-mandatory-field",
   "runs": [

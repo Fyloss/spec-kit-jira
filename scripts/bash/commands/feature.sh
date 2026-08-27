@@ -790,8 +790,8 @@ cmd_feature() {
   # layer earlier — an operator who named something and got nothing back.
   # Gated on has_mention so a run naming nothing stays byte-identical to
   # the current release (FR-028); never issues a Jira request (FR-027).
-  local no_config_msg='no team configuration found — .specify/jira/config.yml is missing, unreadable, or declares no teams; run /speckit.jira.config to create one'
-  local no_selection_msg='no team selected in .specify/jira/personal.yml — that selection is your own and no script writes it for you; run /speckit.jira.config to select one'
+  local no_config_msg='no team configuration found — .specify/jira/config.yml is missing, unreadable, or declares no teams; run /speckit.jira-mirror.config to create one'
+  local no_selection_msg='no team selected in .specify/jira/personal.yml — that selection is your own and no script writes it for you; run /speckit.jira-mirror.config to select one'
 
   # (1) No committed catalogue at all ⇒ pass-through (FR-017).
   if [[ ! -f "${dir}/config.yml" ]]; then

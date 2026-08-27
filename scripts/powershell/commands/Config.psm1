@@ -350,7 +350,7 @@ function Get-JiraFieldDefaultsBlock {
     $lines = @(
         $script:FieldDefaultsBeginToken,
         '# Recorded defaults for custom fields on ticket creation (011), written by',
-        '# `/speckit.jira.config`. Edit a value here by hand if you like — keep it',
+        '# `/speckit.jira-mirror.config`. Edit a value here by hand if you like — keep it',
         '# between these markers; an entry outside them is a duplicate top-level key',
         '# and the next read refuses it (exit 4).',
         $yaml,
@@ -475,7 +475,7 @@ function Get-JiraTaskMirrorBlock {
     $lines = @(
         $script:TaskMirrorBeginToken,
         '# How each project''s task list reaches Jira (022), written by',
-        '# `/speckit.jira.config`. `subtask` creates one sub-task per task;',
+        '# `/speckit.jira-mirror.config`. `subtask` creates one sub-task per task;',
         '# `checklist` writes one checklist into each story instead. Edit a value',
         '# here by hand if you like — keep it between these markers; an entry outside',
         '# them is a duplicate top-level key and the next read refuses it (exit 4).',

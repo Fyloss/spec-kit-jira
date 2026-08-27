@@ -1,4 +1,4 @@
-# 4. The config ceremony — `/speckit.jira.config`
+# 4. The config ceremony — `/speckit.jira-mirror.config`
 
 The one-command install ceremony. Every step is an API read, a config read, or
 a closed enumerated question — **no step is left to model judgement**, and the
@@ -8,7 +8,7 @@ a closed enumerated question — **no step is left to model judgement**, and the
 
 ```mermaid
 flowchart TD
-    Start(["/speckit.jira.config"]) --> Hooks["1 · Hooks effect<br/>read the registry, classify every event<br/>needs no Jira and no committed config"]
+    Start(["/speckit.jira-mirror.config"]) --> Hooks["1 · Hooks effect<br/>read the registry, classify every event<br/>needs no Jira and no committed config"]
     Hooks --> Load["2 · Load and validate the committed team config"]
     Load --> GitignorePersonal["2a · Gitignore + personal.yml effects (030)<br/>computed here, AHEAD of the degraded check —<br/>an operator with no working credentials yet<br/>still needs personal.yml created and covered"]
     GitignorePersonal --> Degraded{"Connection settings present?<br/>base URL · email · token"}
@@ -141,7 +141,7 @@ projects:
 or answer it once, per project, without committing anything:
 
 ```sh
-speckit.jira.config --issue-type CONSUMER=specification=Epic --issue-type CONSUMER=story=Story
+speckit.jira-mirror.config --issue-type CONSUMER=specification=Epic --issue-type CONSUMER=story=Story
 ```
 
 `--child-type KEY=<name>` remains accepted as the short form of

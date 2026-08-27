@@ -320,7 +320,7 @@ role_promotion_note() {
 
 # hierarchy_child_type_unresolved_message <project_key> — contract §6.
 hierarchy_child_type_unresolved_message() {
-  printf 'reconcile: project %s has no recorded issue type for user stories. Run /speckit.jira.config to record it (zero writes)' "$1"
+  printf 'reconcile: project %s has no recorded issue type for user stories. Run /speckit.jira-mirror.config to record it (zero writes)' "$1"
 }
 
 # hierarchy_parent_link_unavailable_message <project_key> <child_logical_name> — contract §6.
@@ -330,14 +330,14 @@ hierarchy_parent_link_unavailable_message() {
 
 # hierarchy_binding_shape_stale_message <project_key> — contract §6.
 hierarchy_binding_shape_stale_message() {
-  printf 'reconcile: the local binding for %s predates parent support and does not record issue-type hierarchy. The project is bound — its binding is simply a version behind. Run /speckit.jira.config to refresh it (zero writes)' "$1"
+  printf 'reconcile: the local binding for %s predates parent support and does not record issue-type hierarchy. The project is bound — its binding is simply a version behind. Run /speckit.jira-mirror.config to refresh it (zero writes)' "$1"
 }
 
 # hierarchy_mandatory_fields_message <unsatisfiable_json> [<project_key>] —
 # contract §5, §3.6, FR-016. Input: [{"type_name":"…","fields":["…","…"]}, …].
 # One refusal naming every unsatisfiable field of every written type, fields
 # named by their Jira `name`, never a customfield_NNNNN id — followed, when a
-# project_key is given, by one copy-pasteable `speckit.jira.config
+# project_key is given, by one copy-pasteable `speckit.jira-mirror.config
 # --field-default …` line per field that records a default for it permanently
 # (011, US3). The value is left as a placeholder for the operator to fill in;
 # only the KEY=Type=Label positions are known here. The KEY=Type=Label=Value
@@ -355,7 +355,7 @@ hierarchy_mandatory_fields_message() {
     ) as $refusal
     | if $p == "" then $refusal
       else
-        ($u | [ .[] as $t | $t.fields[] | "  speckit.jira.config \($p) --field-default '\''\($p)=\($t.type_name)=\(.)=<value>'\''" ]) as $remedies
+        ($u | [ .[] as $t | $t.fields[] | "  speckit.jira-mirror.config \($p) --field-default '\''\($p)=\($t.type_name)=\(.)=<value>'\''" ]) as $remedies
         | ([$refusal, "Record a default for each to fix this permanently:"] + $remedies) | join("\n")
       end
   '
@@ -496,7 +496,7 @@ hierarchy_task_unsatisfiable_message() {
     ) as $refusal
     | if $p == "" then $refusal
       else
-        ($f | map("  speckit.jira.config \($p) --field-default '\''\($p)=\($t)=\(.)=<value>'\''")) as $remedies
+        ($f | map("  speckit.jira-mirror.config \($p) --field-default '\''\($p)=\($t)=\(.)=<value>'\''")) as $remedies
         | ([$refusal, "Record a default for each to fix this permanently:"] + $remedies) | join("\n")
       end
   '
@@ -528,7 +528,7 @@ hierarchy_task_field_unsatisfiable_line() {
   # kcov-excl-start — jq literal (string lines are not statements)
   jq -rn --arg n "${logical_name}" --arg p "${project}" --arg t "${type_name}" '
     "Issue type \"\($t)\" requires \"\($n)\", which has no recorded default."
-    + (if $p == "" then "" else " Record one to fix this permanently: speckit.jira.config \($p) --field-default '\''\($p)=\($t)=\($n)=<value>'\''." end)
+    + (if $p == "" then "" else " Record one to fix this permanently: speckit.jira-mirror.config \($p) --field-default '\''\($p)=\($t)=\($n)=<value>'\''." end)
     + " Nothing was written for this task (zero writes)."
   '
   # kcov-excl-stop

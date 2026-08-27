@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # T043 [US1] — The config run reports three effects separately (FR-054).
 #
-# A single `/speckit.jira.config` run has three effects — metadata discovery,
+# A single `/speckit.jira-mirror.config` run has three effects — metadata discovery,
 # `after_*` hook registration, and managed-README-block management — and the run
 # summary reports each SEPARATELY (FR-054). At this phase only the discovery
 # effect performs its write; the hooks and README effects are wired in later
@@ -118,7 +118,7 @@ seed_disabled_registry() {
       cmd="$(register_hooks_command_for "${e}")"
       enabled=true
       [[ "${e}" == "after_implement" ]] && enabled=false
-      printf '  %s:\n  - extension: jira\n    command: %s\n    enabled: %s\n' "${e}" "${cmd}" "${enabled}"
+      printf '  %s:\n  - extension: jira-mirror\n    command: %s\n    enabled: %s\n' "${e}" "${cmd}" "${enabled}"
       printf '    optional: false\n    priority: 10\n    prompt: Execute %s?\n' "${cmd}"
       printf '    description: Mirror.\n    condition: null\n'
     done
@@ -238,7 +238,7 @@ seed_disabled_registry() {
     printf 'hooks:\n'
     for e in "${HOOK_EVENTS[@]}"; do
       cmd="$(register_hooks_command_for "${e}")"
-      printf '  %s:\n  - extension: jira\n    command: %s\n    enabled: true\n' "${e}" "${cmd}"
+      printf '  %s:\n  - extension: jira-mirror\n    command: %s\n    enabled: true\n' "${e}" "${cmd}"
       printf '    optional: false\n    priority: 10\n    prompt: Execute %s?\n' "${cmd}"
       printf '    description: Mirror.\n    condition: null\n'
     done

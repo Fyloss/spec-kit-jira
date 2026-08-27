@@ -295,7 +295,7 @@ _cfg_raise_parse_failure() {
   local idx="$1" line content
   line="${_cfg_linenos[idx]}"
   content="$(_cfg_redact_line "${_cfg_lines[idx]}")"
-  _CFG_ERR="$(printf 'config: %s:%s: cannot parse this line as a mapping entry: %s\nconfig: a key must be followed by ": " — quote the key if it contains a colon, e.g. "Blocked: waiting": "10001"\nconfig: re-run /speckit.jira.config to regenerate %s from the Jira instance.' \
+  _CFG_ERR="$(printf 'config: %s:%s: cannot parse this line as a mapping entry: %s\nconfig: a key must be followed by ": " — quote the key if it contains a colon, e.g. "Blocked: waiting": "10001"\nconfig: re-run /speckit.jira-mirror.config to regenerate %s from the Jira instance.' \
     "${_cfg_file}" "${line}" "${content}" "${_cfg_file}")"
 }
 
@@ -306,7 +306,7 @@ _cfg_raise_duplicate_key() {
   local idx="$1" key="$2" first_line="$3" line redacted_key
   line="${_cfg_linenos[idx]}"
   redacted_key="$(_cfg_redact_line "${key}")"
-  _CFG_ERR="$(printf 'config: %s:%s: duplicate key %s — already defined at line %s\nconfig: two entries cannot claim the same name; delete or rename one of them.\nconfig: re-run /speckit.jira.config to regenerate %s from the Jira instance.' \
+  _CFG_ERR="$(printf 'config: %s:%s: duplicate key %s — already defined at line %s\nconfig: two entries cannot claim the same name; delete or rename one of them.\nconfig: re-run /speckit.jira-mirror.config to regenerate %s from the Jira instance.' \
     "${_cfg_file}" "${line}" "${redacted_key}" "${first_line}" "${_cfg_file}")"
 }
 
@@ -508,7 +508,7 @@ _cfg_parse_mapping() {
       #
       #     hooks:
       #       before_specify:
-      #       - extension: jira        <- same indent as the key
+      #       - extension: jira-mirror <- same indent as the key
       #
       # Requiring a greater indent made this reader stop at the key and return
       # null for its value, so the registry of every real installation parsed as
@@ -1520,7 +1520,7 @@ config_load() {
   local local_f="${dir}/config.local.yml"
 
   if [[ ! -f "${team}" ]]; then
-    printf 'config: %s not found — run /speckit.jira.config first.\n' "${team}" >&2
+    printf 'config: %s not found — run /speckit.jira-mirror.config first.\n' "${team}" >&2
     return "${EXIT_CONFIG}"
   fi
 

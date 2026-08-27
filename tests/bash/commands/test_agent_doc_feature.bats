@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # The feature command definition — the scope fence (consumer incident 2026-08-22).
 #
-# `speckit.jira.feature` is a `before_specify` hook that computes NAMES. In the
+# `speckit.jira-mirror.feature` is a `before_specify` hook that computes NAMES. In the
 # reported incident a single dispatch of it authored `spec.md`, skipped the
 # remaining `before_specify` hooks, and ran the `after_specify` chain itself —
 # which created two real Jira issues in a shared project before any
@@ -16,14 +16,14 @@
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  DOC="${ROOT}/commands/speckit.jira.feature.md"
+  DOC="${ROOT}/commands/speckit.jira-mirror.feature.md"
 }
 
 @test "the document exists and answers to the name the hook references" {
   [ -f "${DOC}" ]
   local frontmatter
   frontmatter="$(awk 'NR > 1 && /^---[[:space:]]*$/ { exit } NR > 1 { print }' "${DOC}")"
-  grep -qE '^name:[[:space:]]*"speckit\.jira\.feature"[[:space:]]*$' <<< "${frontmatter}"
+  grep -qE '^name:[[:space:]]*"speckit\.jira-mirror\.feature"[[:space:]]*$' <<< "${frontmatter}"
 }
 
 @test "the scope fence is a section of its own, ahead of the ceremony" {
@@ -57,7 +57,7 @@ setup() {
   local body
   body="$(awk '/^## What this step is, and is not — normative$/ { f = 1; next } f && /^## / { f = 0 } f' "${DOC}")"
   grep -qE 'after_\*' <<< "${body}"
-  grep -qE 'speckit\.jira\.reconcile' <<< "${body}"
+  grep -qE 'speckit\.jira-mirror\.reconcile' <<< "${body}"
   grep -qE 'after_specify' <<< "${body}"
 }
 

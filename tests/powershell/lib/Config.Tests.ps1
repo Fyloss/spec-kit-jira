@@ -438,7 +438,7 @@ It 'a pre-seeded file already holding the escaped form loads and rewrites byte-i
         $lines = $errMsg -split "`n"
         $lines[0] | Should -Be "config: ${f}:3: cannot parse this line as a mapping entry: this line has no delimiter"
         $lines[1] | Should -Be 'config: a key must be followed by ": " — quote the key if it contains a colon, e.g. "Blocked: waiting": "10001"'
-        $lines[2] | Should -Be "config: re-run /speckit.jira.config to regenerate ${f} from the Jira instance."
+        $lines[2] | Should -Be "config: re-run /speckit.jira-mirror.config to regenerate ${f} from the Jira instance."
         Remove-Item -Recurse -Force $d
     }
 
@@ -934,8 +934,8 @@ Describe 'Block sequences at the parent key indentation (003 T011 regression)' {
             '  auto_execute_hooks: true'
             'hooks:'
             '  before_specify:'
-            '  - extension: jira'
-            '    command: speckit.jira.feature'
+            '  - extension: jira-mirror'
+            '    command: speckit.jira-mirror.feature'
             '    enabled: true'
         ) -join "`n"
         Set-Content -Path (Join-Path $d 'pyyaml.yml') -Value ($yaml + "`n") -NoNewline
@@ -943,7 +943,7 @@ Describe 'Block sequences at the parent key indentation (003 T011 regression)' {
         $json.installed[0] | Should -BeExactly 'jira'
         $json.settings.auto_execute_hooks | Should -BeTrue
         @($json.hooks.before_specify).Count | Should -Be 1
-        @($json.hooks.before_specify)[0].command | Should -BeExactly 'speckit.jira.feature'
+        @($json.hooks.before_specify)[0].command | Should -BeExactly 'speckit.jira-mirror.feature'
         @($json.hooks.before_specify)[0].enabled | Should -BeTrue
         Remove-Item -Recurse -Force $d
     }

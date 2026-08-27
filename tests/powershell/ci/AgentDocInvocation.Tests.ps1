@@ -2,7 +2,7 @@
 # port. Twin of tests/bash/ci/test_agent_doc_invocation.bats (FR-014, R6).
 #
 # `specify extension add` copies this repository into the consuming repository's
-# `.specify/extensions/jira/` and installs NOTHING on the machine: no binary, no
+# `.specify/extensions/jira-mirror/` and installs NOTHING on the machine: no binary, no
 # PATH entry, no shell profile edit. Yet both command documents used to instruct
 # the assistant to run `spec-kit-jira config` and `spec-kit-jira feature` as bare
 # names. In a consuming repository no such command exists — which is precisely
@@ -17,8 +17,8 @@
 BeforeAll {
     $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:Docs = Get-ChildItem -LiteralPath (Join-Path $script:Root 'commands') -Filter '*.md' -File | Sort-Object Name
-    $script:BashEntry = '.specify/extensions/jira/scripts/bash/spec-kit-jira.sh'
-    $script:PwshEntry = '.specify/extensions/jira/scripts/powershell/spec-kit-jira.ps1'
+    $script:BashEntry = '.specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh'
+    $script:PwshEntry = '.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1'
 }
 
 Describe 'Command documents invoke a bridge that exists' {

@@ -74,7 +74,7 @@ the checkout.
 POSIX-to-Windows path heuristic to every argument handed to it — including a
 `--arg` value that merely *looks* like a path. `reconcile`'s confirmation-
 pending `resume_with` hint is a literal slash command
-(`/speckit.jira.reconcile …`), never a filesystem path, but MSYS rewrote its
+(`/speckit.jira-mirror.reconcile …`), never a filesystem path, but MSYS rewrote its
 leading `/` to the runner's Git install root before jq ever saw the argument.
 
 Measured (`us2-field-defaults-question`, 012 regression): the diverging

@@ -285,7 +285,7 @@ named user story's heading:
 Unlike the story marker above, a pinning marker carries no identifier of its
 own — it names the designated key directly, because nothing has been created
 or stamped yet. It expresses only the agent's *intention* to bind that story
-to that issue; `speckit.jira.seed` validates it deterministically (one marker
+to that issue; `speckit.jira-mirror.seed` validates it deterministically (one marker
 per designated key, one designated key per marker, in designator order) before
 any Jira interaction, and only replaces it with the real story marker **after**
 the operator has confirmed the write plan.
