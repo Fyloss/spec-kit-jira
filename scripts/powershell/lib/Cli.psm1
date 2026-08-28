@@ -13,6 +13,9 @@ Set-StrictMode -Version Latest
 # session and re-scope it to this module instead (a documented landmine —
 # see the project memory on lib module imports from a nested module).
 Import-Module (Join-Path $PSScriptRoot 'Output.psm1') # ConvertTo-JiraJsonValue — Get-JiraFieldAnswersFor's canonical output
+# 032 — --accept-site shape-checks its value against the one origin grammar
+# (C1.9) rather than inventing a second one here.
+Import-Module (Join-Path $PSScriptRoot 'UrlOrigin.psm1')
 
 # Exit-code table (monotonically escalating — Constitution III).
 $script:ExitCodes = @{
@@ -123,6 +126,7 @@ function Invoke-JiraCliParse {
     $help = 'false'
     $parseError = ''
     $useTeam = ''
+    $acceptSite = ''
     $reuse = ''
     $acceptDefaults = 'false'
     $positional = [System.Collections.Generic.List[string]]::new()
@@ -263,6 +267,28 @@ function Invoke-JiraCliParse {
                 }
                 break
             }
+            '^--accept-site$' {
+                # 032, contract origin-pinning.md §C3.8: the deliberate
+                # acceptance of a destination that differs from the one this
+                # checkout is bound to. The operator must NAME the origin —
+                # replaying the refusal's printed instruction without it is not
+                # acceptance, which is the whole point of the flag (SC-008).
+                # Shape-checked here, as --style and --reuse are, so a value
+                # that is not an origin never reaches the ceremony.
+                if ($idx + 1 -ge $Arguments.Count) {
+                    $parseError = '--accept-site requires a value (--accept-site <origin>)'
+                }
+                else {
+                    $idx++
+                    if ($null -ne (Get-JiraUrlOriginCanonical -Url $Arguments[$idx])) {
+                        $acceptSite = $Arguments[$idx]
+                    }
+                    else {
+                        $parseError = '--accept-site requires an absolute origin such as https://example.atlassian.net'
+                    }
+                }
+                break
+            }
             '^--reuse$' {
                 # 029, contract feature-question-contract.md §1/§6: the
                 # answer to the reuse question. Absent means unanswered — no
@@ -379,6 +405,7 @@ function Invoke-JiraCliParse {
         $lines.Add("stories=$($stories -join $usJoin)")
         $lines.Add("confirm=$confirm")
         $lines.Add("accept_defaults=$acceptDefaults")
+        $lines.Add("accept_site=$acceptSite")
         $lines.Add("args=$($positional -join ' ')")
         $lines.Add("exit=$($script:ExitCodes.ok)")
     }

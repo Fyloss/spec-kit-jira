@@ -204,6 +204,15 @@ _normalize_config_yaml_base_url() {
     sed -i.bak -E 's#http://127\.0\.0\.1:[0-9]+#http://127.0.0.1:MOCK_PORT#g' "${f}" 2> /dev/null
     rm -f "${f}.bak"
   done < <(find "${dir}" -path '*/jira/config.yml' -print0 2> /dev/null)
+  # 032 — `bound_site` in the GITIGNORED local layer lands in the same trap for
+  # the same reason: the ceremony records the origin it actually reached, and
+  # the two backends reach two different loopback ports. Masked identically, so
+  # a scenario that binds can still be compared byte-for-byte on everything
+  # else it writes.
+  while IFS= read -r -d '' f; do
+    sed -i.bak -E 's#http://127\.0\.0\.1:[0-9]+#http://127.0.0.1:MOCK_PORT#g' "${f}" 2> /dev/null
+    rm -f "${f}.bak"
+  done < <(find "${dir}" -path '*/jira/config.local.yml' -print0 2> /dev/null)
 }
 export -f _normalize_config_yaml_base_url
 

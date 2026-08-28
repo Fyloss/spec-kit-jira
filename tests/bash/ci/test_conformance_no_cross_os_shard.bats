@@ -15,7 +15,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (231)" {
+@test "the conformance corpus has exactly the recorded scenario count (243)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -203,7 +203,7 @@ setup() {
   # catalogue's silence (zero-team-catalogue), and path resolution's two
   # divergence-surface cases (nested-invocation, no-project) (231 -> 236).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 236 ]
+  [ "${count}" -eq 243 ]
 }
 
 # Everything the conformance job declares, as one block.

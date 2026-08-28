@@ -5,6 +5,16 @@
 # hold is `base_url` below — your team's Jira identifies the team, not you, so
 # it belongs in a reviewed file rather than in each developer's shell.
 #
+# Being reviewed is not, by itself, what makes `base_url` safe. A one-line
+# change to it redirects every request — and the credential every request
+# carries — to whatever host the change names, and a URL edit in a diff does
+# not look dangerous. So the bridge does not trust this key on its own: the
+# configuration ceremony records the site it actually reached in the gitignored
+# .specify/jira/config.local.yml, and any later run whose declared destination
+# differs from that record refuses before its first request, naming both.
+# Accepting a genuine change means naming it:
+#   /speckit.jira-mirror.config --accept-site https://your-new-site.atlassian.net
+#
 # The token never lives in any file. It is read from JIRA_API_TOKEN, or from a
 # retrieval command you declare in JIRA_PAT_COMMAND so that an OS vault answers
 # for it — see docs/CREDENTIALS.md. Your own email goes in the gitignored
@@ -13,6 +23,7 @@
 # Your team's Jira site. The ceremony does not invent it: until it is set here
 # (or SPEC_KIT_JIRA_BASE_URL is exported) every run reports a degraded state
 # naming this key. No trailing slash — the sink appends /rest/api/3/... itself.
+# Changing this value after the project is bound requires --accept-site (above).
 # base_url: "https://your-site.atlassian.net"
 
 # Keys use business language (what the team decides), not Jira internals. The

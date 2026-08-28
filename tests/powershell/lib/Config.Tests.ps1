@@ -1004,7 +1004,13 @@ Describe 'Resolve-JiraConnection' {
     It 'T023 — sets SPEC_KIT_JIRA_BASE_URL from config.yml when unset' {
         $d = New-TempConfigDir
         Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nbase_url: `"https://team.atlassian.net`"`n") -NoNewline
-        Resolve-JiraConnection -ConfigDir $d | Out-Null
+        # 032 — a file-supplied destination now meets the pin, so this checkout
+        # has to be bound to it or the gate refuses before seeding.
+        Set-Content -Path (Join-Path $d 'config.local.yml') -Value "bound_site: `"https://team.atlassian.net`"" -NoNewline
+        # The return code is asserted, not discarded: piping it to Out-Null is
+        # why this suite stayed green through a change that reddened its bash
+        # twin, since the variable is seeded before the gate runs.
+        (Resolve-JiraConnection -ConfigDir $d) | Should -Be 0
         $env:SPEC_KIT_JIRA_BASE_URL | Should -Be 'https://team.atlassian.net'
         Remove-Item -Recurse -Force $d
     }
@@ -1021,8 +1027,11 @@ Describe 'Resolve-JiraConnection' {
     It 'T023 — treats an empty SPEC_KIT_JIRA_BASE_URL as unset' {
         $d = New-TempConfigDir
         Set-Content -Path (Join-Path $d 'config.yml') -Value ($script:ValidTeam + "`nbase_url: `"https://team.atlassian.net`"`n") -NoNewline
+        # 032 — an empty variable is treated as unset, so the destination is
+        # file-supplied and meets the pin.
+        Set-Content -Path (Join-Path $d 'config.local.yml') -Value "bound_site: `"https://team.atlassian.net`"" -NoNewline
         $env:SPEC_KIT_JIRA_BASE_URL = ''
-        Resolve-JiraConnection -ConfigDir $d | Out-Null
+        (Resolve-JiraConnection -ConfigDir $d) | Should -Be 0
         $env:SPEC_KIT_JIRA_BASE_URL | Should -Be 'https://team.atlassian.net'
         Remove-Item -Recurse -Force $d
     }

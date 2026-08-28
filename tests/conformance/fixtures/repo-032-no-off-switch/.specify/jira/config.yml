@@ -1,0 +1,22 @@
+# 030 — a base_url with a trailing slash (invalid per connection-settings.md
+# §2.2). Located refusal, exit 4, before any Jira call.
+base_url: "https://declared.example.invalid"
+projects:
+  - key: TEST
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: ''
+    project: TEST
+routing_default: TEST
+privacy:
+  allowlist: []
+# 032 C4.12 — plausible off switches, at the top level and inside a team
+# entry. None of them may weaken the destination pin. The team schema
+# refuses an unknown key outright, so the run fails closed either way; what
+# must never happen is a clean pass.
+pin_enforcement: false
+verify_destination: false

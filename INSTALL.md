@@ -161,13 +161,49 @@ upgrading refuses with:
 > simply a version behind. Run /speckit.jira-mirror.config to refresh it (zero
 > writes)`
 
-This is expected, and it happens before the first read, so nothing is written
-and nothing is lost. Run `/speckit.jira-mirror.config` once — the ceremony
+This is expected, and nothing is written and nothing is lost. (The refusal is
+raised while the run is already in its plan phase, after the reads that phase
+performs — it is fail-closed on *writes*, which is what matters here, but it is
+not literally the first thing the run does. An earlier edition of this document
+claimed it was.) Run `/speckit.jira-mirror.config` once — the ceremony
 rediscovers the project's issue types in the new shape, may ask which type
 mirrors a user story when the base hierarchy level holds more than one
 candidate, and then `reconcile` proceeds normally. Tickets already mirrored
 flat (no parent, created before this release) are left exactly as they are —
 they are not migrated; see the CHANGELOG's Migration note.
+
+### Upgrading to the destination-pinning release
+
+Every installation configured before this release records no bound Jira
+destination, so the first `reconcile` after upgrading refuses:
+
+> `config: this checkout records no bound Jira destination, so the one this
+> repository declares (https://your-site.atlassian.net) cannot be verified.
+> Zero requests issued, nothing written. Run /speckit.jira-mirror.config once
+> to bind it`
+
+Run `/speckit.jira-mirror.config` once. The ceremony records the site it
+actually reaches, into the gitignored `.specify/jira/config.local.yml`, and
+every later run compares the site `config.yml` declares against that record.
+No question is asked and no extra step is added — the ceremony was already
+contacting Jira to resolve ids.
+
+Why the refusal rather than adopting whatever `config.yml` currently says:
+adopting it on sight would bind the checkout to a value an incoming change
+controls, which is the case this exists to catch.
+
+**When the site legitimately changes** — a real migration — the ceremony will
+not re-record it on its own either, because otherwise following the refusal's
+printed instruction would be enough to accept a redirection somebody else
+introduced. Name the new destination:
+
+```bash
+/speckit.jira-mirror.config --accept-site https://your-new-site.atlassian.net
+```
+
+A destination supplied through `SPEC_KIT_JIRA_BASE_URL` is exempt from all of
+this and is never recorded: an environment variable is typed by the operator
+and cannot be introduced by a pull request.
 
 ### Upgrading to the provenance-label release
 

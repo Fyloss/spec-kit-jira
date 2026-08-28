@@ -582,9 +582,21 @@ config: re-run /speckit.jira-mirror.config to regenerate <file> from the Jira in
 This exits `4` on a direct run. Inside a lifecycle hook, the same three lines
 are followed by one `WARNING:` and the host command still completes normally
 — nothing is mirrored until the file is fixed or regenerated. Re-running
-`/speckit.jira-mirror.config` rewrites `config.local.yml` from scratch, which
-resolves the great majority of cases; a hand-edited `config.yml` or
-`personal.yml` needs the named line corrected by hand.
+`/speckit.jira-mirror.config` rediscovers and rewrites the machine-owned parts
+of `config.local.yml`, which resolves the great majority of cases; a
+hand-edited `config.yml` or `personal.yml` needs the named line corrected by
+hand.
+
+One thing a plain re-run deliberately does **not** fix: a `config.yml` whose
+`base_url` now names a different Jira site from the one this checkout is bound
+to. The bridge refuses that before its first request, and the ceremony refuses
+to re-record it too — otherwise following the refusal's own instruction would
+be enough to accept a redirection somebody else introduced. Accepting a genuine
+site change means naming it:
+
+```bash
+/speckit.jira-mirror.config --accept-site https://your-new-site.atlassian.net
+```
 
 ## Repository layout
 

@@ -30,6 +30,11 @@ _put() { # _put <issue-key> — a clean PUT action targeting one issue key.
 
 @test "a 401 write fails closed with the auth exit code (3)" {
   mock_start "${MOCK}/configs/faults.json"
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   local actions; actions="[$(_put AUTH-1)]"
   run apply_writes "${actions}"
   [ "$status" -eq 3 ]
@@ -37,24 +42,44 @@ _put() { # _put <issue-key> — a clean PUT action targeting one issue key.
 
 @test "a 404 write fails closed (2)" {
   mock_start "${MOCK}/configs/faults.json"
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   run apply_writes "[$(_put MISSING-1)]"
   [ "$status" -eq 2 ]
 }
 
 @test "a dropped connection fails closed (2)" {
   mock_start "${MOCK}/configs/faults.json"
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   run apply_writes "[$(_put NET-1)]"
   [ "$status" -eq 2 ]
 }
 
 @test "an exhausted 429 fails closed (2)" {
   mock_start "${MOCK}/configs/faults.json"
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   JIRA_MAX_ATTEMPTS=3 run apply_writes "[$(_put RATE-1)]"
   [ "$status" -eq 2 ]
 }
 
 @test "a fault aborts the remaining writes — the second action is never attempted" {
   mock_start "${MOCK}/configs/faults.json"
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   # AUTH-1 (401) precedes COMP-9 (would succeed). The abort must stop before COMP-9.
   local actions
   actions="$(jq -cn --argjson a "$(_put AUTH-1)" --argjson b "$(_put COMP-9)" '[$a,$b]')"
@@ -70,6 +95,11 @@ _put() { # _put <issue-key> — a clean PUT action targeting one issue key.
   # A native pwsh HTTP client cannot reach the curl shim's sentinel
   # MOCK_BASE_URL, so this cross-port test uses the real pwsh server.
   mock_start "${MOCK}/configs/faults.json" powershell
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   local ps_abs; ps_abs="$(cd "${PS_SINK}" && pwd)"
   local key code_bash code_ps
   for key in AUTH-1 MISSING-1 NET-1; do

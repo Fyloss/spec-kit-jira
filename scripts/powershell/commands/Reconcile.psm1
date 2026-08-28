@@ -731,6 +731,16 @@ function Invoke-JiraReconcileRun {
     # SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml / personal.yml,
     # environment first. Runs before the base-url check just below.
     if ((Resolve-JiraConnection -ConfigDir (Get-JiraConfigDirPath)) -ne 0) {
+        # 032, C5.2 — relay the destination pin's OWN message. This call site
+        # substitutes a generic line for whatever the library reported, which
+        # would otherwise discard the located refusal (both origins named, plus
+        # the accepting invocation) on exactly the path a lifecycle hook takes.
+        # The status is consulted rather than the message being composed in the
+        # library, because only this layer knows how to report through the fault
+        # path that keeps the host command's outcome intact.
+        if ((Get-JiraConnectionPinStatus) -ne 'proceed') {
+            return (Get-JiraReconcileFaultCode -Code ([int](Get-JiraExitCode 'config')) -Message (Get-JiraConnectionPinMessage -ConfigDir (Get-JiraConfigDirPath)))
+        }
         return (Get-JiraReconcileFaultCode -Code ([int](Get-JiraExitCode 'config')) -Message 'reconcile: the team configuration could not be loaded (zero writes)')
     }
 

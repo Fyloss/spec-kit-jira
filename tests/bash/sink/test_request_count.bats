@@ -76,6 +76,9 @@ _run_with_timing() {
       if (( n < 3 )); then printf "429"; else printf "200"; fi
     }
     export -f curl
+    # 032, C6.4 — declare the destination the way the connection chokepoint
+    # does in production; without it the credential producer rightly refuses.
+    export SPEC_KIT_JIRA_BASE_URL="https://example.invalid"
     JIRA_EMAIL=user@example.com JIRA_API_TOKEN=tok jira_request GET "https://example.invalid/x" > /dev/null 2>&1 || true
     printf "count=%s" "$(jira_request_count)"
   '
@@ -95,6 +98,8 @@ _run_with_timing() {
     _JIRA_REQUEST_COUNT_FILE="/nonexistent-dir-xyz/count.log"
     curl() { printf "%s" "200"; }
     export -f curl
+    # 032, C6.4 — as above.
+    export SPEC_KIT_JIRA_BASE_URL="https://example.invalid"
     JIRA_EMAIL=user@example.com JIRA_API_TOKEN=tok jira_request GET "https://example.invalid/x" > /dev/null
     printf "survived rc=%s count=%s" "$?" "$(jira_request_count)"
   '

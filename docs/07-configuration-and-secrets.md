@@ -192,6 +192,40 @@ Two rules here are easy to meet as surprises rather than as documentation:
   inconsistency to file a bug against: an environment variable an operator
   typed themselves gets the operator's own scrutiny, a committed file does
   not.
+- **The committed base URL is pinned, because scrutiny alone does not scale.**
+  The paragraph above states the trust gap; 032 closes it. Checking the scheme
+  says nothing about the *host*, and a one-line change to `base_url` redirects
+  every request — and the credential every request carries — to whatever host
+  it names. That diff does not look dangerous. So the configuration ceremony
+  records the origin it actually reached at `bound_site` in the gitignored
+  `config.local.yml`, and every later run compares the declared origin against
+  that record **before its first request**: a mismatch, an absent record or a
+  malformed one refuses with exit 4, zero requests and zero writes, naming both
+  origins.
+
+  Three properties are worth stating because each was a design decision rather
+  than a consequence:
+
+  - The record lives in the **gitignored** layer, so a pull request cannot
+    write it. That is the whole reason it can be trusted, and it is why
+    Constitution IV/V needed a third narrow exemption (v3.0.0) — the
+    credential-shape guard refuses a real site host at every other key of that
+    file, and still does.
+  - **Re-running the ceremony does not accept a changed destination.** The
+    refusal tells the operator to run the ceremony; if that were enough, the
+    instruction would be the bypass. Accepting means naming it:
+    `--accept-site <origin>`, and the value must be the origin actually
+    reached.
+  - **An environment-supplied destination is exempt and is never recorded**,
+    on exactly the ground this section already gives for the retrieval
+    command's name: the environment is operator-typed and out of reach of a
+    pull request. A record made from it would bind the checkout to whatever
+    happened to be exported once.
+
+  Known limitation, documented rather than detected: a tracked file that
+  populates the environment — a direnv `.envrc`, a `Makefile`, a compose file —
+  can supply a destination without meeting the comparison. Detecting that would
+  mean auditing every mechanism able to fill a process environment.
 
 ## Reading a YAML file, fail-closed
 

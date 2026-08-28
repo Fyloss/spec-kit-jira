@@ -1,0 +1,18 @@
+base_url: "@MOCK_BASE_URL@"
+# Team config for the reconcile bridge (committable, credential-free).
+# Business-language keys; see the extension README for the full reference.
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: "billing-"
+    project: COMP
+routing_default: COMP
+privacy:
+  allowlist:
+    - docs.example-support.atlassian.net

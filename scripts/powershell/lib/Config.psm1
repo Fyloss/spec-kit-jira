@@ -17,6 +17,9 @@
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot 'Output.psm1') -Force
+# 032 — the destination pin compares origins (C1). NOT -Force: this is a
+# sibling lib dependency and a forced reimport re-scopes it into this module.
+Import-Module (Join-Path $PSScriptRoot 'UrlOrigin.psm1')
 
 $script:ExitConfig = 4
 
@@ -1003,11 +1006,19 @@ function Test-JiraLocalConfig {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Object)
     $errs = [System.Collections.Generic.List[string]]::new()
-    $allowed = @('site_alias', 'resolved_ids', 'overrides', 'hooks')
+    $allowed = @('site_alias', 'bound_site', 'resolved_ids', 'overrides', 'hooks')
     if ($Object -is [System.Collections.IDictionary]) {
         foreach ($k in (Get-JiraOrdinalSorted $Object.Keys)) {
             if ($allowed -cnotcontains [string]$k) { $errs.Add("unknown config.local key: $k") }
         }
+    }
+    # 032 — only the TYPE is checked here. Whether the value equals its own
+    # canonical origin form is decided by the connection gate, which is where a
+    # malformed record has to be reported anyway (C2.3, C4.9). Same error
+    # string as the Bash port's jq program.
+    $boundSite = Get-CfgProp $Object 'bound_site'
+    if ($null -ne $boundSite -and $boundSite -isnot [string]) {
+        $errs.Add('bound_site must be a string')
     }
     # The operator disable record (003 FR-029). Only the SHAPE is validated
     # here: an event name outside the closed set is reported and ignored at read
@@ -1253,7 +1264,14 @@ function Import-JiraConfig {
         # construction (jq treats the null document as having no keys); this makes
         # the two ports agree explicitly rather than by luck (Constitution VI).
         if ($null -eq $localObj) { $localObj = [ordered]@{} }
-        if (& $fail 'credential' $localF (Get-JiraConfigCredentialError $localObj)) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() } }
+        # `bound_site` is exempt, and it alone (032, C2.5; Constitution IV/V
+        # third narrow exemption, v3.0.0). It holds the origin this checkout is
+        # bound to, which is a site coordinate by construction — the guard
+        # would otherwise refuse every Atlassian Cloud record and make the
+        # configuration permanently unloadable. Per-key and per-layer: every
+        # other key of this file is still scanned, which is what
+        # us030-guard-not-a-hole asserts.
+        if (& $fail 'credential' $localF (Get-JiraConfigCredentialError $localObj -ExemptPaths @('bound_site'))) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() } }
         if (& $fail 'schema' $localF (Test-JiraLocalConfig $localObj)) { return [pscustomobject]@{ ExitCode = $script:ExitConfig; Json = ''; Errors = $errors.ToArray() } }
         $overrides = Get-CfgProp $localObj 'overrides'
         if ($null -eq $overrides) { $overrides = [ordered]@{} }
@@ -1416,6 +1434,184 @@ function Import-JiraPersonalConfig {
     return [pscustomobject]@{ ExitCode = 0; Json = (ConvertTo-JiraJsonValue $result); Errors = $errors }
 }
 
+# --- 032: the destination pin (contracts/origin-pinning.md §C4) --------------
+#
+# The outcome of the comparison, as a STATUS rather than a message (C4.6).
+# Callers compose the operator-facing text themselves, because Reconcile's
+# chokepoint call site replaces whatever the library would have said with its
+# own generic line — a message composed here would be lost on exactly the path
+# a lifecycle hook takes.
+$script:PinStatus = 'proceed'
+$script:PinDeclared = ''
+$script:PinRecorded = ''
+
+# The origin this run is allowed to reach, canonical. Set once by the gate;
+# read per request by the credential producer (C6.2) so it never re-reads or
+# re-parses configuration. Module-scoped, never an environment variable: a
+# child process must not inherit it.
+$script:PinnedOrigin = ''
+
+# True when this run's destination came from the environment rather than from
+# config.yml. FR-011 exempts such a destination from the comparison AND forbids
+# recording it: the environment is per-shell and per-invocation, so a record
+# made from it would bind the checkout to whatever happened to be exported that
+# once. The conformance harness exports the mock's ephemeral origin exactly this
+# way, which is how recording it unconditionally was caught — two runs produced
+# two ports, and the corpus stopped being byte-identical.
+$script:PinEnvSupplied = $false
+
+function Get-JiraPinEnvSupplied {
+    return $script:PinEnvSupplied
+}
+
+function Test-JiraConnectionPin {
+    <#
+    .SYNOPSIS
+      Set $script:PinStatus to proceed | mismatch | absent | malformed and
+      return $true only on proceed. Mirror of config_pin_evaluate.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ConfigDir,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $Declared
+    )
+    $script:PinStatus = 'proceed'
+    $script:PinDeclared = ''
+    $script:PinRecorded = ''
+
+    $declaredCanon = Get-JiraUrlOriginCanonical -Url $Declared
+    if ($null -eq $declaredCanon) {
+        # An unparseable declared destination is not this gate's business — the
+        # base_url shape validator already refused it, earlier and with its own
+        # message. Saying so twice would be two errors for one defect.
+        return $true
+    }
+    $script:PinDeclared = $declaredCanon
+
+    $localObj = Get-CfgLocalObject -ConfigDir $ConfigDir
+    $recorded = ''
+    if ($null -ne $localObj) {
+        $v = Get-CfgProp $localObj 'bound_site'
+        if ($null -ne $v) { $recorded = [string] $v }
+    }
+
+    if ([string]::IsNullOrEmpty($recorded)) {
+        $script:PinStatus = 'absent'
+        return $false
+    }
+
+    $recordedCanon = Get-JiraUrlOriginCanonical -Url $recorded
+    if ($null -eq $recordedCanon -or $recordedCanon -cne $recorded) {
+        # Either it is not an origin at all, or it is one written in a
+        # non-canonical spelling. Both are `malformed`: a record we cannot
+        # compare byte-for-byte is a record we cannot trust, and guessing at
+        # the operator's intent is how a pin quietly stops pinning.
+        $script:PinStatus = 'malformed'
+        return $false
+    }
+    $script:PinRecorded = $recordedCanon
+
+    if ($declaredCanon -cne $recordedCanon) {
+        $script:PinStatus = 'mismatch'
+        return $false
+    }
+    return $true
+}
+
+function Get-JiraConnectionPinStatus {
+    return $script:PinStatus
+}
+
+function Get-JiraConnectionPinMessage {
+    <#
+    .SYNOPSIS
+      The located refusal for the current pin status, on one line
+      (C4.7-C4.9). Names destinations only; no portion of the credential can
+      appear because none is read (C4.10). Byte-identical to
+      config_pin_message.
+    #>
+    [CmdletBinding()]
+    param([string] $ConfigDir = (Get-JiraConfigDirPath))
+    switch ($script:PinStatus) {
+        'mismatch' {
+            return "config: this repository asks to write to $($script:PinDeclared), but this checkout is bound to $($script:PinRecorded). Zero requests issued. If the new destination is legitimate, accept it by name: /speckit.jira-mirror.config --accept-site $($script:PinDeclared)"
+        }
+        'absent' {
+            return "config: this checkout records no bound Jira destination, so the one this repository declares ($($script:PinDeclared)) cannot be verified. Zero requests issued, nothing written. Run /speckit.jira-mirror.config once to bind it"
+        }
+        'malformed' {
+            return "config: bound_site in $ConfigDir/config.local.yml is not a canonical origin, so this checkout has no destination to verify against. Zero requests issued, nothing written. Run /speckit.jira-mirror.config once to rewrite it"
+        }
+        default { return '' }
+    }
+}
+
+function Test-JiraCeremonyPin {
+    <#
+    .SYNOPSIS
+      The binding ceremony's own gate (C3.7/C3.8). Runs BEFORE discovery, not
+      at the write site: the ceremony knows the declared destination and the
+      recorded one from the moment the chokepoint resolves the connection, so
+      there is nothing to learn from the network first. Checking early means a
+      redirected ceremony refuses without issuing the discovery requests it
+      used to send before saying no, and it puts this refusal where every other
+      command's already is.
+
+      The WRITE stays at the end of the ceremony, so the property that matters
+      is preserved: a destination is only ever recorded after it has actually
+      been reached.
+
+      Returns $true to proceed; on refusal writes the located reason to stderr
+      and returns $false. Mirror of config_pin_ceremony_check.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ConfigDir,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $Declared,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $AcceptSite
+    )
+    # An environment-supplied destination is exempt and is never recorded
+    # (FR-011), so there is nothing to compare.
+    if (Get-JiraPinEnvSupplied) { return $true }
+
+    $declaredCanon = Get-JiraUrlOriginCanonical -Url $Declared
+    if ($null -eq $declaredCanon) { return $true }
+
+    $localObj = Get-CfgLocalObject -ConfigDir $ConfigDir
+    $prior = ''
+    if ($null -ne $localObj) {
+        $v = Get-CfgProp $localObj 'bound_site'
+        if ($null -ne $v) { $prior = [string] $v }
+    }
+
+    # No record yet: this ceremony is the first bind, and gating it would mean
+    # nothing could ever be bound.
+    if ([string]::IsNullOrEmpty($prior)) { return $true }
+    if ($prior -ceq $declaredCanon) { return $true }
+
+    if ([string]::IsNullOrEmpty($AcceptSite)) {
+        [Console]::Error.WriteLine("config: this repository asks to bind to $declaredCanon, but this checkout is already bound to $prior. Nothing recorded, zero requests issued. If the new destination is legitimate, accept it by name: /speckit.jira-mirror.config --accept-site $declaredCanon")
+        return $false
+    }
+
+    $accepted = Get-JiraUrlOriginCanonical -Url $AcceptSite
+    if ($accepted -cne $declaredCanon) {
+        [Console]::Error.WriteLine("config: --accept-site names $AcceptSite but this repository declares $declaredCanon. Nothing recorded — the destination you accept must be the one this repository asks for")
+        return $false
+    }
+    return $true
+}
+
+function Get-JiraPinnedOrigin {
+    <#
+    .SYNOPSIS
+      The canonical origin this run verified, or '' when the gate did not run
+      (an environment-supplied destination, or the binding ceremony). Read by
+      the credential producer (C6.1).
+    #>
+    return $script:PinnedOrigin
+}
+
 function Resolve-JiraConnection {
     <#
     .SYNOPSIS
@@ -1452,7 +1648,12 @@ function Resolve-JiraConnection {
     param(
         [string] $ConfigDir = (Get-JiraConfigDirPath),
         [string] $MergedJson = '',
-        [string] $PersonalJson = ''
+        [string] $PersonalJson = '',
+        # 032, C3.1: the binding ceremony opts out BY ARGUMENT, never by this
+        # function detecting who called it. During the ceremony the destination
+        # is being learned, not verified — gating it would mean nothing could
+        # ever be bound.
+        [switch] $Binding
     )
     $cfg = $MergedJson
     if (-not $cfg) {
@@ -1465,11 +1666,43 @@ function Resolve-JiraConnection {
         }
     }
 
+    # 032, C4.3: provenance must be captured HERE. Once the variable is seeded
+    # below, nothing downstream can tell an operator-typed destination from a
+    # file-supplied one, and the whole exemption turns on that distinction.
+    $envSupplied = [bool] $env:SPEC_KIT_JIRA_BASE_URL
+    $script:PinEnvSupplied = $envSupplied
+
     if (-not $env:SPEC_KIT_JIRA_BASE_URL) {
         $cfgObj = $cfg | ConvertFrom-Json -Depth 100
         if ($cfgObj.PSObject.Properties['base_url'] -and $cfgObj.base_url) {
             $env:SPEC_KIT_JIRA_BASE_URL = [string] $cfgObj.base_url
         }
+    }
+
+    # The gate (C4.1/C4.4). An environment-supplied destination is exempt: the
+    # environment is operator-typed and unreachable from a pull request, which
+    # is the same ground on which Principle IV admits the credential retrieval
+    # command's name from there and nowhere else.
+    $script:PinStatus = 'proceed'
+    $script:PinnedOrigin = ''
+    if ($env:SPEC_KIT_JIRA_BASE_URL) {
+        if ($envSupplied -or $Binding) {
+            $c = Get-JiraUrlOriginCanonical -Url $env:SPEC_KIT_JIRA_BASE_URL
+            $script:PinnedOrigin = if ($null -ne $c) { $c } else { '' }
+        }
+        else {
+            if (-not (Test-JiraConnectionPin -ConfigDir $ConfigDir -Declared $env:SPEC_KIT_JIRA_BASE_URL)) {
+                return [int] $script:ExitConfig
+            }
+            $script:PinnedOrigin = $script:PinDeclared
+        }
+    }
+    # Hand the verified destination to the credential producer (C6.1). The
+    # dependency runs Config -> Credentials, never the reverse: the producer
+    # owns its own refusal so a caller cannot bypass it by forgetting to ask.
+    # Guarded, because this module is loadable without the credential module.
+    if (Get-Command -Name Set-JiraCredentialPinnedOrigin -ErrorAction SilentlyContinue) {
+        Set-JiraCredentialPinnedOrigin -Origin $script:PinnedOrigin
     }
 
     # A present personal.yml is validated UNCONDITIONALLY (C6.2: "a malformed
@@ -1847,4 +2080,5 @@ Export-ModuleMember -Function Get-JiraConfigDirPath, Resolve-JiraConfigDir, Get-
     Test-JiraPlaceholderKey, Get-JiraPlaceholderKey, `
     Get-JiraHookEventNameList, Get-JiraAfterEventNameList, Get-JiraHooksDisabled, Add-JiraHooksDisabled, Remove-JiraHooksDisabled, `
     Get-CfgLocalPath, Get-CfgLocalObject, Get-JiraRoleNameList, Get-JiraFieldDefaultsFor, `
+    Test-JiraConnectionPin, Get-JiraConnectionPinStatus, Get-JiraConnectionPinMessage, Get-JiraPinnedOrigin, Get-JiraPinEnvSupplied, Test-JiraCeremonyPin, `
     Get-JiraFieldDefaultsYaml, Get-JiraTaskMirrorFor, Get-JiraTaskMirrorYaml

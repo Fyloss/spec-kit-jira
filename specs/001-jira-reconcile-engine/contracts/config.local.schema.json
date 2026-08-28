@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://spec-kit-jira/contracts/config.local.schema.json",
   "title": "Local Binding (config.local.yml)",
-  "description": "Gitignored personal overrides and instance-specific resolved ids at .specify/jira/config.local.yml. NEVER contains a credential (secrets resolve only via NFR-3). Validation MUST reject any credential-shaped value (FR-023): ATATT prefix, a real *.atlassian.net host, email/token shapes. The real site URL is a coordinate and is NOT stored here; only a non-secret alias is. Never destroyed by reinstall/upgrade (FR-020). Presented as JSON Schema; the on-disk file is YAML.",
+  "description": "Gitignored personal overrides and instance-specific resolved ids at .specify/jira/config.local.yml. NEVER contains a credential (secrets resolve only via NFR-3). Validation MUST reject any credential-shaped value (FR-023): ATATT prefix, a real *.atlassian.net host, email/token shapes. The real site URL is a coordinate and is NOT stored here; only a non-secret alias is. Never destroyed by reinstall/upgrade (FR-020). Presented as JSON Schema; the on-disk file is YAML. (032: bound_site is the single exception — see its own description.)",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -10,10 +10,16 @@
       "type": "string",
       "description": "A non-secret human alias for the instance (e.g. 'prod'). The real site URL is resolved at runtime and never persisted here."
     },
+    "bound_site": {
+      "type": "string",
+      "description": "032: the Jira ORIGIN (scheme + host + port, canonical) this checkout is bound to. Written by the configuration ceremony from the site it actually reached; compared before the first request of every later run, which refuses when config.yml declares a different one. This is the third narrow exemption to the credential-shape guard (Constitution IV/V, v3.0.0) and it is per-key: a real site host is still refused at every OTHER key of this file. Distinct from site_alias, which keeps its meaning above and is neither read nor written by this mechanism."
+    },
     "resolved_ids": {
       "type": "object",
       "description": "Instance-specific id resolutions cached locally when the team chooses not to commit them.",
-      "additionalProperties": { "type": "string" }
+      "additionalProperties": {
+        "type": "string"
+      }
     },
     "overrides": {
       "type": "object",
