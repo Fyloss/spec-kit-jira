@@ -1,0 +1,24 @@
+base_url: "https://a.b.."
+# Team config combining the 002 US3 teams: catalogue (feature.sh's
+# designator resolution) with a company-managed project a reconcile can
+# actually mirror against (027, T106).
+projects:
+  - key: IJT
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+    hierarchy:
+      specification: Epic
+      story: Story
+    halted_statuses:
+      - Done
+routing_default: IJT
+teams:
+  - id: ijt
+    project: IJT
+    folder_prefix: "ijt-"
+    branch_pattern: "ijt-<ID>/<FEATURE_NAME>"
+privacy:
+  allowlist: []

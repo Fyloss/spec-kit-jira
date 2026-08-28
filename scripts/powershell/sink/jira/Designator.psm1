@@ -8,7 +8,11 @@
 
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path $PSScriptRoot '../../lib/Output.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../../lib/Output.psm1')
+# 032 — the one origin grammar (C1); this module owned a second one until then.
+# No -Force: forcing a lib dependency from a sink module reimports it into the
+# caller's scope and clobbers state the caller already holds.
+Import-Module (Join-Path $PSScriptRoot '../../lib/UrlOrigin.psm1') -Force
 
 function Get-JiraDesignatorKey {
     <#
@@ -64,50 +68,26 @@ function Get-JiraDesignatorUrlCandidate {
     return $null
 }
 
-function Get-JiraDesignatorUrlPart {
-    <#
-    .SYNOPSIS
-      Prints scheme/host/port. Mirror of _desig_url_parts. Returns $null
-      when <Url> carries no scheme.
-    #>
-    param([Parameter(Mandatory)] [string] $Url)
-    if ($Url -match '^([a-zA-Z][a-zA-Z0-9+.-]*)://([^/?#]+)') {
-        $scheme = $Matches[1].ToLowerInvariant()
-        $hostport = $Matches[2]
-        $host_ = $hostport
-        $port = ''
-        if ($hostport.Contains(':')) {
-            $parts = $hostport.Split(':', 2)
-            $host_ = $parts[0]
-            $port = $parts[1]
-        }
-        return [pscustomobject]@{ Scheme = $scheme; Host = $host_; Port = $port }
-    }
-    return $null
-}
-
 function Test-JiraDesignatorHostMatch {
     <#
     .SYNOPSIS
       §4: compare scheme, host (case-insensitively, minus one trailing
       dot), and port (after the scheme's default). Mirror of
       designator_host_match.
+    .NOTES
+      032: the parsing and comparison this function owned now live in
+      lib/UrlOrigin.psm1, which is where the connection chokepoint can also
+      reach them (Constitution VIII forbids lib/ depending on sink/).
+      Delegating rather than keeping a second copy closed two measured
+      cross-port divergences that lived here — TrimEnd('.') stripped every
+      trailing dot where bash stripped one, and ToLowerInvariant() folded
+      U+0130 differently — plus a Split(':', 2) that broke a bracketed IPv6
+      authority. That last one was equally wrong in bash, which is why the
+      corpus never noticed it.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Url, [Parameter(Mandatory)] [string] $BaseUrl)
-    $u = Get-JiraDesignatorUrlPart -Url $Url
-    $b = Get-JiraDesignatorUrlPart -Url $BaseUrl
-    if (-not $u -or -not $b) { return $false }
-    $uHost = $u.Host.TrimEnd('.').ToLowerInvariant()
-    $bHost = $b.Host.TrimEnd('.').ToLowerInvariant()
-    if ($u.Scheme -ne $b.Scheme) { return $false }
-    if ($uHost -ne $bHost) { return $false }
-    $defaultPort = ''
-    if ($u.Scheme -eq 'https') { $defaultPort = '443' }
-    elseif ($u.Scheme -eq 'http') { $defaultPort = '80' }
-    $uPort = if ($u.Port) { $u.Port } else { $defaultPort }
-    $bPort = if ($b.Port) { $b.Port } else { $defaultPort }
-    return ($uPort -eq $bPort)
+    return (Test-JiraUrlOriginEqual -First $Url -Second $BaseUrl)
 }
 
 function Resolve-JiraDesignator {

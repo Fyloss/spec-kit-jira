@@ -14,6 +14,8 @@ _JIRA_SINK_DESIGNATOR=1
 _designator_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${_designator_dir}/../../lib/output.sh"
+# shellcheck source=/dev/null
+source "${_designator_dir}/../../lib/url_origin.sh" # 032 — the one origin grammar (C1); this module owned a second one until then
 
 # _desig_trim <string> — strip leading and trailing whitespace, fork-free
 # (docs/11-process-budget.md).
@@ -114,49 +116,20 @@ designator_reduce_url_candidate() {
   return 1
 }
 
-# _desig_url_parts <url> — prints "scheme host port" (space-separated; port
-# empty when unspecified); returns 1 when <url> does not carry a scheme.
-_desig_url_parts() {
-  local url="$1"
-  if [[ "${url}" =~ ^([a-zA-Z][a-zA-Z0-9+.-]*)://([^/?#]+) ]]; then
-    local scheme="${BASH_REMATCH[1],,}" hostport="${BASH_REMATCH[2]}" host port=""
-    if [[ "${hostport}" == *:* ]]; then
-      host="${hostport%%:*}"
-      port="${hostport#*:}"
-    else
-      host="${hostport}"
-    fi
-    printf '%s %s %s' "${scheme}" "${host}" "${port}"
-    return 0
-  fi
-  return 1
-}
-
 # designator_host_match <url> <base-url> — §4: compare scheme, host
-# (case-insensitively, minus one trailing dot), and port (after the
-# scheme's default). A path prefix on <base-url> is ignored. Returns 0 on a
-# match.
+# (case-insensitively, minus one trailing dot), and port (after the scheme's
+# default). A path prefix on <base-url> is ignored. Returns 0 on a match.
+#
+# 032: the parsing and comparison this function owned now live in
+# lib/url_origin.sh, which is where the connection chokepoint can also reach
+# them (Constitution VIII forbids lib/ depending on sink/). Delegating rather
+# than keeping a second copy closed two measured cross-port divergences that
+# lived here — a trailing dot stripped once in bash and repeatedly in
+# PowerShell, and a case fold that disagreed on U+0130 — plus a bracketed IPv6
+# authority that both ports split at the first colon and so parsed to garbage
+# equally, which is why the corpus never noticed.
 designator_host_match() {
-  local us bs
-  us="$(_desig_url_parts "$1")" || return 1
-  bs="$(_desig_url_parts "$2")" || return 1
-  local u_scheme u_host u_port b_scheme b_host b_port
-  read -r u_scheme u_host u_port <<< "${us}"
-  read -r b_scheme b_host b_port <<< "${bs}"
-  u_host="${u_host%.}"
-  b_host="${b_host%.}"
-  u_host="${u_host,,}"
-  b_host="${b_host,,}"
-  [[ "${u_scheme}" == "${b_scheme}" ]] || return 1
-  [[ "${u_host}" == "${b_host}" ]] || return 1
-  local default_port=""
-  case "${u_scheme}" in
-    https) default_port=443 ;;
-    http) default_port=80 ;;
-  esac
-  [[ -z "${u_port}" ]] && u_port="${default_port}"
-  [[ -z "${b_port}" ]] && b_port="${default_port}"
-  [[ "${u_port}" == "${b_port}" ]]
+  url_origin_equal "$1" "$2"
 }
 
 # designator_classify <role> <raw> <base-url> — the single-designator
