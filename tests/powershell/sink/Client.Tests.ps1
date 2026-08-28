@@ -25,11 +25,17 @@ Describe 'Jira REST transport' {
         $env:JIRA_EMAIL = $null
         $env:JIRA_API_TOKEN = $null
         $env:JIRA_NO_SLEEP = $null
+        $env:SPEC_KIT_JIRA_BASE_URL = $null
         $env:JIRA_MAX_ATTEMPTS = $null
     }
 
     It 'GET returns exit code 0 and the response body on success' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'default.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $r = Invoke-JiraRequest -Method GET -Url "$($mock.BaseUrl)/rest/api/3/project/COMP"
             $r.ExitCode | Should -Be 0
@@ -39,6 +45,11 @@ Describe 'Jira REST transport' {
 
     It 'POST returns exit code 0 and the created-issue body (201)' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'default.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $r = Invoke-JiraRequest -Method POST -Url "$($mock.BaseUrl)/rest/api/3/issue" -Body '{"fields":{}}'
             $r.ExitCode | Should -Be 0
@@ -48,6 +59,11 @@ Describe 'Jira REST transport' {
 
     It 'T043 [030, C6.2/C6.3]: no credential resolvable maps to the auth exit code AND reports the reason, never silent' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'default.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $env:JIRA_API_TOKEN = $null
             $se = [System.IO.StringWriter]::new()
@@ -65,6 +81,11 @@ Describe 'Jira REST transport' {
 
     It '401 maps to the auth exit code (3), zero body' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'faults.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $r = Invoke-JiraRequest -Method GET -Url "$($mock.BaseUrl)/rest/api/3/project/AUTH"
             $r.ExitCode | Should -Be 3
@@ -74,6 +95,11 @@ Describe 'Jira REST transport' {
 
     It '404 maps to the fail-closed exit code (2), zero body' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'faults.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $r = Invoke-JiraRequest -Method GET -Url "$($mock.BaseUrl)/rest/api/3/project/MISSING"
             $r.ExitCode | Should -Be 2
@@ -83,6 +109,11 @@ Describe 'Jira REST transport' {
 
     It 'a dropped connection (network fault) maps to fail-closed (2)' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'faults.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $r = Invoke-JiraRequest -Method GET -Url "$($mock.BaseUrl)/rest/api/3/project/NET"
             $r.ExitCode | Should -Be 2
@@ -91,6 +122,11 @@ Describe 'Jira REST transport' {
 
     It '429 retries honouring Retry-After then exhausts to fail-closed (2)' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'faults.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $env:JIRA_MAX_ATTEMPTS = '3'
             $r = Invoke-JiraRequest -Method GET -Url "$($mock.BaseUrl)/rest/api/3/project/RATE"
@@ -102,6 +138,11 @@ Describe 'Jira REST transport' {
 
     It 'never emits the token on the verbose stream (NFR-3, SC-007)' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'default.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $tmp = New-TemporaryFile
             Invoke-JiraRequest -Method GET -Url "$($mock.BaseUrl)/rest/api/3/project/COMP" -Verbose 4> $tmp.FullName | Out-Null

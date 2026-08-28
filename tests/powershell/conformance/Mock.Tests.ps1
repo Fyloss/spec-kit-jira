@@ -10,6 +10,11 @@ BeforeAll {
 Describe 'Mocked Jira double' {
     It 'serves company-managed project discovery' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'default.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $r = Invoke-RestMethod -Uri "$($mock.BaseUrl)/rest/api/3/project/COMP"
             $r.style | Should -Be 'classic'
@@ -18,6 +23,11 @@ Describe 'Mocked Jira double' {
 
     It 'serves team-managed project discovery down the next-gen path' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'default.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $r = Invoke-RestMethod -Uri "$($mock.BaseUrl)/rest/api/3/project/TEAM"
             $r.style | Should -Be 'next-gen'
@@ -26,6 +36,11 @@ Describe 'Mocked Jira double' {
 
     It 'injects a 401 for the AUTH project' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'faults.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $code = $null
             try { Invoke-RestMethod -Uri "$($mock.BaseUrl)/rest/api/3/project/AUTH" | Out-Null }
@@ -36,6 +51,11 @@ Describe 'Mocked Jira double' {
 
     It 'injects a network fault by dropping the connection' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'faults.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             { Invoke-RestMethod -Uri "$($mock.BaseUrl)/rest/api/3/project/NET" -TimeoutSec 5 } | Should -Throw
         } finally { Stop-JiraMock -Mock $mock }
@@ -43,6 +63,11 @@ Describe 'Mocked Jira double' {
 
     It 'records the API call sequence' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'default.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             Invoke-RestMethod -Uri "$($mock.BaseUrl)/rest/api/3/project/COMP" | Out-Null
             (Get-JiraMockCallLog -Mock $mock) -join "`n" | Should -Match 'GET /rest/api/3/project/COMP'

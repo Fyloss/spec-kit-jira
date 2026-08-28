@@ -31,6 +31,11 @@ Describe 'Fail-closed writes' {
 
     It 'a 401 write fails closed with the auth exit code (3)' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'faults.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $actions = ConvertTo-Json -InputObject @((New-Put $mock.BaseUrl 'AUTH-1')) -Depth 10
             Invoke-JiraApplyWriteSet -ActionsJson $actions | Should -Be 3
@@ -39,6 +44,11 @@ Describe 'Fail-closed writes' {
 
     It 'a 404 write fails closed (2)' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'faults.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $actions = ConvertTo-Json -InputObject @((New-Put $mock.BaseUrl 'MISSING-1')) -Depth 10
             Invoke-JiraApplyWriteSet -ActionsJson $actions | Should -Be 2
@@ -47,6 +57,11 @@ Describe 'Fail-closed writes' {
 
     It 'a dropped connection fails closed (2)' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'faults.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $actions = ConvertTo-Json -InputObject @((New-Put $mock.BaseUrl 'NET-1')) -Depth 10
             Invoke-JiraApplyWriteSet -ActionsJson $actions | Should -Be 2
@@ -55,6 +70,11 @@ Describe 'Fail-closed writes' {
 
     It 'an exhausted 429 fails closed (2)' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'faults.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $env:JIRA_MAX_ATTEMPTS = '3'
             $actions = ConvertTo-Json -InputObject @((New-Put $mock.BaseUrl 'RATE-1')) -Depth 10
@@ -64,6 +84,11 @@ Describe 'Fail-closed writes' {
 
     It 'a fault aborts the remaining writes — the second action is never attempted' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'faults.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $actions = ConvertTo-Json -InputObject @((New-Put $mock.BaseUrl 'AUTH-1'), (New-Put $mock.BaseUrl 'COMP-9')) -Depth 10
             Invoke-JiraApplyWriteSet -ActionsJson $actions | Should -Be 3
