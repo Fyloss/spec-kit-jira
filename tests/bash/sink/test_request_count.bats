@@ -91,6 +91,18 @@ _run_with_timing() {
 @test "T013: with the counter file unwritable, the run's outcome is unaffected (V5, fail-open)" {
   ROOT2="${ROOT}"
   LIB="${ROOT2}/scripts/bash"
+  RCFILE="${BATS_TEST_TMPDIR}/rc"
+  # V5 claims one thing: a counting failure does not change the RUN'S OUTCOME.
+  # The outcome is the exit status, so that is what is asserted — written to a
+  # file by the subshell itself rather than parsed out of merged stdout+stderr.
+  #
+  # The previous form matched `"${output}" == "survived rc=0"*`, anchored on the
+  # PREFIX of the two streams combined. That conflates "the outcome is right"
+  # with "nothing else printed anything", so any diagnostic on stderr — from
+  # this code or from the environment — reddened it while the outcome was fine.
+  # It passed on macOS, under Linux bash, under bats 1.10, and in a full local
+  # suite of the same 2599 tests, and failed only on the CI runner: exactly the
+  # signature of an assertion measuring something other than its subject.
   run bash -c '
     source "'"${LIB}"'/lib/cli.sh"
     source "'"${LIB}"'/lib/credentials.sh"
@@ -98,13 +110,18 @@ _run_with_timing() {
     _JIRA_REQUEST_COUNT_FILE="/nonexistent-dir-xyz/count.log"
     curl() { printf "%s" "200"; }
     export -f curl
-    # 032, C6.4 — as above.
+    # 032, C6.4 — declare the destination the way the connection chokepoint
+    # does in production; without it the credential producer rightly refuses.
     export SPEC_KIT_JIRA_BASE_URL="https://example.invalid"
     JIRA_EMAIL=user@example.com JIRA_API_TOKEN=tok jira_request GET "https://example.invalid/x" > /dev/null
-    printf "survived rc=%s count=%s" "$?" "$(jira_request_count)"
+    printf "%s" "$?" > "'"${RCFILE}"'"
+    printf "count=%s" "$(jira_request_count)"
   '
   [ "${status}" -eq 0 ]
-  [[ "${output}" == "survived rc=0"* ]]
+  # The outcome itself: unchanged by the counter being unwritable.
+  [ "$(cat "${RCFILE}")" -eq 0 ]
+  # And the counter fails open rather than erroring.
+  [[ "${output}" == *"count=0"* ]]
 }
 
 @test "T013: an unprimed counter file reads as zero rather than erroring" {
