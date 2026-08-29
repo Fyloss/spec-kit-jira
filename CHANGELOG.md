@@ -7,6 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-29
+
+### ⚠ BREAKING CHANGES
+
+- **The Jira destination is now pinned, and an existing installation refuses its
+  first reconcile until you re-run the configuration ceremony once.** The
+  configuration ceremony records the site it actually reached in the gitignored
+  `.specify/jira/config.local.yml`, and every later run compares the site
+  `config.yml` declares against that record before its first request. An
+  installation configured before this release has no record, so it cannot verify
+  what `config.yml` asks for:
+
+  > `config: this checkout records no bound Jira destination, so the one this
+  > repository declares (https://your-site.atlassian.net) cannot be verified.
+  > Zero requests issued, nothing written. Run /speckit.jira-mirror.config once
+  > to bind it`
+
+  **Migration — one command, no new question asked:**
+
+  ```sh
+  /speckit.jira-mirror.config
+  ```
+
+  The ceremony already contacts Jira to resolve ids, so the site it reached is
+  recorded at no extra cost to you. Adopting whatever `config.yml` currently says
+  would defeat the point: that value is exactly what an incoming change controls.
+
+  **When your site legitimately changes** — a real migration — re-running the
+  ceremony is deliberately *not* enough to accept it, because otherwise the
+  refusal's own printed instruction would be the way around it. Name the new
+  destination:
+
+  ```sh
+  /speckit.jira-mirror.config --accept-site https://your-new-site.atlassian.net
+  ```
+
+  A destination supplied through `SPEC_KIT_JIRA_BASE_URL` is exempt from all of
+  this and is never recorded: an environment variable is typed by the operator
+  and cannot be introduced by a pull request.
+
+### Security
+
+- **A committed `base_url` could redirect your Jira credential to any host.**
+  `base_url` lives in the committed `.specify/jira/config.yml` by design, and its
+  only validation constrained the scheme — never the host — while the transport
+  attached `Authorization: Basic base64(email:token)` to every URL
+  unconditionally. A contributor could open a pull request whose only change was
+  that one line, naming a host they control; a maintainer who checked the branch
+  out and ran any spec-kit command shipped a live Jira API token to it. Nothing
+  required an explicit action, because the lifecycle hooks are registered
+  non-optional, and nothing printed the resolved host, so the redirection was
+  silent.
+
+  The pin closes it: a mismatch, an absent record or a malformed one refuses with
+  exit 4, zero requests and zero writes, naming both the declared origin and the
+  bound one. Defence in depth, the credential itself is now withheld for any
+  destination the run did not verify, so a future call site that builds its own
+  URL cannot obtain it by forgetting to ask.
+
+### Added
+
+- `--accept-site <origin>` on `/speckit.jira-mirror.config`, the deliberate
+  gesture that accepts a changed destination by naming it.
+- `bound_site` in `.specify/jira/config.local.yml`, the record of the origin this
+  checkout is bound to. It is distinct from the existing `site_alias`, which
+  keeps its meaning and is left untouched.
+
+### Fixed
+
+- **Three cross-port divergences in designator host comparison**, all reachable
+  from a URL-form designator and all pre-dating this release. A trailing dot was
+  stripped once by the Bash port and repeatedly by the PowerShell one, so
+  `https://a.b../x` was refused on one port and accepted on the other; the two
+  case folds disagreed on `U+0130`, so a host containing it compared differently
+  per port; and a bracketed IPv6 authority such as `http://[::1]:8080` was split
+  on the first colon by both ports, parsing to a host of `[` — equally wrong on
+  each side, which is why the conformance corpus never caught it. Parsing now
+  lives in one implementation shared by both ports.
+- **An empty `.specify/jira/config.local.yml` crashed the configuration ceremony
+  on the PowerShell port.** The Bash port treated the same file as empty and
+  proceeded.
+
 ## [0.21.0] - 2026-08-27
 
 ### Changed
@@ -1429,7 +1511,8 @@ First public release.
 repair_hint?}`, and the contract documents the `actions`, `warnings`, and
   `notes` fields the summary carries (FR-033, FR-047).
 
-[Unreleased]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.20.3...v0.21.0
 [0.20.3]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.20.2...v0.20.3
 [0.20.2]: https://github.com/Fyloss/spec-kit-jira-mirror/compare/v0.20.1...v0.20.2

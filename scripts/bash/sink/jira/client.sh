@@ -184,7 +184,10 @@ jira_request() {
     # itself, to stderr, before it returns — this call site only needs to map
     # the failure to the auth exit code, not construct the message.
     local cfg
-    if ! cfg="$(cred_curl_config "${email}")"; then
+    # 032, C6.1 — the destination travels with the request so the producer can
+    # refuse an unbound one. Passing it here is what makes the guarantee
+    # structural rather than a convention every future call site must remember.
+    if ! cfg="$(cred_curl_config "${email}" "${url}")"; then
       rc="$(cli_exit_code auth)"
       break
     fi

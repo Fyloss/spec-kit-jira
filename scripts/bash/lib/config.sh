@@ -47,6 +47,8 @@ config_key_is_placeholder() {
 _CONFIG_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${_CONFIG_LIB_DIR}/output.sh"   # json_canonical (byte-parity serialiser)
+# shellcheck source=/dev/null
+source "${_CONFIG_LIB_DIR}/url_origin.sh" # 032 — the destination pin compares origins (C1)
 
 # =============================================================================
 # Version single-source (T032, FR-021/FR-022)
@@ -1017,8 +1019,10 @@ def loopback_http: test("^http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:[0-9]+)?
 # kcov-excl-start — jq literal (string lines are not statements)
 _CFG_LOCAL_ERRORS_JQ='
 [
-  (keys_unsorted[] | select(IN("site_alias","resolved_ids","overrides","hooks")|not)
+  (keys_unsorted[] | select(IN("site_alias","bound_site","resolved_ids","overrides","hooks")|not)
    | "unknown config.local key: \(.)"),
+  (if has("bound_site") and ((.bound_site|type) != "string")
+   then "bound_site must be a string" else empty end),
   (if has("hooks") then
      ( .hooks
        | ( (if (type) != "object" then "hooks must be a mapping" else empty end),
@@ -1545,7 +1549,14 @@ config_load() {
     # See the identical guard on team_json above — an empty config.local.yml
     # is a normal, common state (nothing has been resolved locally yet).
     [[ "${local_json}" == "null" ]] && local_json="{}"
-    printf '%s' "${local_json}" | _cfg_credential_errors | _cfg_report_errors "credential" "${local_f}" || return "${EXIT_CONFIG}"
+    # `bound_site` is exempt, and it alone (032, C2.5; Constitution IV/V third
+    # narrow exemption, v3.0.0). It holds the origin this checkout is bound to,
+    # which is a site coordinate by construction — the guard would otherwise
+    # refuse every Atlassian Cloud record and make the configuration
+    # permanently unloadable. The exemption is per-key and per-layer: every
+    # other key of this file is still scanned, which is what
+    # us030-guard-not-a-hole asserts.
+    printf '%s' "${local_json}" | _cfg_credential_errors "bound_site" | _cfg_report_errors "credential" "${local_f}" || return "${EXIT_CONFIG}"
     printf '%s' "${local_json}" | _cfg_schema_errors "${_CFG_LOCAL_ERRORS_JQ}" | _cfg_report_errors "schema" "${local_f}" || return "${EXIT_CONFIG}"
     # Recursive object merge of the local `overrides` over the team config. jq's
     # `*` replaces ARRAYS wholesale, which would silently DROP every project the
@@ -1608,8 +1619,167 @@ config_load() {
 # there, unconditionally (contract C3.4: every OTHER caller — seed/mention/
 # reconcile/config, all of which reach the network — omits this argument and
 # gets the full, unconditional config_personal_load validation below).
+# --- 032: the destination pin (contracts/origin-pinning.md §C4) --------------
+#
+# The outcome of the comparison, as a STATUS rather than a message (C4.6).
+# Callers compose the operator-facing text themselves, because reconcile's
+# chokepoint call site replaces whatever the library would have said with its
+# own generic line — a message composed here would be lost on exactly the path
+# a lifecycle hook takes.
+_CFG_PIN_STATUS="proceed"
+_CFG_PIN_DECLARED=""
+_CFG_PIN_RECORDED=""
+
+# _CFG_PINNED_ORIGIN — the origin this run is allowed to reach, in canonical
+# form. Set once by the gate; read per request by the credential producer
+# (C6.2) so it never re-reads or re-parses configuration. NOT exported: a child
+# process must not inherit it, the same rule the credential cache states for
+# itself.
+_CFG_PINNED_ORIGIN=""
+
+# _CFG_PIN_ENV_SUPPLIED — true when this run's destination came from the
+# environment rather than from config.yml. FR-011 exempts such a destination
+# from the comparison AND forbids recording it: the environment is per-shell
+# and per-invocation, so a record made from it would bind the checkout to
+# whatever happened to be exported that once. The conformance harness exports
+# the mock's ephemeral origin exactly this way, which is how recording it
+# unconditionally was caught — two runs produced two ports, and the corpus
+# stopped being byte-identical.
+_CFG_PIN_ENV_SUPPLIED=false
+
+# config_pin_env_supplied — "true"/"false" for the current run.
+config_pin_env_supplied() {
+  printf '%s' "${_CFG_PIN_ENV_SUPPLIED}"
+}
+
+# config_pin_evaluate <config-dir> <declared-url> — set _CFG_PIN_STATUS to
+# proceed | mismatch | absent | malformed, and _CFG_PIN_DECLARED /
+# _CFG_PIN_RECORDED to the canonical forms involved. Returns 0 on proceed,
+# non-zero otherwise. Spawns nothing beyond the local-layer read the caller
+# would perform anyway (C4.2).
+config_pin_evaluate() {
+  local dir="$1" declared="$2" local_json recorded declared_canon
+  _CFG_PIN_STATUS="proceed"
+  _CFG_PIN_DECLARED=""
+  _CFG_PIN_RECORDED=""
+
+  if ! declared_canon="$(url_origin_canonical "${declared}")"; then
+    # An unparseable declared destination is not this gate's business — the
+    # base_url shape validator already refused it, earlier and with its own
+    # message. Saying so twice would be two errors for one defect.
+    return 0
+  fi
+  _CFG_PIN_DECLARED="${declared_canon}"
+
+  local_json="$(_cfg_local_json "${dir}")" || local_json='{}'
+  recorded="$(jq -r '.bound_site // ""' <<< "${local_json}")"
+
+  if [[ -z "${recorded}" ]]; then
+    _CFG_PIN_STATUS="absent"
+    return 1
+  fi
+
+  local recorded_canon
+  if ! recorded_canon="$(url_origin_canonical "${recorded}")" \
+    || [[ "${recorded_canon}" != "${recorded}" ]]; then
+    # Either it is not an origin at all, or it is one written in a
+    # non-canonical spelling. Both are `malformed`: a record we cannot compare
+    # byte-for-byte is a record we cannot trust, and guessing at the operator's
+    # intent is how a pin quietly stops pinning.
+    _CFG_PIN_STATUS="malformed"
+    return 1
+  fi
+  _CFG_PIN_RECORDED="${recorded_canon}"
+
+  if [[ "${declared_canon}" != "${recorded_canon}" ]]; then
+    _CFG_PIN_STATUS="mismatch"
+    return 1
+  fi
+  return 0
+}
+
+# config_pin_message <config-dir> — the located refusal for the current
+# _CFG_PIN_STATUS, on one line (C4.7-C4.9). Names destinations only; no portion
+# of the credential can appear here because none is read (C4.10).
+config_pin_message() {
+  local dir="${1:-${JIRA_CONFIG_DIR}}"
+  case "${_CFG_PIN_STATUS}" in
+    mismatch)
+      printf 'config: this repository asks to write to %s, but this checkout is bound to %s. Zero requests issued. If the new destination is legitimate, accept it by name: /speckit.jira-mirror.config --accept-site %s' \
+        "${_CFG_PIN_DECLARED}" "${_CFG_PIN_RECORDED}" "${_CFG_PIN_DECLARED}"
+      ;;
+    absent)
+      printf 'config: this checkout records no bound Jira destination, so the one this repository declares (%s) cannot be verified. Zero requests issued, nothing written. Run /speckit.jira-mirror.config once to bind it' \
+        "${_CFG_PIN_DECLARED}"
+      ;;
+    malformed)
+      printf 'config: bound_site in %s/config.local.yml is not a canonical origin, so this checkout has no destination to verify against. Zero requests issued, nothing written. Run /speckit.jira-mirror.config once to rewrite it' \
+        "${dir}"
+      ;;
+    *) ;;
+  esac
+}
+
+# config_pin_ceremony_check <config-dir> <declared-url> <accept-site> — the
+# binding ceremony's own gate (C3.7/C3.8). Runs BEFORE discovery, not at the
+# write site: the ceremony knows the declared destination and the recorded one
+# from the moment the chokepoint resolves the connection, so there is nothing
+# to learn from the network first. Checking early means a redirected ceremony
+# refuses without issuing the seven discovery requests it used to send before
+# saying no, and it puts this refusal where every other command's already is.
+#
+# The WRITE stays at the end of the ceremony, so the property that matters is
+# preserved: a destination is only ever recorded after it has actually been
+# reached.
+#
+# Returns 0 to proceed. On refusal, prints the located reason to stderr and
+# returns EXIT_CONFIG.
+config_pin_ceremony_check() {
+  local dir="$1" declared="$2" accept_site="$3"
+  local declared_canon local_json prior accepted
+
+  # An environment-supplied destination is exempt and is never recorded
+  # (FR-011), so there is nothing to compare.
+  [[ "$(config_pin_env_supplied)" == "true" ]] && return 0
+
+  declared_canon="$(url_origin_canonical "${declared}" 2> /dev/null)" || return 0
+  local_json="$(_cfg_local_json "${dir}")" || local_json='{}'
+  prior="$(jq -r '.bound_site // ""' <<< "${local_json}")"
+
+  # No record yet: this ceremony is the first bind, and gating it would mean
+  # nothing could ever be bound.
+  [[ -z "${prior}" ]] && return 0
+  [[ "${prior}" == "${declared_canon}" ]] && return 0
+
+  if [[ -z "${accept_site}" ]]; then
+    printf 'config: this repository asks to bind to %s, but this checkout is already bound to %s. Nothing recorded, zero requests issued. If the new destination is legitimate, accept it by name: /speckit.jira-mirror.config --accept-site %s\n' \
+      "${declared_canon}" "${prior}" "${declared_canon}" >&2
+    return "${EXIT_CONFIG}"
+  fi
+
+  accepted="$(url_origin_canonical "${accept_site}" 2> /dev/null)" || accepted=""
+  if [[ "${accepted}" != "${declared_canon}" ]]; then
+    printf 'config: --accept-site names %s but this repository declares %s. Nothing recorded — the destination you accept must be the one this repository asks for\n' \
+      "${accept_site}" "${declared_canon}" >&2
+    return "${EXIT_CONFIG}"
+  fi
+  return 0
+}
+
+# config_pinned_origin — the canonical origin this run verified, or empty when
+# the gate did not run (an environment-supplied destination, or the binding
+# ceremony). Read by the credential producer (C6.1).
+config_pinned_origin() {
+  printf '%s' "${_CFG_PINNED_ORIGIN}"
+}
+
 config_resolve_connection() {
   local dir="${1:-${JIRA_CONFIG_DIR}}" cfg="${2:-}" personal_json="${3:-}"
+  # 032, C3.1: the binding ceremony opts out BY ARGUMENT, never by this
+  # function detecting who called it. During the ceremony the destination is
+  # being learned, not verified — gating it would mean nothing could ever be
+  # bound.
+  local binding="${4:-false}"
   if [[ -z "${cfg}" ]]; then
     cfg='{}'
     if [[ -f "${dir}/config.yml" ]]; then
@@ -1617,10 +1787,38 @@ config_resolve_connection() {
     fi
   fi
 
+  # 032, C4.3: provenance must be captured HERE. Once the variable is seeded
+  # below, nothing downstream can tell an operator-typed destination from a
+  # file-supplied one, and the whole exemption turns on that distinction.
+  local env_supplied=false
+  [[ -n "${SPEC_KIT_JIRA_BASE_URL:-}" ]] && env_supplied=true
+  _CFG_PIN_ENV_SUPPLIED="${env_supplied}"
+
   if [[ -z "${SPEC_KIT_JIRA_BASE_URL:-}" ]]; then
     local base_url
     base_url="$(jq -r '.base_url // ""' <<< "${cfg}")"
     [[ -n "${base_url}" ]] && export SPEC_KIT_JIRA_BASE_URL="${base_url}"
+  fi
+
+  # The gate (C4.1/C4.4). An environment-supplied destination is exempt: the
+  # environment is operator-typed and unreachable from a pull request, which is
+  # the same ground on which Principle IV admits the credential retrieval
+  # command's name from there and nowhere else.
+  _CFG_PIN_STATUS="proceed"
+  _CFG_PINNED_ORIGIN=""
+  if [[ -n "${SPEC_KIT_JIRA_BASE_URL:-}" ]]; then
+    if [[ "${env_supplied}" == true || "${binding}" == true ]]; then
+      _CFG_PINNED_ORIGIN="$(url_origin_canonical "${SPEC_KIT_JIRA_BASE_URL}" 2> /dev/null)" || _CFG_PINNED_ORIGIN=""
+    else
+      config_pin_evaluate "${dir}" "${SPEC_KIT_JIRA_BASE_URL}" || return "${EXIT_CONFIG}"
+      _CFG_PINNED_ORIGIN="${_CFG_PIN_DECLARED}"
+    fi
+  fi
+  # Hand the verified destination to the credential producer (C6.1). The
+  # dependency runs config -> credentials, never the reverse: the producer owns
+  # its own refusal so a caller cannot bypass it by forgetting to ask.
+  if declare -F cred_pin_origin > /dev/null 2>&1; then
+    cred_pin_origin "${_CFG_PINNED_ORIGIN}"
   fi
 
   # A present personal.yml is validated UNCONDITIONALLY (C6.2: "a malformed

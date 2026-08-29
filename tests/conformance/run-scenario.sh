@@ -271,9 +271,13 @@ for ((i = 1; i <= RUN_COUNT; i++)); do
   if [ "${RUN_COUNT}" -gt 1 ] || [ "$(jq_lines '(.runs // []) | length' "${SCENARIO}")" -gt 0 ]; then
     # shellcheck disable=SC2016  # $i is a jq variable bound by --argjson, not a
     # shell expansion; shellcheck only recognises that for the literal name `jq`.
-    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq_lines -r --argjson i "$((i - 1))" '.runs[$i].argv[]? // empty' "${SCENARIO}")
+    # 032, T028 — the sentinel is substituted in argv too, not only in the
+    # fixture's config.yml. A scenario that has to NAME the mock's origin (the
+    # --accept-site gesture) cannot pre-bake an OS-assigned port; without this
+    # the positive half of SC-008 is unexpressible. A no-op when absent.
+    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq_lines -r --argjson i "$((i - 1))" '.runs[$i].argv[]? // empty' "${SCENARIO}" | sed "s|@MOCK_BASE_URL@|${MOCK_BASE_URL}|g")
   else
-    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq_lines -r '.argv[]? // empty' "${SCENARIO}")
+    while IFS= read -r arg; do ARGV+=("${arg}"); done < <(jq_lines -r '.argv[]? // empty' "${SCENARIO}" | sed "s|@MOCK_BASE_URL@|${MOCK_BASE_URL}|g")
   fi
 
   # `runs[i].before` (021, US2, T021) mutates WORKDIR immediately ahead of
@@ -288,7 +292,10 @@ for ((i = 1; i <= RUN_COUNT; i++)); do
     while IFS= read -r rel_path; do
       [ -z "${rel_path}" ] && continue
       mkdir -p "$(dirname "${WORKDIR}/${rel_path}")"
-      jq_lines -r --argjson i "$((i - 1))" --arg k "${rel_path}" '.runs[$i].before.write[$k]' "${SCENARIO}" > "${WORKDIR}/${rel_path}"
+      # 032, T028 — substitute the sentinel here as well, so a run can rewrite
+      # config.yml to point back at the mock. The fixture-copy substitution
+      # above runs once, before any `before.write` replaces the file.
+      jq_lines -r --argjson i "$((i - 1))" --arg k "${rel_path}" '.runs[$i].before.write[$k]' "${SCENARIO}" | sed "s|@MOCK_BASE_URL@|${MOCK_BASE_URL}|g" > "${WORKDIR}/${rel_path}"
     done < <(jq_lines -r --argjson i "$((i - 1))" '.runs[$i].before.write // {} | keys[]' "${SCENARIO}")
 
     while IFS= read -r rel_path; do

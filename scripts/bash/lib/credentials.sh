@@ -14,6 +14,31 @@
 [[ -n ${_JIRA_LIB_CREDENTIALS:-} ]] && return 0
 _JIRA_LIB_CREDENTIALS=1
 
+_credentials_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${_credentials_dir}/url_origin.sh" # 032 — compare the request's origin against the pinned one (C6.1)
+
+# 032, C6.1-C6.4 — the destination this process verified, canonical. Owned
+# HERE rather than read out of lib/config.sh, so the dependency runs
+# config -> credentials and never the other way: this module is the one that
+# must be able to refuse, and a producer that reaches into its caller for
+# permission is a producer that can be bypassed by a caller that forgets.
+#
+# NOT exported (C6.3): a spawned child must not inherit it, the same rule the
+# credential cache states for itself.
+#
+# Empty means the gate never ran for this process. The producer then refuses:
+# a call site that reached the transport without passing the gate does not get
+# a credential (C6.4).
+_CRED_PINNED_ORIGIN=""
+
+# cred_pin_origin <canonical-origin> — record the verified destination. Called
+# once by the connection chokepoint; a second call with a different value is
+# accepted, because the ceremony legitimately rebinds within one process.
+cred_pin_origin() {
+  _CRED_PINNED_ORIGIN="$1"
+}
+
 # Directory holding gitignored per-operator files (overridable for tests).
 : "${JIRA_CONFIG_DIR:=.specify/jira}"
 
@@ -212,7 +237,41 @@ cred_prime_cache() {
 # is what `sink/jira/client.sh` relies on to satisfy C6.1 without touching the
 # global itself.
 cred_curl_config() {
-  local email="$1"
+  local email="$1" url="${2:-}"
+  # 032, C6.1/C6.4 — refuse to produce an authorization value for a
+  # destination this process did not verify. This is defence in depth, not the
+  # gate: the gate at the connection chokepoint already refused, once, with a
+  # located message. What this adds is that a FUTURE call site building its own
+  # URL cannot get a credential by forgetting to ask. The check is two string
+  # comparisons against state the gate already computed — no re-read, no
+  # re-parse, no spawn (C6.2, docs/11-process-budget.md).
+  #
+  # A caller that passes no URL keeps the old behaviour, so the check cannot
+  # break a call site that has not been taught about it yet; every such site is
+  # still covered by the gate itself.
+  if [[ -n "${url}" ]]; then
+    local pinned="${_CRED_PINNED_ORIGIN}"
+    if [[ -z "${pinned}" && -n "${SPEC_KIT_JIRA_BASE_URL:-}" ]]; then
+      # No chokepoint ran in this process, but the destination came from the
+      # environment — which is the case FR-011 declares exempt, and for which
+      # the chokepoint itself would have pinned exactly this origin. Deriving
+      # it here keeps a directly-driven sink working without weakening
+      # anything: the attack this feature exists to stop is a destination
+      # declared in config.yml, and config.yml is read ONLY by the chokepoint.
+      # If no chokepoint ran, no file-supplied destination can be in play.
+      pinned="$(url_origin_canonical "${SPEC_KIT_JIRA_BASE_URL}" 2> /dev/null)" || pinned=""
+    fi
+    if [[ -z "${pinned}" ]]; then
+      _CRED_LAST_ERROR="credential withheld: this run verified no Jira destination, so no request may carry the operator's credential"
+      printf '%s\n' "${_CRED_LAST_ERROR}" >&2
+      return 1
+    fi
+    if ! url_origin_equal "${url}" "${pinned}"; then
+      _CRED_LAST_ERROR="credential withheld: this request targets a destination this checkout is not bound to"
+      printf '%s\n' "${_CRED_LAST_ERROR}" >&2
+      return 1
+    fi
+  fi
   local _xt=0
   case "$-" in *x*) _xt=1; set +x ;; esac
   local token basic rc=0

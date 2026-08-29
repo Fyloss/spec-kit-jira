@@ -12,6 +12,12 @@
 [[ -n ${_JIRA_LIB_CLI:-} ]] && return 0
 _JIRA_LIB_CLI=1
 
+# 032 — --accept-site shape-checks its value against the one origin grammar
+# (C1.9) rather than inventing a second one here.
+_cli_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${_cli_dir}/url_origin.sh"
+
 # Exit-code table (monotonically escalating — Constitution III). `:=` keeps
 # re-sourcing safe across modules.
 : "${EXIT_OK:=0}"
@@ -81,6 +87,7 @@ cli_field_answers_for() {
 cli_parse() {
   local command="" dry_run=false force=false json=false on_drift=abort
   local verbose=false help=false error="" use_team="" accept_defaults=false reuse=""
+  local accept_site=""
   local -a positional=() styles=() enable_hooks=() child_types=() issue_types=()
   local -a field_defaults=() field_values=()
   local -a task_mirrors=()
@@ -207,6 +214,24 @@ cli_parse() {
         else
           shift
           use_team="$1"
+        fi
+        ;;
+      --accept-site)
+        # 032, contract origin-pinning.md §C3.8: the deliberate acceptance of a
+        # destination that differs from the one this checkout is bound to. The
+        # operator must NAME the origin — replaying the refusal's printed
+        # instruction without it is not acceptance, which is the whole point of
+        # the flag (SC-008). Shape-checked here, as --style and --reuse are, so
+        # a value that is not an origin never reaches the ceremony.
+        if [[ $# -lt 2 ]]; then
+          error="--accept-site requires a value (--accept-site <origin>)"
+        else
+          shift
+          if url_origin_canonical "$1" > /dev/null 2>&1; then
+            accept_site="$1"
+          else
+            error="--accept-site requires an absolute origin such as https://example.atlassian.net"
+          fi
         fi
         ;;
       --reuse)
@@ -363,6 +388,7 @@ cli_parse() {
   printf 'stories=%s\n' "${stories_joined}"
   printf 'confirm=%s\n' "${confirm}"
   printf 'accept_defaults=%s\n' "${accept_defaults}"
+  printf 'accept_site=%s\n' "${accept_site}"
   printf 'args=%s\n' "${args_joined}"
   printf 'exit=%s\n' "${EXIT_OK}"
 }

@@ -85,10 +85,20 @@ flowchart LR
         R6["statuses — name to id"]
         R7["estimation_field_id"]
         R8["the operator's hook disable decisions"]
+        R9["bound_site — the origin this ceremony reached (032)"]
     end
 
     Local -->|"read on every reconcile"| Reconcile["reconcile plan context"]
 ```
+
+`bound_site` is the one entry the ceremony writes that is not discovered from
+Jira: it is the origin the ceremony itself reached, recorded so that every later
+run can refuse a `config.yml` that has since been pointed somewhere else (032).
+It is written only when the destination came from `config.yml` — an
+environment-supplied one is exempt and never recorded — and re-running the
+ceremony will **not** overwrite it with a different origin unless the operator
+names that origin with `--accept-site`. Without that rule the refusal's own
+"run the ceremony" instruction would be enough to accept a redirection.
 
 The serialisation is deterministic: a second run over an unchanged instance
 rewrites the file byte-for-byte identically. Each project's ids live under

@@ -81,7 +81,10 @@ function Invoke-JiraRequest {
     # A resolution failure here (030, C6.2/C6.3) is reported to stderr —
     # byte-identical to the Bash port's cred_curl_config, which reports it
     # itself rather than leaving this call site to construct the message.
-    $header = Get-JiraAuthHeader -Email $Email
+    # 032, C6.1 — the destination travels with the request so the producer can
+    # refuse an unbound one. Passing it here is what makes the guarantee
+    # structural rather than a convention every future call site must remember.
+    $header = Get-JiraAuthHeader -Email $Email -Url $Url
     if (-not $header) {
         [Console]::Error.WriteLine((Get-JiraCredentialLastError))
         return [pscustomobject]@{ Status = 0; Body = ''; ExitCode = (Get-JiraExitCode 'auth') }

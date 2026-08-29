@@ -1,6 +1,46 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 2.0.0 → 3.0.0 (MAJOR — one existing prohibition is narrowed. This is the
+same test 2.0.0 applied to itself: a guard that refuses a site coordinate at the local
+binding layer's new dedicated key satisfies 2.0.0 and violates 3.0.0, and one that admits
+it does the reverse. Behaviour that satisfies one version violates the other, which is
+the definition of a backward-incompatible governance change. MINOR was considered and
+rejected on exactly the ground 2.0.0 recorded: "nothing existing weakened or restated"
+does not hold when a prohibition acquires a new exception.)
+
+Modified principles:
+
+IV. Credential Security — Zero Tokens in the Tree, Ever
+  The closing prohibition acquires a THIRD narrow exemption: a Jira origin at the single
+  dedicated `bound_site` key of the GITIGNORED local binding layer. Rationale — the
+  bridge cannot refuse a destination it has no trustworthy record of, and the record can
+  only be trusted if it lives where a pull request cannot reach it. Every gitignored
+  layer is covered by this principle's own ban, so the record is impossible without this
+  exemption. Token, authentication email, and accountId remain banned everywhere without
+  exception, including test fixtures; a real site URL at any other key of that file, and
+  at every key of every other file, remains banned.
+
+V. Separation of Team Config / Local Binding / Secrets
+  (a) Layer 2 (local binding) gains the `bound_site` key in its stated contents.
+  (b) The enforcement test changes from "two narrow exemptions" to three, and still
+      requires proof that each shape is refused at every other key of its own file and
+      at every key of the other files. The per-key, per-layer character of the
+      exemptions is unchanged and is what keeps the guard a guard.
+
+Rejected alternative (recorded so it is not re-proposed): storing a one-way digest of the
+origin rather than the origin itself, which would need no amendment. The only digest
+primitive in the tree is file-based (`git hash-object`); hashing a short string requires a
+stdin-fed invocation, which is both a process spawn and a known cross-port divergence — a
+PowerShell pipe to a native command appends a newline, and the conformance corpus cannot
+detect it. It also forfeits the refusal message's ability to name the bound destination,
+and Principle XVI's readability.
+
+Templates requiring update: none — no template states the exemption count.
+Follow-up TODOs: none
+
+Previous report (2.0.0), retained:
+------------------------------------------------------------------------------
 Version change: 1.3.0 → 2.0.0 (MAJOR — two existing prohibitions are narrowed and a
 mandated resolution rung is removed. Every prior amendment qualified as MINOR on the
 stated ground that "nothing existing weakened or restated"; that ground does not hold
@@ -395,8 +435,12 @@ unaffected by any bridge failure.
 No token, authentication email, or accountId may ever enter a tracked file, including
 test fixtures. A Jira base URL MAY be declared at the single dedicated key of the
 committed team config: it is a team-wide coordinate that every team on the site resolves
-identically, it is not a secret, and it grants nothing without a token. Anywhere else —
-any other key, any other file, any test fixture — a real site URL remains forbidden.
+identically, it is not a secret, and it grants nothing without a token. A Jira origin MAY
+also be recorded at the single dedicated `bound_site` key of the GITIGNORED local binding
+layer, and there only: the bridge cannot refuse a destination it has no trustworthy record
+of, and that record is trustworthy only where a pull request cannot reach it. Anywhere
+else — any other key of either file, any other file, any test fixture — a real site URL
+remains forbidden.
 
 - Credentials MUST be resolved in this order, and in no other: environment variables →
   an operator-declared retrieval command. The second rung is an environment variable
@@ -456,7 +500,10 @@ Three strictly separate layers:
    developer re-declares. Whoever adopts it chooses knowingly that the hostname enters
    the repository's history and cannot be retracted from it.
 2. **Local binding, GITIGNORED** — `.specify/jira/config.local.yml`: personal
-   overrides, instance-specific resolved ids when the team chooses not to commit them.
+   overrides, instance-specific resolved ids when the team chooses not to commit them,
+   and the `bound_site` origin this checkout is bound to. The last is admitted here and
+   nowhere else because it is the value a redirected team config must be checked
+   against: a record an incoming change can rewrite proves nothing.
 3. **Per-operator config, GITIGNORED** — `.specify/jira/personal.yml`: the settings that
    differ for every person rather than for every machine — the operator's authentication
    email and their optional team selection. It MUST NEVER be committed and MUST NEVER
@@ -468,11 +515,12 @@ a reinstall or upgrade of the extension must never be able to destroy the user's
 configuration or hooks.
 
 **Enforcement test**: an upgrade/reinstall test asserts config and hooks survive intact;
-schema validation rejects any credential-shaped value in every YAML layer. The two
-narrow exemptions — a site coordinate at the team config's base-URL key, an email at the
-per-operator config's email key — are per-key and per-layer: a test proves that each of
-those shapes is still refused at every other key of its own file and at every key of the
-other files, and that a token shape is refused everywhere without exception.
+schema validation rejects any credential-shaped value in every YAML layer. The three
+narrow exemptions — a site coordinate at the team config's base-URL key, an origin at the
+local binding's `bound_site` key, an email at the per-operator config's email key — are
+per-key and per-layer: a test proves that each of those shapes is still refused at every
+other key of its own file and at every key of the other files, and that a token shape is
+refused everywhere without exception.
 
 ### VI. macOS / Linux / Windows Portability
 
@@ -756,4 +804,4 @@ whose review requires verbal explanations to be understood fails this principle.
 - Every PR review verifies compliance with all sixteen principles; any deviation MUST
   be justified in the plan's "Complexity Tracking" section or the PR is rejected.
 
-**Version**: 2.0.0 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-08-18
+**Version**: 3.0.0 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-08-28

@@ -30,10 +30,16 @@ Describe 'the request counter is shared across every module that imports Client.
         $env:JIRA_EMAIL = $null
         $env:JIRA_API_TOKEN = $null
         $env:JIRA_NO_SLEEP = $null
+        $env:SPEC_KIT_JIRA_BASE_URL = $null
     }
 
     It 'a request issued through DuplicateProbe.psm1 is visible to Get-JiraRequestCount, alongside a direct one' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'default.json')
+        # 032, C6.4 — declare the destination the way production does. The
+        # connection chokepoint sets this variable before any request; a suite
+        # that drives the transport directly must stand in for it, or the
+        # credential producer rightly refuses a destination nothing verified.
+        $env:SPEC_KIT_JIRA_BASE_URL = $mock.BaseUrl
         try {
             $before = Get-JiraRequestCount
             Invoke-JiraRequest -Method GET -Url "$($mock.BaseUrl)/rest/api/3/project/COMP" | Out-Null

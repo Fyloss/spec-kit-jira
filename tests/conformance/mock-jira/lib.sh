@@ -134,6 +134,16 @@ _mock_start_pwsh() {
   # holds one open blocks whoever reads the other end until it dies — bats' fd
   # 3, a `run` pipe, or kcov's trace pipe, which is how the Bash coverage job
   # spent a whole CI step waiting for an EOF that could not arrive.
+  #
+  # fd 8 is that trace pipe (tests/coverage/bash-coverage.sh TRACE_FD), and it
+  # is NOT closed here — deliberately, after trying. Adding `8>&-` to this line
+  # made the pwsh mock segfault on the ubuntu runner ("Segmentation fault (core
+  # dumped)" naming this exact command), reddening us1-tasks-create, a scenario
+  # unrelated to any of it. The cause was not established; what is established
+  # is that this line is on the hot path of EVERY conformance run, so trading a
+  # coverage-job hang for corpus-wide instability is the wrong trade. The hang
+  # is contained instead by the bounded drain in bash-coverage.sh, which turns
+  # a silent 350-minute burn into a fast, named failure.
   pwsh "${args[@]}" < /dev/null > "${MOCK_TMPDIR}/mock.out" 2> "${MOCK_TMPDIR}/mock.err" 3>&- &
   MOCK_PID=$!
 

@@ -1182,6 +1182,9 @@ YAML
 @test "T022 — sets SPEC_KIT_JIRA_BASE_URL from config.yml when unset" {
   write_valid_team
   printf 'base_url: "https://team.atlassian.net"\n' >> "${DIR}/config.yml"
+  # 032 — a file-supplied destination now meets the pin, so this checkout has
+  # to be bound to it or the gate refuses before the variable is ever seeded.
+  printf 'bound_site: "https://team.atlassian.net"\n' > "${DIR}/config.local.yml"
   unset SPEC_KIT_JIRA_BASE_URL
   JIRA_CONFIG_DIR="${DIR}" config_resolve_connection "${DIR}"
   [ "${SPEC_KIT_JIRA_BASE_URL}" = "https://team.atlassian.net" ]
@@ -1200,6 +1203,9 @@ YAML
 @test "T022 — treats an empty SPEC_KIT_JIRA_BASE_URL as unset" {
   write_valid_team
   printf 'base_url: "https://team.atlassian.net"\n' >> "${DIR}/config.yml"
+  # 032 — an empty variable is treated as unset, so the destination is
+  # file-supplied and meets the pin.
+  printf 'bound_site: "https://team.atlassian.net"\n' > "${DIR}/config.local.yml"
   export SPEC_KIT_JIRA_BASE_URL=""
   JIRA_CONFIG_DIR="${DIR}" config_resolve_connection "${DIR}"
   [ "${SPEC_KIT_JIRA_BASE_URL}" = "https://team.atlassian.net" ]

@@ -1,7 +1,17 @@
 # Official spec-kit install-time copy exclusion (gitignore syntax): everything
+
 # listed here is development-only material that `specify extension add` must
+<<<<<<< Updated upstream
 # NEVER copy into a consuming repository's `.specify/extensions/jira-mirror/`.
+=======
+
+# NEVER copy into a consuming repository's `.specify/extensions/jira/`.
+
+>>>>>>> Stashed changes
 # (This file itself is always excluded automatically.)
+
+AGENTS.md
+CLAUDE.md
 tests/
 specs/
 .specify/
@@ -13,12 +23,21 @@ specs/
 .shellcheckrc
 PSScriptAnalyzerSettings.psd1
 coverage.xml
+<<<<<<< Updated upstream
 testResults.xml
+=======
+
+>>>>>>> Stashed changes
 # The coverage runner's output directory. It is gitignored, so it exists only on
+
 # a machine that has measured coverage — but `specify extension add --dev` copies
+
 # the working tree, not the git index, and this directory holds a NAMED PIPE
+
 # (the xtrace fifo). Python's copytree refuses to copy one, so the install fails
+
 # outright on any developer machine where the gate has been run.
+
 coverage/
 
 # Golden "before" captures a feature's own test plan records at repo root

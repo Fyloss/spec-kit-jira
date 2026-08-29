@@ -23,6 +23,11 @@ teardown() {
 
 @test "GET returns 0 and the response body on success" {
   mock_start "${MOCK}/configs/default.json"
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   run jira_request GET "${MOCK_BASE_URL}/rest/api/3/project/COMP"
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r .style)" = "classic" ]
@@ -30,6 +35,11 @@ teardown() {
 
 @test "POST returns 0 and the created-issue body (201)" {
   mock_start "${MOCK}/configs/default.json"
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   run jira_request POST "${MOCK_BASE_URL}/rest/api/3/issue" '{"fields":{}}'
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r .key)" = "COMP-1" ]
@@ -37,6 +47,11 @@ teardown() {
 
 @test "T042 [030, C6.1]: no credential resolvable maps to the auth exit code AND reports the reason, never silent" {
   mock_start "${MOCK}/configs/default.json"
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   unset JIRA_API_TOKEN
   run --separate-stderr jira_request GET "${MOCK_BASE_URL}/rest/api/3/project/COMP"
   [ "$status" -eq 3 ]
@@ -51,6 +66,11 @@ teardown() {
 
 @test "401 maps to the auth exit code (3), zero body" {
   mock_start "${MOCK}/configs/faults.json"
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   run jira_request GET "${MOCK_BASE_URL}/rest/api/3/project/AUTH"
   [ "$status" -eq 3 ]
   [ -z "$output" ]
@@ -58,6 +78,11 @@ teardown() {
 
 @test "404 maps to the fail-closed exit code (2), zero body" {
   mock_start "${MOCK}/configs/faults.json"
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   run jira_request GET "${MOCK_BASE_URL}/rest/api/3/project/MISSING"
   [ "$status" -eq 2 ]
   [ -z "$output" ]
@@ -65,12 +90,22 @@ teardown() {
 
 @test "a dropped connection (network fault) maps to fail-closed (2)" {
   mock_start "${MOCK}/configs/faults.json"
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   run jira_request GET "${MOCK_BASE_URL}/rest/api/3/project/NET"
   [ "$status" -eq 2 ]
 }
 
 @test "429 retries honouring Retry-After then exhausts to fail-closed (2)" {
   mock_start "${MOCK}/configs/faults.json"
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   JIRA_MAX_ATTEMPTS=3 run jira_request GET "${MOCK_BASE_URL}/rest/api/3/project/RATE"
   [ "$status" -eq 2 ]
   # The transport reached the mock exactly JIRA_MAX_ATTEMPTS times before giving up.
@@ -80,6 +115,11 @@ teardown() {
 
 @test "the resolved token NEVER appears under set -x (NFR-3, SC-007)" {
   mock_start "${MOCK}/configs/default.json"
+  # 032, C6.4 — declare the destination the way production does. The
+  # connection chokepoint sets this variable before any request; a suite that
+  # drives the transport directly must stand in for it, or the credential
+  # producer rightly refuses a destination nothing verified.
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
   trace="$(mktemp)"
   (
     exec 9> "${trace}"

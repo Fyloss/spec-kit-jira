@@ -351,6 +351,15 @@ in your own words when the report already names it.
 - `--enable-hook <event>` — repeatable; release one lifecycle event the operator
   previously disabled. It clears the extension's own record and **does not touch
   the hook registry**.
+- `--accept-site <origin>` — accept a Jira destination that differs from the one
+  this checkout is bound to (032). The ceremony records the site it reaches into
+  the gitignored `config.local.yml`; a later run whose `config.yml` declares a
+  different site refuses before its first request. **Re-running this ceremony is
+  deliberately not enough to accept that change** — otherwise the refusal's own
+  instruction would be the bypass, and someone who redirected `base_url` in a
+  pull request would only have to wait for the operator to follow the printed
+  advice. The value must name the origin the ceremony actually reaches; naming a
+  different one refuses with zero writes.
 - `--json` — emit the machine-readable run summary (`run-summary.schema.json`).
 - `--dry-run` — compute everything and report, but write nothing.
 - `--verbose` — extra diagnostics (the token never appears, even here).

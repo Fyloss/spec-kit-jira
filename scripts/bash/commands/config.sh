@@ -994,6 +994,7 @@ cmd_config() {
   local parsed json="false" dry_run="false" exit_code="0" error="" styles="" args="" enable_hooks="" issue_types=""
   local field_defaults=""
   local task_mirrors=""
+  local accept_site=""
   parsed="$(cli_parse "$@")"
   while IFS='=' read -r key value; do
     case "${key}" in
@@ -1004,6 +1005,7 @@ cmd_config() {
       enable_hooks) enable_hooks="${value}" ;;
       field_defaults) field_defaults="${value}" ;;
       task_mirrors) task_mirrors="${value}" ;;
+      accept_site) accept_site="${value}" ;;
       args) args="${value}" ;;
       exit) exit_code="${value}" ;;
       error) error="${value}" ;;
@@ -1035,7 +1037,19 @@ cmd_config() {
   # The resolution chokepoint (030, plan.md §Key design decision): seed
   # SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml / personal.yml,
   # environment first. Runs before anything below reads either variable.
-  config_resolve_connection "${configdir}" "${cfg}" || return $?
+  # 032, C3.1 — the fourth argument opts this ceremony out of the destination
+  # pin. It is the command that ESTABLISHES the record, so gating it would mean
+  # nothing could ever be bound. The opt-out is passed explicitly rather than
+  # detected inside the chokepoint: a gate that decides for itself who is exempt
+  # is one refactor away from exempting the wrong caller.
+  config_resolve_connection "${configdir}" "${cfg}" "" true || return $?
+
+  # 032, C3.7/C3.8 — the ceremony's own gate, BEFORE discovery. It knows the
+  # declared destination and the recorded one already; there is nothing to
+  # learn from the network first. Refusing here rather than at the write site
+  # means a redirected ceremony issues zero requests instead of discovering
+  # first and saying no afterwards.
+  config_pin_ceremony_check "${configdir}" "${SPEC_KIT_JIRA_BASE_URL:-}" "${accept_site}" || return $?
 
   # Gitignore + personal effects (030, research §R5) — moved AHEAD of the
   # degraded-mode early return below. The fresh-setup case IS degraded mode
@@ -1360,7 +1374,30 @@ cmd_config() {
   # Merge the resolved-id table into the machine-owned local layer, preserving
   # the operator's site_alias / overrides, and emit deterministic canonical YAML.
   local newlocal yaml
-  newlocal="$(jq -cS --argjson r "${resolved}" '. + {resolved_ids: $r}' <<< "${existing}")"
+  # 032, C3.2 — record the destination this ceremony actually reached, in the
+  # SAME serialize-and-write that persists resolved_ids, so no partial state can
+  # exist. Normalised at write time (C1.9), not only at compare time: two runs
+  # differing only in the declared spelling must produce byte-identical files or
+  # Constitution II's zero-churn proof fails. Everything above this point
+  # returns early on refusal, so a ceremony that did not complete discovery
+  # never reaches here (C3.3), and a degraded run returns long before (C3.4).
+  # Recorded ONLY when the destination came from config.yml. FR-011 exempts an
+  # environment-supplied destination from the comparison and equally forbids
+  # recording it: the environment is per-shell and per-invocation, so a record
+  # made from it binds the checkout to whatever happened to be exported once.
+  local bound_site=""
+  if [[ "$(config_pin_env_supplied)" != "true" ]]; then
+    bound_site="$(url_origin_canonical "${SPEC_KIT_JIRA_BASE_URL:-}" 2> /dev/null)" || bound_site=""
+  fi
+  # The record itself. The CHECK that guards a changed destination now runs
+  # before discovery (config_pin_ceremony_check); by the time execution reaches
+  # here the destination is either unchanged, freshly bound, or explicitly
+  # accepted by name — and it has actually been reached.
+  if [[ -n "${bound_site}" ]]; then
+    newlocal="$(jq -cS --argjson r "${resolved}" --arg b "${bound_site}" '. + {resolved_ids: $r, bound_site: $b}' <<< "${existing}")"
+  else
+    newlocal="$(jq -cS --argjson r "${resolved}" '. + {resolved_ids: $r}' <<< "${existing}")"
+  fi
   yaml="$(printf '%s' "${newlocal}" | config_to_yaml)"
 
   # Discovery-effect status: created / unchanged / written.

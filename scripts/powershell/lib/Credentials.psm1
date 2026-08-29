@@ -29,6 +29,9 @@ $script:CredCacheToken = $null
 # config ceremony's degraded-mode trigger (C6.4-C6.6). NEVER contains anything
 # the retrieval command wrote to stdout (C4.4) — only the command's own
 # stderr, and only for the "declared and failed" class.
+# 032 — compare the request's origin against the pinned one (C6.1).
+Import-Module (Join-Path $PSScriptRoot 'UrlOrigin.psm1')
+
 $script:CredLastError = ''
 
 function Get-JiraCredentialLastError {
@@ -176,6 +179,33 @@ function Resolve-JiraToken {
     return $token
 }
 
+# 032, C6.1-C6.4 — the destination this process verified, canonical. Owned
+# HERE rather than read out of lib/Config.psm1, so the dependency runs
+# Config -> Credentials and never the other way: this module is the one that
+# must be able to refuse, and a producer that reaches into its caller for
+# permission is a producer that can be bypassed by a caller that forgets.
+#
+# Module-scoped, never an environment variable (C6.3): a spawned child must not
+# inherit it, the same rule the credential cache states for itself.
+#
+# Empty means the gate never ran for this process. The producer then refuses:
+# a call site that reached the transport without passing the gate does not get
+# a credential (C6.4).
+$script:PinnedOrigin = ''
+
+function Set-JiraCredentialPinnedOrigin {
+    <#
+    .SYNOPSIS
+      Record the verified destination. Called once by the connection
+      chokepoint; a second call with a different value is accepted, because the
+      ceremony legitimately rebinds within one process. Mirror of
+      cred_pin_origin.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Origin)
+    $script:PinnedOrigin = $Origin
+}
+
 function Get-JiraAuthHeader {
     <#
     .SYNOPSIS
@@ -183,13 +213,50 @@ function Get-JiraAuthHeader {
       Invoke-RestMethod -Headers. The base64 value is byte-identical to the Bash
       port's. Returns $null when no token is available — the located reason is
       then in Get-JiraCredentialLastError (C6.2, C6.3).
+    .NOTES
+      032, C6.1/C6.4: refuses to produce a value for a destination this process
+      did not verify. Defence in depth, not the gate — the gate at the
+      connection chokepoint already refused once, with a located message. What
+      this adds is that a FUTURE call site building its own URL cannot get a
+      credential by forgetting to ask. Two string comparisons against state the
+      gate already computed: no re-read, no re-parse, no spawn (C6.2).
+
+      A caller that passes no -Url keeps the old behaviour, so the check cannot
+      break a call site that has not been taught about it yet; every such site
+      is still covered by the gate itself.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] [string] $Email)
+    param(
+        [Parameter(Mandatory)] [string] $Email,
+        [string] $Url = ''
+    )
+    if ($Url) {
+        $pinned = $script:PinnedOrigin
+        if ([string]::IsNullOrEmpty($pinned) -and $env:SPEC_KIT_JIRA_BASE_URL) {
+            # No chokepoint ran in this process, but the destination came from
+            # the environment — the case FR-011 declares exempt, and for which
+            # the chokepoint itself would have pinned exactly this origin.
+            # Deriving it here keeps a directly-driven sink working without
+            # weakening anything: the attack this feature exists to stop is a
+            # destination declared in config.yml, and config.yml is read ONLY by
+            # the chokepoint. If no chokepoint ran, no file-supplied destination
+            # can be in play.
+            $c = Get-JiraUrlOriginCanonical -Url ([string] $env:SPEC_KIT_JIRA_BASE_URL)
+            if ($null -ne $c) { $pinned = $c }
+        }
+        if ([string]::IsNullOrEmpty($pinned)) {
+            $script:CredLastError = "credential withheld: this run verified no Jira destination, so no request may carry the operator's credential"
+            return $null
+        }
+        if (-not (Test-JiraUrlOriginEqual -First $Url -Second $pinned)) {
+            $script:CredLastError = 'credential withheld: this request targets a destination this checkout is not bound to'
+            return $null
+        }
+    }
     $token = Resolve-JiraToken
     if (-not $token) { return $null }
     $basic = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes("${Email}:$token"))
     return @{ Authorization = "Basic $basic" }
 }
 
-Export-ModuleMember -Function Resolve-JiraToken, Get-JiraAuthHeader, Get-JiraConfigDir, Get-JiraCredentialFromCommand, Get-JiraCredentialLastError
+Export-ModuleMember -Function Resolve-JiraToken, Get-JiraAuthHeader, Get-JiraConfigDir, Get-JiraCredentialFromCommand, Get-JiraCredentialLastError, Set-JiraCredentialPinnedOrigin

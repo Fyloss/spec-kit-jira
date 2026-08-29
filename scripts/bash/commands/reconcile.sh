@@ -613,6 +613,17 @@ _reconcile_run() {
   # state that check exists to handle gracefully; only a PRESENT and malformed
   # file fails closed.
   if ! config_resolve_connection "${JIRA_CONFIG_DIR:-.specify/jira}"; then
+    # 032, C5.2 — relay the destination pin's OWN message. This call site
+    # substitutes a generic line for whatever the library reported, which would
+    # otherwise discard the located refusal (both origins named, plus the
+    # accepting invocation) on exactly the path a lifecycle hook takes. The
+    # status is consulted rather than the message being composed in the
+    # library, because only this layer knows how to report through the fault
+    # path that keeps the host command's outcome intact.
+    if [[ "${_CFG_PIN_STATUS:-proceed}" != "proceed" ]]; then
+      _reconcile_fault "${EXIT_CONFIG}" "$(config_pin_message "${JIRA_CONFIG_DIR:-.specify/jira}")"
+      return $?
+    fi
     _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the team configuration could not be loaded (zero writes)'
     return $?
   fi

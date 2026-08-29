@@ -17,6 +17,12 @@ Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot '../lib/Cli.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Output.psm1') -Force
+# 032 — the ceremony canonicalises the origin it reached before recording it
+# (C3.2). Imported here explicitly: lib/Config.psm1's own import of this
+# module does not make its functions visible in THIS module's scope, and the
+# gap surfaced as a cross-port byte divergence in config.local.yml rather
+# than as a load error.
+Import-Module (Join-Path $PSScriptRoot '../lib/UrlOrigin.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force -Global # ConvertFrom-JiraConfigYaml must reach callers — a nested import here is not enough
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Hierarchy.psm1') -Force
@@ -1108,6 +1114,7 @@ function Invoke-JiraConfig {
     $enableHooks = if ($state.ContainsKey('enable_hooks')) { $state['enable_hooks'] } else { '' }
     $fieldDefaults = if ($state.ContainsKey('field_defaults')) { $state['field_defaults'] } else { '' }
     $taskMirrors = if ($state.ContainsKey('task_mirrors')) { $state['task_mirrors'] } else { '' }
+    $acceptSite = if ($state.ContainsKey('accept_site')) { $state['accept_site'] } else { '' }
 
     $configdir = if ($env:JIRA_CONFIG_DIR) { $env:JIRA_CONFIG_DIR } else { '.specify/jira' }
 
@@ -1130,8 +1137,22 @@ function Invoke-JiraConfig {
     # The resolution chokepoint (030, plan.md §Key design decision): seed
     # SPEC_KIT_JIRA_BASE_URL / JIRA_EMAIL from config.yml / personal.yml,
     # environment first. Runs before anything below reads either variable.
-    $chokepointRc = Resolve-JiraConnection -ConfigDir $configdir -MergedJson $cfg.Json
+    # 032, C3.1 — -Binding opts this ceremony out of the destination pin. It is
+    # the command that ESTABLISHES the record, so gating it would mean nothing
+    # could ever be bound. The opt-out is passed explicitly rather than detected
+    # inside the chokepoint: a gate that decides for itself who is exempt is one
+    # refactor away from exempting the wrong caller.
+    $chokepointRc = Resolve-JiraConnection -ConfigDir $configdir -MergedJson $cfg.Json -Binding
     if ($chokepointRc -ne 0) { return [int] $chokepointRc }
+
+    # 032, C3.7/C3.8 — the ceremony's own gate, BEFORE discovery. It knows the
+    # declared destination and the recorded one already; there is nothing to
+    # learn from the network first. Refusing here rather than at the write site
+    # means a redirected ceremony issues zero requests instead of discovering
+    # first and saying no afterwards.
+    if (-not (Test-JiraCeremonyPin -ConfigDir $configdir -Declared ([string] $env:SPEC_KIT_JIRA_BASE_URL) -AcceptSite $acceptSite)) {
+        return [int] $script:ExitConfig
+    }
 
     # Gitignore + personal effects (030, research §R5) — moved AHEAD of the
     # degraded-mode early return below. The fresh-setup case IS degraded mode
@@ -1530,6 +1551,29 @@ function Invoke-JiraConfig {
         foreach ($prop in $existing.PSObject.Properties) { $existingMap[$prop.Name] = $prop.Value }
     }
     $existingMap['resolved_ids'] = $resolved
+    # 032, C3.2 — record the destination this ceremony actually reached, in the
+    # SAME serialize-and-write that persists resolved_ids, so no partial state
+    # can exist. Normalised at write time (C1.9), not only at compare time: two
+    # runs differing only in the declared spelling must produce byte-identical
+    # files or Constitution II's zero-churn proof fails. Everything above this
+    # point returns early on refusal, so a ceremony that did not complete
+    # discovery never reaches here (C3.3), and a degraded run returns long
+    # before (C3.4).
+    # Recorded ONLY when the destination came from config.yml. FR-011 exempts
+    # an environment-supplied destination from the comparison and equally
+    # forbids recording it: the environment is per-shell and per-invocation,
+    # so a record made from it binds the checkout to whatever happened to be
+    # exported once.
+    # The record itself. The CHECK that guards a changed destination now runs
+    # before discovery (Test-JiraCeremonyPin); by the time execution reaches
+    # here the destination is either unchanged, freshly bound, or explicitly
+    # accepted by name — and it has actually been reached.
+    if (-not (Get-JiraPinEnvSupplied)) {
+        $boundSite = Get-JiraUrlOriginCanonical -Url ([string] $env:SPEC_KIT_JIRA_BASE_URL)
+        if ($null -ne $boundSite) {
+            $existingMap['bound_site'] = $boundSite
+        }
+    }
     # ConvertTo-JiraConfigYaml throws when the document cannot be represented
     # (research R3/R5); caught here and turned into the Bash port's contract —
     # a plain stderr message and EXIT_CONFIG, not a default exception trace.
@@ -1546,7 +1590,14 @@ function Invoke-JiraConfig {
     if (-not (Test-Path -LiteralPath $localf)) {
         $discStatus = 'created'
     }
-    elseif (((Get-Content -Raw -LiteralPath $localf) -replace "`r`n", "`n").TrimEnd("`n") -eq $yaml) {
+    # The [string] cast is load-bearing, not decoration. `Get-Content -Raw` on an
+    # EMPTY file returns $null, and `$null -replace …` evaluates to an empty
+    # System.Object[] rather than to a string — so `.TrimEnd()` then throws
+    # "[System.Object[]] does not contain method named 'TrimEnd'" and the whole
+    # ceremony dies. The Bash port compares the same case as an empty string and
+    # proceeds, so this was a silent cross-port divergence on any installation
+    # whose config.local.yml exists but is empty.
+    elseif (((([string](Get-Content -Raw -LiteralPath $localf))) -replace "`r`n", "`n").TrimEnd("`n") -eq $yaml) {
         $discStatus = 'unchanged'
     }
     if (-not $dryRun) {

@@ -35,6 +35,12 @@ setup() {
   export JIRA_EMAIL="user@example.com"
   export JIRA_API_TOKEN="RAWSECRETXYZ"
   export JIRA_NO_SLEEP=1
+  # 032, C6.4 — declare the destination the way production does. The connection
+  # chokepoint sets this variable before any request; a suite that drives the
+  # transport directly must stand in for it, or the credential producer rightly
+  # refuses a destination nothing verified. Every request below targets this
+  # loopback origin.
+  export SPEC_KIT_JIRA_BASE_URL="http://127.0.0.1:1"
 
   STUB="${BATS_TEST_TMPDIR}/stub"
   CAPTURE="${BATS_TEST_TMPDIR}/curl-config"

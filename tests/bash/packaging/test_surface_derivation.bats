@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # T007 [026] — the derivation of contracts/surface-derivation.md §2 yields
-# exactly the installable surface: 98 files, containing the manifest, both
+# exactly the installable surface: 100 files, containing the manifest, both
 # ports' entry points and all four command documents, and nothing under any
 # development-only directory.
 
@@ -10,11 +10,11 @@ setup() {
   source "${ROOT}/packaging/lib/surface.sh"
 }
 
-@test "the derived surface has exactly 98 members (quickstart.md step 1)" {
+@test "the derived surface has exactly 100 members (quickstart.md step 1)" {
   run packaging_derive_surface
   [ "$status" -eq 0 ]
   count="$(printf '%s\n' "$output" | grep -c .)"
-  [ "${count}" -eq 98 ]
+  [ "${count}" -eq 100 ]
 }
 
 @test "the derived surface contains the manifest, both entry points and the four command documents" {
@@ -53,10 +53,10 @@ setup() {
   # reading them under the caller's locale; under en_US.UTF-8 that mismatch
   # makes `comm` treat both inputs as unsorted and it silently stops
   # excluding anything, so the derived surface becomes every tracked file
-  # instead of the 98-file surface (SC-004, C2.1).
+  # instead of the 100-file surface (SC-004, C2.1).
   if ! locale -a 2> /dev/null | grep -qxF 'en_US.UTF-8'; then
     skip "en_US.UTF-8 locale is not installed on this host"
   fi
   count="$(LC_ALL=en_US.UTF-8 bash -c "source '${ROOT}/packaging/lib/surface.sh'; packaging_derive_surface | grep -c .")"
-  [ "${count}" -eq 98 ]
+  [ "${count}" -eq 100 ]
 }
