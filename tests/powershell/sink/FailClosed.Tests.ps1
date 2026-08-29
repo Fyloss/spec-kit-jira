@@ -27,6 +27,11 @@ Describe 'Fail-closed writes' {
         $env:JIRA_API_TOKEN = $null
         $env:JIRA_NO_SLEEP = $null
         $env:JIRA_MAX_ATTEMPTS = $null
+        # 032, C6.4 — cleared with the rest. FR-011 EXEMPTS an
+        # environment-supplied destination from the pin, so a leaked value
+        # would silently exempt a later test that is meant to meet the gate,
+        # hiding a failure rather than causing one.
+        $env:SPEC_KIT_JIRA_BASE_URL = $null
     }
 
     It 'a 401 write fails closed with the auth exit code (3)' {

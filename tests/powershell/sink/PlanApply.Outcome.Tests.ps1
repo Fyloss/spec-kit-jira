@@ -22,7 +22,14 @@ BeforeAll {
 }
 
 Describe 'Invoke-JiraApplyWriteSetWithRecognition — the confirmed-creation outcome (015)' {
-    AfterEach { if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null } }
+    AfterEach {
+        if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null }
+        # 032, C6.4 — cleared with the rest. FR-011 EXEMPTS an
+        # environment-supplied destination from the pin, so a leaked value
+        # would silently exempt a later test that is meant to meet the gate,
+        # hiding a failure rather than causing one.
+        $env:SPEC_KIT_JIRA_BASE_URL = $null
+    }
 
     It 'normal completion: the outcome names both creations, parent first (O1/O2/O3)' {
         $script:M = Start-JiraMock -ConfigPath (New-MockConfig '{"projects":{"AAA":"team"}}')

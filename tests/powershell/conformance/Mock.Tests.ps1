@@ -8,6 +8,14 @@ BeforeAll {
 }
 
 Describe 'Mocked Jira double' {
+    AfterEach {
+        # 032, C6.4 — cleared with the rest. FR-011 EXEMPTS an
+        # environment-supplied destination from the pin, so a leaked value
+        # would silently exempt a later test that is meant to meet the gate,
+        # hiding a failure rather than causing one.
+        $env:SPEC_KIT_JIRA_BASE_URL = $null
+    }
+
     It 'serves company-managed project discovery' {
         $mock = Start-JiraMock -ConfigPath (Join-Path $ConfigDir 'default.json')
         # 032, C6.4 — declare the destination the way production does. The

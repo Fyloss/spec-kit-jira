@@ -8,11 +8,11 @@
 
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path $PSScriptRoot '../../lib/Output.psm1')
+Import-Module (Join-Path $PSScriptRoot '../../lib/Output.psm1') -Force
 # 032 — the one origin grammar (C1); this module owned a second one until then.
 # No -Force: forcing a lib dependency from a sink module reimports it into the
 # caller's scope and clobbers state the caller already holds.
-Import-Module (Join-Path $PSScriptRoot '../../lib/UrlOrigin.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../../lib/UrlOrigin.psm1')
 
 function Get-JiraDesignatorKey {
     <#
