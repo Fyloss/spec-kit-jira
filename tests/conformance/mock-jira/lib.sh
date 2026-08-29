@@ -134,7 +134,15 @@ _mock_start_pwsh() {
   # holds one open blocks whoever reads the other end until it dies — bats' fd
   # 3, a `run` pipe, or kcov's trace pipe, which is how the Bash coverage job
   # spent a whole CI step waiting for an EOF that could not arrive.
-  pwsh "${args[@]}" < /dev/null > "${MOCK_TMPDIR}/mock.out" 2> "${MOCK_TMPDIR}/mock.err" 3>&- &
+  #
+  # fd 8 is that trace pipe (tests/coverage/bash-coverage.sh TRACE_FD). Until
+  # now this line closed fd 3 only, so the sentence above named the coverage
+  # hazard and then left it open: a mock orphaned by a killed or aborted suite
+  # kept the FIFO's write end, `extract_trace` never saw EOF, and the job hung
+  # on `wait "${filter_pid}"` until the 350-minute ceiling — with no verdict,
+  # because the timeout diagnostic sits AFTER that wait. Closing it here is
+  # the root fix; bash-coverage.sh bounds the wait as a backstop.
+  pwsh "${args[@]}" < /dev/null > "${MOCK_TMPDIR}/mock.out" 2> "${MOCK_TMPDIR}/mock.err" 3>&- 8>&- &
   MOCK_PID=$!
 
   local i=0 max=$((_MOCK_READY_TIMEOUT_S * 20))

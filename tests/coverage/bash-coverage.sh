@@ -378,6 +378,11 @@ diag() {
 
 KCOV_TIMEOUT="${SPEC_KIT_JIRA_COVERAGE_TIMEOUT:-600}"
 BATS_TIMEOUT="${SPEC_KIT_JIRA_COVERAGE_BATS_TIMEOUT:-1200}"
+# How long the trace filter may take to drain after the suite ends. This is a
+# BACKSTOP against a descriptor leak, not a throughput budget: the filter is
+# line-oriented and drains in seconds once EOF arrives, so reaching this bound
+# means something is still holding fd 8, never that the filter is slow.
+FILTER_DRAIN_TIMEOUT="${SPEC_KIT_JIRA_COVERAGE_FILTER_DRAIN_TIMEOUT:-120}"
 
 # Runs the bats suite with its trace on fd 8. The filter reads a FIFO rather
 # than a temp file because the raw stream is the whole suite's execution, bats
@@ -425,7 +430,34 @@ trace_bats() {
   bats_rc=$?
 
   exec 8>&-
-  wait "${filter_pid}"
+  # Bounded, never a bare `wait` (032). Closing our own write end is not
+  # enough to guarantee EOF: every child of the traced suite inherits fd 8,
+  # and a LONG-LIVED one orphaned by a kill keeps the FIFO open, so the
+  # filter never terminates. That is not hypothetical — an orphaned pwsh mock
+  # server did exactly this, and because the timeout diagnostic below sits
+  # AFTER this wait, the job burned to its 350-minute ceiling and reported
+  # nothing at all. The root cause is fixed where the mock is spawned
+  # (tests/conformance/mock-jira/lib.sh closes fd 8); this bound is what keeps
+  # the NEXT such child from costing a silent CI step instead of a verdict.
+  #
+  # A distinct diagnostic on purpose: "the filter did not drain" and "the
+  # suite ran out of time" are different failures with different fixes, and
+  # conflating them is what sent this job's last diagnosis after the wrong
+  # one (a timeout ceiling that was never the constraint).
+  local drain_waited=0 filter_alive=1
+  while [ "${drain_waited}" -lt "${FILTER_DRAIN_TIMEOUT}" ]; do
+    kill -0 "${filter_pid}" 2> /dev/null || { filter_alive=0; break; }
+    sleep 1
+    drain_waited=$((drain_waited + 1))
+  done
+  if [ "${filter_alive}" -eq 1 ]; then
+    kill -TERM "${filter_pid}" 2> /dev/null
+    diag 'bash-coverage.sh: the trace filter did not drain within %ss.\n' "${FILTER_DRAIN_TIMEOUT}"
+    diag '  A child of the traced suite is still holding fd %s open — the trace\n' "${TRACE_FD}"
+    diag '  FIFO cannot reach EOF. Look for an orphaned background process\n'
+    diag '  (a mock server, a spawned shell) that does not close it.\n'
+  fi
+  wait "${filter_pid}" 2> /dev/null || true
 
   if [ "${bats_rc}" -eq 124 ]; then
     diag 'bash-coverage.sh: the traced bats run did not finish within %ss.\n' "${BATS_TIMEOUT}"
