@@ -320,20 +320,49 @@ function Build-JiraNeutralDocument {
 function Resolve-JiraRouting {
     <#
     .SYNOPSIS
-      Resolve the ONE project a spec reconciles against (US8, FR 041, FR 042).
-      Mirror of routing_resolve. Inputs: the spec folder's basename, the labels
-      declared in the spec (a JSON array), and the team config's `routing` rules
-      plus `routing_default`. First matching rule wins; a rule matches only when
-      EVERY condition it declares holds. An unmatched spec falls back to
-      routing_default; no match with no default is refused with exit 4. PURE: no
-      Jira reads or writes. Returns { ExitCode; ProjectKey } (the asymmetric-shape
-      convention shared with the sink client).
+      Resolve the ONE project a spec reconciles against (US8, FR 041, FR 042;
+      033 FR-001, contracts/routing-resolution.md C1.1-C2.5).
+      Mirror of routing_resolve.
+
+      FOUR ranks, first non-empty wins:
+        1  a committed `routing:` rule whose every declared condition holds;
+        2  a committed `teams[]` entry whose folder_prefix prefixes the
+           de-numbered folder name;
+        3  the `project` of the `teams[]` entry whose id equals -SelectedTeamId
+           — the team the OPERATOR selected in their gitignored personal.yml;
+        4  `routing_default`, optional since 033.
+      Nothing left: refused with exit 4.
+
+      Ranks 1 and 2 stay ahead of rank 3 unconditionally (C2.5): they reason
+      about the SPECIFICATION, rank 3 about the PERSON, and a specification
+      that says where it belongs must outrank whoever happens to be
+      reconciling it.
+
+      -SelectedTeamId is OPTIONAL and MAY be empty; empty is not an error and
+      produces no diagnostic (C2.3). It arrives already validated against the
+      catalogue, so this function neither re-validates nor reports on it
+      (C4.1); an id matching no entry contributes nothing (C4.2). With it
+      empty the resolution is byte-identical to the three-input resolver
+      (C1.4), which is what makes FR-009 true by construction.
+
+      PURE: no Jira reads or writes, no file opened. Returns
+      { ExitCode; ProjectKey } (the asymmetric-shape convention shared with
+      the sink client).
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string] $FolderName,
         [Parameter(Mandatory)] [string] $LabelsJson,
-        [Parameter(Mandatory)] [string] $RoutingConfigJson
+        [Parameter(Mandatory)] [string] $RoutingConfigJson,
+        [string] $SelectedTeamId = '',
+        # 033: the bash twin's caller suppresses the diagnostic below with
+        # `2>/dev/null`, because reconcile composes its own four-rank refusal
+        # and the resolver's one-liner would be a second, poorer explanation of
+        # the same fact. PowerShell cannot redirect [Console]::Error at the call
+        # site, so the suppression has to be a parameter — without it the two
+        # ports emit a different number of stderr lines on every refusal, which
+        # no unit test sees and the conformance corpus fails on.
+        [switch] $Quiet
     )
     $cfg = $RoutingConfigJson | ConvertFrom-Json -Depth 100
     $labels = @($LabelsJson | ConvertFrom-Json -Depth 100)
@@ -383,12 +412,25 @@ function Resolve-JiraRouting {
         }
     }
 
+    # Rank 3 (033) — the team the operator selected. Consulted only after both
+    # committed ranks have declined, and only when a selection was supplied:
+    # an empty id is a normal, silent state, not a failure (C2.3, C4.4).
+    if (-not [string]::IsNullOrEmpty($SelectedTeamId) -and (Test-JiraInterchangeProp $cfg 'teams')) {
+        foreach ($t in @($cfg.teams)) {
+            if ([string](Get-JiraInterchangeProp $t 'id') -ceq $SelectedTeamId) {
+                return [pscustomobject]@{ ExitCode = 0; ProjectKey = [string](Get-JiraInterchangeProp $t 'project') }
+            }
+        }
+    }
+
     $default = [string](Get-JiraInterchangeProp $cfg 'routing_default')
     if (-not [string]::IsNullOrEmpty($default)) {
         return [pscustomobject]@{ ExitCode = 0; ProjectKey = $default }
     }
 
-    [Console]::Error.WriteLine('routing: no routing rule matched and no routing_default is configured')
+    if (-not $Quiet) {
+        [Console]::Error.WriteLine('routing: no routing rule matched and no routing_default is configured')
+    }
     return [pscustomobject]@{ ExitCode = 4; ProjectKey = '' }
 }
 

@@ -764,9 +764,17 @@ function Test-JiraTeamConfig {
         $errs.Add('projects must be a non-empty array')
     }
 
-    $rd = Get-CfgProp $Object 'routing_default'
-    if ($rd -isnot [string] -or ($rd -cnotmatch '^[A-Z][A-Z0-9_]+$')) {
-        $errs.Add('routing_default must be a valid project key')
+    # 033, C5.1-C5.3 — OPTIONAL, not permissive. Presence is tested on the
+    # dictionary rather than on the value, mirroring the bash port's
+    # `has("routing_default")`: an explicitly null value (`routing_default:`
+    # with nothing after it) is PRESENT and malformed, and must still be
+    # refused, whereas an absent key must not be.
+    $rdPresent = ($Object -is [System.Collections.IDictionary]) -and $Object.Contains('routing_default')
+    if ($rdPresent) {
+        $rd = Get-CfgProp $Object 'routing_default'
+        if ($rd -isnot [string] -or ($rd -cnotmatch '^[A-Z][A-Z0-9_]+$')) {
+            $errs.Add('routing_default must be a valid project key')
+        }
     }
 
     $allowedTop = @('version_compat', 'projects', 'routing', 'routing_default', 'privacy', 'teams', 'field_defaults', 'task_mirror', 'base_url')
@@ -1445,6 +1453,17 @@ $script:PinStatus = 'proceed'
 $script:PinDeclared = ''
 $script:PinRecorded = ''
 
+# --- 033: the operator's selected team (routing rank 3) ----------------------
+#
+# The catalogue team id this operator selected in their gitignored
+# personal.yml, or '' when they selected none (or there is no such file). Set
+# by Resolve-JiraConnection, which already loads and validates that file on
+# every path that reaches the tracker; capturing what it produced costs
+# nothing, whereas a second Import-JiraPersonalConfig would repeat a parse the
+# run already paid for. Read through Get-JiraPersonalTeam — module scope is not
+# visible to importers. Twin of the bash port's _CFG_PERSONAL_TEAM.
+$script:PersonalTeam = ''
+
 # The origin this run is allowed to reach, canonical. Set once by the gate;
 # read per request by the credential producer (C6.2) so it never re-reads or
 # re-parses configuration. Module-scoped, never an environment variable: a
@@ -1520,6 +1539,16 @@ function Test-JiraConnectionPin {
 
 function Get-JiraConnectionPinStatus {
     return $script:PinStatus
+}
+
+function Get-JiraPersonalTeam {
+    <#
+    .SYNOPSIS
+      The catalogue team id this operator selected, as captured by the last
+      Resolve-JiraConnection call, or '' when none was selected (033, routing
+      rank 3). Twin of reading _CFG_PERSONAL_TEAM in the bash port.
+    #>
+    return $script:PersonalTeam
 }
 
 function Get-JiraConnectionPinMessage {
@@ -1655,6 +1684,9 @@ function Resolve-JiraConnection {
         # ever be bound.
         [switch] $Binding
     )
+    # 033: reset before this run's own answer, so a second call in the same
+    # session can never inherit the first call's selection.
+    $script:PersonalTeam = ''
     $cfg = $MergedJson
     if (-not $cfg) {
         $cfg = '{}'
@@ -1718,8 +1750,18 @@ function Resolve-JiraConnection {
             # validation side effect (a malformed team or email fails closed
             # here, ExitCode 4), then read the field straight from the parsed
             # file.
+            #
+            # 033: its result is now CAPTURED rather than discarded. The object
+            # carries `team` on its active branch, which is routing rank 3's
+            # whole input; recomputing it later would mean a second load for a
+            # value this run already has.
             $loadedP = Import-JiraPersonalConfig -ConfigDir $ConfigDir -MergedJson $cfg
             if ($loadedP.ExitCode -ne 0) { return [int] $loadedP.ExitCode }
+            # Not direct dot access — Set-StrictMode throws on a property the
+            # inactive shapes never carry.
+            $loadedObj = $loadedP.Json | ConvertFrom-Json -Depth 100
+            $teamProp = $loadedObj.PSObject.Properties['team']
+            if ($teamProp) { $script:PersonalTeam = [string] $teamProp.Value }
         }
         else {
             # Not direct dot access: Set-StrictMode makes .state throw on the
@@ -1735,6 +1777,11 @@ function Resolve-JiraConnection {
                 # seeding from a file that cannot be re-parsed anyway.
                 return 0
             }
+            # 033: the caller already loaded and validated the file and handed
+            # us the result; take rank 3's input from it rather than loading a
+            # second time.
+            $suppliedTeamProp = $suppliedObj.PSObject.Properties['team']
+            if ($suppliedTeamProp) { $script:PersonalTeam = [string] $suppliedTeamProp.Value }
         }
         if (-not $env:JIRA_EMAIL) {
             try { $pObj = Read-JiraConfigYamlObject -Path $pf } catch { return $script:ExitConfig }
@@ -2081,4 +2128,5 @@ Export-ModuleMember -Function Get-JiraConfigDirPath, Resolve-JiraConfigDir, Get-
     Get-JiraHookEventNameList, Get-JiraAfterEventNameList, Get-JiraHooksDisabled, Add-JiraHooksDisabled, Remove-JiraHooksDisabled, `
     Get-CfgLocalPath, Get-CfgLocalObject, Get-JiraRoleNameList, Get-JiraFieldDefaultsFor, `
     Test-JiraConnectionPin, Get-JiraConnectionPinStatus, Get-JiraConnectionPinMessage, Get-JiraPinnedOrigin, Get-JiraPinEnvSupplied, Test-JiraCeremonyPin, `
+    Get-JiraPersonalTeam, `
     Get-JiraFieldDefaultsYaml, Get-JiraTaskMirrorFor, Get-JiraTaskMirrorYaml

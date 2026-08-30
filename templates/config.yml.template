@@ -120,7 +120,26 @@ routing:
       folder_prefix: '' # e.g. 'billing-' matches specs/billing-*
     project: PROJ
 
-# The project used when no routing rule matches.
+# OPTIONAL last resort: the project used when nothing else places a spec.
+#
+# Routing resolves in four ranks, first one that answers wins:
+#   1. a `routing:` rule above  — matched against the RAW folder name,
+#                                 numbering included
+#   2. a `teams:` folder_prefix — matched against the folder name with its
+#                                 leading `NNN-` removed
+#   3. the team the developer selected in .specify/jira/personal.yml
+#   4. routing_default, below
+# Nothing at all: the run is refused, and the message says what each rank found.
+#
+# Rank 3 takes precedence over this key, so a repository shared by several teams
+# can leave it out entirely rather than imposing one team's project on everyone.
+# Delete the line if that is your case. A single-team repository should keep it:
+# a rule with no condition matches nothing, so this is the only way to say
+# "everything goes here".
+#
+# Rank 3 applies only to a specification that is not yet bound. Once its stories
+# carry ticket markers, the specification itself fixes its project, and every
+# developer resolves it identically whatever team they selected.
 routing_default: PROJ
 
 # OPTIONAL team catalogue: the naming conventions each team ships under. When a

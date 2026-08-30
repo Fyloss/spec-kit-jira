@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-08-30
+
+### Added
+
+- **Routing follows the developer's own team.** The team selected in the
+  gitignored `.specify/jira/personal.yml` now decides where a specification is
+  mirrored when no committed rule and no committed team folder prefix places it.
+  Resolution is four ranks deep, first one that answers wins: a `routing:` rule,
+  a `teams:` folder prefix, **your team**, then `routing_default`. In a
+  repository shared by several teams, nobody's work is mirrored into another
+  team's project any more (spec 033, FR-001/FR-002).
+- Routing gained its first conformance coverage. The corpus previously contained
+  no scenario exercising rank resolution at all; it now carries eleven, one per
+  rank and one per refusal state, byte-compared across both ports.
+
+### Changed
+
+- **`routing_default` is now OPTIONAL.** It was a required key of the committed
+  `config.yml`, which imposed a single project on every developer of every team
+  sharing a repository — a value that has no correct answer there. A
+  configuration that omits it validates; one that declares it malformed is
+  refused exactly as before (FR-003). Existing single-team repositories are
+  untouched: with no team selected, resolution is byte-identical to before.
+
+### Upgrade note — who is affected
+
+Your repository is affected **only if it already declares a `teams:` catalogue
+and your developers select a team in `personal.yml`**. There, a specification
+that matches no `routing:` rule and carries no team folder prefix used to fall
+to `routing_default`; it now goes to the selecting developer's team project.
+
+Nothing already mirrored moves. The new rank applies only while a specification
+is unbound — once its stories carry ticket markers, the specification fixes its
+own project and every developer resolves it identically. Only specifications
+mirrored for the first time after this release can land somewhere new.
+
+With no `teams:` catalogue, or with no developer selecting a team, resolution is
+byte-identical to 0.22.0 — verified by re-running all 95 pre-existing reconcile
+conformance scenarios against the previous tree and comparing byte for byte.
+- The routing refusal now reports what **each** of the four ranks found instead
+  of naming one missing key, and distinguishes the three reasons your team was
+  not used — no `personal.yml`, a `personal.yml` selecting no team, and a
+  specification already bound (FR-007).
+- The unknown-project refusal no longer opens "a routing rule names project X",
+  which was false whenever the key came from the team catalogue or from
+  `routing_default`.
+
+### Fixed
+
+- The PowerShell port emitted one stderr line more than the Bash port on a
+  routing refusal: the resolver's own diagnostic, which the Bash caller
+  suppresses. Both ports are now byte-identical on that path.
+
 ## [0.22.0] - 2026-08-29
 
 ### ⚠ BREAKING CHANGES

@@ -71,10 +71,18 @@ _assert_fault_properties() {
 }
 
 @test "routing-unresolved: no rule and no routing_default (contract cause 2)" {
-  # routing_default is schema-mandatory on the committed team layer, so this
-  # state is reached the way a real repository would reach it: the machine
-  # layer's own override nulls it out (schema-valid on both layers — neither
-  # layer's own routing_default is invalid, only the merged result is empty).
+  # 033 changed BOTH halves of this case, and the needle below with them.
+  #
+  # routing_default is no longer schema-mandatory (FR-003), so the machine
+  # layer's null override is now one of two ways to reach this state rather
+  # than the only one. It is kept as written because it still exercises the
+  # merge path, which omitting the key would not.
+  #
+  # The needle changed because the message did. It used to end "add
+  # routing_default to config.yml", which C6.5 now forbids as the SOLE remedy:
+  # a repository may have declined to declare that key deliberately, and three
+  # other ranks could equally have placed this specification. The message now
+  # reports what each of the four ranks found.
   cat > "${JIRA_CONFIG_DIR}/config.yml" <<'EOF'
 projects:
   - key: COMP
@@ -85,7 +93,7 @@ EOF
 overrides:
   routing_default: null
 EOF
-  _assert_fault_properties "add routing_default to config.yml"
+  _assert_fault_properties "routing could not be resolved"
 }
 
 @test "placeholder-binding: the resolved key equals the shipped placeholder (contract cause 3)" {

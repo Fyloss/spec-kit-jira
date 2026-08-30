@@ -15,7 +15,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (243)" {
+@test "the conformance corpus has exactly the recorded scenario count (254)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -202,8 +202,17 @@ setup() {
   # to load (config-unloadable, personal-unloadable), a valid zero-team
   # catalogue's silence (zero-team-catalogue), and path resolution's two
   # divergence-surface cases (nested-invocation, no-project) (231 -> 236).
+  # 033 adds eleven, which is the whole of routing's conformance coverage: the
+  # corpus had NO scenario exercising routing resolution before this feature.
+  # Rank 1 (rule-route), rank 2 (team-route), rank 3 in both directions
+  # (personal-route-beta, personal-route-alpha), rank 4 and the untouched
+  # legacy shape (legacy-shape), the bound-marker precondition
+  # (bound-ignores-personal), the catalogue project absent from projects[]
+  # (rank3-unknown-project), the schema relaxation (no-routing-default), and
+  # the three distinguishable refusal states (refuse-no-selection,
+  # refuse-no-team-key, refuse-bound-skip) (243 -> 254).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 243 ]
+  [ "${count}" -eq 254 ]
 }
 
 # Everything the conformance job declares, as one block.

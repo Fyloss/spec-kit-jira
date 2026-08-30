@@ -74,9 +74,9 @@ Five named causes. Each emits exactly one message naming the cause, the file or 
 | # | Cause | Condition | Remedy named |
 | --- | --- | --- | --- |
 | 1 | `not-configured` | No base URL — a fresh install | `/speckit.jira.config` |
-| 2 | `routing-unresolved` | No rule matched, no team route, no `routing_default` | Add `routing_default` to `config.yml` |
+| 2 | `routing-unresolved` | No rank placed the spec: no rule matched, no team folder prefix matched, no team is selected (or the spec is already bound), and no `routing_default` (033: the key is optional) | Report what EACH of the four ranks found, and offer all three remedies — a rule or a `teams:` entry in `config.yml`, a team selection in `personal.yml`, or `routing_default`. Naming `routing_default` alone is forbidden by 033 C6.5: the repository may have declined it deliberately |
 | 3 | `placeholder-binding` | Resolved key equals the shipped placeholder | `/speckit.jira.config` |
-| 4 | `unknown-project` | A routing rule names a project `projects[]` does not declare | Correct the rule in `config.yml` |
+| 4 | `unknown-project` | Routing resolved a project `projects[]` does not declare — from a rule, a `teams[]` entry, or `routing_default` | Correct whichever of the three named it. 033 removed the "a routing rule names" wording, which was false for the other two sources |
 | 5 | `project-not-bound` | No `resolved_ids` entry for the resolved project | `/speckit.jira.config` |
 
 Cause 1 keeps its existing behaviour: a notice, zero writes, **exit 0** in every context — it is the normal state of a fresh install, not a fault.

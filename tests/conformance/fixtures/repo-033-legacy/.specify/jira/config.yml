@@ -1,0 +1,18 @@
+# 033 — the legacy shape this feature must not disturb (FR-009, C1.4):
+# routing_default is declared, no `teams:` catalogue exists, and no
+# personal.yml accompanies it. Rank 4 is the only rank that can fire.
+#
+# No `base_url` key: the conformance harness exports SPEC_KIT_JIRA_BASE_URL
+# from the mock's OS-assigned port (run-scenario.sh:221). Declaring one here
+# would engage 032's destination pin, which needs a `bound_site` record this
+# scenario has no reason to carry.
+projects:
+  - key: IJT
+    style: company_managed
+routing:
+  - match:
+      folder_prefix: 'billing-'
+    project: IJT
+routing_default: IJT
+privacy:
+  allowlist: []

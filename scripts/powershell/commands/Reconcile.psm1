@@ -140,8 +140,77 @@ function Resolve-JiraReconcileRouting {
       are what this resolves in practice. Returns { ExitCode; ProjectKey }.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] [string] $Folder, [Parameter(Mandatory)] [string] $ConfigJson)
-    return (Resolve-JiraRouting -FolderName (Split-Path -Leaf $Folder) -LabelsJson '[]' -RoutingConfigJson $ConfigJson)
+    param(
+        [Parameter(Mandatory)] [string] $Folder,
+        [Parameter(Mandatory)] [string] $ConfigJson,
+        # 033: routing rank 3 — the catalogue team this operator selected, or ''
+        # when none was selected or the specification is already bound.
+        [string] $SelectedTeamId = ''
+    )
+    # -Quiet mirrors the bash twin's `2>/dev/null`: reconcile composes its own
+    # four-rank refusal, and the resolver's one-liner would be a second, poorer
+    # explanation of the same fact on the same stream.
+    return (Resolve-JiraRouting -FolderName (Split-Path -Leaf $Folder) -LabelsJson '[]' -RoutingConfigJson $ConfigJson -SelectedTeamId $SelectedTeamId -Quiet)
+}
+
+function Get-JiraReconcileRoutingRefusal {
+    <#
+    .SYNOPSIS
+      The message for a specification that no rank could place (033 FR-007,
+      contracts/routing-resolution.md C6.1-C6.5). Byte-identical twin of
+      _reconcile_routing_refusal.
+
+      It reports what EACH of the four ranks found, not merely the last one.
+      The message it replaces named a single missing key and prescribed
+      declaring routing_default — wrong twice over once the chain is four deep:
+      it names one of four consulted sources, and it prescribes a key the
+      repository may have declined to declare deliberately (C6.5).
+
+      Rank 3's three states are kept apart (C6.3) because their remedies
+      differ: one operator creates a file, another uncomments a line, and a
+      third needs nothing — their specification is already bound, and no
+      selection would have changed the outcome.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Folder,
+        [Parameter(Mandatory)] [string] $ConfigJson,
+        [Parameter(Mandatory)] [string] $ConfigDir,
+        [Parameter(Mandatory)] [bool] $AlreadyBound,
+        [string] $SelectedTeamId = ''
+    )
+    $base = Split-Path -Leaf $Folder
+    $cfgObj = $ConfigJson | ConvertFrom-Json -Depth 100
+
+    $rulesVal = Get-JiraPlanPropSafe $cfgObj 'routing'
+    $nRules = if ($null -ne $rulesVal) { @($rulesVal).Count } else { 0 }
+    $teamsVal = Get-JiraPlanPropSafe $cfgObj 'teams'
+    $nTeams = if ($null -ne $teamsVal) { @($teamsVal).Count } else { 0 }
+    $hasDefault = [bool]($cfgObj.PSObject.Properties['routing_default'])
+
+    $rank1 = if ($nRules -eq 0) { 'no routing rules are declared' }
+    else { "none of the $nRules routing rules matched" }
+
+    $rank2 = if ($nTeams -eq 0) { 'no teams: catalogue is declared' }
+    else { "none of the $nTeams team folder prefixes matched" }
+
+    $rank3 = if ($AlreadyBound) {
+        'not consulted — this specification is already bound, so its project is fixed by its own markers'
+    }
+    elseif (-not [string]::IsNullOrEmpty($SelectedTeamId)) {
+        "the selected team `"$SelectedTeamId`" declares no project in the catalogue"
+    }
+    elseif (-not (Test-Path -LiteralPath "$ConfigDir/personal.yml")) {
+        "no team is selected — $ConfigDir/personal.yml does not exist"
+    }
+    else {
+        "no team is selected — $ConfigDir/personal.yml declares no team: key"
+    }
+
+    $rank4 = if (-not $hasDefault) { 'routing_default is not declared' }
+    else { 'routing_default is declared but produced nothing' }
+
+    return "reconcile: routing could not be resolved for `"$base`" (zero writes). Rule route: $rank1. Team route: $rank2. Your team: $rank3. Default: $rank4. Any one of these places it: add a rule or a teams: entry to $ConfigDir/config.yml, select your team in $ConfigDir/personal.yml, or declare routing_default in $ConfigDir/config.yml."
 }
 
 function Get-JiraReconcilePhaseStatusMap {
@@ -853,14 +922,32 @@ function Invoke-JiraReconcileRun {
         $cfg = $loaded.Json
     }
 
+    # 033, C3.1/C3.2 — the specification's own bytes, read ONCE here and reused
+    # by the parse further down. Routing rank 3 (the operator's selected team)
+    # needs "was any story already bound BEFORE this run", and the answer must
+    # be taken before this run assigns any marker of its own.
+    $rawSpec = Get-Content -Raw -LiteralPath $specFile
+    if ($null -eq $rawSpec) { $rawSpec = '' }
+
+    # Rank 3 is offered only to an unbound specification. Once a story carries a
+    # ticket, the specification itself records which project it lives in, and
+    # that record outranks whoever happens to be reconciling it — otherwise two
+    # operators with different selections would reroute the same spec back and
+    # forth, each run mirroring it afresh into the other project (FR-004).
+    $routingTeam = ''
+    $specAlreadyBound = Test-JiraStoryMarkerAnyBound -Content $rawSpec
+    if (-not $specAlreadyBound) {
+        $routingTeam = Get-JiraPersonalTeam
+    }
+
     $projectFromConfig = $false
     if (-not [string]::IsNullOrEmpty($overrideProject)) {
         $projectKey = $overrideProject
     }
     else {
-        $routed = Resolve-JiraReconcileRouting -Folder $folder -ConfigJson $cfg
+        $routed = Resolve-JiraReconcileRouting -Folder $folder -ConfigJson $cfg -SelectedTeamId $routingTeam
         if ($routed.ExitCode -ne 0) {
-            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: routing could not be resolved — no rule in $cfgDir/config.yml matched `"$(Split-Path -Leaf $folder)`" and no routing_default is configured; add routing_default to config.yml")
+            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message (Get-JiraReconcileRoutingRefusal -Folder $folder -ConfigJson $cfg -ConfigDir $cfgDir -AlreadyBound $specAlreadyBound -SelectedTeamId (Get-JiraPersonalTeam)))
         }
         $projectKey = $routed.ProjectKey
         $projectFromConfig = $true
@@ -887,7 +974,7 @@ function Invoke-JiraReconcileRun {
             if ([string](Get-JiraPlanPropSafe $p 'key') -eq $projectKey) { $declared = $true; break }
         }
         if (-not $declared) {
-            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: a routing rule names project `"$projectKey`", which is not declared in $cfgDir/config.yml's projects[] — correct the rule in config.yml (zero writes)")
+            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: routing resolved project `"$projectKey`", which is not declared in $cfgDir/config.yml's projects[] — correct the routing rule, the teams[] entry, or routing_default that names it (zero writes)")
         }
     }
 
@@ -1021,8 +1108,12 @@ function Invoke-JiraReconcileRun {
     # THIS run parses, so a dry run predicts the exact identifiers a
     # following real run would use. An unwritable spec.md fails closed
     # BEFORE any Jira write (FR-012).
-    $rawSpec = Get-Content -Raw -LiteralPath $specFile
-    if ($null -eq $rawSpec) { $rawSpec = '' }
+    #
+    # `$rawSpec` is read further up now (033, C3.2): routing rank 3 needs to
+    # know whether this specification was ALREADY bound before this run, and
+    # routing resolves ~180 lines before this point. The read moved rather than
+    # being repeated — nothing between the two points writes the file, so the
+    # bytes are identical either way.
     try { $preParse = Get-JiraParsedSpec -Text $rawSpec -FolderSlug $slug }
     catch {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the specification could not be parsed (zero writes)')
@@ -2475,4 +2566,5 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
 }
 
 Export-ModuleMember -Function Invoke-JiraReconcile, Resolve-JiraReconcileRouting, `
-    Get-JiraReconcileLocalBindingFor, Get-JiraReconcilePlanContextFromBinding
+    Get-JiraReconcileLocalBindingFor, Get-JiraReconcilePlanContextFromBinding, `
+    Get-JiraReconcileRoutingRefusal

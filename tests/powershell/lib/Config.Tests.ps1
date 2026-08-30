@@ -659,12 +659,17 @@ Describe 'Import-JiraConfig' {
         }
     }
 
-    It 'rejects a missing routing_default (exit 4)' {
+    # INVERTED by 033 (FR-003, contracts/routing-resolution.md C5.1) — twin of
+    # the bash port's inverted case in tests/bash/lib/test_config.bats. The key
+    # was mandatory, which imposed one project on every developer of every team
+    # sharing a repository. Kept inverted rather than deleted: the old contract
+    # is exactly what a future reader would otherwise reinstate by accident.
+    It 'accepts a missing routing_default (033: the key is optional)' {
         $d = New-TempConfigDir
         Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: company_managed`n" -NoNewline
         $r = Import-JiraConfig -ConfigDir $d
-        $r.ExitCode | Should -Be 4
-        ($r.Errors -join "`n") | Should -Match 'routing_default'
+        $r.ExitCode | Should -Be 0
+        ($r.Errors -join "`n") | Should -Not -Match 'routing_default'
         Remove-Item -Recurse -Force $d
     }
 

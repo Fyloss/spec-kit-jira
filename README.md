@@ -424,6 +424,34 @@ conventions without either of them editing a committed file. Without a
 naming is exactly what it would be without this extension, and no Jira request
 is made.
 
+### Your team also decides where your work is mirrored
+
+That one line does a second job. When a specification matches no committed
+`routing:` rule and carries no team folder prefix, it is mirrored into **your**
+team's project rather than into whatever `routing_default` the repository
+happens to name. Routing resolves in four ranks, first one that answers wins:
+
+1. a committed `routing:` rule — matched against the raw folder name;
+2. a committed `teams:` `folder_prefix` — matched against the folder name with
+   its leading `NNN-` removed;
+3. **your `team:` selection**;
+4. `routing_default`, which is optional.
+
+Nothing answers and the run is refused, telling you what each of the four ranks
+found rather than naming one missing key.
+
+The two committed ranks stay ahead of yours on purpose: a specification that
+says where it belongs must outrank whoever happens to be reconciling it. And
+rank 3 applies only while a specification is still **unbound** — once its
+stories carry ticket markers, the specification itself fixes its project, and
+every developer resolves it identically whatever team each has selected.
+Changing your `team:` will not move work that is already mirrored.
+
+In a repository shared by several teams this is what stops one team's work
+being mirrored into another team's project. Such a repository can leave
+`routing_default` out of `config.yml` entirely — there is no value that is
+correct for all of them.
+
 ### Overriding your team's convention
 
 Rarely, your team's convention does not work for you — a constraint from your

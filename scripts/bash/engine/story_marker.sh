@@ -137,6 +137,52 @@ story_marker_parse_line() {
   jq -cn --arg id "${idval}" '{kind:"malformed", id:$id}' | json_canonical
 }
 
+# story_marker_any_bound <content> — return 0 when ANY line of <content> carries
+# a story marker in the BOUND form, 1 otherwise (033, FR-004,
+# contracts/routing-resolution.md C3.3/C3.4).
+#
+# Routing rank 3 — the project of the team the operator selected in their
+# gitignored personal.yml — is consulted ONLY for a specification that is not
+# yet bound. Without that bound, routing would depend on a per-operator file:
+# two developers would resolve the same specification to different projects and
+# each run would mirror it afresh into the other one, leaving two live ticket
+# sets. The stopping condition is already in the filesystem (Constitution I) —
+# a bound marker is an earlier run's record of which project this spec lives in.
+#
+# Only the ticket-bearing form counts. `creating` is a run in flight and a bare
+# marker is assigned-but-not-created; neither pins a project yet.
+#
+# FORK-FREE by contract (C3.4). It deliberately does NOT reuse
+# story_marker_parse_line, which spends one `jq` per line — on a 200-story
+# document that is 200 processes against zero. The trim is inlined for the same
+# reason: `$(_smk_trim …)` forks a subshell per line.
+story_marker_any_bound() {
+  local content="$1" line t body idval tail
+  local generic_re='^<!--[[:space:]]+speckit-jira[[:space:]]+(.*)-->[[:space:]]*$'
+  local story_re='^story=([^[:space:]]+)([[:space:]]+(.*))?$'
+  local ticket_re='^ticket=[A-Z][A-Z0-9_]*-[1-9][0-9]*$'
+  [[ -z "${content}" ]] && return 1
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    t="${line#"${line%%[![:space:]]*}"}"
+    t="${t%"${t##*[![:space:]]}"}"
+    # Cheap gate first: most lines of a specification are prose.
+    [[ "${t}" == '<!--'* ]] || continue
+    [[ "${t}" =~ ${generic_re} ]] || continue
+    body="${BASH_REMATCH[1]}"
+    body="${body#"${body%%[![:space:]]*}"}"
+    body="${body%"${body##*[![:space:]]}"}"
+    [[ "${body}" =~ ${story_re} ]] || continue
+    idval="${BASH_REMATCH[1]}"
+    tail="${BASH_REMATCH[3]:-}"
+    [[ "${idval}" =~ ^[0-9a-f]{16}$ ]] || continue
+    tail="${tail#"${tail%%[![:space:]]*}"}"
+    tail="${tail%"${tail##*[![:space:]]}"}"
+    [[ "${tail}" =~ ${ticket_re} ]] && return 0
+  done <<< "${content}"
+  return 1
+}
+
 # _smk_scan_anchors <content> — the anchor line numbers (1-based), one per
 # story section, IN DOCUMENT ORDER (contract "Placement"): every
 # `^#{2,4}\s+User Story` heading; else the document's first H1; else "0" (the

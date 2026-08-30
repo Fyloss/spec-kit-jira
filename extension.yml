@@ -14,7 +14,7 @@ schema_version: "1.0"
 extension:
   id: jira-mirror
   name: Jira Mirror
-  version: 0.22.0
+  version: 0.23.0
   description: >-
     Spec Kit ↔ Jira bridge for team-managed and company-managed projects:
     configurable workflows & hierarchies (Scrum/SAFe), multi-project, idempotent
