@@ -112,6 +112,48 @@ function ConvertTo-JiraStoryMarkerInfo {
     return (ConvertTo-JiraJsonValue ([ordered]@{ kind = 'malformed'; id = $idval }))
 }
 
+function Test-JiraStoryMarkerAnyBound {
+    <#
+    .SYNOPSIS
+      True when ANY line of $Content carries a story marker in the BOUND form.
+      Mirror of story_marker_any_bound (033, FR-004,
+      contracts/routing-resolution.md C3.3/C3.4).
+
+      Routing rank 3 — the project of the team the operator selected in their
+      gitignored personal.yml — is consulted ONLY for a specification that is
+      not yet bound. Without that bound, routing would depend on a per-operator
+      file: two developers would resolve the same specification to different
+      projects and each run would mirror it afresh into the other one, leaving
+      two live ticket sets. A bound marker is an earlier run's record of which
+      project this specification lives in (Constitution I).
+
+      Only the ticket-bearing form counts. `creating` is a run in flight and a
+      bare marker is assigned-but-not-created; neither pins a project yet.
+
+      The grammar is applied inline rather than through
+      ConvertTo-JiraStoryMarkerInfo: that builds and serialises an object per
+      line, which is the same waste the bash twin avoids by not calling
+      story_marker_parse_line (C3.4).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Content)
+    if ([string]::IsNullOrEmpty($Content)) { return $false }
+    foreach ($raw in ($Content -split "`n")) {
+        $t = $raw.TrimEnd("`r").Trim()
+        # Cheap gate first: most lines of a specification are prose.
+        if (-not $t.StartsWith('<!--')) { continue }
+        if ($t -notmatch '^<!--\s+speckit-jira\s+(.*)-->\s*$') { continue }
+        $body = $Matches[1].Trim()
+        if ($body -notmatch '^story=(\S+)(\s+(.*))?$') { continue }
+        $idval = $Matches[1]
+        $tail = if ($Matches[3]) { $Matches[3] } else { '' }
+        if ($idval -notmatch '^[0-9a-f]{16}$') { continue }
+        $tail = $tail.Trim()
+        if ($tail -cmatch '^ticket=[A-Z][A-Z0-9_]*-[1-9][0-9]*$') { return $true }
+    }
+    return $false
+}
+
 function Get-JiraStoryMarkerAnchors {
     <#
     .SYNOPSIS
@@ -299,4 +341,4 @@ function Set-JiraStoryMarkerRecordTicket {
 Export-ModuleMember -Function New-JiraStoryMarkerId, Format-JiraStoryMarkerLine, ConvertTo-JiraStoryMarkerInfo, `
     Get-JiraStoryMarkerAnchors, Set-JiraStoryMarkerAssign, Set-JiraStoryMarkerMarkCreating, `
     Set-JiraStoryMarkerRecordTicket, Find-JiraStoryMarkerLineForId, `
-    Get-JiraStoryMarkerSectionInfo
+    Get-JiraStoryMarkerSectionInfo, Test-JiraStoryMarkerAnyBound

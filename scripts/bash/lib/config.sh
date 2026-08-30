@@ -872,7 +872,8 @@ def branchpattern:
 [
   (if (.projects|type) != "array" or (.projects|length) < 1
    then "projects must be a non-empty array" else empty end),
-  (if (.routing_default|type) != "string" or ((.routing_default|projkey) != true)
+  (if has("routing_default")
+      and ((.routing_default|type) != "string" or ((.routing_default|projkey) != true))
    then "routing_default must be a valid project key" else empty end),
   (keys_unsorted[] | select(IN("version_compat","projects","routing","routing_default","privacy","teams","field_defaults","task_mirror","base_url")|not)
    | "unknown top-level key: \(.)"),
@@ -1637,6 +1638,25 @@ _CFG_PIN_RECORDED=""
 # itself.
 _CFG_PINNED_ORIGIN=""
 
+# --- 033: the operator's selected team (routing rank 3) ----------------------
+#
+# _CFG_PERSONAL_TEAM — the catalogue team id this operator selected in their
+# gitignored personal.yml, or "" when they selected none (or there is no such
+# file). Set by config_resolve_connection, which already loads and validates
+# that file on every path that reaches the tracker; capturing what it produced
+# costs nothing, whereas a second config_personal_load would spend several `jq`
+# invocations recomputing a value the run already holds.
+#
+# Set through a module-scoped variable for exactly the reason _CFG_PIN_STATUS
+# is: a value returned on stdout would have to be captured, and the chokepoint
+# is invoked as a bare command so its own status can propagate. It is only
+# visible because that call is NOT wrapped in `$(...)` — a command substitution
+# would compute this in a forked subshell and discard it with the subshell.
+#
+# NOT exported: routing is decided in-process, and a child must not inherit a
+# routing decision it did not make.
+_CFG_PERSONAL_TEAM=""
+
 # _CFG_PIN_ENV_SUPPLIED — true when this run's destination came from the
 # environment rather than from config.yml. FR-011 exempts such a destination
 # from the comparison AND forbids recording it: the environment is per-shell
@@ -1780,6 +1800,9 @@ config_resolve_connection() {
   # being learned, not verified — gating it would mean nothing could ever be
   # bound.
   local binding="${4:-false}"
+  # 033: reset before this run's own answer, so a second call in the same
+  # process can never inherit the first call's selection.
+  _CFG_PERSONAL_TEAM=""
   if [[ -z "${cfg}" ]]; then
     cfg='{}'
     if [[ -f "${dir}/config.yml" ]]; then
@@ -1833,8 +1856,21 @@ config_resolve_connection() {
       # which mentions the key. Call it anyway, for its validation side effect
       # (a malformed team or email fails closed here, EXIT_CONFIG), then read
       # the field straight from the parsed file.
-      config_personal_load "${dir}" "${cfg}" > /dev/null || return $?
-    elif [[ "$(jq -r '.state // ""' <<< "${personal_json}")" == "personal-unloadable" ]]; then
+      #
+      # 033: its result is now CAPTURED rather than discarded. The object
+      # carries `team` on its active branch, which is routing rank 3's whole
+      # input; recomputing it later would mean a second load for a value this
+      # run already has.
+      local _cfg_pjson
+      _cfg_pjson="$(config_personal_load "${dir}" "${cfg}")" || return $?
+      _CFG_PERSONAL_TEAM="$(jq -r '.team // ""' <<< "${_cfg_pjson}")"
+    elif [[ "$(jq -r '.state // ""' <<< "${personal_json}")" != "personal-unloadable" ]]; then
+      # 033: the caller already loaded and validated the file and handed us the
+      # result; take rank 3's input from it rather than loading a second time.
+      _CFG_PERSONAL_TEAM="$(jq -r '.team // ""' <<< "${personal_json}")"
+    fi
+    if [[ -n "${personal_json}" ]] \
+      && [[ "$(jq -r '.state // ""' <<< "${personal_json}")" == "personal-unloadable" ]]; then
       # The caller already knows this file is broken and already reported it
       # (031). Nothing downstream on that pass-through path makes a Jira
       # request, so there is no email worth seeding from a file that cannot

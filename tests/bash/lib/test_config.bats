@@ -751,15 +751,22 @@ YAML
 
 # --- Schema validation -------------------------------------------------------
 
-@test "config_load rejects a missing routing_default (exit 4)" {
+# INVERTED by 033 (FR-003, contracts/routing-resolution.md C5.1). This test
+# asserted the requirement the feature deliberately reverses: `routing_default`
+# was mandatory, which imposed one project on every developer of every team in
+# a repository shared by several. It is kept — inverted rather than deleted —
+# because the old contract is exactly what a future reader would otherwise
+# reinstate by accident. The malformed-value half of the rule is unchanged and
+# is covered by tests/bash/lib/test_config_routing_default_optional.bats.
+@test "config_load accepts a missing routing_default (033: the key is optional)" {
   cat > "${DIR}/config.yml" <<'YAML'
 projects:
   - key: PROJ
     style: company_managed
 YAML
   JIRA_CONFIG_DIR="${DIR}" run config_load
-  [ "$status" -eq 4 ]
-  [[ "$output" == *"routing_default"* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"routing_default"* ]]
 }
 
 @test "config_load rejects an invalid project style enum (exit 4)" {

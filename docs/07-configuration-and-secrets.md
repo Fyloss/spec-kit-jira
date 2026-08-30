@@ -10,7 +10,7 @@ flowchart TB
         A[".specify/jira/config.yml"]
         A1["projects · epic_strategy · task_strategy"]
         A2["priority_map · estimation_field · hierarchy"]
-        A3["routing + routing_default"]
+        A3["routing + routing_default (OPTIONAL since 033)"]
         A4["teams catalogue"]
         A5["privacy.allowlist"]
         A6["phase_status_map (per role since 023) · halted_statuses"]
@@ -64,6 +64,43 @@ Rules that hold across all three:
 - **Keys use business language**, not Jira internals: `epic_strategy: per_feature`,
   never an opaque id where a logical name exists. A tech lead should be able to
   review their team's config without opening the documentation.
+
+
+### Routing: four ranks, first one that answers wins
+
+A specification reconciles against exactly ONE project, resolved in this order
+(033, `specs/033-routing-follows-team/contracts/routing-resolution.md`):
+
+| Rank | Source | Layer | Matched against |
+| --- | --- | --- | --- |
+| 1 | a `routing:` rule | committed | the **raw** folder name, numbering included |
+| 2 | a `teams:` `folder_prefix` | committed | the folder name with its leading `NNN-` removed |
+| 3 | the developer's `team:` selection | **gitignored** `personal.yml` | — it is about the person, not the specification |
+| 4 | `routing_default` | committed | — the repository's stated last resort |
+
+Nothing answers: the run is refused with exit 4 and zero writes, and the message
+reports what each of the four ranks found rather than naming one missing key.
+
+Two properties of that order are load-bearing.
+
+**Ranks 1 and 2 outrank rank 3, always.** They reason about the specification;
+rank 3 reasons about whoever is running the command. A gitignored file must
+never override a team's committed routing decision — that would be the same
+imposition rank 3 exists to remove, pointed the other way.
+
+**Rank 3 applies only while a specification is unbound.** Once any story carries
+a ticket marker, the specification itself records which project it lives in, and
+that record decides for every developer whatever team each has selected. Without
+that bound, two developers would resolve the same specification differently and
+each run would mirror it afresh into the other project, leaving two live ticket
+sets.
+
+`routing_default` became OPTIONAL in 033. A repository shared by several teams
+can omit it — there is no value that is correct for all of them — and let each
+developer route through rank 3. A single-team repository should keep it: a rule
+that declares no condition matches nothing, so the key is the only way to say
+"everything goes here".
+
 
 ## Where `.specify/jira/` itself is found (031)
 

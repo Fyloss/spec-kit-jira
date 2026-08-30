@@ -21,7 +21,7 @@ flowchart TD
     Bound -->|"yes"| Avail{"Bridge entry points intact?"}
     Avail -->|"no"| Notice2(["Incomplete install — notice, exit 0"])
 
-    Avail -->|"yes"| Route["1 · Resolve routing<br/>folder → project key, or an explicit override"]
+    Avail -->|"yes"| Route["1 · Resolve routing<br/>four ranks: rule → team prefix → your team → default<br/>folder → project key, or an explicit override"]
     Route --> Validate["2 · Refuse a missing, malformed,<br/>placeholder, or undeclared project key"]
     Validate --> Assign["3 · ASSIGN durable story identifiers<br/>splice the marker line into spec.md"]
     Assign --> AssignTasks["3a · ASSIGN durable task identifiers<br/>splice the marker line into tasks.md, when task role declared (012)"]

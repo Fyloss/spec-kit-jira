@@ -94,7 +94,11 @@ routing_default: COMP
 overrides:
   routing_default: null
 '@ | Set-Content -LiteralPath (Join-Path $env:JIRA_CONFIG_DIR 'config.local.yml') -NoNewline
-        Assert-FaultProperties -Needle 'add routing_default to config.yml'
+        # 033: the needle changed with the message. It used to end "add
+        # routing_default to config.yml", which C6.5 now forbids as the SOLE
+        # remedy — a repository may have declined that key deliberately, and
+        # three other ranks could equally have placed this specification.
+        Assert-FaultProperties -Needle 'routing could not be resolved'
     }
 
     It 'placeholder-binding: the resolved key equals the shipped placeholder (contract cause 3)' {

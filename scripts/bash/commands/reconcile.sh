@@ -124,8 +124,70 @@ _reconcile_fault() {
 # resolved key, or nothing with a non-zero return when routing_resolve itself
 # could not resolve one (routing-unresolved, US3).
 _reconcile_resolve_routing() {
-  local folder="$1" cfg="$2"
-  routing_resolve "$(basename "${folder}")" '[]' "${cfg}" 2>/dev/null
+  local folder="$1" cfg="$2" team="${3:-}"
+  routing_resolve "$(basename "${folder}")" '[]' "${cfg}" "${team}" 2>/dev/null
+}
+
+# _reconcile_routing_refusal <folder> <cfg-json> <config-dir> <bound> <team>
+# The message for a specification that no rank could place (033 FR-007,
+# contracts/routing-resolution.md C6.1–C6.5).
+#
+# It reports what EACH of the four ranks found, not merely the last one. The
+# message it replaces named a single missing key and prescribed declaring
+# `routing_default` — advice that is wrong twice over once the chain is four
+# deep: it names one of four consulted sources, and it prescribes a key the
+# repository may have declined to declare deliberately (C6.5).
+#
+# Rank 3's three states are kept apart (C6.3) because their remedies differ:
+# one operator needs to create a file, another to uncomment a line, and a third
+# needs nothing at all — their specification is already bound, and no selection
+# would have changed the outcome. Conflating them sends two of the three to
+# edit a file that is already correct.
+_reconcile_routing_refusal() {
+  local folder="$1" cfg="$2" cfg_dir="$3" bound="$4" team="$5"
+  local base n_rules n_teams has_default rank1 rank2 rank3 rank4
+  base="$(basename "${folder}")"
+
+  # One jq for all four counts — the refusal path is not a reason to abandon
+  # the process budget.
+  local counts
+  counts="$(jq -r '[
+      ((.routing // []) | length),
+      ((.teams // []) | length),
+      (if has("routing_default") then 1 else 0 end)
+    ] | @tsv' <<< "${cfg}")"
+  IFS=$'\t' read -r n_rules n_teams has_default <<< "${counts}"
+
+  if [[ "${n_rules}" -eq 0 ]]; then
+    rank1="no routing rules are declared"
+  else
+    rank1="none of the ${n_rules} routing rules matched"
+  fi
+
+  if [[ "${n_teams}" -eq 0 ]]; then
+    rank2="no teams: catalogue is declared"
+  else
+    rank2="none of the ${n_teams} team folder prefixes matched"
+  fi
+
+  if [[ "${bound}" == "true" ]]; then
+    rank3="not consulted — this specification is already bound, so its project is fixed by its own markers"
+  elif [[ -n "${team}" ]]; then
+    rank3="the selected team \"${team}\" declares no project in the catalogue"
+  elif [[ ! -f "${cfg_dir}/personal.yml" ]]; then
+    rank3="no team is selected — ${cfg_dir}/personal.yml does not exist"
+  else
+    rank3="no team is selected — ${cfg_dir}/personal.yml declares no team: key"
+  fi
+
+  if [[ "${has_default}" -eq 0 ]]; then
+    rank4="routing_default is not declared"
+  else
+    rank4="routing_default is declared but produced nothing"
+  fi
+
+  printf 'reconcile: routing could not be resolved for "%s" (zero writes). Rule route: %s. Team route: %s. Your team: %s. Default: %s. Any one of these places it: add a rule or a teams: entry to %s/config.yml, select your team in %s/personal.yml, or declare routing_default in %s/config.yml.' \
+    "${base}" "${rank1}" "${rank2}" "${rank3}" "${rank4}" "${cfg_dir}" "${cfg_dir}" "${cfg_dir}"
 }
 
 # _reconcile_phase_status_map <project-key> <cfg-json> — the resolved,
@@ -730,11 +792,30 @@ _reconcile_run() {
     fi
   fi
 
+  # 033, C3.1/C3.2 — the specification's own bytes, read ONCE here and reused by
+  # the parse further down. Routing rank 3 (the operator's selected team) needs
+  # "was any story already bound BEFORE this run", and the answer must be taken
+  # before this run assigns any marker of its own.
+  local raw_spec
+  raw_spec="$(cat "${spec_file}" 2> /dev/null; printf x)"; raw_spec="${raw_spec%x}"
+
+  # Rank 3 is offered only to an unbound specification. Once a story carries a
+  # ticket, the specification itself records which project it lives in, and
+  # that record outranks whoever happens to be reconciling it — otherwise two
+  # operators with different selections would reroute the same spec back and
+  # forth, each run mirroring it afresh into the other project (FR-004).
+  local routing_team="" spec_already_bound="false"
+  if story_marker_any_bound "${raw_spec}"; then
+    spec_already_bound="true"
+  else
+    routing_team="${_CFG_PERSONAL_TEAM:-}"
+  fi
+
   local project_key project_from_config="false"
   if [[ -n "${override_project}" ]]; then
     project_key="${override_project}"
-  elif ! project_key="$(_reconcile_resolve_routing "${folder}" "${cfg}")"; then
-    _reconcile_fault "${EXIT_CONFIG}" "reconcile: routing could not be resolved — no rule in ${cfg_dir}/config.yml matched \"$(basename "${folder}")\" and no routing_default is configured; add routing_default to config.yml"
+  elif ! project_key="$(_reconcile_resolve_routing "${folder}" "${cfg}" "${routing_team}")"; then
+    _reconcile_fault "${EXIT_CONFIG}" "$(_reconcile_routing_refusal "${folder}" "${cfg}" "${cfg_dir}" "${spec_already_bound}" "${_CFG_PERSONAL_TEAM:-}")"
     return $?
   else
     project_from_config="true"
@@ -758,7 +839,7 @@ _reconcile_run() {
   # override, which may legitimately name a project outside config.yml.
   if [[ "${project_from_config}" == "true" ]] \
     && ! jq -e --arg k "${project_key}" '(.projects // [])[] | select(.key == $k)' <<< "${cfg}" > /dev/null 2>&1; then
-    _reconcile_fault "${EXIT_CONFIG}" "reconcile: a routing rule names project \"${project_key}\", which is not declared in ${cfg_dir}/config.yml's projects[] — correct the rule in config.yml (zero writes)"
+    _reconcile_fault "${EXIT_CONFIG}" "reconcile: routing resolved project \"${project_key}\", which is not declared in ${cfg_dir}/config.yml's projects[] — correct the routing rule, the teams[] entry, or routing_default that names it (zero writes)"
     return $?
   fi
 
@@ -887,8 +968,12 @@ _reconcile_run() {
   # real run would use. An unwritable spec.md fails closed BEFORE any Jira
   # write (FR-012): no ticket may ever exist for a story whose identifier was
   # never recorded.
-  local raw_spec pre_parse assigned_count=0
-  raw_spec="$(cat "${spec_file}" 2> /dev/null; printf x)"; raw_spec="${raw_spec%x}"
+  # `raw_spec` is read further up now (033, C3.2): routing rank 3 needs to know
+  # whether this specification was ALREADY bound before this run, and routing
+  # resolves ~150 lines before this point. The read moved rather than being
+  # repeated — nothing between the two points writes the file, so the bytes are
+  # identical either way.
+  local pre_parse assigned_count=0
   if ! pre_parse="$(printf '%s' "${raw_spec}" | parse_spec "${slug}")"; then
     _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the specification could not be parsed (zero writes)'
     return $?

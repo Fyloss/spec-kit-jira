@@ -185,22 +185,48 @@ interchange_build() {
   printf '%s' "${doc}"
 }
 
-# routing_resolve <folder-name> <labels-json> <routing-config-json> — resolve the
-# ONE project a spec reconciles against (US8, FR 041, FR 042). Inputs: the spec
-# folder's basename (tested against each rule's folder_prefix), the labels declared
-# in the spec (a JSON array, tested against each rule's spec_label), and the team
-# config's `routing` rules plus `routing_default`. First matching rule wins; a rule
-# matches only when EVERY condition it declares holds (a rule with no condition is
-# skipped, and an empty-string condition counts as undeclared — the shipped
-# template's placeholder rule must not become a match-everything rule that
-# shadows the implicit team route). An unmatched spec falls back to
-# routing_default; a spec that matches nothing with no default is refused with
-# EXIT_CONFIG (zero writes downstream). PURE: no Jira reads or writes. Prints
-# the resolved project key on stdout.
+# routing_resolve <folder-name> <labels-json> <routing-config-json> [team-id]
+# Resolve the ONE project a spec reconciles against (US8, FR 041, FR 042; 033
+# FR-001, contracts/routing-resolution.md C1.1–C2.5).
+#
+# FOUR ranks, first non-empty wins:
+#   1  a committed `routing:` rule whose every declared condition holds;
+#   2  a committed `teams[]` entry whose folder_prefix prefixes the de-numbered
+#      folder name;
+#   3  the `project` of the `teams[]` entry whose id equals [team-id] — the team
+#      the OPERATOR selected in their gitignored personal.yml (033);
+#   4  `routing_default`, which is optional since 033.
+# Nothing left: refused with EXIT_CONFIG (zero writes downstream).
+#
+# A rule matches only when EVERY condition it declares holds (a rule with no
+# condition is skipped, and an empty-string condition counts as undeclared — the
+# shipped template's placeholder rule must not become a match-everything rule
+# that shadows the implicit team route).
+#
+# Ranks 1 and 2 stay ahead of rank 3 unconditionally (C2.5). They reason about
+# the SPECIFICATION; rank 3 reasons about the PERSON, and a specification that
+# says where it belongs must outrank whoever happens to be reconciling it —
+# otherwise a gitignored file would override a team's committed routing, which
+# is the same imposition 033 removes, pointed the other way.
+#
+# [team-id] is OPTIONAL and MAY be empty; empty is not an error and produces no
+# diagnostic (C2.3). It arrives already validated against the catalogue by
+# config_personal_load, so this function neither re-validates nor reports on it
+# (C4.1) — an id matching no entry simply contributes nothing (C4.2).
+#
+# With [team-id] empty the whole resolution is byte-identical to the
+# three-input resolver this replaces (C1.4). That is what makes FR-009 —
+# "every existing repository is untouched" — true by construction rather than
+# by inspection.
+#
+# PURE: no Jira reads or writes, and no file opened (C1.2). ONE external
+# process for the whole resolution, whatever the catalogue's size (C1.3) — the
+# rank-3 lookup is folded into the jq programme that already runs.
+# Prints the resolved project key on stdout.
 routing_resolve() {
-  local folder="$1" labels="$2" cfg="$3" key
+  local folder="$1" labels="$2" cfg="$3" team="${4:-}" key
   # kcov-excl-start — jq literal (string lines are not statements)
-  key="$(jq -r --arg folder "${folder}" --argjson labels "${labels}" '
+  key="$(jq -r --arg folder "${folder}" --argjson labels "${labels}" --arg team "${team}" '
     (.routing // []) as $rules
     | ( first(
           $rules[]
@@ -223,7 +249,11 @@ routing_resolve() {
           | select((($t.folder_prefix // "") != "") and ($flat | startswith($t.folder_prefix)))
           | $t.project
         ) // null ) as $team_route
-    | ( $matched // $team_route // .routing_default // "" )
+    | ( first( (.teams // [])[]
+          | select($team != "" and (.id // "") == $team)
+          | .project
+        ) // null ) as $personal_route
+    | ( $matched // $team_route // $personal_route // .routing_default // "" )
   ' <<< "${cfg}")"
   # kcov-excl-stop
 

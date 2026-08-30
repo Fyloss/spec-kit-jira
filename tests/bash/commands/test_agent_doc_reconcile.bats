@@ -137,12 +137,16 @@ setup() {
 @test "017 — the section heading's stated cause count matches the number of table rows" {
   local heading_n row_n
   heading_n="$(grep -oE '## Message discipline — the [a-z]+ distinguished causes' "${DOC}" | sed -E 's/.*the ([a-z]+) distinguished.*/\1/')"
-  [ "${heading_n}" = "eight" ]
+  # 033 (T074) added the ninth: a routing refusal, which exits 4 exactly as the
+  # credentials row does and became reachable by design once `routing_default`
+  # turned optional. The literal is pinned deliberately — this guard exists so
+  # that adding a row without updating the prose is caught, and it did catch it.
+  [ "${heading_n}" = "nine" ]
   # Every data row, header and separator excluded — a row may start with a
   # bold cause name (`| **Bridge unavailable** |`), so match on the leading
   # pipe alone and subtract the two fixed header lines.
   row_n="$(awk '/^## Message discipline/ { f = 1; next } f && /^## / { f = 0 } f && /^\|/' "${DOC}" | wc -l | tr -d ' ')"
-  [ "$((row_n - 2))" -eq 8 ]
+  [ "$((row_n - 2))" -eq 9 ]
 }
 
 @test "017 — the <SPEC-FILE> positional is documented as accepting a feature specification file only" {

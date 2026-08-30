@@ -5,7 +5,7 @@
   "description": "Committable, credential-free team configuration at .specify/jira/config.yml (repo root, never in the extension folder). Business-language keys (Constitution XVI). Validation MUST reject any credential-shaped value (FR-023): the ATATT token prefix, a real *.atlassian.net host, or an email/token shape in any string value. Presented as JSON Schema; the on-disk file is YAML.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["projects", "routing_default"],
+  "required": ["projects"],
   "properties": {
     "version_compat": {
       "type": "string",
@@ -36,7 +36,7 @@
         }
       }
     },
-    "routing_default": { "$ref": "#/$defs/projectKey" },
+    "routing_default": { "$ref": "#/$defs/projectKey", "description": "OPTIONAL since 033 (FR-003). The last of four routing ranks: a `routing` rule, then a `teams[]` folder_prefix, then the team the developer selected in the gitignored personal.yml, then this. A repository shared by several teams may omit it — there is no value that is correct for all of them — and let each developer route through their own selection. Optional means MAY BE ABSENT, never may be malformed: a declared value that is not a project key is still refused." },
     "privacy": {
       "type": "object",
       "additionalProperties": false,

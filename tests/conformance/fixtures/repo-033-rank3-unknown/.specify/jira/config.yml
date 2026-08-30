@@ -1,0 +1,30 @@
+# 033 conformance fixture — a repository shared by two teams.
+#
+# Rank 1's rule prefix is spelled with the host's numbering component:
+# routing rules test the RAW folder name, unlike the team route, which tests it
+# with the leading `NNN-` removed. A rule spelled 'billing-' would never match
+# `003-billing-refund`.
+#
+# No `base_url` key: the harness exports SPEC_KIT_JIRA_BASE_URL from the mock's
+# port. Declaring one would engage 032's destination pin.
+projects:
+  - key: ALPHA
+    style: company_managed
+  - key: BETA
+    style: company_managed
+routing:
+  - match:
+      folder_prefix: '003-billing-'
+    project: ALPHA
+routing_default: ALPHA
+teams:
+  - id: alpha
+    project: ALPHA
+    folder_prefix: "alpha-"
+    branch_pattern: "alpha-<ID>/<FEATURE_NAME>"
+  - id: beta
+    project: GHOST
+    folder_prefix: "beta-"
+    branch_pattern: "beta-<ID>/<FEATURE_NAME>"
+privacy:
+  allowlist: []

@@ -88,7 +88,7 @@ works either way (026 FR-016).
    mirror that could not run is never a reason for `/speckit.plan` or
    `/speckit.implement` to fail.
 
-## Message discipline — the eight distinguished causes
+## Message discipline — the nine distinguished causes
 
 At most **one** message per host command run, naming the **true** cause:
 
@@ -99,6 +99,7 @@ At most **one** message per host command run, naming the **true** cause:
 | Binding predates this release | Exit `4`, message says the binding "predates parent support" | The project is already bound; its local binding is a version behind. Run `/speckit.jira-mirror.config` to refresh it (see INSTALL.md, "Upgrading to the parent-hierarchy release") |
 | Credentials absent, or a declared retrieval command failed | Exit `4`, no token from either resolution rung | The token resolved through neither `JIRA_API_TOKEN` nor a declared `JIRA_PAT_COMMAND`; a declared command that failed names the reason (missing, non-zero exit, timeout, empty output) |
 | Credentials rejected | Exit `3` | Jira rejected the credentials — they exist but are not accepted |
+| Routing unresolved | Exit `4`, message starts "routing could not be resolved for" | Relay the bridge's own message verbatim: it reports what each of the four routing ranks found — the committed rules, the team folder prefixes, the developer's own team selection, and `routing_default` — and offers all three remedies. Do **not** shorten it to "add routing_default": that key is optional, and a repository shared by several teams may have declined it deliberately |
 | Prerequisite missing | Exit `5` | The named prerequisite is missing; relay the entry point's own message |
 | Jira unreachable | Exit `2` after exhausted retries | Jira could not be reached; nothing was mirrored |
 | **Bridge unavailable** | The entry point above does not exist at its repository-relative path | Emit the fallback block below **verbatim** |

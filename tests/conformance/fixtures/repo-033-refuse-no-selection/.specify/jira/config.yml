@@ -1,0 +1,12 @@
+# 033 C6 — the refusal shape: no routing rule matches, no teams: catalogue is
+# declared, no personal.yml exists, and routing_default is absent. All four
+# ranks find nothing, and the message must say so rank by rank.
+projects:
+  - key: ALPHA
+    style: company_managed
+routing:
+  - match:
+      folder_prefix: '003-billing-'
+    project: ALPHA
+privacy:
+  allowlist: []
