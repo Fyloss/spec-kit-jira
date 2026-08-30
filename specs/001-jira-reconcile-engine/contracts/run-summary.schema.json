@@ -59,7 +59,10 @@
         "discovery": { "$ref": "#/$defs/effect" },
         "hooks": { "$ref": "#/$defs/effect" },
         "readme": { "$ref": "#/$defs/effect" },
-        "gitignore": { "$ref": "#/$defs/effect" }
+        "gitignore": { "$ref": "#/$defs/effect" },
+        "personal": { "$ref": "#/$defs/effect" },
+        "field_defaults": { "$ref": "#/$defs/effect" },
+        "task_mirror": { "$ref": "#/$defs/effect" }
       }
     },
     "drift": {
@@ -134,6 +137,23 @@
         }
       }
     },
+    "provisional": {
+      "type": "array",
+      "description": "Degraded-mode team-name proposals derived from local branch names, each flagged as unverified because Jira introspection was unavailable (030). Empty when the scan found nothing. Present only on a degraded `config` run.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["team_prefix", "provisional"],
+        "properties": {
+          "team_prefix": { "type": "string" },
+          "provisional": { "const": true }
+        }
+      }
+    },
+    "rerun_guidance": {
+      "type": "string",
+      "description": "What the operator must supply to turn a degraded run into a full one, named literally (Principle XVI). Present only on a degraded `config` run."
+    },
     "exit_code": {
       "type": "integer",
       "minimum": 0,
@@ -147,14 +167,16 @@
       "required": ["status"],
       "properties": {
         "status": {
-          "description": "The first six are WRITE outcomes, for effects that write a file this extension owns. The last five are the READ-ONLY verification vocabulary of the hooks effect (003 contracts/hook-registry-entry.md): that effect classifies and reports the consuming repository's hook registry and never writes it, so no write outcome could honestly describe it.",
+          "description": "The first eight are WRITE outcomes, for effects that write a file this extension owns; `would_create` is the dry-run twin of `created`, predicted but not performed (Constitution XI), and `inert` means the managed region exists but the run had nothing to put in it. The last five are the READ-ONLY verification vocabulary of the hooks effect (003 contracts/hook-registry-entry.md): that effect classifies and reports the consuming repository's hook registry and never writes it, so no write outcome could honestly describe it.",
           "enum": [
             "written",
             "unchanged",
             "created",
+            "would_create",
             "repaired",
             "refused",
             "skipped",
+            "inert",
             "healthy",
             "incomplete",
             "held_disabled",
