@@ -51,11 +51,25 @@ The short version — one inseparable rule, not two:
 
 ## Running the suites
 
-- `tests/run-bash.sh` — full bash suite (~190s / 3m10s, `bats`+`jq` only, no
-  PowerShell or GNU `parallel` required). Use `tests/run-bash.sh --since <ref>`
-  for a change-scoped inner loop (≤60s on a single-module diff).
+- `tests/run-bash.sh` — full bash suite. **~16 min** (940 s measured 2026-08-30:
+  2688 tests across 274 files, unloaded machine, parallel via `xargs -P`).
+  `bats`+`jq` only — no PowerShell or GNU `parallel` required. The count grows
+  fast enough that this figure goes stale: it read 190 s when the suite was a
+  third of its current size, which cost more than one session to a run that
+  looked hung and was merely long. **Re-measure before trusting it, and update
+  this line when you do.**
+- Use `tests/run-bash.sh --since <ref>` for a change-scoped inner loop (≤60s on
+  a single-module diff). It **fails open to the full run** — printing which
+  reason on its `mode:` line — whenever the affected set is undeterminable:
+  a bad ref, a detached HEAD, or a change touching `scripts/bash/lib/*`,
+  `tests/bash/helpers/*`, `tests/conformance/mock-jira/*` or the runner itself.
+  A shared-helper change is the common one, so check that `mode:` line before
+  concluding the inner loop is slow — it may simply not be scoped.
 - `bats -r tests/bash` still works directly if you need raw `bats` output —
   the `-r` is load-bearing, without it bats silently runs nothing — but it is
-  serial and ~15 min; prefer `tests/run-bash.sh` for everyday use.
+  serial; prefer `tests/run-bash.sh` for everyday use. **Its runtime is
+  unmeasured at the current suite size**; the ~15 min once quoted here predates
+  the growth above and cannot still hold, since the *parallel* runner alone now
+  takes 16.
 - `bash tests/conformance/ci-conformance.sh` — cross-port byte equivalence.
 - `shellcheck` and `actionlint` must stay clean.
