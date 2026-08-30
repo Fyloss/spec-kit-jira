@@ -1,6 +1,81 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 3.0.0 → 4.0.0 (MAJOR — two mandated obligations are REMOVED outright and
+one prohibition is widened. Behaviour that satisfies 3.0.0 violates 4.0.0 and the
+reverse: an extension that checks and reports hook health satisfies 3.0.0 and violates
+4.0.0's ban on reading the registry, while one that stays silent does the opposite. That
+is the definition of a backward-incompatible governance change. MINOR was not arguable —
+this is a removal, not an expansion.)
+
+Modified principles:
+
+X. Self-Healing Automatic Mirror → Self-Healing Automatic Mirror, Within Its Own Boundary
+  (a) The obligation "Installation MUST register the `after_*` hooks" is REMOVED. It
+      describes a world that no longer exists: the host writes `.specify/extensions.yml`
+      from the manifest's top-level `hooks:` block, and feature 003 already removed this
+      extension's writer. `scripts/bash/hooks/register_hooks.sh` states it in its own
+      header — "exactly ONE writer and it is not us". The principle had outlived the
+      architecture it was written for.
+  (b) The obligation "On every execution the extension MUST check its hooks' health,
+      report it, and offer a one-command repair" is REMOVED. It obliged the extension to
+      audit work it neither performs nor can correct: it may read the registry and act on
+      nothing it finds there. The audit was also observed producing a FALSE NEGATIVE in a
+      real consumer repository — all seven events reported missing while the registry
+      carried them — most plausibly because the 0.22.0 id/command rename made every
+      previously-written entry unrecognisable to a classifier requiring both
+      `extension: jira-mirror` and the new command names. A report that can be
+      confidently wrong about a fact it cannot repair is worse than no report.
+  (c) The existing prohibition on WRITING the registry is widened to READING it, and
+      stated as the general rule it follows from: an extension that cannot repair a fact
+      must not assert it.
+  (d) What the extension genuinely self-heals is retained and made explicit — reconcile's
+      idempotent re-binding, the safely re-runnable configuration ceremony, and the
+      single actionable remedy in hook context.
+  (e) The enforcement test changes from install/upgrade/duplicate-entry/disabled-hook
+      assertions to: no registry read and no registry write in any state, plus the
+      re-run assertions for the two behaviours the extension does own.
+
+Consequence recorded deliberately, so it is not discovered later in a diff: the
+obligation "a hook the operator explicitly disabled (`enabled: false`) MUST be respected
+forever — no repair or upgrade may re-enable it" is REMOVED with the rest. A reinstall
+may now re-enable a hand-disabled hook, and this extension will neither prevent it nor
+report it. That is a real protection being given up, knowingly, on the ground that the
+registry belongs to the host and honouring the operator's decision within it is the
+host's obligation to keep.
+
+The principle KEEPS its number and its place. Deleting it would renumber XI–XVI and
+invalidate the Constitution Check table of all thirty-two specifications already written.
+
+Rejected alternative (recorded so it is not re-proposed): keep the health check and
+repair the classifier, teaching it the pre-rename id and command names alongside the
+current ones. Rejected on two grounds — it preserves an audit of another component's work
+that this extension can act on in no way, and every future rename reintroduces the same
+false negative through the same door.
+
+Principle V's clause "a reinstall or upgrade of the extension must never be able to
+destroy the user's configuration or hooks" is UNAFFECTED and stays where it is. It
+constrains where configuration LIVES; it says nothing about who verifies the registry.
+Nor does its enforcement test collide with X: a test suite may read any file it needs to
+make an assertion. X binds the shipped extension, not the harness that checks it.
+
+Templates requiring update: none. `.specify/templates/plan-template.md`,
+`spec-template.md` and `tasks-template.md` state the Constitution Check obligation
+generically and name no individual principle.
+
+Follow-up TODOs — the code and its documentation still implement the removed obligations,
+and are retired by feature 034, not by this amendment. Changing them here would make them
+describe a version that has not shipped:
+  ⚠ scripts/{bash,powershell} — the hook registry reader, the config ceremony's hooks
+    effect, reconcile's `hook_health`, `--enable-hook`, and the `hooks.disabled` record.
+  ⚠ README.md:183 — "reports the hook registration".
+  ⚠ docs/03-lifecycle-hooks.md — "Installation — who writes what" and "The operator's
+    disable decision".
+  ⚠ docs/05-reconcile-flow.md:40,384 — hook health in the run summary and its type.
+  ⚠ tests — the install/upgrade/duplicate/disabled-hook suites listed in (e).
+
+Previous report (3.0.0), retained:
+------------------------------------------------------------------------------
 Version change: 2.0.0 → 3.0.0 (MAJOR — one existing prohibition is narrowed. This is the
 same test 2.0.0 applied to itself: a guard that refuses a site coordinate at the local
 binding layer's new dedicated key satisfies 2.0.0 and violates 3.0.0, and one that admits
@@ -621,19 +696,26 @@ up disabled: precision wins over recall at the BLOCK tier.
 email warns, an allowlisted Confluence link passes silently; a BLOCK-tier false
 positive on allowlisted content is a failing test.
 
-### X. Self-Healing Automatic Mirror
+### X. Self-Healing Automatic Mirror, Within Its Own Boundary
 
-- Installation MUST register the `after_*` hooks idempotently and resiliently to
-  reinstalls/upgrades: an extension update must never silently strip the hooks (a known
-  defect in the ecosystem).
-- On every execution the extension MUST check its hooks' health, report it, and offer a
-  one-command repair.
-- A hook the operator explicitly disabled (`enabled: false`) MUST be respected forever —
-  no repair or upgrade may re-enable it.
+- **The lifecycle-hook registry is the host's, not ours.** Registering the declared
+  events, and keeping them registered across reinstalls and upgrades, is established
+  once the operator runs `specify extension add`: the host writes
+  `.specify/extensions.yml` from this extension's manifest, and it is the only writer.
+- The extension MUST NOT read, write, verify, or report that registry. The prohibition
+  on writing it is hereby widened to reading it. An extension that cannot repair a fact
+  MUST NOT assert it: a classification of another component's work, acted on in no way,
+  buys nothing and can be confidently wrong.
+- What the extension self-heals is what the extension owns, and that obligation stands:
+  reconcile MUST be idempotent and MUST re-establish the binding on a later run with no
+  manual intervention; the configuration ceremony MUST be safely re-runnable; and a
+  failure in hook context MUST surface one actionable remedy rather than fail the host
+  command (Principle III).
 
-**Enforcement test**: install→upgrade→verify tests assert hooks survive; repeated
-installs assert no duplicate hook entries; a disabled hook stays disabled across
-repair and upgrade.
+**Enforcement test**: a test proves the extension neither writes nor reads
+`.specify/extensions.yml` in any state; re-running reconcile after an interrupted run
+asserts the binding is re-established with no duplicate ticket; re-running the
+configuration ceremony asserts zero churn.
 
 ### XI. Universal Dry-Run and Auditability
 
@@ -804,4 +886,4 @@ whose review requires verbal explanations to be understood fails this principle.
 - Every PR review verifies compliance with all sixteen principles; any deviation MUST
   be justified in the plan's "Complexity Tracking" section or the PR is rejected.
 
-**Version**: 3.0.0 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-08-28
+**Version**: 4.0.0 | **Ratified**: 2026-07-23 | **Last Amended**: 2026-08-30
