@@ -10,8 +10,8 @@ This repository mirrors its Spec Kit artifacts into Jira Cloud via the
   extension catalog, so the host asks to confirm an `⚠ Untrusted Source`
   prompt — answer `y`.
 - **Configure**: run `/speckit.jira-mirror.config` to bind this repository to a Jira
-  project. It also verifies the hook registration — it never modifies
-  `.specify/extensions.yml`, which the official install alone writes.
+  project. It does not touch `.specify/extensions.yml` — the extension never
+  opens that file, for reading or for writing; the official install owns it.
 - **Mirror**: `spec.md` / `plan.md` / `tasks.md` reconcile into Jira as part of
   each Spec Kit lifecycle step. A mirroring failure never fails the spec-kit
   command that triggered it.
@@ -31,8 +31,12 @@ This repository mirrors its Spec Kit artifacts into Jira Cloud via the
   convention for the exceptional case, and reports itself on every run. Without
   the file, naming is unchanged and no Jira request is made.
 - **Disable one event**: set `enabled: false` on its entry in
-  `.specify/extensions.yml` and run `/speckit.jira-mirror.config` once; release it later
-  with `/speckit.jira-mirror.config --enable-hook <event>`.
+  `.specify/extensions.yml`. Two things follow, both deliberate: a reinstall
+  may **re-enable** it without warning, because `specify extension add`
+  rewrites that field unconditionally and this extension will not correct it;
+  and if an entry is missing, **nothing happens and nothing says so** — the
+  extension no longer reports on that file, so the only signal is that no
+  ticket moves.
 - **Prerequisites**: Bash ≥ 4 (macOS ships 3.2 — install a newer Bash), or
   PowerShell 7+ on Windows, plus `curl`, `jq`, and `git`.
 

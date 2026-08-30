@@ -88,7 +88,7 @@ cli_parse() {
   local command="" dry_run=false force=false json=false on_drift=abort
   local verbose=false help=false error="" use_team="" accept_defaults=false reuse=""
   local accept_site=""
-  local -a positional=() styles=() enable_hooks=() child_types=() issue_types=()
+  local -a positional=() styles=() child_types=() issue_types=()
   local -a field_defaults=() field_values=()
   local -a task_mirrors=()
   local parent_seen=false parent="" confirm=false
@@ -250,20 +250,6 @@ cli_parse() {
           fi
         fi
         ;;
-      --enable-hook)
-        # The operator's explicit release of a held lifecycle event (003 FR-007,
-        # FR-029). Repeatable. It exists because `specify extension add` rewrites
-        # `enabled: true` unconditionally, so the extension cannot tell an
-        # operator's re-enable from the install's — and guessing would silently
-        # discard a deliberate choice (research R5). One explicit flag, named in
-        # the ceremony's own report, is the honest mechanism.
-        if [[ $# -lt 2 ]]; then
-          error="--enable-hook requires a lifecycle event (--enable-hook <event>)"
-        else
-          shift
-          enable_hooks+=("$1")
-        fi
-        ;;
       --parent)
         # 027, contract seed-cli-contract.md §2: at most once — key, URL, or
         # free text (may contain spaces). `parent_seen` is recorded
@@ -318,7 +304,7 @@ cli_parse() {
     return 0
   fi
 
-  local args_joined styles_joined enable_hooks_joined child_types_joined issue_types_joined
+  local args_joined styles_joined child_types_joined issue_types_joined
   local field_defaults_joined field_values_joined task_mirrors_joined
   args_joined="$(
     IFS=' '
@@ -327,10 +313,6 @@ cli_parse() {
   styles_joined="$(
     IFS=' '
     printf '%s' "${styles[*]-}"
-  )"
-  enable_hooks_joined="$(
-    IFS=' '
-    printf '%s' "${enable_hooks[*]-}"
   )"
   child_types_joined="$(
     IFS=' '
@@ -379,7 +361,6 @@ cli_parse() {
   printf 'issue_types=%s\n' "${issue_types_joined}"
   printf 'use_team=%s\n' "${use_team}"
   printf 'reuse=%s\n' "${reuse}"
-  printf 'enable_hooks=%s\n' "${enable_hooks_joined}"
   printf 'field_defaults=%s\n' "${field_defaults_joined}"
   printf 'field_values=%s\n' "${field_values_joined}"
   printf 'task_mirrors=%s\n' "${task_mirrors_joined}"

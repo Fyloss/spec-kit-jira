@@ -58,105 +58,6 @@ setup() {
 }
 
 # =============================================================================
-# T061 [003 US6] — An unreadable hook registry (FR-024)
-# =============================================================================
-#
-# The rule this encodes is a rule about honesty. When the extension cannot read
-# the registry it has NO evidence about the hooks, so saying "your hooks are
-# missing" would be a confident, false, and expensive claim — it would send the
-# operator to reinstall an extension whose hooks are fine. FR-024 requires the
-# opposite: name the file, say what defeated the reader where that is
-# determinable, and make no claim about the hooks at all.
-#
-# Two unreadable states are distinguished in prose, because they call for
-# different actions: a genuinely broken file needs repairing, while valid YAML
-# using a construct outside this reader's restricted subset needs rewriting in
-# the subset (or nothing at all, if another tool owns that section).
-#
-# The run is a DEGRADED one — no base URL, so no Jira call — because the hooks
-# effect is computed before the degraded check and needs no connection at all.
-
-# _refusal_work — a scratch repository with a committed config and no Jira
-# connection. Returns with WORK / JIRA_CONFIG_DIR exported.
-_refusal_work() {
-  WORK="$(mktemp -d)"
-  mkdir -p "${WORK}/.specify/jira"
-  export JIRA_CONFIG_DIR="${WORK}/.specify/jira"
-  {
-    printf 'projects:\n'
-    printf '  - key: TEAM\n'
-    printf 'routing_default: TEAM\n'
-  } > "${JIRA_CONFIG_DIR}/config.yml"
-  unset SPEC_KIT_JIRA_BASE_URL
-  export SPEC_KIT_JIRA_EXTENSIONS_YML="${WORK}/.specify/extensions.yml"
-}
-
-# _refusal_registry <line...> — write the registry under test.
-_refusal_registry() {
-  printf '%s\n' "$@" > "${SPEC_KIT_JIRA_EXTENSIONS_YML}"
-}
-
-# _refusal_summary — the --json summary alone. A degraded run also emits its
-# single WARNING on stderr, which bats' `run` folds into $output.
-_refusal_summary() {
-  grep '^{' <<< "$output"
-}
-
-@test "an unreadable registry names the FILE as the cause and writes nothing (FR-024)" {
-  _refusal_work
-  _refusal_registry 'hooks:' '  after_plan:' '   - broken' '     : : :'
-  local before
-  before="$(shasum -a 256 < "${SPEC_KIT_JIRA_EXTENSIONS_YML}")"
-  run cmd_config config --json
-  [ "$status" -eq 0 ]
-  [ "$(jq -r '.effects.hooks.status' <<< "$(_refusal_summary)")" = "unreadable" ]
-  [[ "$(jq -r '.effects.hooks.detail' <<< "$(_refusal_summary)")" == *"extensions.yml"* ]]
-  [ "$(shasum -a 256 < "${SPEC_KIT_JIRA_EXTENSIONS_YML}")" = "${before}" ]
-  rm -rf "${WORK}"
-}
-
-@test "an unreadable registry does NOT report the events as missing (FR-024)" {
-  _refusal_work
-  _refusal_registry 'hooks:' '  after_plan:' '   - broken' '     : : :'
-  run cmd_config config --json
-  # It must not tell the operator to reinstall over a file it merely failed to
-  # parse — the install would not fix it, and the hooks may be perfectly fine.
-  [[ "$(jq -r '.effects.hooks.detail' <<< "$(_refusal_summary)")" != *"specify extension add"* ]]
-  [[ "$(jq -r '.effects.hooks.detail' <<< "$(_refusal_summary)")" == *"no claim is made about the hooks"* ]]
-  rm -rf "${WORK}"
-}
-
-@test "a YAML anchor is distinguished in prose and NAMED (FR-024, Edge Cases)" {
-  # Valid YAML, outside this reader's subset. The distinction matters: this file
-  # is not broken, and telling the operator it is would send them to fix nothing.
-  _refusal_work
-  _refusal_registry 'defaults: &defaults' '  enabled: true' 'hooks:' '  after_plan:' '    - extension: jira-mirror'
-  run cmd_config config --json
-  [ "$(jq -r '.effects.hooks.status' <<< "$(_refusal_summary)")" = "unreadable" ]
-  [[ "$(jq -r '.effects.hooks.detail' <<< "$(_refusal_summary)")" == *"anchor"* ]]
-  rm -rf "${WORK}"
-}
-
-@test "a flow collection is distinguished in prose and NAMED (FR-024, Edge Cases)" {
-  _refusal_work
-  _refusal_registry 'hooks:' '  after_plan: [{extension: jira-mirror, command: speckit.jira-mirror.reconcile}]'
-  run cmd_config config --json
-  [[ "$(jq -r '.effects.hooks.detail' <<< "$(_refusal_summary)")" == *"flow collection"* ]]
-  rm -rf "${WORK}"
-}
-
-@test "an unreadable registry never stops the rest of the ceremony (FR-015)" {
-  # The hooks effect is one of four. A file we cannot read is a report, not a
-  # reason to abandon the run.
-  _refusal_work
-  _refusal_registry 'hooks:' '  after_plan:' '   - broken' '     : : :'
-  run cmd_config config --json
-  [ "$status" -eq 0 ]
-  [ "$(jq -r '.rerun_guidance' <<< "$(_refusal_summary)")" != "null" ]
-  rm -rf "${WORK}"
-}
-
-# =============================================================================
 # T052 [030, US2] — the §6 ordering rule: a malformed FILE setting refuses
 # even when the environment holds a valid one (contracts/connection-
 # settings.md §6). config_load validates the file unconditionally; the
@@ -195,5 +96,51 @@ YAML
   [ "$status" -eq 4 ]
   [[ "$output" == *"email is invalid"* ]]
   unset JIRA_EMAIL
+  rm -rf "${dir}"
+}
+
+# =============================================================================
+# 034 T027/T029/T030 [US3] — the withdrawn flag and the withdrawn key.
+# =============================================================================
+#
+# Both refusals are produced by paths that ALREADY EXISTED. Nothing was added to
+# obtain them (SC-004), and that is the point: the extension has exactly one
+# operator, so there was no installed base for a dedicated retired-key rule or a
+# bespoke message to spare. The key leaves the accepted set and the schema's
+# existing unknown-key refusal handles whatever remains.
+#
+# The key test asserts the MESSAGE, not only the exit code. A refactor that
+# dropped the file path from the report would keep the code green while losing
+# the only part an operator can act on.
+
+@test "034 — --enable-hook is refused as an unknown flag, naming it (FR-004, US3 AC1)" {
+  run cmd_config config --enable-hook after_specify
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--enable-hook"* ]]
+  # The EXISTING unknown-flag path, not a bespoke "this was retired" message.
+  [[ "$output" == *"unknown"* || "$output" == *"unrecognised"* || "$output" == *"unrecognized"* ]]
+}
+
+@test "034 — a config.local.yml declaring hooks is refused, naming key and file (FR-005, SC-004)" {
+  local dir
+  dir="$(mktemp -d)"
+  printf 'projects:\n  - key: PROJ\nrouting_default: PROJ\n' > "${dir}/config.yml"
+  printf 'hooks:\n  disabled:\n    - after_specify\n' > "${dir}/config.local.yml"
+  JIRA_CONFIG_DIR="${dir}" run config_load "${dir}"
+  [ "$status" -eq 4 ]
+  # Names the key...
+  [[ "$output" == *"hooks"* ]]
+  # ...and the file it is in. Both halves matter to an operator.
+  [[ "$output" == *"config.local.yml"* ]]
+  rm -rf "${dir}"
+}
+
+@test "034 — a config.local.yml declaring none of the withdrawn keys still validates (US3 AC3)" {
+  local dir
+  dir="$(mktemp -d)"
+  printf 'projects:\n  - key: PROJ\nrouting_default: PROJ\n' > "${dir}/config.yml"
+  printf 'site_alias: prod\n' > "${dir}/config.local.yml"
+  JIRA_CONFIG_DIR="${dir}" run config_load "${dir}"
+  [ "$status" -eq 0 ]
   rm -rf "${dir}"
 }

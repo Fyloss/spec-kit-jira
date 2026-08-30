@@ -141,12 +141,19 @@ produces nothing. Everything the developer sees then comes from the agent —
 which is why that text is fixed in the command document rather than composed
 at runtime.
 
-## The operator's disable decision
+## Disabling an event — and what the bridge no longer guarantees
 
-A hook the operator explicitly disabled must be respected **forever**: no
-repair and no upgrade may re-enable it. The decision is recorded in the
-bridge's own gitignored local binding, not in the registry the installer
-rewrites — so a reinstall cannot erase it.
+Setting `enabled: false` on an entry in `.specify/extensions.yml` stops that
+event firing. The host honours it; the bridge is not consulted.
+
+**The bridge used to add a second layer**: the configuration ceremony
+observed an `enabled: false` entry, recorded it in its own gitignored local
+binding, and a dispatch guard exited `0` silently for that event even after a
+reinstall had rewritten the registry field back to `true`. That made a
+hand-disabled hook permanent.
+
+That layer is gone, deliberately. Constitution X, as amended in 4.0.0, withdrew
+it along with the rest of the registry reader:
 
 ```mermaid
 stateDiagram-v2
@@ -154,16 +161,18 @@ stateDiagram-v2
     Declared --> Registered: specify extension add writes the registry
     Registered --> Active: hook fires on every lifecycle step
 
-    Active --> HeldDisabled: operator disables the event
-    HeldDisabled --> HeldDisabled: reinstall / upgrade / repair — still disabled
-    HeldDisabled --> Active: operator re-enables it explicitly
+    Active --> Disabled: operator sets enabled false, by hand
+    Disabled --> Active: a reinstall rewrites enabled true — silently
+    Disabled --> Active: or the operator re-enables it by hand
 
     Active --> Inert: no active feature, or repository not bound
     Inert --> Active: binding completed
 ```
 
-When a run is dispatched for a disabled event, the bridge exits `0`
-**silently** — before any prerequisite check, any config read, and any network
-call. No warning either: a warning on every single lifecycle command for an
-event the operator deliberately turned off is precisely the noise the design
-forbids.
+The consequence is stated here rather than left to be discovered: **a reinstall
+may re-enable a hook you disabled by hand, and this extension will neither
+prevent it nor report it.** Honouring an operator's decision inside a file the
+host owns is the host's obligation to keep. What the bridge gave up in exchange
+is the ability to be confidently wrong about that file — the report it used to
+emit was observed claiming all seven events missing while the registry plainly
+carried them.

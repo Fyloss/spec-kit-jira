@@ -46,7 +46,7 @@ Describe 'ConvertTo-JiraSummaryProse style audit (T098)' {
     BeforeAll {
         # Two projects, deliberately declared out of order, so the renderer's own
         # ordering (project key, ordinal) is what is asserted.
-        $script:AuditJson = '{"command":"config","counts":{"created":0,"errors":0,"skipped":0,"updated":0,"warnings":0},"dry_run":false,"effects":{"discovery":{"detail":"2 project(s) discovered","projects":{"WEX":{"style":"company_managed","style_source":"operator"},"IJT":{"style":"team_managed","style_source":"api"}},"status":"written"},"gitignore":{"detail":"personal.yml gitignore coverage","status":"unchanged"},"hooks":{"detail":"lifecycle hooks already registered","status":"unchanged"},"readme":{"detail":"block present","status":"unchanged"}},"exit_code":0,"schema_version":"1.0"}'
+        $script:AuditJson = '{"command":"config","counts":{"created":0,"errors":0,"skipped":0,"updated":0,"warnings":0},"dry_run":false,"effects":{"discovery":{"detail":"2 project(s) discovered","projects":{"WEX":{"style":"company_managed","style_source":"operator"},"IJT":{"style":"team_managed","style_source":"api"}},"status":"written"},"gitignore":{"detail":"personal.yml gitignore coverage","status":"unchanged"},"readme":{"detail":"block present","status":"unchanged"}},"exit_code":0,"schema_version":"1.0"}'
     }
 
     It 'renders the per-project style audit under the discovery effect' {
@@ -61,11 +61,14 @@ Describe 'ConvertTo-JiraSummaryProse style audit (T098)' {
         $discIdx = [array]::FindIndex($rendered, [Predicate[string]] { param($l) $l.StartsWith('  discovery: ') })
         $ijtIdx = [array]::FindIndex($rendered, [Predicate[string]] { param($l) $l.Contains('IJT: ') })
         $wexIdx = [array]::FindIndex($rendered, [Predicate[string]] { param($l) $l.Contains('WEX: ') })
-        $hooksIdx = [array]::FindIndex($rendered, [Predicate[string]] { param($l) $l.StartsWith('  hooks: ') })
-        # discovery < IJT < WEX < hooks: ordinal key order, inside the discovery block.
+        # The boundary marker is the NEXT effect in the renderer's fixed order.
+        # It was `hooks` until 034 removed that effect; `readme` now follows
+        # discovery.
+        $nextIdx = [array]::FindIndex($rendered, [Predicate[string]] { param($l) $l.StartsWith('  readme: ') })
+        # discovery < IJT < WEX < readme: ordinal key order, inside the discovery block.
         $discIdx | Should -BeLessThan $ijtIdx
         $ijtIdx | Should -BeLessThan $wexIdx
-        $wexIdx | Should -BeLessThan $hooksIdx
+        $wexIdx | Should -BeLessThan $nextIdx
     }
 
     It 'adds no style-audit lines when the projects map is empty (degraded run)' {
@@ -87,5 +90,41 @@ Describe 'ConvertTo-JiraSummaryProse Transitioned (T181)' {
     It 'omits Transitioned when counts.transitioned is absent' {
         $json = '{"schema_version":"1.0","command":"reconcile","dry_run":false,"counts":{"created":0,"updated":0,"skipped":0,"warnings":0,"errors":0},"actions":[],"hook_health":{},"exit_code":0}'
         (ConvertTo-JiraSummaryProse $json) | Should -Not -Match 'Transitioned'
+    }
+}
+
+Describe '034 — the prose Effects block never names the hook registry (FR-002, FR-008)' {
+    # Mirror of the 034 block in tests/bash/lib/test_output.bats.
+    #
+    # ConvertTo-JiraSummaryProse is a THIRD consumer of the effects object,
+    # separate from the two that assert on the JSON, and it does not iterate the
+    # object's own keys — it walks a fixed list so both ports render
+    # byte-identically. A 'hooks' entry left in that list survives every
+    # JSON-level assertion in the suite while still shipping the retired word.
+    #
+    # It also degrades silently: the renderer skips an effect whose status is
+    # absent, so a stale entry breaks nothing and shows nothing. That is why the
+    # second test below reads the list itself.
+    BeforeAll {
+        $script:NoHooksJson = '{"command":"config","counts":{"created":0,"errors":0,"skipped":0,"updated":0,"warnings":0},"dry_run":false,"effects":{"discovery":{"detail":"2 project(s) discovered","status":"written"},"gitignore":{"detail":"personal.yml gitignore coverage","status":"unchanged"},"personal":{"detail":"per-operator file","status":"created"},"readme":{"detail":"block present","status":"unchanged"}},"exit_code":0,"schema_version":"1.0"}'
+        $script:OutputModule = Join-Path $PSScriptRoot '../../../scripts/powershell/lib/Output.psm1'
+    }
+
+    It 'renders every effect present and never the word hooks' {
+        $prose = ConvertTo-JiraSummaryProse $NoHooksJson
+        $prose | Should -BeLike '*  discovery: written*'
+        $prose | Should -BeLike '*  readme: unchanged*'
+        $prose | Should -BeLike '*  gitignore: unchanged*'
+        $prose | Should -BeLike '*  personal: created*'
+        $prose | Should -Not -BeLike '*hooks*'
+    }
+
+    It 'no longer carries hooks in the fixed effect list (FR-008)' {
+        # The assertion above passes while 'hooks' merely sits unused in the
+        # list, because the renderer skips an absent status. This one reads the
+        # list itself, which is the thing that must actually change.
+        $line = Select-String -LiteralPath $script:OutputModule -Pattern 'foreach \(\$effect in'
+        $line | Should -Not -BeNullOrEmpty
+        $line.Line | Should -Not -BeLike '*hooks*'
     }
 }

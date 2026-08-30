@@ -262,12 +262,13 @@ summary_render_prose() {
   fi
   printf 'Warnings: %s, Errors: %s\n' "${warnings}" "${errors}"
   # The config ceremony's effects, reported separately (FR-054). Rendered in a
-  # fixed order (discovery, hooks, readme, gitignore, personal) so both ports
-  # match byte-for-byte.
+  # fixed order (discovery, readme, gitignore, personal) so both ports match
+  # byte-for-byte. 034 removed `hooks`: the extension no longer reads the hook
+  # registry, so there is no such effect to render.
   if [[ "$(jq -r 'has("effects")' <<< "${json}")" == "true" ]]; then
     printf 'Effects:\n'
     local effect status detail line
-    for effect in discovery hooks readme gitignore personal; do
+    for effect in discovery readme gitignore personal; do
       status="$(jq -r --arg e "${effect}" '.effects[$e].status // empty' <<< "${json}")"
       [[ -z "${status}" ]] && continue
       detail="$(jq -r --arg e "${effect}" '.effects[$e].detail // empty' <<< "${json}")"

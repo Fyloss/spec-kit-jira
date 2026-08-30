@@ -15,7 +15,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (254)" {
+@test "the conformance corpus has exactly the recorded scenario count (253)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -211,8 +211,13 @@ setup() {
   # (rank3-unknown-project), the schema relaxation (no-routing-default), and
   # the three distinguishable refusal states (refuse-no-selection,
   # refuse-no-team-key, refuse-bound-skip) (243 -> 254).
+  # 034 RETIRES one: us9-hook-registration, whose subject was the ceremony's
+  # hooks effect and its read-only status vocabulary, both deleted with the
+  # hook-registry reader (254 -> 253). The first decrease in this line's
+  # history — the count is not monotonic, and a feature that removes behaviour
+  # lowers it.
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 254 ]
+  [ "${count}" -eq 253 ]
 }
 
 # Everything the conformance job declares, as one block.

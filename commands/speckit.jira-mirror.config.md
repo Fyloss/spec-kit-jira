@@ -1,6 +1,6 @@
 ---
 name: "speckit.jira-mirror.config"
-description: "Configure the Jira reconcile bridge: discover project metadata, verify the lifecycle hooks the install registered, and manage the README block — a deterministic, model-independent ceremony."
+description: "Configure the Jira reconcile bridge: discover project metadata and manage the README block — a deterministic, model-independent ceremony."
 argument-hint: "Optional: a project key to (re)bind, e.g. PROJ"
 ---
 
@@ -299,34 +299,10 @@ A single run's effects are each reported **separately** in the summary:
 
 - **discovery** — the resolved-id table written to `config.local.yml` (above),
   including the per-project style audit.
-- **hooks** — a **read-only verification** of the lifecycle hooks (see below).
 - **readme** — the version-marked managed README block (US5).
 - **gitignore** — idempotent `.gitignore` coverage of the gitignored config
   layer (`config.local.yml`, `personal.yml`), plus the `.env` rule kept as a
   leftover-file guard even though nothing reads that file any more (FR-041).
-
-## The hooks effect: verify and report, never write — normative
-
-The lifecycle hooks are declared in the extension manifest and registered by
-`specify extension add`. **They are already active before this ceremony runs.**
-This ceremony does not register them, and **never modifies
-`.specify/extensions.yml`** — not to register, not to repair, not to realign an
-entry it believes is wrong, not on first run, and not behind a flag. Every run
-leaves that file byte-identical, comments included.
-
-It reports one of five states, and names what the operator should do:
-
-| State | Meaning and remedy |
-| --- | --- |
-| `healthy` | All seven events present and enabled; nothing to do |
-| `incomplete` | One or more events have no entry. Re-run the official install: `specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force` (confirm the untrusted-source prompt with `y`) |
-| `held_disabled` | The operator disabled one or more events. No bridge step runs for them, whatever the registry currently says. Release one with `/speckit.jira-mirror.config --enable-hook <event>` |
-| `duplicated` | A leftover entry from a version that predates manifest-declared hooks: our command with no owning `extension` field. Neither the install nor this extension can remove it, so the report gives the exact manual edit |
-| `unreadable` | The registry could not be read. The file is named as the cause; **no claim is made about the hooks** |
-
-Relay the reported detail verbatim. Do not offer to edit
-`.specify/extensions.yml` on the operator's behalf, and do not describe a state
-in your own words when the report already names it.
 
 ## Flags
 
@@ -348,9 +324,6 @@ in your own words when the report already names it.
   answer to the task-mirroring question the run prints for any project with no
   value recorded. Last occurrence per key wins; the value is spliced into
   `config.yml`'s `task_mirror` managed region.
-- `--enable-hook <event>` — repeatable; release one lifecycle event the operator
-  previously disabled. It clears the extension's own record and **does not touch
-  the hook registry**.
 - `--accept-site <origin>` — accept a Jira destination that differs from the one
   this checkout is bound to (032). The ceremony records the site it reaches into
   the gitignored `config.local.yml`; a later run whose `config.yml` declares a

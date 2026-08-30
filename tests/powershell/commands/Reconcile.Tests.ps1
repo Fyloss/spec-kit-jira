@@ -135,7 +135,6 @@ Describe 'Message discipline (T049 / T088, 003 US5)' {
         $script:MdWork = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
         New-Item -ItemType Directory -Path (Join-Path $script:MdWork '.specify/jira') -Force | Out-Null
         $env:JIRA_CONFIG_DIR = Join-Path $script:MdWork '.specify/jira'
-        $env:SPEC_KIT_JIRA_EXTENSIONS_YML = Join-Path $script:MdWork '.specify/extensions.yml'
         $env:JIRA_NO_SLEEP = '1'
         $env:JIRA_MAX_ATTEMPTS = '1'
         $script:SavedBase = $env:SPEC_KIT_JIRA_BASE_URL
@@ -143,7 +142,6 @@ Describe 'Message discipline (T049 / T088, 003 US5)' {
     AfterEach {
         $env:SPEC_KIT_JIRA_BASE_URL = $script:SavedBase
         Remove-Item Env:\JIRA_CONFIG_DIR -ErrorAction SilentlyContinue
-        Remove-Item Env:\SPEC_KIT_JIRA_EXTENSIONS_YML -ErrorAction SilentlyContinue
         Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
         Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue
         Remove-Item Env:\SPEC_KIT_JIRA_EXTENSION_ROOT -ErrorAction SilentlyContinue
@@ -225,13 +223,32 @@ Describe 'Message discipline (T049 / T088, 003 US5)' {
         $r.Err | Should -Match ([regex]::Escape('/speckit.jira-mirror.config'))
     }
 
-    It 'says NOTHING for a disabled event — not even that it was skipped (FR-020)' {
-        Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
-        $null = Add-JiraHooksDisabled -LifecycleEvent 'after_plan' -ConfigDir $env:JIRA_CONFIG_DIR
-        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
-        $r = Invoke-Degraded @('reconcile', '--json', $script:SpecWith)
-        $r.ExitCode | Should -Be 0
-        $r.Out | Should -BeNullOrEmpty
-        $r.Err | Should -BeNullOrEmpty
+}
+
+Describe '034 — the reconcile summary carries no hook verdict (FR-003)' {
+    # Twin of the 034 block in tests/bash/commands/test_reconcile.bats.
+    #
+    # The ceremony's false verdict was the reported defect, but reconcile runs
+    # far more often, so the same wrong claim was made far more often there.
+    # Removing it from one and not the other would have left the defect in the
+    # busier path.
+    #
+    # The three registry states are exercised because the claim is that they are
+    # indistinguishable, not merely that each happens to be quiet.
+    It 'carries no hook_health, whatever the registry says' {
+        $reg = Join-Path $TestDrive '.specify/extensions.yml'
+        New-Item -ItemType Directory -Path (Join-Path $TestDrive '.specify') -Force | Out-Null
+        foreach ($state in @('correct', 'absent', 'malformed')) {
+            switch ($state) {
+                'absent' { Remove-Item -LiteralPath $reg -ErrorAction SilentlyContinue }
+                'malformed' { [System.IO.File]::WriteAllText($reg, "hooks:`n  - [unclosed`n`t`t: : :`n") }
+                'correct' { [System.IO.File]::WriteAllText($reg, "hooks:`n  after_specify:`n  - extension: jira-mirror`n    enabled: true`n") }
+            }
+            $out = Invoke-Captured @('reconcile', '--dry-run', '--json', $script:SpecWith)
+            $obj = $out | ConvertFrom-Json
+            $obj.PSObject.Properties.Name | Should -Not -Contain 'hook_health'
+            # And no other key smuggles the same claim back under a new name.
+            ($obj.PSObject.Properties.Name | Where-Object { $_ -match 'hook' }) | Should -BeNullOrEmpty
+        }
     }
 }

@@ -397,7 +397,7 @@ waits.
 
 The shared command-line parser also accepts `speckit.jira-mirror.config`'s own flags —
 `--style`, `--child-type`, `--issue-type`, `--field-default`, `--task-mirror`,
-`--use-team`, `--enable-hook` — on `reconcile` without refusing them. They have
+`--use-team` — on `reconcile` without refusing them. They have
 **no effect** here: `reconcile` never reads the values this parser stores for
 them. Pass them to `speckit.jira-mirror.config` instead, where they are documented
 and acted on.

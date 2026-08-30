@@ -146,9 +146,6 @@ run_in_work() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"  gitignore: created"* ]]
   [[ "$output" == *"  personal: created"* ]]
-  # The hooks effect is NOT skipped: it reads two local files and needs no Jira,
-  # so reporting it skipped would be a lie about work that was performed (003 US6).
-  [[ "$output" != *"  hooks: skipped"* ]]
   [[ "$output" == *"Provisional teams: ijt, wex"* ]]
   # The re-run guidance names the bridge in the repository-relative per-port form
   # (003 FR-014, FR-018) — a bare `spec-kit-jira` names nothing after install.
@@ -212,22 +209,6 @@ run_in_work() {
   [ "$status" -ne 0 ]
 }
 
-@test "an unreadable registry is a distinct cause from an unconfigured repository (FR-017, FR-024)" {
-  unset SPEC_KIT_JIRA_BASE_URL
-  export JIRA_API_TOKEN="RAWSECRETXYZ"
-  mkdir -p "${WORK}/.specify"
-  printf '%s\n' 'hooks:' '  after_plan:' '   - broken' '     : : :' > "${WORK}/.specify/extensions.yml"
-  export SPEC_KIT_JIRA_EXTENSIONS_YML="${WORK}/.specify/extensions.yml"
-  run run_in_work config --json
-  [ "$status" -eq 0 ]
-  local summary
-  summary="$(grep '^{' <<< "$output")"
-  # The discovery effect is skipped for the connection; the hooks effect is
-  # unreadable for the file. Two causes, two reports, one run.
-  [ "$(jq -r '.effects.discovery.status' <<< "${summary}")" = "skipped" ]
-  [ "$(jq -r '.effects.hooks.status' <<< "${summary}")" = "unreadable" ]
-}
-
 @test "T052 [011] — degraded mode asks no field-default question and writes nothing to config.yml (FR-009)" {
   unset SPEC_KIT_JIRA_BASE_URL
   export JIRA_API_TOKEN="RAWSECRETXYZ"
@@ -277,4 +258,83 @@ run_in_work() {
   local summary
   summary="$(printf '%s\n' "$output" | grep -v '^WARNING:')"
   [[ "$(jq -r '.effects.personal.status' <<< "${summary}")" != "" ]]
+}
+
+# =============================================================================
+# 034 T010 [US1] — The ceremony says nothing about the hook registry, whatever
+# state that registry is in (FR-002, SC-001, US1 AC1–AC3).
+# =============================================================================
+#
+# The three states are asserted together, in one file, because the claim is
+# about their EQUALITY rather than about any one of them: a correct registry, an
+# absent one and a malformed one must produce summaries that are identical in
+# hook-related content, and that content must be none.
+#
+# The malformed case is the load-bearing one. Before 034 the extension parsed
+# this file, so unparseable bytes produced an `unreadable` verdict and a warning.
+# A file the extension never opens cannot do that — so there must be no parse
+# warning, no hook claim, and no difference in exit code. If this case ever
+# diverges from the other two, something is still reading the registry.
+
+# seed_registry <state> — write `.specify/extensions.yml` into the work tree in
+# one of three states, or remove it.
+seed_registry() {
+  local state="$1" f="${WORK}/.specify/extensions.yml"
+  case "${state}" in
+    absent) rm -f "${f}" ;;
+    malformed) printf 'hooks:\n  - [unclosed\n\t\tbroken: "%s\n' 'x' > "${f}" ;;
+    correct)
+      { printf 'hooks:\n'
+        local e
+        for e in before_specify after_specify after_clarify after_plan after_tasks after_implement after_analyze; do
+          printf '  %s:\n  - extension: jira-mirror\n    command: speckit.jira-mirror.reconcile\n' "${e}"
+          printf '    enabled: true\n    optional: false\n'
+        done
+      } > "${f}" ;;
+  esac
+}
+
+# hook_content <summary-json> — everything the summary says about the registry.
+# Empty is the only acceptable value after 034.
+hook_content() {
+  jq -S '{hook_health: (.hook_health // null), hooks_effect: (.effects.hooks // null)}' <<< "$1"
+}
+
+@test "034 — correct, absent and malformed registries give identical hook content: none (SC-001)" {
+  unset SPEC_KIT_JIRA_BASE_URL
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  local state out rc summaries=() codes=()
+  for state in correct absent malformed; do
+    seed_registry "${state}"
+    rc=0
+    out="$(run_in_work config --json 2> /dev/null)" || rc=$?
+    summaries+=("$(hook_content "${out}")")
+    codes+=("${rc}")
+    # Each summary individually carries no registry claim (US1 AC1–AC3).
+    [ "$(jq -r 'has("hook_health")' <<< "${out}")" = "false" ]
+    [ "$(jq -r '.effects | has("hooks")' <<< "${out}")" = "false" ]
+  done
+  # …and the three agree with each other, which is the actual SC-001 claim.
+  [ "${summaries[0]}" = "${summaries[1]}" ]
+  [ "${summaries[1]}" = "${summaries[2]}" ]
+  [ "${codes[0]}" = "${codes[1]}" ]
+  [ "${codes[1]}" = "${codes[2]}" ]
+}
+
+@test "034 — a malformed registry produces no parse warning of any kind (US1 AC3)" {
+  # NOTE: unlike the test above, this one passes BEFORE 034 as well. Pre-034 the
+  # extension did parse the registry, but it reported an unreadable one through
+  # the summary's `unreadable` flag rather than through stderr, so this channel
+  # was already quiet. It is kept as a regression guard on that channel — the
+  # obvious way to reintroduce a registry claim is a warning — and not as
+  # evidence of the change. Test 17 above is what goes red for 034.
+  unset SPEC_KIT_JIRA_BASE_URL
+  export JIRA_API_TOKEN="RAWSECRETXYZ"
+  seed_registry malformed
+  run --separate-stderr run_in_work config --json
+  [ "$status" -eq 0 ]
+  # The degraded run warns about the missing base URL and nothing else; a
+  # registry the extension never opens cannot contribute a word here.
+  [[ "$stderr" != *"extensions.yml"* ]]
+  [[ "$stderr" != *"hook"* ]]
 }

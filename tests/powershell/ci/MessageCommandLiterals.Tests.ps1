@@ -137,29 +137,6 @@ Describe '(c) Host commands' {
 
 Describe 'The literals the reader emits at runtime' {
     BeforeAll {
-        Import-Module (Join-Path $script:Root 'scripts/powershell/hooks/RegisterHooks.psm1') -Force
     }
 
-    It 'passes all three classes for every repair hint (FR-018)' {
-        # The hint strings are assembled at runtime from constants, so checking the
-        # source is not quite checking the message. Build each one and check it.
-        $work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
-        New-Item -ItemType Directory -Path $work -Force | Out-Null
-        try {
-            # missing -> the official install command, in its runnable form.
-            $h = Get-JiraHookHealth -Path (Join-Path $work 'absent.yml') | ConvertFrom-Json
-            $h.repair_hint | Should -Match ([regex]::Escape('specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force'))
-
-            # held disabled -> the release flag on a declared command.
-            $empty = Join-Path $work 'e.yml'
-            [System.IO.File]::WriteAllText($empty, "hooks: {}`n", (New-Object System.Text.UTF8Encoding($false)))
-            $h = Get-JiraHookHealth -Path $empty -DisabledJson '["after_plan"]' | ConvertFrom-Json
-            $h.repair_hint | Should -Match ([regex]::Escape('/speckit.jira-mirror.config --enable-hook after_plan'))
-            (Get-DeclaredCommands) | Should -Contain 'speckit.jira-mirror.config'
-
-            # No hint may contain a bare bridge invocation.
-            $h.repair_hint | Should -Not -Match '(^|[^/])spec-kit-jira(\.sh|\.ps1)?\s+(config|reconcile)'
-        }
-        finally { Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue }
-    }
 }

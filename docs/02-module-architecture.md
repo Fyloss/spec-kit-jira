@@ -59,7 +59,6 @@ flowchart TB
 
     subgraph HooksLayer["hooks/ — host-integration vocabulary"]
         direction LR
-        H1["register_hooks — registry READER"]
         H2["readme_block — managed block writer"]
     end
 
@@ -180,7 +179,6 @@ mindmap
       run_state — 021
         compose, compare, record the run-state document
     hooks
-      register_hooks reader
       readme_block writer
 ```
 

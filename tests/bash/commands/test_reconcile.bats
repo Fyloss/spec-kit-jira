@@ -142,7 +142,6 @@ _md_work() {
   MDWORK="$(mktemp -d)"
   mkdir -p "${MDWORK}/.specify/jira"
   export JIRA_CONFIG_DIR="${MDWORK}/.specify/jira"
-  export SPEC_KIT_JIRA_EXTENSIONS_YML="${MDWORK}/.specify/extensions.yml"
   export JIRA_NO_SLEEP=1
   export JIRA_MAX_ATTEMPTS=1
 }
@@ -238,16 +237,31 @@ _md_work() {
   rm -rf "${MDWORK}"
 }
 
-@test "a disabled event says NOTHING — not even that it was skipped (FR-020)" {
-  # shellcheck source=/dev/null
-  source "${ROOT}/scripts/bash/lib/config.sh"
-  _md_work
-  unset SPEC_KIT_JIRA_BASE_URL
-  config_hooks_disabled_add after_plan "${JIRA_CONFIG_DIR}" > /dev/null
-  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
-  run cmd_reconcile reconcile --json "${SPEC_WITH}"
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
-  unset SPEC_KIT_JIRA_HOOK_EVENT
-  rm -rf "${MDWORK}"
+# =============================================================================
+# 034 T019 [US2] — reconcile's run summary carries no hook verdict (FR-003).
+# =============================================================================
+#
+# The ceremony's false verdict was the reported defect, but reconcile runs far
+# more often, so the same wrong claim was made far more often there. Removing it
+# from one and not the other would have left the defect in the busier path.
+#
+# The three registry states are exercised for the same reason as in the ceremony
+# suite: the claim is that they are indistinguishable, not merely that each one
+# happens to be quiet.
+
+@test "034 — the reconcile summary carries no hook_health, whatever the registry says" {
+  local state reg="${BATS_TEST_TMPDIR}/.specify/extensions.yml"
+  mkdir -p "${BATS_TEST_TMPDIR}/.specify"
+  for state in correct absent malformed; do
+    case "${state}" in
+      absent) rm -f "${reg}" ;;
+      malformed) printf 'hooks:\n  - [unclosed\n\t\t: : :\n' > "${reg}" ;;
+      correct) printf 'hooks:\n  after_specify:\n  - extension: jira-mirror\n    enabled: true\n' > "${reg}" ;;
+    esac
+    run cmd_reconcile reconcile --dry-run --json "${SPEC_WITH}"
+    [ "$status" -eq 0 ]
+    [ "$(jq -r 'has("hook_health")' <<< "$output")" = "false" ]
+    # And no other key smuggles the same claim back in under a new name.
+    [ "$(jq -r '[paths | join(".")] | map(select(test("hook"))) | length' <<< "$output")" -eq 0 ]
+  done
 }

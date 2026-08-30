@@ -37,7 +37,6 @@ Import-Module (Join-Path $PSScriptRoot '../engine/Drift.psm1')
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Transitions.psm1')
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force # Phase 8, US5 — the completion pass's transitions read
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/DuplicateProbe.psm1') -Force # US4, droppable — the second, best-effort guard
-Import-Module (Join-Path $PSScriptRoot '../hooks/RegisterHooks.psm1') -Force # hook health — READ ONLY (003 FR-022)
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force          # the operator disable record
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Hierarchy.psm1') -Force -Global # the mandatory-field gate — a nested import inside lib/Config.psm1 is not enough
 Import-Module (Join-Path $PSScriptRoot '../lib/Prereq.psm1') -Force          # the bridge-unavailable cause
@@ -58,25 +57,6 @@ Import-Module (Join-Path $PSScriptRoot '../sink/jira/Client.psm1')
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Adf.psm1')
 
 $script:ReconcileExitConfig = 4
-
-function Test-JiraReconcileHeld {
-    <#
-    .SYNOPSIS
-      $true when the operator disabled this lifecycle event. Mirror of
-      _reconcile_is_held.
-
-      Read at DISPATCH, before any prerequisite check and before any network
-      work, so the decision holds even in the window between an install that
-      re-enabled the registry entry and the next ceremony (003 FR-007, FR-020,
-      research R5 step 2). The registry's own `enabled` field is deliberately NOT
-      consulted here: the install rewrites it to `true` unconditionally, so it
-      cannot carry the answer.
-    #>
-    param([string] $LifecycleEvent)
-    if ([string]::IsNullOrEmpty($LifecycleEvent)) { return $false }
-    $recorded = @((Get-JiraHooksDisabled) | ConvertFrom-Json)
-    return ($recorded -ccontains $LifecycleEvent)
-}
 
 function Write-JiraReconcileNotice {
     # The SINGLE message a degraded run is allowed (FR-016). Everything goes to
@@ -722,22 +702,15 @@ function Invoke-JiraReconcileRun {
 
     Start-JiraTimingPhase -Phase 'prereq' -RequestCount (Get-JiraRequestCount)
 
-    # (0) DISPATCH GUARD — the operator's disable decision, honoured before any
-    # prerequisite check, any config read and any network call (FR-020). The exit
-    # is INERT: no Jira call, and no warning either. A warning here would be noise
-    # on every single lifecycle command for an event the operator deliberately
-    # turned off, which is precisely what FR-020 forbids.
+    # The lifecycle event this run was dispatched for. 034 removed the DISPATCH
+    # GUARD that used to sit here and return 0 silently when the operator had
+    # recorded that event as disabled: the record it consulted is retired with
+    # the rest of the registry reader, and Constitution 4.0.0 gives up that
+    # protection deliberately (a reinstall may re-enable a hand-disabled hook,
+    # and this extension will neither prevent nor report it). The event itself
+    # is still read — run-state (021) and the lifecycle status map (023) both
+    # need it. Mirror of commands/reconcile.sh.
     $hookEvent = if ($env:SPEC_KIT_JIRA_HOOK_EVENT) { $env:SPEC_KIT_JIRA_HOOK_EVENT } else { '' }
-    try {
-        if (Test-JiraReconcileHeld -LifecycleEvent $hookEvent) { return 0 }
-    }
-    catch {
-        # An unreadable disable record is not evidence that nothing is
-        # disabled (Constitution X) — propagate rather than silently
-        # proceeding as if the event were not held.
-        [Console]::Error.WriteLine($_.Exception.Message)
-        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message 'reconcile: the operator disable record could not be read (zero writes)')
-    }
 
     # The spec file is the first positional argument.
     $specFile = ''
@@ -2377,13 +2350,6 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
         }
     }
 
-    # Hook health is READ and reported on every run (FR-047). Nothing here writes
-    # the registry, in any state — reading it is the extension's whole
-    # relationship with that file (003 FR-022). The path is relative to the
-    # repository root (cwd), overridable for tests.
-    $extPath = if ($env:SPEC_KIT_JIRA_EXTENSIONS_YML) { $env:SPEC_KIT_JIRA_EXTENSIONS_YML } else { '.specify/extensions.yml' }
-    $hooksHealth = Get-JiraHookHealth -Path $extPath -DisabledJson (Get-JiraHooksDisabled) | ConvertFrom-Json -Depth 100
-
     # Save-JiraRunState (021, T031) below must see whether this run actually
     # applied every planned action — the hook-context downgrade just below
     # resets $rc to 0 even on a real failure, so the pre-downgrade value is
@@ -2539,7 +2505,6 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
         $summaryObj['warnings'] = @($warnsJson | ConvertFrom-Json -Depth 100)
         $summaryObj['notes'] = @($notesJson | ConvertFrom-Json -Depth 100)
     }
-    $summaryObj['hook_health'] = $hooksHealth
     $summaryObj['exit_code'] = $rc
     $summary = ConvertTo-JiraJsonValue $summaryObj
 
