@@ -169,7 +169,7 @@ description: "Task list for 033 — The routing fallback follows the developer's
 - [X] T066 `bash tests/conformance/ci-conformance.sh` — exit 0 and **zero** lines containing `conformance divergence`. Success is silent; there is no pass banner, and the temp paths are harness noise. Never run this concurrently with the bash suite
 - [X] T067 Full Pester run
 - [X] T068 Compare every pre-existing routing scenario against the T005 baseline; any resolved key that changed is a FR-009 violation and blocks the feature
-- [ ] T069 Push `ci/windows-probe` and read the annotations (~11 min). C7.3's CRLF tolerance in the boundness scan is the clause most likely to diverge, and a Windows divergence is diagnosed by measurement on the runner, never by emulation. One retry maximum on a flake
+- [X] T069 Push `ci/windows-probe` and read the annotations (~11 min). C7.3's CRLF tolerance in the boundness scan is the clause most likely to diverge, and a Windows divergence is diagnosed by measurement on the runner, never by emulation. One retry maximum on a flake
 
 ---
 
