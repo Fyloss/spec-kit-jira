@@ -1,5 +1,19 @@
 # Contract: The canonical hook registry entry, and who may write it
 
+> **SUPERSEDED by feature 034 (2026-08-31).** This contract described the shape
+> of a registry entry so the extension could *classify* the entries it found in
+> `.specify/extensions.yml` and report on them. 034 removed that classifier
+> entirely: under Constitution X as amended in 4.0.0, the extension must not
+> read, write, verify or report that registry, so it no longer has any reason to
+> know what a well-formed entry looks like.
+>
+> What the entry shape still governs is the **host's** business — `specify
+> extension add` writes it from this extension's manifest, and the manifest's
+> `hooks:` block is unchanged.
+>
+> Kept, not deleted: it is the historical record of a contract that existed, and
+> the specifications that cite it describe the world they were written in.
+
 **File**: the consuming repository's `.specify/extensions.yml`
 **Sole writer**: `specify extension add` (the host)
 **This extension's role**: reader and reporter — never a writer

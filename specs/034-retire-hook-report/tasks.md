@@ -312,3 +312,10 @@ ceremony, so shipping US1 alone leaves the same wrong verdict in the busier path
 **US3 and Phase 6 are the remainder**, and they are what make FR-001 true. Until
 the reader is deleted the extension still opens a file Constitution X forbids it to
 open; the summaries are merely quiet about it.
+
+---
+
+## Phase 11: Convergence
+
+- [X] T083 Mark `specs/003-install-hook-activation/contracts/hook-registry-entry.md` as superseded by 034, in place, per tasks.md T073 (missing). T073 is checked `[X]` but produced no artifact: the file carries no supersession marker. Add a short header saying the contract described the registry-entry shape the extension classified, that 034 removed the classifier, and that the file is kept as the historical record of a contract that existed — do NOT delete it.
+- [X] T084 Reconcile SC-003's wording with what shipped, per SC-003 (partial). SC-003 claims the end-to-end hook scenarios pass "unmodified"; `tests/bash/hooks/test_hook_resilience.bats` and `tests/powershell/hooks/HookResilience.Tests.ps1` both needed edits — their `setup()`/`BeforeAll` sourced the deleted module so every test died before running, and three tests had retired behaviour as their subject. The FR-007 behaviour itself is untouched and green. Either amend SC-003 to claim what is true (the hook-context behaviour is unchanged; the suites needed harness repair) or record the deviation against it explicitly. The evidence is already written up in `specs/034-retire-hook-report/baseline.md`.

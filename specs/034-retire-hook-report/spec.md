@@ -239,7 +239,22 @@ by its current text.
 - **SC-002**: No command opens `.specify/extensions.yml`, proven by a guard that
   is demonstrated red against the pre-change code.
 - **SC-003**: The lifecycle hooks fire, and the mirror runs, exactly as before —
-  verified by the existing end-to-end hook scenarios passing unmodified.
+  verified by the existing end-to-end hook scenarios, whose **assertions** pass
+  unchanged.
+
+  > Amended during implementation (034 T084). The original wording said those
+  > scenarios pass "unmodified", and that turned out to be unachievable for a
+  > reason that has nothing to do with behaviour: both suites *loaded* the
+  > deleted module in their setup, so every test in them died before running
+  > until the `source` / `Import-Module` line was removed. Three further tests
+  > in them had retired behaviour as their subject — the dispatch hold, and the
+  > registry never being created — and were deleted with it.
+  >
+  > What must be, and is, unchanged is the behaviour the criterion exists to
+  > protect: a bridge failure in hook context still surfaces exactly one
+  > actionable warning and still returns success to the host command. Every
+  > surviving assertion passes untouched. The deviation and its evidence are
+  > recorded in `baseline.md`.
 - **SC-004**: A local binding file still declaring the retired record is refused
   with a message naming both the key and the file, produced entirely by the
   pre-existing unknown-key path — zero lines of code are added to obtain it.
