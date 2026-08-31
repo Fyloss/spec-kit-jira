@@ -308,7 +308,7 @@ _reconcile_phase_order() {
   [[ -z "${resolved}" ]] && resolved='{}'
   jq -cn --argjson pm "${resolved}" '
     def order_for($m):
-      ["before_specify","after_specify","after_clarify","after_plan","after_tasks","after_implement","after_analyze"]
+      ["before_specify","after_specify","after_clarify","after_plan","after_tasks","after_implement","after_analyze","after_converge","after_checklist"]
       | map($m[.] // empty)
       | reduce .[] as $s ([]; if (index($s) != null) then . else . + [$s] end);
     { specification: order_for($pm.specification // {}),

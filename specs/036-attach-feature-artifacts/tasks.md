@@ -113,13 +113,13 @@ artifact content anywhere.
 
 ### The two lifecycle events — FR-019, research R10
 
-- [ ] T027 [P] Write the failing manifest case: update `tests/bash/ci/test_manifest_hooks.bats` (`EXPECTED_EVENTS` at line 33, the *exactly seven* assertion at line 69, the reconcile-fires-every-after loop at line 81) to expect **nine** hooks including `after_converge` and `after_checklist`, and observe it RED against the current `extension.yml`
-- [ ] T028 [P] Write the Pester twin of T027 in `tests/powershell/ci/Manifest.Hooks.Tests.ps1`
-- [ ] T029 [P] Write failing config cases in `tests/bash/lib/test_config.bats` and `tests/powershell/lib/Config.Tests.ps1`: a `phase_status_map` declaring `after_converge` or `after_checklist` is **accepted**, and the unknown-key message lists all eight lifecycle events (the nine hooks less `before_specify`, which is not a phase)
-- [ ] T030 Add `after_converge` and `after_checklist` to the `hooks:` block of `extension.yml`, both `optional: false`, both firing `speckit.jira-mirror.reconcile` (FR-019)
-- [ ] T031 Add both events to the four Bash/PowerShell enumeration sites: `scripts/bash/lib/config.sh:963` (message) and `:1065` (`JIRA_HOOK_EVENT_NAMES`), `scripts/powershell/lib/Config.psm1:942` and `:1858`
-- [ ] T032 Add both events to the two canonical-order sites: `scripts/bash/commands/reconcile.sh:309` and `scripts/powershell/commands/Reconcile.psm1:380`
-- [ ] T033 [P] Add both events to the `phase_status_map` comment in `templates/config.yml.template:91`, keeping the self-documenting style Principle XVI requires
+- [X] T027 [P] Write the failing manifest case: update `tests/bash/ci/test_manifest_hooks.bats` (`EXPECTED_EVENTS` at line 33, the *exactly seven* assertion at line 69, the reconcile-fires-every-after loop at line 81) to expect **nine** hooks including `after_converge` and `after_checklist`, and observe it RED against the current `extension.yml`
+- [X] T028 [P] Write the Pester twin of T027 in `tests/powershell/ci/Manifest.Hooks.Tests.ps1`
+- [X] T029 [P] Write failing config cases in `tests/bash/lib/test_config.bats` and `tests/powershell/lib/Config.Tests.ps1`: a `phase_status_map` declaring `after_converge` or `after_checklist` is **accepted**, and the unknown-key message lists all eight lifecycle events (the nine hooks less `before_specify`, which is not a phase)
+- [X] T030 Add `after_converge` and `after_checklist` to the `hooks:` block of `extension.yml`, both `optional: false`, both firing `speckit.jira-mirror.reconcile` (FR-019)
+- [X] T031 Add both events to the four Bash/PowerShell enumeration sites: `scripts/bash/lib/config.sh:963` (message) and `:1065` (`JIRA_HOOK_EVENT_NAMES`), `scripts/powershell/lib/Config.psm1:942` and `:1858`
+- [X] T032 Add both events to the two canonical-order sites: `scripts/bash/commands/reconcile.sh:309` and `scripts/powershell/commands/Reconcile.psm1:380`
+- [X] T033 [P] Add both events to the `phase_status_map` comment in `templates/config.yml.template:91`, keeping the self-documenting style Principle XVI requires
 
 **Checkpoint**: the artifact set exists and is covered on both ports; artifact content cannot reach the network unscanned; the neutral document carries the set; both transports can send a multipart body without the credential leaving stdin; both mocks serve the new routes and a guard proves they agree; nine hooks are declared and accepted everywhere.
 

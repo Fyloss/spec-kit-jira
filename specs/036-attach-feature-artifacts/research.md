@@ -318,12 +318,16 @@ and to every place the six-event set is written out. *Measured* — the sites ar
 | 9 | `docs/03-lifecycle-hooks.md` | "The seven declared events" — prose and diagram |
 | 10 | `tests/bash/ci/test_manifest_hooks.bats:33,69,81` | `EXPECTED_EVENTS` plus an *exactly seven* assertion |
 | 11 | `tests/powershell/ci/Manifest.Hooks.Tests.ps1` | its twin |
+| 12 | `tests/bash/lib/test_config_phase_status_map.bats` | pins the unknown-key MESSAGE verbatim |
+| 13 | `tests/powershell/lib/Config.PhaseStatusMap.Tests.ps1` | its twin |
 
-Sites 10 and 11 were found while writing `tasks.md`, after this section first
-claimed nine. They are the reason the count matters: the guard asserts
-**exactly** the declared set, so it fails closed on a widening — which is the
-behaviour we want, and which means the guard is part of the change rather than
-a bystander.
+**The count kept growing, and that is the finding.** This section first claimed
+nine; sites 10 and 11 turned up while writing `tasks.md`, and 12 and 13 only
+when the suites were run. Every one of them fails closed on a widening, which is
+the behaviour we want — but it means "add a lifecycle event" is a thirteen-file
+change, and no list of it can be trusted until the suites have been run. Do not
+plan this work from the table alone; run `tests/bash/ci` and `tests/bash/lib`
+and let them tell you what else pins the set.
 
 **Consequence worth stating**: `phase_status_map` gains two accepted keys for
 free. A team can now declare a board move on `after_converge`. That is a

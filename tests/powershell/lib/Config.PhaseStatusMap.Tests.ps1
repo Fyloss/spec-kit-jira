@@ -94,7 +94,7 @@ Describe 'phase_status_map schema' {
         Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: company_managed`n    phase_status_map:`n      epic:`n        after_plan: `"In Progress`"`nrouting_default: PROJ`n" -NoNewline
         $r = Import-JiraConfig -ConfigDir $d
         $r.ExitCode | Should -Be 4
-        ($r.Errors -join "`n") | Should -Match ([regex]::Escape('projects[0].phase_status_map declares unknown key `epic`; the lifecycle events are after_specify, after_clarify, after_plan, after_tasks, after_implement, after_analyze and the roles are specification, story, task'))
+        ($r.Errors -join "`n") | Should -Match ([regex]::Escape('projects[0].phase_status_map declares unknown key `epic`; the lifecycle events are after_specify, after_clarify, after_plan, after_tasks, after_implement, after_analyze, after_converge, after_checklist and the roles are specification, story, task'))
         Remove-Item -Recurse -Force $d
     }
 

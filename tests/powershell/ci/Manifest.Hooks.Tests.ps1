@@ -70,14 +70,14 @@ Describe 'Placement (research R1)' {
 }
 
 Describe 'Coverage (research R9)' {
-    It 'declares exactly the seven events, no more and no fewer' {
+    It 'declares exactly the nine events, no more and no fewer (036 FR-019)' {
         ((Get-HookEvents) | Sort-Object) -join ' ' |
-            Should -BeExactly 'after_analyze after_clarify after_implement after_plan after_specify after_tasks before_specify'
+            Should -BeExactly 'after_analyze after_checklist after_clarify after_converge after_implement after_plan after_specify after_tasks before_specify'
     }
 
     It 'fires the feature command from before_specify and reconcile from every after_*' {
         Get-HookCommandFor -LifecycleEvent 'before_specify' | Should -BeExactly 'speckit.jira-mirror.feature'
-        foreach ($e in @('after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')) {
+        foreach ($e in @('after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze', 'after_converge', 'after_checklist')) {
             Get-HookCommandFor -LifecycleEvent $e | Should -BeExactly 'speckit.jira-mirror.reconcile'
         }
     }
