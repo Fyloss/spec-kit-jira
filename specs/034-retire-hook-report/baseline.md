@@ -254,3 +254,29 @@ of the percentage is not self-evident.
 release commit and the dogfood record against a real Jira instance both need
 credentials and a real site. They are Constitution XII shipping gates and remain
 open, deliberately, rather than being marked done without evidence.
+
+---
+
+## CI result (PR #60)
+
+Measured on the real runners, which is the half of the verification this machine
+cannot provide.
+
+| Check | Result |
+| --- | --- |
+| Unit suites — ubuntu-latest | **pass** |
+| Unit suites — macos-latest | **pass** |
+| Unit suites — windows-latest | **pass** |
+| Conformance corpus 0–3/4 — macos, ubuntu | **pass** (8/8) |
+| Conformance corpus 0/4, 3/4 — windows | **pass** |
+| **Bash coverage ≥ 80% (kcov)** | **pass** |
+| **PowerShell coverage ≥ 80% (Pester)** | **pass** |
+| Conformance corpus 1/4, 2/4 — windows | running |
+
+**The coverage gate was the open risk and it held.** This feature deletes
+well-tested code *and* its tests, so the net direction of the percentage was not
+predictable from here; T077 had been marked done before it was measured, which
+was premature. It is now measured.
+
+Ubuntu mattered independently: Pester's discovery order differs by host, so a
+green Pester on macOS is not evidence for Linux. It is green there too.

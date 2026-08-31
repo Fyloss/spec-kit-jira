@@ -240,7 +240,7 @@ record, and earlier specifications correctly describe the world they were writte
 
 ## Phase 10: Polish & Release
 
-- [ ] T075 Run `tests/run-bash.sh` (~190 s locally) and `pwsh -c 'Invoke-Pester tests/powershell'`. Confirm the deleted tests are **gone**, not skipped, and that the counts moved by the expected amount against T001's baseline. Constitution XIII also requires the suites stay green under parallel execution — run the bash suite with `bats --jobs` at least once, but never concurrently with the conformance corpus.
+- [X] T075 Run `tests/run-bash.sh` (~190 s locally) and `pwsh -c 'Invoke-Pester tests/powershell'`. Confirm the deleted tests are **gone**, not skipped, and that the counts moved by the expected amount against T001's baseline. Constitution XIII also requires the suites stay green under parallel execution — run the bash suite with `bats --jobs` at least once, but never concurrently with the conformance corpus.
 - [X] T076 [P] Run `find scripts/bash -name '*.sh' -exec shellcheck -x -P scripts/bash {} +` and `actionlint`. Keep the scan scoped to `scripts/bash`; a whole-tree scan is ~1900 lines of host-script noise.
 - [X] T077 Confirm the 80% statement-coverage gate (Constitution XIII) still passes. This feature deletes a well-tested module **and its tests**, so the net direction of the percentage is not self-evident and could fall. Record the before/after figures in `specs/034-retire-hook-report/baseline.md` alongside T001's counts.
 - [X] T078 Bump `extension.yml` `version:` from `0.23.0` to `0.24.0` (research R8), and confirm the CI check that the version literal appears in exactly two files — `extension.yml` and `CHANGELOG.md` — still passes.
