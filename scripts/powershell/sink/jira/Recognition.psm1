@@ -274,7 +274,19 @@ function Invoke-JiraRecognitionRun {
       {"bound":{...},"new":[...],"blocked":[...]} — or the transport's
       mapped exit code (>= 2) with Json = '' when the WHOLE specification
       fails closed on an inconclusive read.
+
+      -ProjectKey is INERT since 035 C5.1. It fed the branch that classified a
+      recorded key naming another project as NEW and re-created it in the
+      routed one; that branch is gone, because the command layer refuses on
+      such a mismatch before any read (C3.2). The parameter is kept because it
+      is positional in the bash twin — dropping it would shift every call
+      site's arguments — and because it still documents which project this
+      recognition is scoped to. The scoping is now guaranteed upstream rather
+      than re-checked here: C4.2 requires ONE definition of a project
+      mismatch, so adding a second one in this function would be the very
+      divergence that let the parent and the stories disagree.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'ProjectKey', Justification = 'Inert since 035 C5.1 — kept for cross-port signature parity, and the scoping it names is enforced upstream by C3.2 rather than re-checked here.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string] $StoriesJson,

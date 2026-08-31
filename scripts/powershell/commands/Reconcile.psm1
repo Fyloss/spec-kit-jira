@@ -237,6 +237,7 @@ function Get-JiraReconcileRoutingRefusal {
       third needs nothing — their specification is already bound, and no
       selection would have changed the outcome.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'AlreadyBound', Justification = 'Inert since 035 C2.6 — a bound specification resolves at rank 3 and never reaches this refusal; kept so no caller changes, and so the bash twin keeps the same positional signature.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string] $Folder,
