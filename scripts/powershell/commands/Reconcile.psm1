@@ -222,7 +222,11 @@ function Get-JiraReconcileRoutingRefusal {
       contracts/routing-resolution.md C6.1-C6.5). Byte-identical twin of
       _reconcile_routing_refusal.
 
-      It reports what EACH of the four ranks found, not merely the last one.
+      It reports what EACH of the five ranks found, not merely the last one.
+      035 C2.6: the chain gained the specification's OWN record at rank 3, so
+      the operator's team moved to rank 4. `-AlreadyBound` is now INERT — kept
+      so no caller changes, and unreadable because a bound specification
+      resolves at rank 3 and never reaches this refusal.
       The message it replaces named a single missing key and prescribed
       declaring routing_default — wrong twice over once the chain is four deep:
       it names one of four consulted sources, and it prescribes a key the
@@ -256,10 +260,15 @@ function Get-JiraReconcileRoutingRefusal {
     $rank2 = if ($nTeams -eq 0) { 'no teams: catalogue is declared' }
     else { "none of the $nTeams team folder prefixes matched" }
 
-    $rank3 = if ($AlreadyBound) {
-        'not consulted — this specification is already bound, so its project is fixed by its own markers'
-    }
-    elseif (-not [string]::IsNullOrEmpty($SelectedTeamId)) {
+    # 035 C2.6 — rank 3 is the specification's own record. Reaching this
+    # refusal means it carries none; one that carries a marker never gets here,
+    # and one whose markers name two projects refuses earlier still. The
+    # `$AlreadyBound` branch that used to sit here reported a state the code
+    # can no longer produce, and it named the right answer while acting on none
+    # of it — the defect 035 exists to repair.
+    $rank3 = 'no ticket marker yet, so this specification records no project of its own'
+
+    $rank4 = if (-not [string]::IsNullOrEmpty($SelectedTeamId)) {
         "the selected team `"$SelectedTeamId`" declares no project in the catalogue"
     }
     elseif (-not (Test-Path -LiteralPath "$ConfigDir/personal.yml")) {
@@ -269,10 +278,10 @@ function Get-JiraReconcileRoutingRefusal {
         "no team is selected — $ConfigDir/personal.yml declares no team: key"
     }
 
-    $rank4 = if (-not $hasDefault) { 'routing_default is not declared' }
+    $rank5 = if (-not $hasDefault) { 'routing_default is not declared' }
     else { 'routing_default is declared but produced nothing' }
 
-    return "reconcile: routing could not be resolved for `"$base`" (zero writes). Rule route: $rank1. Team route: $rank2. Your team: $rank3. Default: $rank4. Any one of these places it: add a rule or a teams: entry to $ConfigDir/config.yml, select your team in $ConfigDir/personal.yml, or declare routing_default in $ConfigDir/config.yml."
+    return "reconcile: routing could not be resolved for `"$base`" (zero writes). Rule route: $rank1. Team route: $rank2. Its own record: $rank3. Your team: $rank4. Default: $rank5. Any one of these places it: add a rule or a teams: entry to $ConfigDir/config.yml, select your team in $ConfigDir/personal.yml, or declare routing_default in $ConfigDir/config.yml."
 }
 
 function Get-JiraReconcilePhaseStatusMap {

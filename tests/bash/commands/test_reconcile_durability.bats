@@ -196,7 +196,10 @@ teardown() {
   ! grep -q 'rerouted' "${ROOT}/scripts/bash/sink/jira/recognition.sh"
   ! grep -q 'rerouted' "${ROOT}/scripts/powershell/sink/jira/Recognition.psm1"
 
-  # C5.3: the project-prefix helper is KEPT — the task-tier check reuses it.
-  grep -q '_recognition_project_of' "${ROOT}/scripts/bash/sink/jira/recognition.sh"
-  grep -q 'Get-JiraRecognitionProjectOf' "${ROOT}/scripts/powershell/sink/jira/Recognition.psm1"
+  # C5.3, as amended by convergence: the project-prefix helper is REMOVED. The
+  # clause originally kept it because the task-tier check was said to reuse it;
+  # that check is implemented with the C1 scan over the tasks document instead,
+  # so the helper was left with no caller in either port. Principle XV.
+  ! grep -q '_recognition_project_of' "${ROOT}/scripts/bash/sink/jira/recognition.sh"
+  ! grep -q 'Get-JiraRecognitionProjectOf' "${ROOT}/scripts/powershell/sink/jira/Recognition.psm1"
 }

@@ -259,3 +259,45 @@ _bound_spec() {
   projects="$(jq -r '[.actions[]?.body?.fields?.project?.key // empty] | unique | length' <<< "$output")"
   [ "${projects}" -le 1 ]
 }
+
+@test "FR-015 every message this feature adds is composable with NO Jira reachable" {
+  # The structural reason C3.4 is achievable at all: a message that could only
+  # be written after a create cannot appear in a preview. The retired re-route
+  # note was exactly that — it needed the replacement key, so it was withheld
+  # from --dry-run. Asserted here by composing every new message with no base
+  # URL, no mock running, and no credentials: if any of them needed a value
+  # that only a write produces, it could not be built at all.
+  unset SPEC_KIT_JIRA_BASE_URL JIRA_EMAIL JIRA_API_TOKEN
+  local m1 m2 m3 m4
+  m1="$(_reconcile_markers_split_refusal "specs/031-x/spec.md" "$(printf 'ALPHA\nBETA\n')")"
+  m2="$(_reconcile_project_mismatch_refusal "specs/031-x/spec.md" "ALPHA" "BETA" "override")"
+  m3="$(_reconcile_project_mismatch_refusal "specs/031-x/spec.md" "ALPHA" "BETA" "config")"
+  m4="$(_reconcile_unknown_project_refusal "GHOST" ".specify/jira" "marker" "specs/031-x/spec.md")"
+  for m in "${m1}" "${m2}" "${m3}" "${m4}"; do
+    [ -n "${m}" ]
+    [[ "${m}" == "reconcile: "* ]]
+    # No placeholder left unfilled — an unresolved value would surface here.
+    [[ "${m}" != *"<"*">"* ]]
+  done
+}
+
+@test "FR-022 every command literal in the new messages is runnable exactly as spelled" {
+  # This feature's messages currently spell NO command, which is the honest
+  # state — they tell the operator to correct a marker or a routing rule, not
+  # to run something. The assertion is written against the extracted tokens
+  # rather than against that fact, so it starts failing the moment an edit adds
+  # a command that does not exist.
+  local all shipped tok
+  all="$(_reconcile_markers_split_refusal "specs/031-x/spec.md" "ALPHA")
+$(_reconcile_project_mismatch_refusal "specs/031-x/spec.md" "ALPHA" "BETA" "override")
+$(_reconcile_project_mismatch_refusal "specs/031-x/spec.md" "ALPHA" "BETA" "config")
+$(_reconcile_unknown_project_refusal "GHOST" ".specify/jira" "marker" "specs/031-x/spec.md")
+$(_reconcile_unknown_project_refusal "GHOST" ".specify/jira" "routing" "")"
+  shipped="$(ls "${ROOT}/.claude/skills" 2> /dev/null | tr '\n' ' ')"
+  while read -r tok; do
+    [ -n "${tok}" ] || continue
+    # /speckit.jira-mirror.config -> speckit-jira-mirror-config
+    local slug="${tok#/}"; slug="${slug//./-}"
+    [[ " ${shipped} " == *" ${slug} "* ]] || [ -f "${ROOT}/.claude/commands/${slug}.md" ]
+  done < <(printf '%s' "${all}" | grep -oE '/speckit[a-zA-Z0-9._-]*' | sort -u)
+}

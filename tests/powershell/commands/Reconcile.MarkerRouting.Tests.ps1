@@ -11,8 +11,48 @@
 
 BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
+    $Mock = Join-Path $Root 'tests/conformance/mock-jira'
+    $Fixture = Join-Path $Root 'tests/conformance/fixtures/repo-with-mirrored-spec'
+    Import-Module (Join-Path $Mock 'Mock.psm1') -Force -ErrorAction SilentlyContinue
     Import-Module (Join-Path $Root 'scripts/powershell/engine/StoryMarker.psm1') -Force
     Import-Module (Join-Path $Root 'scripts/powershell/commands/Reconcile.psm1') -Force
+
+    $env:JIRA_EMAIL = 'user@example.com'
+    $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+    $env:JIRA_NO_SLEEP = '1'
+
+    # A refusal travels on stderr; the bash twin's `run` merges both streams.
+    function Invoke-CapturedBothStreams {
+        param([string[]] $ArgList)
+        $so = [System.IO.StringWriter]::new()
+        $se = [System.IO.StringWriter]::new()
+        $origOut = [Console]::Out
+        $origErr = [Console]::Error
+        [Console]::SetOut($so)
+        [Console]::SetError($se)
+        try { $null = Invoke-JiraReconcile -Arguments $ArgList }
+        finally { [Console]::SetOut($origOut); [Console]::SetError($origErr) }
+        return ($so.ToString() + "`n" + $se.ToString())
+    }
+
+    # Sets $script:SpecPath rather than returning it: the JIRA_CONFIG_DIR this
+    # sets must reach the caller, and a value captured through a pipeline would
+    # leave the run using the repository's own .specify/jira instead of the
+    # fixture's — the bash twin failed for exactly that reason first.
+    function New-MirroredRepo {
+        param([string[]] $MarkerLines)
+        $work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        Copy-Item -Recurse $Fixture $work
+        $script:SpecPath = Join-Path $work 'specs/001-billing-invoices/spec.md'
+        $env:JIRA_CONFIG_DIR = Join-Path $work '.specify/jira'
+        (@('# Feature Specification: Billing Invoices', '') + $MarkerLines + @(
+            '', '### User Story 1 - Export an invoice (Priority: P1)', '',
+            'As a customer, I want to export one invoice as a PDF.', '',
+            '- **Given** a signed-in customer viewing an invoice',
+            '- **When** they choose Export',
+            '- **Then** a PDF download starts'
+        )) -join "`n" | Set-Content -NoNewline -Path $script:SpecPath
+    }
 
     $script:Cfg = '{"projects":[{"key":"ALPHA"},{"key":"BETA"}],"routing_default":"BETA","teams":[{"id":"alpha","project":"ALPHA","folder_prefix":"alpha-"},{"id":"beta","project":"BETA","folder_prefix":"beta-"}]}'
 
@@ -102,5 +142,96 @@ Describe 'reconcile: the two mismatch refusals' {
         $out | Should -BeLike '*GHOST*'
         $out | Should -BeLike '*routing rule*'
         $out | Should -Not -BeLike '*markers*'
+    }
+}
+
+Describe 'reconcile: the properties a message builder cannot prove' {
+    AfterEach {
+        Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_PROJECT_KEY -ErrorAction SilentlyContinue
+        if ($script:M) { Stop-JiraMock -Mock $script:M; $script:M = $null }
+    }
+
+    It 'C3.3 the split refusal issues ZERO Jira requests — not merely zero writes' {
+        # "No POST" is the weaker claim. Both refusals are evaluated before the
+        # gate phase, so the call log must be EMPTY: a read that happened would
+        # mean the refusal sits downstream of a network call, and C3.3 would be
+        # a coincidence of ordering rather than a property of the design.
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        New-MirroredRepo -MarkerLines @(
+            '<!-- speckit-jira story=1111111111111111 ticket=COMP-1 -->',
+            '<!-- speckit-jira story=2222222222222222 ticket=LEGACY-9 -->')
+
+        $out = Invoke-CapturedBothStreams @('reconcile', $script:SpecPath, '--dry-run', '--json')
+        ([string]$out) | Should -BeLike '*bound to more than one Jira project*'
+        ([string]$out) | Should -BeLike '*COMP*'
+        ([string]$out) | Should -BeLike '*LEGACY*'
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ }).Count | Should -Be 0
+    }
+
+    It 'C3.3 the mismatch refusal issues ZERO Jira requests' {
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $env:SPEC_KIT_JIRA_PROJECT_KEY = 'OTHER'
+        New-MirroredRepo -MarkerLines @('<!-- speckit-jira story=1111111111111111 ticket=COMP-1 -->')
+
+        $out = Invoke-CapturedBothStreams @('reconcile', $script:SpecPath, '--dry-run', '--json')
+        ([string]$out) | Should -BeLike '*does not move a bound specification*'
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ }).Count | Should -Be 0
+    }
+
+    It 'C3.5 both refusals downgrade to ONE warning under a hook' {
+        # Constitution III: an after_* hook must never fail the host command.
+        # This feature adds two refusals, so the CHANGED branch needs its own
+        # case rather than inheriting the unchanged one's.
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        $env:SPEC_KIT_JIRA_HOOK_CONTEXT = '1'
+        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+
+        New-MirroredRepo -MarkerLines @(
+            '<!-- speckit-jira story=1111111111111111 ticket=COMP-1 -->',
+            '<!-- speckit-jira story=2222222222222222 ticket=LEGACY-9 -->')
+        $out = Invoke-CapturedBothStreams @('reconcile', $script:SpecPath, '--dry-run', '--json')
+        ([string]$out) | Should -BeLike '*WARNING: *'
+        ([string]$out) | Should -BeLike '*bound to more than one Jira project*'
+        ([string]$out) | Should -BeLike '*This spec-kit command completed normally.*'
+
+        $env:SPEC_KIT_JIRA_PROJECT_KEY = 'OTHER'
+        New-MirroredRepo -MarkerLines @('<!-- speckit-jira story=1111111111111111 ticket=COMP-1 -->')
+        $out2 = Invoke-CapturedBothStreams @('reconcile', $script:SpecPath, '--dry-run', '--json')
+        ([string]$out2) | Should -BeLike '*WARNING: *'
+        ([string]$out2) | Should -BeLike '*does not move a bound specification*'
+    }
+
+    It 'C3.4 each refusal is byte-identical with and without --dry-run' {
+        # The clause 035 exists to enforce: nothing reported in one mode and
+        # withheld in the other. Compared as bytes, not as a substring.
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        New-MirroredRepo -MarkerLines @(
+            '<!-- speckit-jira story=1111111111111111 ticket=COMP-1 -->',
+            '<!-- speckit-jira story=2222222222222222 ticket=LEGACY-9 -->')
+
+        $dry = Invoke-CapturedBothStreams @('reconcile', $script:SpecPath, '--dry-run', '--json')
+        $real = Invoke-CapturedBothStreams @('reconcile', $script:SpecPath, '--json')
+        $real | Should -BeExactly $dry
+    }
+
+    It 'FR-009 no run produces an action set naming more than one project' {
+        # The invariant the two refusals exist to protect, asserted over the
+        # emitted actions rather than inferred from the refusals — so a future
+        # path that splits a specification WITHOUT refusing is still caught.
+        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+        New-MirroredRepo -MarkerLines @('<!-- speckit-jira story=1111111111111111 ticket=COMP-1 -->')
+
+        $out = Invoke-CapturedBothStreams @('reconcile', $script:SpecPath, '--dry-run', '--json')
+        $json = ($out -split "`n" | Where-Object { $_.TrimStart().StartsWith('{') } | Select-Object -First 1)
+        $obj = $json | ConvertFrom-Json -Depth 100
+        $projects = @(@($obj.actions) | ForEach-Object { $_.body.fields.project.key } | Where-Object { $_ } | Sort-Object -Unique)
+        $projects.Count | Should -BeLessOrEqual 1
     }
 }

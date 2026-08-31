@@ -80,10 +80,6 @@ _recognition_read() {
   return "${rc}"
 }
 
-# _recognition_project_of <issue-key> — the project-key prefix of an issue key.
-_recognition_project_of() {
-  printf '%s' "${1%%-*}"
-}
 
 # _recognition_read_parent <key> — one GET folding the identity property
 # into the issue fetch. 023, research R6: the field projection widens from

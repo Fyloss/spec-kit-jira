@@ -360,7 +360,7 @@ function Resolve-JiraRouting {
         # resolver for every possible configuration.
         [string] $MarkerProject = '',
         # 033: the bash twin's caller suppresses the diagnostic below with
-        # `2>/dev/null`, because reconcile composes its own four-rank refusal
+        # `2>/dev/null`, because reconcile composes its own rank-by-rank refusal
         # and the resolver's one-liner would be a second, poorer explanation of
         # the same fact. PowerShell cannot redirect [Console]::Error at the call
         # site, so the suppression has to be a parameter — without it the two

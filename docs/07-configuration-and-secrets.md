@@ -66,7 +66,7 @@ Rules that hold across all three:
   review their team's config without opening the documentation.
 
 
-### Routing: four ranks, first one that answers wins
+### Routing: five ranks, first one that answers wins
 
 A specification reconciles against exactly ONE project, resolved in this order
 (035, `specs/035-routing-follows-bindings/contracts/marker-routing.md`, which

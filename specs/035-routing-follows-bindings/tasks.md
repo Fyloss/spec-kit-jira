@@ -216,3 +216,48 @@ it before.
   covered end-to-end in both modes by `Reconcile.Durability.Tests.ps1`; the hook
   downgrade and the one-project invariant are not, on that port. Cross-port
   equivalence of the refusals themselves is carried by the conformance corpus.
+
+
+---
+
+## Phase 7: Convergence
+
+Appended by `/speckit-converge` on 2026-08-31, after assessing the code against
+`spec.md`, `plan.md`, `contracts/marker-routing.md` and the constitution. Ordered
+CRITICAL first.
+
+- [X] T049 **CRITICAL** Rebuild the routing refusal for a FIVE-rank chain in `scripts/bash/commands/reconcile.sh` (`_reconcile_routing_refusal`) and `scripts/powershell/commands/Reconcile.psm1` (`Get-JiraReconcileRoutingRefusal`): add the clause reporting what the specification's own record found, renumber the operator-team clause from rank 3 to rank 4, and delete the now-unreachable `already bound … fixed by its own markers` branch — a bound specification always yields a marker project and can no longer reach this refusal at all. Failing test first, in `tests/bash/commands/test_reconcile_routing_refusal.bats` and `tests/powershell/commands/Reconcile.RoutingRefusal.Tests.ps1`. Per C2.6 (contradicts) — T018/T019 were marked done with no artifact behind them
+- [X] T050 Correct the routing box in `docs/05-reconcile-flow.md:24`, which still renders `four ranks: rule → team prefix → …`. The T041 sweep grepped for `routing_default` and this file states the chain without naming the key — re-grep for `four ranks|four-rank|rank 3 of four` afterwards, not for the key. Per FR-024 (missing)
+- [X] T051 [P] Correct the three live comments still describing a four-rank chain: `scripts/bash/commands/reconcile.sh:171`, `scripts/powershell/commands/Reconcile.psm1:225`, `scripts/powershell/engine/Interchange.psm1:363`. Per Constitution XVI (partial)
+- [X] T052 Extend `tests/live/test_live_zero_churn.bats` to the repository shape that produces a full duplicate ticket set today: a bound specification, a committed default naming another project, no team folder prefix — re-run and assert zero writes of every kind. Constitution II names this suite by path in its enforcement test; the suite is bash-only by design. Per FR-021 / C6.3 (missing)
+- [X] T053 [P] Write the PowerShell twins of the four end-to-end cases now proven only in bash, in `tests/powershell/commands/Reconcile.MarkerRouting.Tests.ps1`: both refusals leave the mock call log empty (C3.3); both downgrade to one `WARNING` at exit 0 under `SPEC_KIT_JIRA_HOOK_CONTEXT` (C3.5); each refusal is byte-identical with and without `--dry-run` (C3.4); no run emits an action set naming more than one project (FR-009). Use a both-streams capture — a refusal travels on stderr, which `Invoke-Captured` does not see. Per FR-019 / C6.1 (missing)
+- [X] T054 Resolve the contradiction at C5.3: the clause keeps `_recognition_project_of` / `Get-JiraRecognitionProjectOf` on the stated ground that the task-tier check reuses them, but that check uses `marker_bound_projects` and neither helper has a caller in either port. Either reuse the helper in the task tier, or delete it from both ports and amend C5.3 to say so. Per C5.3 / Constitution XV (contradicts)
+- [X] T055 [P] Assert FR-015 directly rather than resting on C3.3's zero-request proof: every message this feature adds is composable from values known before any Jira write. Per FR-015 (partial)
+- [X] T056 [P] Add a message-to-command case covering this feature's own literals rather than relying on the generic guard, in the existing message↔command check. Per FR-022 / T040 (partial)
+
+### Phase 7 outcome — 2026-08-31
+
+All eight closed. Verified after the fact:
+
+| Suite | Result |
+| --- | --- |
+| bash `engine` + `sink` + `ci` + `conformance` | 1415 tests, 0 failures |
+| bash `commands` (both halves) + `lib` + `hooks` + `packaging` | 1237 tests, 0 failures |
+| Pester `sink` + `lib` + `engine` | 1269 tests, 0 failures |
+| Pester routing-refusal / marker-routing / durability / routing | 0 failures |
+| conformance, 7 scenarios incl. the three 033 refusal states | byte-identical on both ports |
+| `shellcheck -x -P scripts/bash` | clean |
+
+Two things Phase 7 changed that are worth carrying forward:
+
+- **T049 rewrote a shipped message.** `us033-refuse-bound-skip` now exits **0**
+  instead of 4 — the state it captured (a bound specification no rank could
+  place) cannot occur any more. Its description was rewritten rather than the
+  scenario deleted: it is now the cross-port proof that the refusal is gone.
+- **T054 deleted a helper the contract said to keep.** C5.3 was amended rather
+  than the code bent to fit it, and both ports' durability tests were flipped
+  from asserting presence to asserting absence.
+
+Still open, unchanged from the earlier hand-off: T047 (`ci/windows-probe`,
+in flight), T046 (dogfooding), and the live assertion added by T052, which
+skips until `SPEC_KIT_JIRA_LIVE=1` and real credentials are supplied.

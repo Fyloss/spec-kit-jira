@@ -15,7 +15,7 @@ BeforeAll {
     $script:CfgTeams = '{"projects":[{"key":"ALPHA"}],"routing":[],"teams":[{"id":"beta","project":"BETA","folder_prefix":"beta-"}]}'
 }
 
-Describe 'The four-finding routing refusal' {
+Describe 'The rank-by-rank routing refusal' {
     BeforeEach {
         $script:Work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
         New-Item -ItemType Directory -Path $script:Work -Force | Out-Null
@@ -27,7 +27,7 @@ Describe 'The four-finding routing refusal' {
         }
     }
 
-    It 'C6.2 reports all four ranks' {
+    It 'C6.2 reports all five ranks' {
         $m = Get-JiraReconcileRoutingRefusal -Folder '/x/007-legacy-cleanup' -ConfigJson $script:Cfg -ConfigDir $script:Work -AlreadyBound $false
         $m | Should -Match 'Rule route:'
         $m | Should -Match 'Team route:'
@@ -71,20 +71,33 @@ Describe 'The four-finding routing refusal' {
         $m | Should -Not -Match 'does not exist'
     }
 
-    It 'C6.3 state 3: already bound, so rank 3 never ran' {
-        $m = Get-JiraReconcileRoutingRefusal -Folder '/x/008-bound' -ConfigJson $script:Cfg -ConfigDir $script:Work -AlreadyBound $true
-        $m | Should -Match 'already bound'
-        $m | Should -Not -Match 'no team is selected'
+    It '035 C2.6 the `-AlreadyBound` switch is now inert — it cannot be true here' {
+        # Kept in the signature so no caller changes, but a bound specification
+        # never reaches this refusal: it resolves at rank 3. Passing it must
+        # therefore produce the SAME message as omitting it.
+        $asBound = Get-JiraReconcileRoutingRefusal -Folder '/x/008-bound' -ConfigJson $script:Cfg -ConfigDir $script:Work -AlreadyBound $true
+        $asUnbound = Get-JiraReconcileRoutingRefusal -Folder '/x/008-bound' -ConfigJson $script:Cfg -ConfigDir $script:Work -AlreadyBound $false
+        $asBound | Should -BeExactly $asUnbound
     }
 
-    It 'C6.3 the three states produce three different messages' {
+    It '035 C2.6 the message reports all FIVE ranks, the record among them' {
+        $m = Get-JiraReconcileRoutingRefusal -Folder '/x/007-legacy' -ConfigJson $script:Cfg -ConfigDir $script:Work -AlreadyBound $false
+        $m | Should -Match 'Rule route:'
+        $m | Should -Match 'Team route:'
+        $m | Should -Match 'Its own record: no ticket marker'
+        $m | Should -Match 'Your team:'
+        $m | Should -Match 'Default:'
+    }
+
+    It 'C6.3 the two reachable rank-4 states still produce different messages' {
+        # 035 retires the third: "already bound" cannot occur here any more.
+        # The two that remain have different remedies — create the file, or
+        # uncomment a line — so conflating them would still send one operator
+        # to edit a file that is already correct.
         $s1 = Get-JiraReconcileRoutingRefusal -Folder '/x/007' -ConfigJson $script:Cfg -ConfigDir $script:Work -AlreadyBound $false
-        Set-Content -LiteralPath (Join-Path $script:Work 'personal.yml') -Value '# no team here'
+        Set-Content -Path (Join-Path $script:Work 'personal.yml') -Value '# no team here'
         $s2 = Get-JiraReconcileRoutingRefusal -Folder '/x/007' -ConfigJson $script:Cfg -ConfigDir $script:Work -AlreadyBound $false
-        $s3 = Get-JiraReconcileRoutingRefusal -Folder '/x/007' -ConfigJson $script:Cfg -ConfigDir $script:Work -AlreadyBound $true
-        $s1 | Should -Not -Be $s2
-        $s2 | Should -Not -Be $s3
-        $s1 | Should -Not -Be $s3
+        $s2 | Should -Not -Be $s1
     }
 
     It 'C6.5 does not prescribe routing_default as the only fix' {

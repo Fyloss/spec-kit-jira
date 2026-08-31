@@ -168,20 +168,32 @@ _reconcile_unknown_project_refusal() {
 # The message for a specification that no rank could place (033 FR-007,
 # contracts/routing-resolution.md C6.1–C6.5).
 #
-# It reports what EACH of the four ranks found, not merely the last one. The
+# It reports what EACH of the five ranks found, not merely the last one. The
 # message it replaces named a single missing key and prescribed declaring
-# `routing_default` — advice that is wrong twice over once the chain is four
-# deep: it names one of four consulted sources, and it prescribes a key the
+# `routing_default` — advice that is wrong twice over once the chain is this
+# deep: it names one of five consulted sources, and it prescribes a key the
 # repository may have declined to declare deliberately (C6.5).
 #
-# Rank 3's three states are kept apart (C6.3) because their remedies differ:
-# one operator needs to create a file, another to uncomment a line, and a third
-# needs nothing at all — their specification is already bound, and no selection
-# would have changed the outcome. Conflating them sends two of the three to
-# edit a file that is already correct.
+# 035 C2.6: the chain gained the specification's OWN record at rank 3, so this
+# message gained a clause for it and the operator's team moved to rank 4. The
+# record clause has exactly one honest state — "no ticket marker yet" — because
+# this refusal is now reachable ONLY for an unbound specification: a bound one
+# resolves at rank 3, and one whose markers name two projects refuses earlier
+# still. The branch that used to report a bound specification as "not
+# consulted" is therefore gone. It named the right answer and acted on none of
+# it, which is the defect 035 exists to repair; keeping it as text would leave
+# the message describing a state the code can no longer produce.
+#
+# `bound` stays in the signature so no caller changes, and is now INERT: it
+# cannot be true at this point. Rank 4's two remaining states are still kept
+# apart (C6.3) because their remedies differ — one operator needs to create a
+# file, the other to uncomment a line.
 _reconcile_routing_refusal() {
+  # shellcheck disable=SC2034 # `bound` is INERT since 035 C2.6 — kept in the
+  # signature so no caller changes, and unreadable here because a bound
+  # specification resolves at rank 3 and never reaches this refusal.
   local folder="$1" cfg="$2" cfg_dir="$3" bound="$4" team="$5"
-  local base n_rules n_teams has_default rank1 rank2 rank3 rank4
+  local base n_rules n_teams has_default rank1 rank2 rank3 rank4 rank5
   base="$(basename "${folder}")"
 
   # One jq for all four counts — the refusal path is not a reason to abandon
@@ -206,24 +218,26 @@ _reconcile_routing_refusal() {
     rank2="none of the ${n_teams} team folder prefixes matched"
   fi
 
-  if [[ "${bound}" == "true" ]]; then
-    rank3="not consulted — this specification is already bound, so its project is fixed by its own markers"
-  elif [[ -n "${team}" ]]; then
-    rank3="the selected team \"${team}\" declares no project in the catalogue"
+  # 035 C2.6 — rank 3 is the specification's own record. Reaching this refusal
+  # means it carries none; a specification that carries one never gets here.
+  rank3="no ticket marker yet, so this specification records no project of its own"
+
+  if [[ -n "${team}" ]]; then
+    rank4="the selected team \"${team}\" declares no project in the catalogue"
   elif [[ ! -f "${cfg_dir}/personal.yml" ]]; then
-    rank3="no team is selected — ${cfg_dir}/personal.yml does not exist"
+    rank4="no team is selected — ${cfg_dir}/personal.yml does not exist"
   else
-    rank3="no team is selected — ${cfg_dir}/personal.yml declares no team: key"
+    rank4="no team is selected — ${cfg_dir}/personal.yml declares no team: key"
   fi
 
   if [[ "${has_default}" -eq 0 ]]; then
-    rank4="routing_default is not declared"
+    rank5="routing_default is not declared"
   else
-    rank4="routing_default is declared but produced nothing"
+    rank5="routing_default is declared but produced nothing"
   fi
 
-  printf 'reconcile: routing could not be resolved for "%s" (zero writes). Rule route: %s. Team route: %s. Your team: %s. Default: %s. Any one of these places it: add a rule or a teams: entry to %s/config.yml, select your team in %s/personal.yml, or declare routing_default in %s/config.yml.' \
-    "${base}" "${rank1}" "${rank2}" "${rank3}" "${rank4}" "${cfg_dir}" "${cfg_dir}" "${cfg_dir}"
+  printf 'reconcile: routing could not be resolved for "%s" (zero writes). Rule route: %s. Team route: %s. Its own record: %s. Your team: %s. Default: %s. Any one of these places it: add a rule or a teams: entry to %s/config.yml, select your team in %s/personal.yml, or declare routing_default in %s/config.yml.' \
+    "${base}" "${rank1}" "${rank2}" "${rank3}" "${rank4}" "${rank5}" "${cfg_dir}" "${cfg_dir}" "${cfg_dir}"
 }
 
 # _reconcile_phase_status_map <project-key> <cfg-json> — the resolved,

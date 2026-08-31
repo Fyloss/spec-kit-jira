@@ -306,3 +306,53 @@ teardown() {
   [ "$(jq -r '.counts.created' <<< "$output")" -eq 0 ]
   [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
 }
+
+@test "035 C6.3: a BOUND spec against a contradicting routing_default issues zero writes on re-run" {
+  require_live
+  # shellcheck source=/dev/null
+  source "${CMD_DIR}/reconcile.sh"
+
+  # The repository shape from the 035 report, live. Before 035 the SECOND
+  # reconcile of this specification resolved routing_default — a different
+  # project from the one its own markers record — and planned a full duplicate
+  # ticket set. That is the largest churn violation Principle II can suffer,
+  # and it is invisible to a mock: the mock cannot tell you which project a
+  # real instance would have accepted the create into.
+  #
+  # The committed default is set to a project the specification is NOT in, so
+  # the run has to choose between the record and the default. Zero writes on
+  # the second pass is the only outcome that proves it chose the record.
+  local cfg_dir="${WORK}/.specify/jira"
+  mkdir -p "${cfg_dir}"
+  cat > "${cfg_dir}/config.yml" <<EOF
+projects:
+  - key: ${SPEC_KIT_JIRA_PROJECT_KEY}
+    style: company_managed
+routing_default: ${SPEC_KIT_JIRA_LIVE_OTHER_PROJECT:-${SPEC_KIT_JIRA_PROJECT_KEY}}
+privacy:
+  allowlist: []
+EOF
+  export JIRA_CONFIG_DIR="${cfg_dir}"
+
+  # First run: unbound, so the override places it and the markers are stamped.
+  local first
+  first="$(cmd_reconcile reconcile --json "${SPEC}")"
+  [ "$(jq -r '.counts.errors' <<< "${first}")" -eq 0 ]
+  grep -qE 'speckit-jira (spec|story)=[0-9a-f]{16} ticket=' "${SPEC}"
+
+  # Second run: now BOUND. Routing must follow the markers, and every write
+  # kind must be zero — the assertion list stays exhaustive per Constitution
+  # II's enforcement test.
+  local second
+  second="$(cmd_reconcile reconcile --json "${SPEC}")"
+  [ "$(jq -r '.counts.created' <<< "${second}")" -eq 0 ]
+  [ "$(jq -r '.counts.updated' <<< "${second}")" -eq 0 ]
+  [ "$(jq -r '.counts.errors' <<< "${second}")" -eq 0 ]
+  [ "$(jq -r '.counts.transitioned // 0' <<< "${second}")" -eq 0 ]
+  [ "$(jq -r '.counts.commented // 0' <<< "${second}")" -eq 0 ]
+  [ "$(jq -r '.counts.linked // 0' <<< "${second}")" -eq 0 ]
+  [ "$(jq -r '.counts.labeled // 0' <<< "${second}")" -eq 0 ]
+
+  # And no action names a project other than the one the markers record.
+  [ "$(jq -r '[.actions[]?.body?.fields?.project?.key // empty] | unique | length' <<< "${second}")" -le 1 ]
+}

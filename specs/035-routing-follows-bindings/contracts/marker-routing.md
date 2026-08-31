@@ -126,7 +126,13 @@ both ports.
 **C5.2** The re-route note emitted only outside `--dry-run` MUST be removed. A
 report for a state that can no longer occur is not kept as a precaution.
 
-**C5.3** The issue-key project extraction helper MUST be kept: C4 reuses it.
+**C5.3** The issue-key project extraction helper MUST be REMOVED from both
+ports. This clause originally required keeping it, on the ground that C4's
+task-tier check would reuse it — that turned out to be false: C4 is implemented
+with the C1 scan over the tasks document, which needs no per-key extractor. The
+helper was left with no caller in either port, which Principle XV forbids.
+Convergence found it; the clause is corrected rather than the code bent to fit
+it.
 
 **C5.4** `story_marker_any_bound` / `Test-JiraStoryMarkerAnyBound` MUST be
 replaced by the C1 scan. "Bound" becomes "the set is non-empty".

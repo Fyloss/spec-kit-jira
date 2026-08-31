@@ -231,7 +231,10 @@ Describe 'Invoke-JiraRecognitionRun — scoped to the routed project' {
         # means the projects already agree.
         $recog = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '../../../scripts/powershell/sink/jira/Recognition.psm1')
         $recog | Should -Not -BeLike '*rerouted*'
-        # C5.3: the project-prefix helper is KEPT — the task tier reuses it.
-        $recog | Should -BeLike '*Get-JiraRecognitionProjectOf*'
+        # C5.3, as amended by convergence: the project-prefix helper is
+        # REMOVED. The clause kept it because the task-tier check was said to
+        # reuse it; that check uses the C1 scan over the tasks document
+        # instead, leaving the helper with no caller. Principle XV.
+        $recog | Should -Not -BeLike '*Get-JiraRecognitionProjectOf*'
     }
 }

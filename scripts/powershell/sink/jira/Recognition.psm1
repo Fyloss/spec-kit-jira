@@ -71,13 +71,6 @@ function Get-JiraRecognitionRead {
     return [pscustomobject]@{ ExitCode = [int]$r.ExitCode; Gone = $false; Marker = $null; Fields = $null }
 }
 
-function Get-JiraRecognitionProjectOf {
-    param([string] $IssueKey)
-    $idx = $IssueKey.IndexOf('-')
-    if ($idx -lt 0) { return $IssueKey }
-    return $IssueKey.Substring(0, $idx)
-}
-
 function Get-JiraRecognitionSafe {
     param($Object, [string] $Name)
     if ($null -eq $Object) { return $null }
@@ -486,5 +479,5 @@ function Invoke-JiraRecognitionRun {
     return [pscustomobject]@{ ExitCode = 0; Json = $json }
 }
 
-Export-ModuleMember -Function Invoke-JiraRecognitionRun, Get-JiraRecognitionRead, Get-JiraRecognitionProjectOf, `
+Export-ModuleMember -Function Invoke-JiraRecognitionRun, Get-JiraRecognitionRead, `
     Invoke-JiraRecognitionParentRun, Get-JiraRecognitionReadParent
