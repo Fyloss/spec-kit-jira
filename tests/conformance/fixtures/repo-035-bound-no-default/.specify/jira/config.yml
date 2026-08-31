@@ -1,0 +1,24 @@
+# 035 conformance fixture — a bound specification in a repository declaring NO routing_default — refused today, placed by its own record now
+#
+# The shape that produced the report: two declared projects, a team catalogue
+# naming both, a feature folder carrying NO team-specific prefix, and a
+# committed default naming the project the specification is NOT in.
+#
+# No `base_url` key: the harness exports SPEC_KIT_JIRA_BASE_URL from the mock's
+# port. Declaring one would engage 032's destination pin.
+projects:
+  - key: ALPHA
+    style: company_managed
+  - key: BETA
+    style: company_managed
+teams:
+  - id: alpha
+    project: ALPHA
+    folder_prefix: "alpha-"
+    branch_pattern: "alpha-<ID>/<FEATURE_NAME>"
+  - id: beta
+    project: BETA
+    folder_prefix: "beta-"
+    branch_pattern: "beta-<ID>/<FEATURE_NAME>"
+privacy:
+  allowlist: []

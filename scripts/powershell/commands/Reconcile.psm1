@@ -125,12 +125,94 @@ function Resolve-JiraReconcileRouting {
         [Parameter(Mandatory)] [string] $ConfigJson,
         # 033: routing rank 3 — the catalogue team this operator selected, or ''
         # when none was selected or the specification is already bound.
-        [string] $SelectedTeamId = ''
+        [string] $SelectedTeamId = '',
+        # 035: routing rank 3 — the project this specification's own bound
+        # markers record, or '' when it carries none.
+        [string] $MarkerProject = ''
     )
     # -Quiet mirrors the bash twin's `2>/dev/null`: reconcile composes its own
-    # four-rank refusal, and the resolver's one-liner would be a second, poorer
-    # explanation of the same fact on the same stream.
-    return (Resolve-JiraRouting -FolderName (Split-Path -Leaf $Folder) -LabelsJson '[]' -RoutingConfigJson $ConfigJson -SelectedTeamId $SelectedTeamId -Quiet)
+    # rank-by-rank refusal, and the resolver's one-liner would be a second,
+    # poorer explanation of the same fact on the same stream.
+    return (Resolve-JiraRouting -FolderName (Split-Path -Leaf $Folder) -LabelsJson '[]' -RoutingConfigJson $ConfigJson -SelectedTeamId $SelectedTeamId -MarkerProject $MarkerProject -Quiet)
+}
+
+function Get-JiraReconcileMarkersSplitRefusal {
+    <#
+    .SYNOPSIS
+      035 C3.1: the specification's own markers name more than one project.
+      Mirror of _reconcile_markers_split_refusal.
+
+      Reachable from a run interrupted partway through a re-route, which is
+      itself evidence that something already went wrong. The bridge does not
+      pick a winner — every candidate for "the right one" resolves the
+      ambiguity by re-creating tickets, which is the action this feature exists
+      to stop it taking on its own. The same posture the duplicate-claim block
+      already takes: nothing written, the operator resolves.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $SpecFile,
+        [Parameter(Mandatory)] [string[]] $Projects
+    )
+    $joined = ($Projects -join ', ')
+    return "reconcile: $SpecFile is bound to more than one Jira project — its markers name $joined. A specification lives in exactly one project, so nothing was written. Correct the ticket= values so every marker names a single project, then reconcile again (zero writes)."
+}
+
+function Get-JiraReconcileProjectMismatchRefusal {
+    <#
+    .SYNOPSIS
+      035 C3.2: this run routes somewhere other than where the specification is
+      already recorded. Mirror of _reconcile_project_mismatch_refusal.
+
+      -Source is 'override' or 'config' — after the marker rank is in the
+      chain, those are the only two ways the two can disagree, so no
+      rank-reporting machinery is needed to say where the routed project came
+      from.
+
+      The bridge refuses rather than moving the specification. Moving one is
+      effectively irreversible, it strands a complete ticket set, and firing it
+      as a side effect of a configuration edit is the same class of surprise as
+      the defect this feature repairs. Refusing keeps the option open; a silent
+      move cannot be taken back.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $SpecFile,
+        [Parameter(Mandatory)] [string] $Recorded,
+        [Parameter(Mandatory)] [string] $Routed,
+        [Parameter(Mandatory)] [string] $Source
+    )
+    $origin = if ($Source -eq 'override') {
+        'the explicit SPEC_KIT_JIRA_PROJECT_KEY override'
+    }
+    else {
+        "a routing rule or teams[] entry in this repository's config.yml"
+    }
+    return "reconcile: $SpecFile is already mirrored into $Recorded, which its own markers record, but this run routes to $Routed — from $origin. The bridge does not move a bound specification between projects on its own, so nothing was written. Either route this specification back to $Recorded, or clear its ticket= markers to mirror it afresh into $Routed (zero writes)."
+}
+
+function Get-JiraReconcileUnknownProjectRefusal {
+    <#
+    .SYNOPSIS
+      US3 unknown-project, with the 035 marker-aware variant (FR-007). Mirror
+      of _reconcile_unknown_project_refusal.
+
+      The message that blames a routing rule, a teams[] entry or
+      routing_default is advice for a file that is already correct when the
+      record placed the run: what needs correcting is then the markers, or
+      projects[] itself.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Key,
+        [Parameter(Mandatory)] [string] $ConfigDir,
+        [Parameter(Mandatory)] [string] $Source,
+        [string] $SpecFile = ''
+    )
+    if ($Source -eq 'marker') {
+        return "reconcile: $SpecFile is bound to project `"$Key`" by its own markers, and $ConfigDir/config.yml does not declare that project in projects[] — declare it, or correct the ticket= markers naming it (zero writes)"
+    }
+    return "reconcile: routing resolved project `"$Key`", which is not declared in $ConfigDir/config.yml's projects[] — correct the routing rule, the teams[] entry, or routing_default that names it (zero writes)"
 }
 
 function Get-JiraReconcileRoutingRefusal {
@@ -902,15 +984,31 @@ function Invoke-JiraReconcileRun {
     $rawSpec = Get-Content -Raw -LiteralPath $specFile
     if ($null -eq $rawSpec) { $rawSpec = '' }
 
-    # Rank 3 is offered only to an unbound specification. Once a story carries a
-    # ticket, the specification itself records which project it lives in, and
-    # that record outranks whoever happens to be reconciling it — otherwise two
-    # operators with different selections would reroute the same spec back and
-    # forth, each run mirroring it afresh into the other project (FR-004).
+    # 035 C1.6/C2.1 — the project the specification's OWN markers record, from
+    # the bytes above, before routing and before any Jira read. 033 named this
+    # record as the reason the operator's team is suppressed for a bound
+    # specification and then never read it, so resolution fell through to
+    # `routing_default` — free to name a different project entirely.
+    #
+    # The set's cardinality answers three questions at once: none means unbound
+    # and today's resolution applies untouched; one is rank 3; more than one is
+    # a refusal.
+    $markerProjects = @(Get-JiraMarkerBoundProjects -Content $rawSpec)
+    $markerProject = if ($markerProjects.Count -ge 1) { $markerProjects[0] } else { '' }
+
+    # Rank 4 stays suppressed for a bound specification exactly as 033 requires:
+    # rank 3 REPLACES it there rather than joining it, so no gitignored file can
+    # reroute a specification two operators share (C2.4).
     $routingTeam = ''
-    $specAlreadyBound = Test-JiraStoryMarkerAnyBound -Content $rawSpec
+    $specAlreadyBound = ($markerProjects.Count -gt 0)
     if (-not $specAlreadyBound) {
         $routingTeam = Get-JiraPersonalTeam
+    }
+
+    # C3.1 — the markers disagree with each other. Before routing, before any
+    # read: zero writes is structural here, not asserted.
+    if ($markerProjects.Count -gt 1) {
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message (Get-JiraReconcileMarkersSplitRefusal -SpecFile $specFile -Projects $markerProjects))
     }
 
     $projectFromConfig = $false
@@ -918,7 +1016,7 @@ function Invoke-JiraReconcileRun {
         $projectKey = $overrideProject
     }
     else {
-        $routed = Resolve-JiraReconcileRouting -Folder $folder -ConfigJson $cfg -SelectedTeamId $routingTeam
+        $routed = Resolve-JiraReconcileRouting -Folder $folder -ConfigJson $cfg -SelectedTeamId $routingTeam -MarkerProject $markerProject
         if ($routed.ExitCode -ne 0) {
             return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message (Get-JiraReconcileRoutingRefusal -Folder $folder -ConfigJson $cfg -ConfigDir $cfgDir -AlreadyBound $specAlreadyBound -SelectedTeamId (Get-JiraPersonalTeam)))
         }
@@ -935,9 +1033,22 @@ function Invoke-JiraReconcileRun {
         return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: the project is still set to the shipped placeholder `"$projectKey`" — run /speckit.jira-mirror.config to bind a real project (zero writes)")
     }
 
+    # 035 C3.2 — the routed project is not the one the specification records.
+    # With rank 3 in the chain this is reachable only two ways, and both are
+    # deliberate: an explicit override, or a committed rule/teams[] entry at
+    # ranks 1-2. Deliberate about ROUTING is not the same as asking the bridge
+    # to abandon a ticket set and build another, so it refuses — before any
+    # read, and identically under --dry-run (C3.3, C3.4).
+    if ((-not [string]::IsNullOrEmpty($markerProject)) -and $projectKey -cne $markerProject) {
+        $mismatchSource = if (-not [string]::IsNullOrEmpty($overrideProject)) { 'override' } else { 'config' }
+        return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message (Get-JiraReconcileProjectMismatchRefusal -SpecFile $specFile -Recorded $markerProject -Routed $projectKey -Source $mismatchSource))
+    }
+
     # US3 unknown-project: a routing rule (or routing_default/team route) named
     # a project the team config never declares in projects[] — distinct from
     # an override, which may legitimately name a project outside config.yml.
+    # 035 FR-007: when the record placed the run, config.yml's routing is
+    # already correct and the message must not send the operator to edit it.
     if ($projectFromConfig) {
         $cfgObj = $cfg | ConvertFrom-Json -Depth 100
         $projectsVal = Get-JiraPlanPropSafe $cfgObj 'projects'
@@ -947,7 +1058,8 @@ function Invoke-JiraReconcileRun {
             if ([string](Get-JiraPlanPropSafe $p 'key') -eq $projectKey) { $declared = $true; break }
         }
         if (-not $declared) {
-            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message "reconcile: routing resolved project `"$projectKey`", which is not declared in $cfgDir/config.yml's projects[] — correct the routing rule, the teams[] entry, or routing_default that names it (zero writes)")
+            $unknownSource = if ((-not [string]::IsNullOrEmpty($markerProject)) -and $projectKey -ceq $markerProject) { 'marker' } else { 'routing' }
+            return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message (Get-JiraReconcileUnknownProjectRefusal -Key $projectKey -ConfigDir $cfgDir -Source $unknownSource -SpecFile $specFile))
         }
     }
 
@@ -1288,6 +1400,21 @@ function Invoke-JiraReconcileRun {
             $tasksFile = $candidateTasksFile
             $tasksRaw = Get-Content -Raw -LiteralPath $tasksFile
             if ($null -eq $tasksRaw) { $tasksRaw = '' }
+
+            # 035 C4.1/C4.2 — the task tier, checked by the SAME rule as the
+            # specification and at the point tasks.md is ALREADY read, so no
+            # unconditional read is added for a run with no task tier (C4.3).
+            # Three tiers holding three definitions of a project mismatch is
+            # how the parent and the stories came to disagree in the first
+            # place.
+            $tasksMarkerProjects = @(Get-JiraMarkerBoundProjects -Content $tasksRaw)
+            if ($tasksMarkerProjects.Count -gt 1) {
+                return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message (Get-JiraReconcileMarkersSplitRefusal -SpecFile $tasksFile -Projects $tasksMarkerProjects))
+            }
+            if ($tasksMarkerProjects.Count -eq 1 -and $tasksMarkerProjects[0] -cne $projectKey) {
+                $tMismatchSource = if (-not [string]::IsNullOrEmpty($overrideProject)) { 'override' } else { 'config' }
+                return (Get-JiraReconcileFaultCode -Code $script:ReconcileExitConfig -Message (Get-JiraReconcileProjectMismatchRefusal -SpecFile $tasksFile -Recorded $tasksMarkerProjects[0] -Routed $projectKey -Source $tMismatchSource))
+            }
 
             if ($taskTierMode -ne 'subtask') {
             # 022, US5 (FR-005): checklist mode needs no resolvable sub-task
@@ -2310,45 +2437,12 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
         }
     }
 
-    # T071: the catalogued `re-routed` notice, once the new key is recorded.
-    # Recognition tags a re-routed story with its former key and project
-    # ($recog.rerouted); the new key is only known after the create response,
-    # so the command layer re-reads the just-written spec file for it.
-    # Skipped under --dry-run (no key is ever recorded there) and skipped for
-    # a story whose creation did not complete this run — a future run
-    # reports it then.
-    $reroutedProp = Get-JiraPlanPropSafe $recog 'rerouted'
-    if (-not $dryRun -and $reroutedProp -and @($reroutedProp.PSObject.Properties).Count -gt 0) {
-        $postRaw = Get-Content -Raw -LiteralPath $specFile
-        if ($null -eq $postRaw) { $postRaw = '' }
-        try {
-            $postParseObj = (Get-JiraParsedSpec -Text $postRaw -FolderSlug $slug) | ConvertFrom-Json -Depth 100
-            $notesList = [System.Collections.Generic.List[string]]::new()
-            foreach ($n in @($notesJson | ConvertFrom-Json -Depth 100)) { $notesList.Add([string]$n) }
-            foreach ($rp in $reroutedProp.PSObject.Properties) {
-                $rid = $rp.Name
-                $story = $postParseObj.stories | Where-Object { [string]$_.local_id -eq $rid } | Select-Object -First 1
-                $marker = if ($story) { Get-JiraPlanPropSafe $story 'marker' } else { $null }
-                $state = if ($marker) { [string](Get-JiraPlanPropSafe $marker 'state') } else { '' }
-                if ($state -eq 'bound') {
-                    $newKey = [string](Get-JiraPlanPropSafe $marker 'ticket')
-                    if (-not [string]::IsNullOrEmpty($newKey)) {
-                        $formerKey = [string]$rp.Value.former_key
-                        $formerProject = [string]$rp.Value.former_project
-                        $notesList.Add("Story $rid in $specFile was previously mirrored as $formerKey in project $formerProject, which is no longer the project this specification routes to; $formerKey was left untouched and the story was mirrored into $projectKey as $newKey. Nothing was moved or deleted.")
-                        $hasLifecycle = $true
-                    }
-                }
-            }
-            $notesJson = ConvertTo-JiraJsonValue $notesList
-        }
-        catch {
-            # Best-effort re-read of the just-written spec file; a parse
-            # failure here only skips the re-routed notice this run, it does
-            # not undo the writes already applied above.
-            $null = $_
-        }
-    }
+    # 035 C5.2 — the `re-routed` note that lived here is GONE. It reported a
+    # story re-created in another project, and only outside --dry-run, because
+    # the replacement key was not known until the create response arrived. That
+    # is a report withheld from the one mode whose purpose is to predict, and
+    # C3.2 has since made the state it reported a refusal: nothing re-creates a
+    # bound item elsewhere any more, so there is nothing left to report.
 
     # Save-JiraRunState (021, T031) below must see whether this run actually
     # applied every planned action — the hook-context downgrade just below
@@ -2532,4 +2626,5 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
 
 Export-ModuleMember -Function Invoke-JiraReconcile, Resolve-JiraReconcileRouting, `
     Get-JiraReconcileLocalBindingFor, Get-JiraReconcilePlanContextFromBinding, `
-    Get-JiraReconcileRoutingRefusal
+    Get-JiraReconcileRoutingRefusal, Get-JiraReconcileMarkersSplitRefusal, `
+    Get-JiraReconcileProjectMismatchRefusal, Get-JiraReconcileUnknownProjectRefusal

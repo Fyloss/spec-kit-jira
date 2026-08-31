@@ -430,23 +430,28 @@ is made.
 That one line does a second job. When a specification matches no committed
 `routing:` rule and carries no team folder prefix, it is mirrored into **your**
 team's project rather than into whatever `routing_default` the repository
-happens to name. Routing resolves in four ranks, first one that answers wins:
+happens to name. Routing resolves in five ranks, first one that answers wins:
 
 1. a committed `routing:` rule — matched against the raw folder name;
 2. a committed `teams:` `folder_prefix` — matched against the folder name with
    its leading `NNN-` removed;
-3. **your `team:` selection**;
-4. `routing_default`, which is optional.
+3. **the project this specification's own `ticket=` markers already record**;
+4. **your `team:` selection**;
+5. `routing_default`, which is optional.
 
-Nothing answers and the run is refused, telling you what each of the four ranks
-found rather than naming one missing key.
+Nothing answers and the run is refused, telling you what each rank found rather
+than naming one missing key.
 
-The two committed ranks stay ahead of yours on purpose: a specification that
-says where it belongs must outrank whoever happens to be reconciling it. And
-rank 3 applies only while a specification is still **unbound** — once its
-stories carry ticket markers, the specification itself fixes its project, and
-every developer resolves it identically whatever team each has selected.
-Changing your `team:` will not move work that is already mirrored.
+The two committed ranks stay ahead of the rest on purpose: they say where a
+specification BELONGS, and your team must remain able to move one. Rank 3 says
+only where it already LIVES — so once its markers carry tickets, the
+specification fixes its own project and every developer resolves it identically
+whatever team each has selected. Changing your `team:` will not move work that
+is already mirrored.
+
+And neither will anything else, silently: if the routed project ever ends up
+differing from the one your markers record, the run **refuses** with zero writes
+and names both projects rather than re-creating your tickets somewhere else.
 
 In a repository shared by several teams this is what stops one team's work
 being mirrored into another team's project. Such a repository can leave

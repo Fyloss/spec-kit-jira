@@ -355,6 +355,10 @@ function Resolve-JiraRouting {
         [Parameter(Mandatory)] [string] $LabelsJson,
         [Parameter(Mandatory)] [string] $RoutingConfigJson,
         [string] $SelectedTeamId = '',
+        # 035 C2.5: OPTIONAL and MAY be empty. Empty is not an error, produces
+        # no diagnostic, and yields output byte-identical to the four-input
+        # resolver for every possible configuration.
+        [string] $MarkerProject = '',
         # 033: the bash twin's caller suppresses the diagnostic below with
         # `2>/dev/null`, because reconcile composes its own four-rank refusal
         # and the resolver's one-liner would be a second, poorer explanation of
@@ -412,9 +416,22 @@ function Resolve-JiraRouting {
         }
     }
 
-    # Rank 3 (033) — the team the operator selected. Consulted only after both
-    # committed ranks have declined, and only when a selection was supplied:
-    # an empty id is a normal, silent state, not a failure (C2.3, C4.4).
+    # Rank 3 (035) — the project the SPECIFICATION'S OWN bound markers record.
+    # 033 suppressed the operator's team for a bound specification, citing
+    # "the specification itself records which project it lives in", and then
+    # never read that record: resolution fell through to `routing_default`,
+    # free to name a different project entirely. Below the two committed ranks
+    # (C2.3): a record of where a specification LIVES must not override a
+    # committed decision about where it BELONGS. What the run does when those
+    # two disagree is the command layer's business (C3.2), not this function's.
+    if (-not [string]::IsNullOrEmpty($MarkerProject)) {
+        return [pscustomobject]@{ ExitCode = 0; ProjectKey = $MarkerProject }
+    }
+
+    # Rank 4 (033) — the team the operator selected. Consulted only after the
+    # committed ranks and the record have declined, and only when a selection
+    # was supplied: an empty id is a normal, silent state, not a failure
+    # (033 C2.3, C4.4).
     if (-not [string]::IsNullOrEmpty($SelectedTeamId) -and (Test-JiraInterchangeProp $cfg 'teams')) {
         foreach ($t in @($cfg.teams)) {
             if ([string](Get-JiraInterchangeProp $t 'id') -ceq $SelectedTeamId) {

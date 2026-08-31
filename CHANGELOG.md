@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-08-31
+
+### Fixed — BREAKING
+
+**A specification already mirrored into a project no longer re-routes itself
+into another one.** Reported from a real multi-team, company-managed Jira, on a
+feature folder carrying no team-specific prefix. `/speckit.specify` mirrored the
+specification into the operator's own team project and recorded the keys in
+`spec.md`. `/speckit.plan`'s reconcile, against the same unchanged
+specification, resolved a **different** project and planned to CREATE a fresh
+story rather than update the one already recorded. Nothing in the run said why:
+the summary named the wrong project three times — an action, a field-default
+note and a provenance-label warning — and never once said the story was already
+bound elsewhere. What stopped it was a person reading the preview.
+
+0.23.0 introduced the guard responsible. It suppressed the developer's team
+selection for any specification carrying a ticket marker, on the stated ground
+that "the specification itself records which project it lives in" — and then
+never read that record, so resolution fell through to `routing_default`, a
+committed value free to name a different project entirely. The guard uninstalled
+precisely the rank that had created the tickets, because that rank had created
+them.
+
+Routing now reads the record. It resolves in **five** ranks, first that answers
+wins:
+
+1. a committed `routing:` rule;
+2. a committed `teams:` `folder_prefix`;
+3. **the project the specification's own `ticket=` markers record** — new;
+4. the developer's `team:` selection in the gitignored `personal.yml`;
+5. `routing_default`, still optional.
+
+Ranks 1 and 2 stay ahead: a team that commits a decision about where a
+specification belongs must remain able to move it. Rank 3 outranks 4 and 5,
+which know nothing about the specification at all. A specification carrying no
+marker resolves exactly as it does today — every existing repository is
+untouched, and a bound one now resolves identically for every developer whatever
+team each has selected.
+
+Also fixed, from the same report:
+
+- **One run can no longer split one specification across two projects.** The
+  parent tier compared no projects at all while the story and task tiers did, so
+  a single run could update the parent in one project and create its children in
+  another — a hierarchy Jira will not accept. All three tiers now hold one rule.
+- **`--dry-run` no longer withholds an outcome.** The note explaining a
+  re-routed story was emitted only outside `--dry-run`, because the replacement
+  key was unknown until the create returned. Nothing is conditioned on the run
+  being real any more.
+
+### Removed — BREAKING
+
+**The silent re-route.** A bound item whose recorded key named a project other
+than the routed one was reclassified as new and re-created there, leaving the
+original stranded and untouched. It is now a refusal: exit 4, zero writes,
+evaluated before any Jira read, naming the recorded project, the routed project,
+and which of the two possible sources produced the routed one — an explicit
+`SPEC_KIT_JIRA_PROJECT_KEY` override, or the repository's committed routing.
+
+Moving a whole specification between projects is effectively irreversible and
+strands a complete ticket set. Having it fire as a side effect of a
+configuration edit is the same class of surprise as the defect above, so the
+bridge does not do it on its own. Route the specification back, or clear its
+`ticket=` markers deliberately.
+
+A second refusal joins it: a specification whose own markers name **more than
+one** project — reachable from a run interrupted partway through a re-route —
+also refuses with zero writes, naming every project found.
+
+Both refusals are downgraded to a single warning under a lifecycle hook, leaving
+the host spec-kit command's exit code unaffected, exactly as every other
+fail-closed refusal is.
+
 ## [0.24.0] - 2026-08-30
 
 ### Removed — BREAKING

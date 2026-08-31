@@ -15,7 +15,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (253)" {
+@test "the conformance corpus has exactly the recorded scenario count (259)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -216,8 +216,11 @@ setup() {
   # hook-registry reader (254 -> 253). The first decrease in this line's
   # history — the count is not monotonic, and a feature that removes behaviour
   # lowers it.
+  # 035 adds six for the marker rank and the two mismatch refusals:
+  # bound-beats-default, bound-same-for-every-operator, bound-no-default-declared,
+  # refuse-markers-split, refuse-routed-mismatch, unbound-unchanged (253 -> 259).
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 253 ]
+  [ "${count}" -eq 259 ]
 }
 
 # Everything the conformance job declares, as one block.
