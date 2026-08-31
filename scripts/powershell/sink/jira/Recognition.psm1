@@ -71,13 +71,6 @@ function Get-JiraRecognitionRead {
     return [pscustomobject]@{ ExitCode = [int]$r.ExitCode; Gone = $false; Marker = $null; Fields = $null }
 }
 
-function Get-JiraRecognitionProjectOf {
-    param([string] $IssueKey)
-    $idx = $IssueKey.IndexOf('-')
-    if ($idx -lt 0) { return $IssueKey }
-    return $IssueKey.Substring(0, $idx)
-}
-
 function Get-JiraRecognitionSafe {
     param($Object, [string] $Name)
     if ($null -eq $Object) { return $null }
@@ -281,7 +274,19 @@ function Invoke-JiraRecognitionRun {
       {"bound":{...},"new":[...],"blocked":[...]} — or the transport's
       mapped exit code (>= 2) with Json = '' when the WHOLE specification
       fails closed on an inconclusive read.
+
+      -ProjectKey is INERT since 035 C5.1. It fed the branch that classified a
+      recorded key naming another project as NEW and re-created it in the
+      routed one; that branch is gone, because the command layer refuses on
+      such a mismatch before any read (C3.2). The parameter is kept because it
+      is positional in the bash twin — dropping it would shift every call
+      site's arguments — and because it still documents which project this
+      recognition is scoped to. The scoping is now guaranteed upstream rather
+      than re-checked here: C4.2 requires ONE definition of a project
+      mismatch, so adding a second one in this function would be the very
+      divergence that let the parent and the stories disagree.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'ProjectKey', Justification = 'Inert since 035 C5.1 — kept for cross-port signature parity, and the scoping it names is enforced upstream by C3.2 rather than re-checked here.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string] $StoriesJson,
@@ -298,7 +303,6 @@ function Invoke-JiraRecognitionRun {
     $bound = [ordered]@{}
     $new = [System.Collections.Generic.List[string]]::new()
     $blocked = [System.Collections.Generic.List[object]]::new()
-    $rerouted = [ordered]@{}
     $allIds = @($stories | ForEach-Object { [string]$_.local_id })
 
     foreach ($st in $stories) {
@@ -346,11 +350,10 @@ function Invoke-JiraRecognitionRun {
             continue
         }
 
-        if (-not [string]::IsNullOrEmpty($ProjectKey) -and (Get-JiraRecognitionProjectOf -IssueKey $key) -ne $ProjectKey) {
-            $new.Add($id)
-            $rerouted[$id] = [ordered]@{ former_key = $key; former_project = (Get-JiraRecognitionProjectOf -IssueKey $key) }
-            continue
-        }
+        # 035 C5.1: the branch that classified a recorded key naming another
+        # project as NEW — re-creating it in the routed project and leaving the
+        # recorded one stranded — is GONE. The command layer refuses on that
+        # mismatch before any read (C3.2), so this state cannot reach here.
 
         # subtasks (T073, FR-021): fetched only for story-kind reads — the
         # orphan/re-attribution check reconcile.ps1 runs against a story's
@@ -484,9 +487,9 @@ function Invoke-JiraRecognitionRun {
         $bound[$id] = $entry
     }
 
-    $json = ConvertTo-JiraJsonValue ([ordered]@{ bound = $bound; new = $new; blocked = $blocked; rerouted = $rerouted })
+    $json = ConvertTo-JiraJsonValue ([ordered]@{ bound = $bound; new = $new; blocked = $blocked })
     return [pscustomobject]@{ ExitCode = 0; Json = $json }
 }
 
-Export-ModuleMember -Function Invoke-JiraRecognitionRun, Get-JiraRecognitionRead, Get-JiraRecognitionProjectOf, `
+Export-ModuleMember -Function Invoke-JiraRecognitionRun, Get-JiraRecognitionRead, `
     Invoke-JiraRecognitionParentRun, Get-JiraRecognitionReadParent

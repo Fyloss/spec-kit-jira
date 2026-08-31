@@ -122,24 +122,27 @@ routing:
 
 # OPTIONAL last resort: the project used when nothing else places a spec.
 #
-# Routing resolves in four ranks, first one that answers wins:
+# Routing resolves in five ranks, first one that answers wins:
 #   1. a `routing:` rule above  — matched against the RAW folder name,
 #                                 numbering included
 #   2. a `teams:` folder_prefix — matched against the folder name with its
 #                                 leading `NNN-` removed
-#   3. the team the developer selected in .specify/jira/personal.yml
-#   4. routing_default, below
+#   3. the project the spec's own `ticket=` markers already record
+#   4. the team the developer selected in .specify/jira/personal.yml
+#   5. routing_default, below
 # Nothing at all: the run is refused, and the message says what each rank found.
 #
-# Rank 3 takes precedence over this key, so a repository shared by several teams
-# can leave it out entirely rather than imposing one team's project on everyone.
-# Delete the line if that is your case. A single-team repository should keep it:
-# a rule with no condition matches nothing, so this is the only way to say
-# "everything goes here".
+# Ranks 3 and 4 both take precedence over this key, so a repository shared by
+# several teams can leave it out entirely rather than imposing one team's
+# project on everyone. Delete the line if that is your case. A single-team
+# repository should keep it: a rule with no condition matches nothing, so this
+# is the only way to say "everything goes here".
 #
-# Rank 3 applies only to a specification that is not yet bound. Once its stories
-# carry ticket markers, the specification itself fixes its project, and every
-# developer resolves it identically whatever team they selected.
+# Rank 3 is what makes a bound specification stable: once its markers carry
+# tickets, the specification itself fixes its project and every developer
+# resolves it identically whatever team they selected. If a rule above ever
+# routes a bound specification somewhere else, the run REFUSES with zero writes
+# rather than re-creating its tickets in the new project.
 routing_default: PROJ
 
 # OPTIONAL team catalogue: the naming conventions each team ships under. When a

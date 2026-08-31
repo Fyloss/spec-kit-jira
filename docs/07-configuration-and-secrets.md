@@ -10,7 +10,7 @@ flowchart TB
         A[".specify/jira/config.yml"]
         A1["projects · epic_strategy · task_strategy"]
         A2["priority_map · estimation_field · hierarchy"]
-        A3["routing + routing_default (OPTIONAL since 033)"]
+        A3["routing + routing_default (OPTIONAL since 033)<br/>outranked by a spec's own markers since 035"]
         A4["teams catalogue"]
         A5["privacy.allowlist"]
         A6["phase_status_map (per role since 023) · halted_statuses"]
@@ -66,38 +66,52 @@ Rules that hold across all three:
   review their team's config without opening the documentation.
 
 
-### Routing: four ranks, first one that answers wins
+### Routing: five ranks, first one that answers wins
 
 A specification reconciles against exactly ONE project, resolved in this order
-(033, `specs/033-routing-follows-team/contracts/routing-resolution.md`):
+(035, `specs/035-routing-follows-bindings/contracts/marker-routing.md`, which
+amends 033's four-rank chain):
 
 | Rank | Source | Layer | Matched against |
 | --- | --- | --- | --- |
 | 1 | a `routing:` rule | committed | the **raw** folder name, numbering included |
 | 2 | a `teams:` `folder_prefix` | committed | the folder name with its leading `NNN-` removed |
-| 3 | the developer's `team:` selection | **gitignored** `personal.yml` | — it is about the person, not the specification |
-| 4 | `routing_default` | committed | — the repository's stated last resort |
+| 3 | the project the specification's own `ticket=` markers record | the specification itself | — it is where this specification already lives |
+| 4 | the developer's `team:` selection | **gitignored** `personal.yml` | — it is about the person, not the specification |
+| 5 | `routing_default` | committed | — the repository's stated last resort |
 
 Nothing answers: the run is refused with exit 4 and zero writes, and the message
-reports what each of the four ranks found rather than naming one missing key.
+reports what each rank found rather than naming one missing key.
 
-Two properties of that order are load-bearing.
+Three properties of that order are load-bearing.
 
-**Ranks 1 and 2 outrank rank 3, always.** They reason about the specification;
-rank 3 reasons about whoever is running the command. A gitignored file must
-never override a team's committed routing decision — that would be the same
-imposition rank 3 exists to remove, pointed the other way.
+**Ranks 1 and 2 outrank everything below them, always.** They are committed
+decisions about where a specification BELONGS, and a team must remain able to
+move one. Rank 3 reports only where it currently LIVES; rank 4 is about whoever
+is running the command. A gitignored file must never override a team's committed
+routing decision — that would be the same imposition rank 4 exists to remove,
+pointed the other way.
 
-**Rank 3 applies only while a specification is unbound.** Once any story carries
-a ticket marker, the specification itself records which project it lives in, and
-that record decides for every developer whatever team each has selected. Without
-that bound, two developers would resolve the same specification differently and
-each run would mirror it afresh into the other project, leaving two live ticket
-sets.
+**Rank 3 is what makes a bound specification stable.** Once any marker carries a
+ticket, the specification itself records which project it lives in, and that
+record decides for every developer whatever team each has selected. 033 already
+said this and did not do it: it suppressed rank 4 for a bound specification,
+citing that record, and then never read it — so resolution fell through to
+`routing_default`, free to name a different project, and the second reconcile of
+a specification planned a duplicate ticket set somewhere else. 035 reads it.
+
+**A specification is never moved between projects by the bridge.** Where the
+routed project ends up differing from the one the markers record — a team
+changed a committed rule, or an operator supplied an explicit project override —
+the run refuses with zero writes and names both projects. Moving a whole
+specification is effectively irreversible and strands a complete ticket set;
+having it fire as a side effect of a configuration edit is exactly the surprise
+035 exists to remove. Route the specification back, or clear its `ticket=`
+markers deliberately.
 
 `routing_default` became OPTIONAL in 033. A repository shared by several teams
 can omit it — there is no value that is correct for all of them — and let each
-developer route through rank 3. A single-team repository should keep it: a rule
+developer route through rank 4. A single-team repository should keep it: a rule
 that declares no condition matches nothing, so the key is the only way to say
 "everything goes here".
 

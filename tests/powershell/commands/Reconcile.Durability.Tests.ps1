@@ -30,6 +30,21 @@ BeforeAll {
         try { $null = Invoke-JiraReconcile -Arguments $ArgList } finally { [Console]::SetOut($orig) }
         return $sw.ToString()
     }
+
+    # 035: a refusal is written to stderr, so a test asserting on one needs both
+    # streams. The bash twin gets this for free from bats' `run`.
+    function Invoke-CapturedBothStreams {
+        param([string[]] $ArgList)
+        $so = [System.IO.StringWriter]::new()
+        $se = [System.IO.StringWriter]::new()
+        $origOut = [Console]::Out
+        $origErr = [Console]::Error
+        [Console]::SetOut($so)
+        [Console]::SetError($se)
+        try { $null = Invoke-JiraReconcile -Arguments $ArgList }
+        finally { [Console]::SetOut($origOut); [Console]::SetError($origErr) }
+        return ($so.ToString() + "`n" + $se.ToString())
+    }
 }
 
 Describe 'Invoke-JiraReconcile — no machine-local state' {
@@ -94,7 +109,11 @@ Describe 'Invoke-JiraReconcile — no machine-local state' {
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -eq 'POST /rest/api/3/issue' }).Count | Should -Be 0
     }
 
-    It "re-routed: the catalogued notice names the story, the former key and project, and the new key (T071)" {
+    It '035 C3.2: a recorded key in another project REFUSES, zero writes, both modes' {
+        # Was: "re-routed: the catalogued notice names the story, the former key
+        # and project, and the new key (T071)". That behaviour is retired.
+        # Re-creating a bound story in the routed project stranded the recorded
+        # one and, under --dry-run, said nothing at all about having done so.
         $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
         $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
 
@@ -105,7 +124,7 @@ Describe 'Invoke-JiraReconcile — no machine-local state' {
 
         @(
             '# Feature Specification: Billing Invoices', '',
-            '### User Story 1 - Export a single invoice (Priority: P1)',
+            '### User Story 1 - Export single invoice (Priority: P1)',
             '<!-- speckit-jira story=1111111111111111 ticket=LEGACY-42 -->', '',
             'As a customer, I want to export one invoice as a PDF.', '',
             '- **Given** a signed-in customer viewing an invoice',
@@ -113,21 +132,21 @@ Describe 'Invoke-JiraReconcile — no machine-local state' {
             '- **Then** a PDF download starts'
         ) -join "`n" | Set-Content -NoNewline -Path $spec
 
-        $r = Invoke-Captured @('reconcile', $spec, '--json') | ConvertFrom-Json
-        $r.counts.created | Should -Be 2
+        # The refusal travels on stderr, which Invoke-Captured (stdout only)
+        # does not see — the bash twin's `run` merges both streams.
+        $out = Invoke-CapturedBothStreams @('reconcile', $spec, '--json')
+        ([string]$out) | Should -BeLike '*does not move a bound specification*'
 
-        $note = if (@($r.notes).Count -gt 0) { [string]$r.notes[0] } else { '' }
-        $note | Should -BeLike '*1111111111111111*'
-        $note | Should -BeLike '*LEGACY-42*'
-        $note | Should -BeLike '*in project LEGACY*'
-        $note | Should -BeLike '*mirrored into COMP as COMP-2*'
-
-        # the recorded marker now names the new ticket; the former one is
-        # left untouched — no write was ever issued to it. COMP-1 is the
-        # parent (Phase 5, US2), created first.
-        (Get-Content -Raw -LiteralPath $spec) | Should -BeLike '*ticket=COMP-2*'
-        (Get-Content -Raw -LiteralPath $spec) | Should -Not -BeLike '*ticket=LEGACY-42*'
+        # C3.3 — refused before any Jira read, so zero writes is structural.
         @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ -match 'LEGACY-42' }).Count | Should -Be 0
+
+        # The recorded marker is untouched: nothing was re-created anywhere.
+        (Get-Content -Raw -LiteralPath $spec) | Should -BeLike '*ticket=LEGACY-42*'
+        (Get-Content -Raw -LiteralPath $spec) | Should -Not -BeLike '*ticket=COMP-*'
+
+        # C3.4 — identical under --dry-run, where the old note went silent.
+        $out2 = Invoke-CapturedBothStreams @('reconcile', $spec, '--dry-run', '--json')
+        ([string]$out2) | Should -BeLike '*does not move a bound specification*'
     }
 }
 
@@ -200,20 +219,22 @@ Describe 'Invoke-JiraRecognitionRun — scoped to the routed project' {
         $specRefB = '{"repo":"acme/app","spec_slug":"002-beta","folder":"x"}'
         $r = Invoke-JiraRecognitionRun -StoriesJson $stories -SpecRefJson $specRefB -ProjectKey 'COMP' -SpecPath $specB
         $r.ExitCode | Should -Be 0
-        # OTHER-1 does not belong to the routed COMP project: mirrored as
-        # new, the former ticket left untouched (US3 re-routed case, FR-019).
-        ($r.Json | ConvertFrom-Json).new[0] | Should -Be '1111111111111111'
+        # 035 C5.1: recognition no longer reclassifies a recorded key naming
+        # another project as new — the command layer refused before this could
+        # be reached, so the branch that did is gone.
+        @(($r.Json | ConvertFrom-Json).new).Count | Should -Be 0
     }
 
-    It 'a story whose recorded ticket lives outside the routed project is mirrored into the routed project, not blocked' {
-        $script:M = Start-JiraMock -ConfigPath (Join-Path $Mock 'configs/default.json')
-        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
-        $stories = '[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"LEGACY-42"}}]'
-        $specRef = '{"repo":"acme/app","spec_slug":"001-billing","folder":"x"}'
-        $r = Invoke-JiraRecognitionRun -StoriesJson $stories -SpecRefJson $specRef -ProjectKey 'COMP' -SpecPath 'spec.md'
-        $r.ExitCode | Should -Be 0
-        $out = $r.Json | ConvertFrom-Json
-        @($out.blocked).Count | Should -Be 0
-        $out.new[0] | Should -Be '1111111111111111'
+    It '035 C5.1: recognition holds no opinion about which project a key names' {
+        # The comparison now lives in ONE place, in the command layer, and
+        # refuses (C3.2) before any read. Reaching recognition at all therefore
+        # means the projects already agree.
+        $recog = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '../../../scripts/powershell/sink/jira/Recognition.psm1')
+        $recog | Should -Not -BeLike '*rerouted*'
+        # C5.3, as amended by convergence: the project-prefix helper is
+        # REMOVED. The clause kept it because the task-tier check was said to
+        # reuse it; that check uses the C1 scan over the tasks document
+        # instead, leaving the helper with no caller. Principle XV.
+        $recog | Should -Not -BeLike '*Get-JiraRecognitionProjectOf*'
     }
 }

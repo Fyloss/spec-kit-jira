@@ -261,11 +261,12 @@ document describes only the first:
 1. **Naming** — the folder prefix and branch pattern a new feature is created
    under, taken from that team's catalogue entry. That is everything below.
 2. **Routing** — where a specification is mirrored when no committed `routing:`
-   rule and no committed team folder prefix places it. The selected team's
-   project is rank 3 of four, ahead of `config.yml`'s `routing_default`, so a
-   repository shared by several teams never mirrors one team's work into
-   another's. See `docs/07-configuration-and-secrets.md`, "Routing: four ranks".
+   rule, no committed team folder prefix and no existing ticket marker places
+   it. The selected team's project is rank 4 of five, ahead of `config.yml`'s
+   `routing_default`, so a repository shared by several teams never mirrors one
+   team's work into another's. See `docs/07-configuration-and-secrets.md`,
+   "Routing".
 
 The routing half applies only while a specification is still unbound. Once its
-stories carry ticket markers the specification fixes its own project, and
-changing this key will not move it.
+markers carry tickets the specification fixes its own project (rank 3, added in
+035), and changing this key will not move it.

@@ -112,46 +112,66 @@ function ConvertTo-JiraStoryMarkerInfo {
     return (ConvertTo-JiraJsonValue ([ordered]@{ kind = 'malformed'; id = $idval }))
 }
 
-function Test-JiraStoryMarkerAnyBound {
+function Get-JiraMarkerBoundProjects {
     <#
     .SYNOPSIS
-      True when ANY line of $Content carries a story marker in the BOUND form.
-      Mirror of story_marker_any_bound (033, FR-004,
-      contracts/routing-resolution.md C3.3/C3.4).
+      The SORTED, UNIQUE set of Jira project keys carried by $Content's BOUND
+      markers. Mirror of marker_bound_projects (035,
+      contracts/marker-routing.md C1.1-C1.7; data-model.md §1).
 
-      Routing rank 3 — the project of the team the operator selected in their
-      gitignored personal.yml — is consulted ONLY for a specification that is
-      not yet bound. Without that bound, routing would depend on a per-operator
-      file: two developers would resolve the same specification to different
-      projects and each run would mirror it afresh into the other one, leaving
-      two live ticket sets. A bound marker is an earlier run's record of which
-      project this specification lives in (Constitution I).
+      Supersedes Test-JiraStoryMarkerAnyBound. Routing needs more than "is this
+      bound": it needs WHICH project the specification's own markers record.
+      033 named that record as the reason rank 3 is suppressed for a bound
+      specification and then never read it, so resolution fell through to
+      `routing_default` — a committed value free to name a different project
+      entirely, which is how a bound specification came to plan a duplicate
+      ticket set in the wrong place.
 
-      Only the ticket-bearing form counts. `creating` is a run in flight and a
-      bare marker is assigned-but-not-created; neither pins a project yet.
+      The set's CARDINALITY answers three questions at once (C1.1):
+        0  not bound            — today's resolution applies, untouched
+        1  the marker rank      — and the value every tier is compared against
+        2+ the markers disagree — a refusal, zero writes
+
+      ALL THREE marker grammars count: parent (`spec=`), story (`story=`) and
+      task (`task=`). Reading the parent is a deliberate widening over 033
+      C3.3, which read stories only (C1.3).
+
+      Only the ticket-bearing form counts (C1.2). `creating` is a run in flight
+      and a bare marker is assigned-but-not-created; neither pins a project.
 
       The grammar is applied inline rather than through
-      ConvertTo-JiraStoryMarkerInfo: that builds and serialises an object per
-      line, which is the same waste the bash twin avoids by not calling
-      story_marker_parse_line (C3.4).
+      ConvertTo-JiraStoryMarkerInfo, which builds and serialises an object per
+      line — the same waste the bash twin avoids by not calling
+      story_marker_parse_line (C1.5).
+
+      The sort is ORDINAL, never culture-aware: two ports emitting two
+      orderings of one set would leave the conformance corpus comparing
+      collation rather than behaviour.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Returns a set of project keys; a singular name would misdescribe the value.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Content)
-    if ([string]::IsNullOrEmpty($Content)) { return $false }
+    $found = [System.Collections.Generic.List[string]]::new()
+    if ([string]::IsNullOrEmpty($Content)) { return @() }
     foreach ($raw in ($Content -split "`n")) {
         $t = $raw.TrimEnd("`r").Trim()
         # Cheap gate first: most lines of a specification are prose.
         if (-not $t.StartsWith('<!--')) { continue }
         if ($t -notmatch '^<!--\s+speckit-jira\s+(.*)-->\s*$') { continue }
         $body = $Matches[1].Trim()
-        if ($body -notmatch '^story=(\S+)(\s+(.*))?$') { continue }
-        $idval = $Matches[1]
-        $tail = if ($Matches[3]) { $Matches[3] } else { '' }
+        if ($body -notmatch '^(spec|story|task)=(\S+)(\s+(.*))?$') { continue }
+        $idval = $Matches[2]
+        $tail = if ($Matches[4]) { $Matches[4].Trim() } else { '' }
         if ($idval -notmatch '^[0-9a-f]{16}$') { continue }
-        $tail = $tail.Trim()
-        if ($tail -cmatch '^ticket=[A-Z][A-Z0-9_]*-[1-9][0-9]*$') { return $true }
+        # A key that does not match the issue-key grammar contributes nothing
+        # (C1.4) — the same refusal to guess the old predicate applied.
+        if ($tail -cnotmatch '^ticket=([A-Z][A-Z0-9_]*)-[1-9][0-9]*$') { continue }
+        $proj = $Matches[1]
+        if (-not $found.Contains($proj)) { $found.Add($proj) | Out-Null }
     }
-    return $false
+    if ($found.Count -eq 0) { return @() }
+    $found.Sort([StringComparer]::Ordinal)
+    return $found.ToArray()
 }
 
 function Get-JiraStoryMarkerAnchors {
@@ -341,4 +361,4 @@ function Set-JiraStoryMarkerRecordTicket {
 Export-ModuleMember -Function New-JiraStoryMarkerId, Format-JiraStoryMarkerLine, ConvertTo-JiraStoryMarkerInfo, `
     Get-JiraStoryMarkerAnchors, Set-JiraStoryMarkerAssign, Set-JiraStoryMarkerMarkCreating, `
     Set-JiraStoryMarkerRecordTicket, Find-JiraStoryMarkerLineForId, `
-    Get-JiraStoryMarkerSectionInfo, Test-JiraStoryMarkerAnyBound
+    Get-JiraStoryMarkerSectionInfo, Get-JiraMarkerBoundProjects

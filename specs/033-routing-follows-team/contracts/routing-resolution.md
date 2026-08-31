@@ -8,6 +8,17 @@ Supersedes the three-rank chain described in
 `specs/004-reconcile-config-resolution/contracts/resolution-contract.md` for the
 resolution order only; every other clause of that contract stands.
 
+**Superseded in turn by `specs/035-routing-follows-bindings/contracts/marker-routing.md`
+for the resolution order (C2) and for rank 3's precondition (C3).** C3.1 here
+required the caller to supply an EMPTY team id for a bound specification, on the
+ground that "the specification itself records which project it lives in" — a
+record this contract never had anyone read, so resolution fell through to
+`routing_default`, free to name a different project entirely. 035 inserts that
+record as its own rank and makes a disagreement a refusal. Every other clause
+below stands, including C1 (the resolver's purity and process budget), C4 (the
+selected team id), C5 (`routing_default` optional) and C7 (cross-port
+equivalence).
+
 ---
 
 ## C1 — The resolver's interface

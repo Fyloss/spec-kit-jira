@@ -93,12 +93,20 @@ teardown() {
   local specRefB='{"repo":"acme/app","spec_slug":"002-beta","folder":"x"}'
   run recognition_run "${stories}" "${specRefB}" "COMP" "${specB}"
   [ "$status" -eq 0 ]
-  # OTHER-1 does not belong to the routed COMP project: mirrored as new,
-  # the former ticket left untouched (US3 re-routed case, FR-019).
-  [ "$(jq -r '.new[0]' <<< "$output")" = "1111111111111111" ]
+  # 035 C5.1: the branch that short-circuited on the project prefix — mirroring
+  # such a story as NEW into the routed project — is gone. The scoping
+  # guarantee this test exists for is unchanged and now rests entirely on the
+  # identity marker: OTHER-1 is READ, and its identity names specification
+  # 001-alpha, not this one, so it never satisfies 002-beta's marker. What must
+  # never happen is that it is silently adopted.
+  [ "$(jq -r '[.bound[].key] | index("OTHER-1") // "no"' <<< "$output")" = "no" ]
 }
 
-@test "re-routed: the catalogued notice names the story, the former key and project, and the new key (T071)" {
+@test "035 C3.2: a recorded key in another project REFUSES, zero writes, both modes" {
+  # Was: "re-routed: the catalogued notice names the story, the former key and
+  # project, and the new key (T071)". That behaviour is retired. Re-creating a
+  # bound story in the routed project stranded the recorded one and, under
+  # --dry-run, said nothing at all about having done so.
   mock_start "${MOCK}/configs/default.json"
   export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
 
@@ -109,7 +117,7 @@ teardown() {
 
   printf '%s\n' \
     '# Feature Specification: Billing Invoices' '' \
-    '### User Story 1 - Export a single invoice (Priority: P1)' \
+    '### User Story 1 - Export single invoice (Priority: P1)' \
     '<!-- speckit-jira story=1111111111111111 ticket=LEGACY-42 -->' '' \
     'As a customer, I want to export one invoice as a PDF.' '' \
     '- **Given** a signed-in customer viewing an invoice' \
@@ -117,21 +125,23 @@ teardown() {
     '- **Then** a PDF download starts' > "${spec}"
 
   run cmd_reconcile reconcile "${spec}" --json
-  [ "$status" -eq 0 ]
-  [ "$(jq -r '.counts.created' <<< "$output")" -eq 2 ]
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"LEGACY"* ]]
+  [[ "$output" == *"COMP"* ]]
+  [[ "$output" == *"does not move a bound specification"* ]]
 
-  local note; note="$(jq -r '.notes[0] // ""' <<< "$output")"
-  [[ "${note}" == *"1111111111111111"* ]]
-  [[ "${note}" == *"LEGACY-42"* ]]
-  [[ "${note}" == *"in project LEGACY"* ]]
-  [[ "${note}" == *"mirrored into COMP as COMP-2"* ]]
-
-  # the recorded marker now names the new ticket; the former one is left
-  # untouched — no write was ever issued to it. COMP-1 is the parent
-  # (Phase 5, US2), created first.
-  grep -q 'ticket=COMP-2' "${spec}"
-  ! grep -q 'ticket=LEGACY-42' "${spec}"
+  # C3.3 — refused before any Jira read, so zero writes is structural.
   [ "$(grep -c 'LEGACY-42' "${MOCK_CALLLOG}")" -eq 0 ]
+  [ "$(grep -c 'POST' "${MOCK_CALLLOG}")" -eq 0 ]
+
+  # The recorded marker is untouched: nothing was re-created anywhere.
+  grep -q 'ticket=LEGACY-42' "${spec}"
+  ! grep -q 'ticket=COMP-' "${spec}"
+
+  # C3.4 — identical under --dry-run, which is where the old note went silent.
+  run cmd_reconcile reconcile "${spec}" --dry-run --json
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"does not move a bound specification"* ]]
 }
 
 @test "T061 [016] — FR-000/FR-000a: a real run leaves every byte of the spec file unchanged except the speckit-jira marker lines" {
@@ -171,13 +181,25 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
-@test "a story whose recorded ticket lives outside the routed project is mirrored into the routed project, not blocked" {
-  mock_start "${ROOT}/tests/conformance/mock-jira/configs/default.json"
-  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
-  local stories='[{"local_id":"1111111111111111","marker":{"state":"bound","id":"1111111111111111","ticket":"LEGACY-42"}}]'
-  local specRef='{"repo":"acme/app","spec_slug":"001-billing","folder":"x"}'
-  run recognition_run "${stories}" "${specRef}" "COMP" "spec.md"
-  [ "$status" -eq 0 ]
-  [ "$(jq '.blocked | length' <<< "$output")" -eq 0 ]
-  [ "$(jq -r '.new[0]' <<< "$output")" = "1111111111111111" ]
+@test "035 C5.1: recognition holds no opinion about which project a key names" {
+  # Was: "a story whose recorded ticket lives outside the routed project is
+  # mirrored into the routed project, not blocked". That short-circuit is gone.
+  # Recognition compared the recorded key's project against the routed one and
+  # re-created the item elsewhere; the parent tier never did, so one run could
+  # update a parent in one project while creating its children in another.
+  #
+  # The comparison now lives in ONE place, in the command layer, and refuses
+  # (C3.2) before any read. Reaching recognition at all therefore means the
+  # projects already agree — so recognition reads a foreign-looking key exactly
+  # as it reads any other, and classifies it on what the read returns.
+  ! grep -q '_key_proj' "${ROOT}/scripts/bash/sink/jira/recognition.sh"
+  ! grep -q 'rerouted' "${ROOT}/scripts/bash/sink/jira/recognition.sh"
+  ! grep -q 'rerouted' "${ROOT}/scripts/powershell/sink/jira/Recognition.psm1"
+
+  # C5.3, as amended by convergence: the project-prefix helper is REMOVED. The
+  # clause originally kept it because the task-tier check was said to reuse it;
+  # that check is implemented with the C1 scan over the tasks document instead,
+  # so the helper was left with no caller in either port. Principle XV.
+  ! grep -q '_recognition_project_of' "${ROOT}/scripts/bash/sink/jira/recognition.sh"
+  ! grep -q 'Get-JiraRecognitionProjectOf' "${ROOT}/scripts/powershell/sink/jira/Recognition.psm1"
 }

@@ -104,28 +104,96 @@ _reconcile_fault() {
 # resolved key, or nothing with a non-zero return when routing_resolve itself
 # could not resolve one (routing-unresolved, US3).
 _reconcile_resolve_routing() {
-  local folder="$1" cfg="$2" team="${3:-}"
-  routing_resolve "$(basename "${folder}")" '[]' "${cfg}" "${team}" 2>/dev/null
+  local folder="$1" cfg="$2" team="${3:-}" marker="${4:-}"
+  routing_resolve "$(basename "${folder}")" '[]' "${cfg}" "${team}" "${marker}" 2>/dev/null
+}
+
+# _reconcile_markers_split_refusal <spec-file> <projects-newline-list>
+# 035 C3.1: the specification's own markers name more than one project.
+#
+# Reachable from a run interrupted partway through a re-route, which is itself
+# evidence that something already went wrong. The bridge does not pick a winner
+# — every candidate for "the right one" resolves the ambiguity by re-creating
+# tickets, which is the action this feature exists to stop it taking on its own.
+# The same posture the duplicate-claim block already takes: nothing written, the
+# operator resolves.
+_reconcile_markers_split_refusal() {
+  local spec_file="$1" projects="$2" joined
+  joined="$(printf '%s' "${projects}" | tr '\n' ' ')"
+  joined="${joined%"${joined##*[![:space:]]}"}"
+  joined="${joined// /, }"
+  printf 'reconcile: %s is bound to more than one Jira project — its markers name %s. A specification lives in exactly one project, so nothing was written. Correct the ticket= values so every marker names a single project, then reconcile again (zero writes).' \
+    "${spec_file}" "${joined}"
+}
+
+# _reconcile_project_mismatch_refusal <spec-file> <recorded> <routed> <source>
+# 035 C3.2: this run routes somewhere other than where the specification is
+# already recorded. <source> is "override" or "config" — after the marker rank
+# is in the chain, those are the only two ways the two can disagree, so no
+# rank-reporting machinery is needed to say where the routed project came from.
+#
+# The bridge refuses rather than moving the specification. Moving one is
+# effectively irreversible, it strands a complete ticket set, and firing it as a
+# side effect of a configuration edit is the same class of surprise as the
+# defect this feature repairs. Refusing keeps the option open; a silent move
+# cannot be taken back.
+_reconcile_project_mismatch_refusal() {
+  local spec_file="$1" recorded="$2" routed="$3" source="$4" origin
+  if [[ "${source}" == "override" ]]; then
+    origin="the explicit SPEC_KIT_JIRA_PROJECT_KEY override"
+  else
+    origin="a routing rule or teams[] entry in this repository's config.yml"
+  fi
+  printf 'reconcile: %s is already mirrored into %s, which its own markers record, but this run routes to %s — from %s. The bridge does not move a bound specification between projects on its own, so nothing was written. Either route this specification back to %s, or clear its ticket= markers to mirror it afresh into %s (zero writes).' \
+    "${spec_file}" "${recorded}" "${routed}" "${origin}" "${recorded}" "${routed}"
+}
+
+# _reconcile_unknown_project_refusal <key> <config-dir> <source> <spec-file>
+# US3 unknown-project, with the 035 marker-aware variant (FR-007). The message
+# that blames a routing rule, a teams[] entry or routing_default is advice for a
+# file that is already correct when the record placed the run: what needs
+# correcting is then the markers, or projects[] itself.
+_reconcile_unknown_project_refusal() {
+  local key="$1" cfg_dir="$2" source="$3" spec_file="${4:-}"
+  if [[ "${source}" == "marker" ]]; then
+    printf 'reconcile: %s is bound to project "%s" by its own markers, and %s/config.yml does not declare that project in projects[] — declare it, or correct the ticket= markers naming it (zero writes)' \
+      "${spec_file}" "${key}" "${cfg_dir}"
+    return 0
+  fi
+  printf 'reconcile: routing resolved project "%s", which is not declared in %s/config.yml'"'"'s projects[] — correct the routing rule, the teams[] entry, or routing_default that names it (zero writes)' \
+    "${key}" "${cfg_dir}"
 }
 
 # _reconcile_routing_refusal <folder> <cfg-json> <config-dir> <bound> <team>
 # The message for a specification that no rank could place (033 FR-007,
 # contracts/routing-resolution.md C6.1–C6.5).
 #
-# It reports what EACH of the four ranks found, not merely the last one. The
+# It reports what EACH of the five ranks found, not merely the last one. The
 # message it replaces named a single missing key and prescribed declaring
-# `routing_default` — advice that is wrong twice over once the chain is four
-# deep: it names one of four consulted sources, and it prescribes a key the
+# `routing_default` — advice that is wrong twice over once the chain is this
+# deep: it names one of five consulted sources, and it prescribes a key the
 # repository may have declined to declare deliberately (C6.5).
 #
-# Rank 3's three states are kept apart (C6.3) because their remedies differ:
-# one operator needs to create a file, another to uncomment a line, and a third
-# needs nothing at all — their specification is already bound, and no selection
-# would have changed the outcome. Conflating them sends two of the three to
-# edit a file that is already correct.
+# 035 C2.6: the chain gained the specification's OWN record at rank 3, so this
+# message gained a clause for it and the operator's team moved to rank 4. The
+# record clause has exactly one honest state — "no ticket marker yet" — because
+# this refusal is now reachable ONLY for an unbound specification: a bound one
+# resolves at rank 3, and one whose markers name two projects refuses earlier
+# still. The branch that used to report a bound specification as "not
+# consulted" is therefore gone. It named the right answer and acted on none of
+# it, which is the defect 035 exists to repair; keeping it as text would leave
+# the message describing a state the code can no longer produce.
+#
+# `bound` stays in the signature so no caller changes, and is now INERT: it
+# cannot be true at this point. Rank 4's two remaining states are still kept
+# apart (C6.3) because their remedies differ — one operator needs to create a
+# file, the other to uncomment a line.
 _reconcile_routing_refusal() {
+  # shellcheck disable=SC2034 # `bound` is INERT since 035 C2.6 — kept in the
+  # signature so no caller changes, and unreadable here because a bound
+  # specification resolves at rank 3 and never reaches this refusal.
   local folder="$1" cfg="$2" cfg_dir="$3" bound="$4" team="$5"
-  local base n_rules n_teams has_default rank1 rank2 rank3 rank4
+  local base n_rules n_teams has_default rank1 rank2 rank3 rank4 rank5
   base="$(basename "${folder}")"
 
   # One jq for all four counts — the refusal path is not a reason to abandon
@@ -150,24 +218,26 @@ _reconcile_routing_refusal() {
     rank2="none of the ${n_teams} team folder prefixes matched"
   fi
 
-  if [[ "${bound}" == "true" ]]; then
-    rank3="not consulted — this specification is already bound, so its project is fixed by its own markers"
-  elif [[ -n "${team}" ]]; then
-    rank3="the selected team \"${team}\" declares no project in the catalogue"
+  # 035 C2.6 — rank 3 is the specification's own record. Reaching this refusal
+  # means it carries none; a specification that carries one never gets here.
+  rank3="no ticket marker yet, so this specification records no project of its own"
+
+  if [[ -n "${team}" ]]; then
+    rank4="the selected team \"${team}\" declares no project in the catalogue"
   elif [[ ! -f "${cfg_dir}/personal.yml" ]]; then
-    rank3="no team is selected — ${cfg_dir}/personal.yml does not exist"
+    rank4="no team is selected — ${cfg_dir}/personal.yml does not exist"
   else
-    rank3="no team is selected — ${cfg_dir}/personal.yml declares no team: key"
+    rank4="no team is selected — ${cfg_dir}/personal.yml declares no team: key"
   fi
 
   if [[ "${has_default}" -eq 0 ]]; then
-    rank4="routing_default is not declared"
+    rank5="routing_default is not declared"
   else
-    rank4="routing_default is declared but produced nothing"
+    rank5="routing_default is declared but produced nothing"
   fi
 
-  printf 'reconcile: routing could not be resolved for "%s" (zero writes). Rule route: %s. Team route: %s. Your team: %s. Default: %s. Any one of these places it: add a rule or a teams: entry to %s/config.yml, select your team in %s/personal.yml, or declare routing_default in %s/config.yml.' \
-    "${base}" "${rank1}" "${rank2}" "${rank3}" "${rank4}" "${cfg_dir}" "${cfg_dir}" "${cfg_dir}"
+  printf 'reconcile: routing could not be resolved for "%s" (zero writes). Rule route: %s. Team route: %s. Its own record: %s. Your team: %s. Default: %s. Any one of these places it: add a rule or a teams: entry to %s/config.yml, select your team in %s/personal.yml, or declare routing_default in %s/config.yml.' \
+    "${base}" "${rank1}" "${rank2}" "${rank3}" "${rank4}" "${rank5}" "${cfg_dir}" "${cfg_dir}" "${cfg_dir}"
 }
 
 # _reconcile_phase_status_map <project-key> <cfg-json> — the resolved,
@@ -774,22 +844,46 @@ _reconcile_run() {
   local raw_spec
   raw_spec="$(cat "${spec_file}" 2> /dev/null; printf x)"; raw_spec="${raw_spec%x}"
 
-  # Rank 3 is offered only to an unbound specification. Once a story carries a
-  # ticket, the specification itself records which project it lives in, and
-  # that record outranks whoever happens to be reconciling it — otherwise two
-  # operators with different selections would reroute the same spec back and
-  # forth, each run mirroring it afresh into the other project (FR-004).
+  # 035 C1.6/C2.1 — the project the specification's OWN markers record, from
+  # the bytes above, before routing and before any Jira read. 033 named this
+  # record as the reason the operator's team is suppressed for a bound
+  # specification and then never read it, so resolution fell through to
+  # `routing_default` — free to name a different project entirely.
+  #
+  # The set's cardinality answers three questions at once: none means unbound
+  # and today's resolution applies untouched; one is rank 3; more than one is a
+  # refusal.
+  local marker_list marker_project="" marker_count=0 _mp
+  marker_list="$(marker_bound_projects "${raw_spec}")"
+  if [[ -n "${marker_list}" ]]; then
+    while IFS= read -r _mp; do
+      [[ -n "${_mp}" ]] || continue
+      marker_count=$((marker_count + 1))
+      [[ "${marker_count}" -eq 1 ]] && marker_project="${_mp}"
+    done <<< "${marker_list}"
+  fi
+
+  # Rank 4 stays suppressed for a bound specification exactly as 033 requires:
+  # rank 3 REPLACES it there rather than joining it, so no gitignored file can
+  # reroute a specification two operators share (C2.4).
   local routing_team="" spec_already_bound="false"
-  if story_marker_any_bound "${raw_spec}"; then
+  if [[ "${marker_count}" -gt 0 ]]; then
     spec_already_bound="true"
   else
     routing_team="${_CFG_PERSONAL_TEAM:-}"
   fi
 
+  # C3.1 — the markers disagree with each other. Before routing, before any
+  # read: zero writes is structural here, not asserted.
+  if [[ "${marker_count}" -gt 1 ]]; then
+    _reconcile_fault "${EXIT_CONFIG}" "$(_reconcile_markers_split_refusal "${spec_file}" "${marker_list}")"
+    return $?
+  fi
+
   local project_key project_from_config="false"
   if [[ -n "${override_project}" ]]; then
     project_key="${override_project}"
-  elif ! project_key="$(_reconcile_resolve_routing "${folder}" "${cfg}" "${routing_team}")"; then
+  elif ! project_key="$(_reconcile_resolve_routing "${folder}" "${cfg}" "${routing_team}" "${marker_project}")"; then
     _reconcile_fault "${EXIT_CONFIG}" "$(_reconcile_routing_refusal "${folder}" "${cfg}" "${cfg_dir}" "${spec_already_bound}" "${_CFG_PERSONAL_TEAM:-}")"
     return $?
   else
@@ -809,12 +903,29 @@ _reconcile_run() {
     return $?
   fi
 
+  # 035 C3.2 — the routed project is not the one the specification records.
+  # With rank 3 in the chain this is reachable only two ways, and both are
+  # deliberate: an explicit override, or a committed rule/teams[] entry at
+  # ranks 1-2. Deliberate about ROUTING is not the same as asking the bridge to
+  # abandon a ticket set and build another, so it refuses — before any read,
+  # and identically under --dry-run (C3.3, C3.4).
+  if [[ -n "${marker_project}" && "${project_key}" != "${marker_project}" ]]; then
+    local _mismatch_source="config"
+    [[ -n "${override_project}" ]] && _mismatch_source="override"
+    _reconcile_fault "${EXIT_CONFIG}" "$(_reconcile_project_mismatch_refusal "${spec_file}" "${marker_project}" "${project_key}" "${_mismatch_source}")"
+    return $?
+  fi
+
   # US3 unknown-project: a routing rule (or routing_default/team route) named a
   # project the team config never declares in projects[] — distinct from an
-  # override, which may legitimately name a project outside config.yml.
+  # override, which may legitimately name a project outside config.yml. 035
+  # FR-007: when the record placed the run, config.yml's routing is already
+  # correct and the message must not send the operator to edit it.
   if [[ "${project_from_config}" == "true" ]] \
     && ! jq -e --arg k "${project_key}" '(.projects // [])[] | select(.key == $k)' <<< "${cfg}" > /dev/null 2>&1; then
-    _reconcile_fault "${EXIT_CONFIG}" "reconcile: routing resolved project \"${project_key}\", which is not declared in ${cfg_dir}/config.yml's projects[] — correct the routing rule, the teams[] entry, or routing_default that names it (zero writes)"
+    local _unknown_source="routing"
+    [[ -n "${marker_project}" && "${project_key}" == "${marker_project}" ]] && _unknown_source="marker"
+    _reconcile_fault "${EXIT_CONFIG}" "$(_reconcile_unknown_project_refusal "${project_key}" "${cfg_dir}" "${_unknown_source}" "${spec_file}")"
     return $?
   fi
 
@@ -1122,6 +1233,32 @@ _reconcile_run() {
       tasks_file="${candidate_tasks_file}"
       local tasks_raw
       tasks_raw="$(cat "${tasks_file}" 2> /dev/null; printf x)"; tasks_raw="${tasks_raw%x}"
+
+      # 035 C4.1/C4.2 — the task tier, checked by the SAME rule as the
+      # specification and at the point tasks.md is ALREADY parsed, so no
+      # unconditional read is added for a run with no task tier (C4.3). Three
+      # tiers holding three definitions of a project mismatch is how the parent
+      # and the stories came to disagree in the first place.
+      local tasks_marker_list _tmp
+      tasks_marker_list="$(marker_bound_projects "${tasks_raw}")"
+      if [[ -n "${tasks_marker_list}" ]]; then
+        local tasks_marker_count=0 tasks_marker_project=""
+        while IFS= read -r _tmp; do
+          [[ -n "${_tmp}" ]] || continue
+          tasks_marker_count=$((tasks_marker_count + 1))
+          [[ "${tasks_marker_count}" -eq 1 ]] && tasks_marker_project="${_tmp}"
+        done <<< "${tasks_marker_list}"
+        if [[ "${tasks_marker_count}" -gt 1 ]]; then
+          _reconcile_fault "${EXIT_CONFIG}" "$(_reconcile_markers_split_refusal "${tasks_file}" "${tasks_marker_list}")"
+          return $?
+        fi
+        if [[ "${tasks_marker_project}" != "${project_key}" ]]; then
+          local _tmismatch_source="config"
+          [[ -n "${override_project}" ]] && _tmismatch_source="override"
+          _reconcile_fault "${EXIT_CONFIG}" "$(_reconcile_project_mismatch_refusal "${tasks_file}" "${tasks_marker_project}" "${project_key}" "${_tmismatch_source}")"
+          return $?
+        fi
+      fi
 
       if [[ "${task_tier_mode}" != "subtask" ]]; then
         # 022, US5 (FR-005): checklist mode needs no resolvable sub-task
@@ -2049,12 +2186,6 @@ _reconcile_run() {
     fi
   fi
 
-  # T071: the catalogued `re-routed` notice, once the new key is recorded.
-  # Recognition tags a re-routed story with its former key and project
-  # (recog.rerouted); the new key is only known after the create response,
-  # so the command layer re-reads the just-written spec_file for it. Skipped
-  # under --dry-run (no key is ever recorded there) and skipped for a story
-  # whose creation did not complete this run — a future run reports it then.
   # T079/parent-marker.md `parent-recreated`: a summary note, not a refusal
   # — the recorded parent no longer existed, so a new one was created and
   # the record was updated. The new key is only known after the create
@@ -2073,29 +2204,12 @@ _reconcile_run() {
     fi
   fi
 
-  local rerouted; rerouted="$(jq -c '.rerouted // {}' <<< "${recog}")"
-  if [[ "${dry_run}" != "true" ]] && [[ "$(jq 'length' <<< "${rerouted}")" -gt 0 ]]; then
-    local post_content post_parse
-    post_content="$(cat "${spec_file}" 2> /dev/null; printf x)"; post_content="${post_content%x}"
-    if post_parse="$(printf '%s' "${post_content}" | parse_spec "${slug}" 2> /dev/null)"; then
-      local rid
-      for rid in $(jq -r 'keys[]' <<< "${rerouted}"); do
-        local new_key
-        new_key="$(jq -r --arg id "${rid}" \
-          '.stories[] | select(.local_id == $id and .marker.state == "bound") | .marker.ticket // empty' \
-          <<< "${post_parse}")"
-        if [[ -n "${new_key}" ]]; then
-          local former_key former_project
-          former_key="$(jq -r --arg id "${rid}" '.[$id].former_key' <<< "${rerouted}")"
-          former_project="$(jq -r --arg id "${rid}" '.[$id].former_project' <<< "${rerouted}")"
-          notes="$(jq -c --arg d \
-            "Story ${rid} in ${spec_file} was previously mirrored as ${former_key} in project ${former_project}, which is no longer the project this specification routes to; ${former_key} was left untouched and the story was mirrored into ${project_key} as ${new_key}. Nothing was moved or deleted." \
-            '. + [$d]' <<< "${notes}")"
-          has_lifecycle="true"
-        fi
-      done
-    fi
-  fi
+  # 035 C5.2 — the `re-routed` note that lived here is GONE. It reported a
+  # story re-created in another project, and only outside --dry-run, because
+  # the replacement key was not known until the create response arrived. That
+  # is a report withheld from the one mode whose purpose is to predict, and
+  # C3.2 has since made the state it reported a refusal: nothing re-creates a
+  # bound item elsewhere any more, so there is nothing left to report.
 
   # run_state_record (021, T031) below must see whether this run actually
   # applied every planned action — the hook-context downgrade just below

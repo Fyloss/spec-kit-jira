@@ -1,1 +1,3 @@
-{ "feature_directory": "specs/034-retire-hook-report" }
+{
+  "feature_directory": "specs/035-routing-follows-bindings"
+}

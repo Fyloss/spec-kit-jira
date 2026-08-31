@@ -25,12 +25,38 @@ teardown() {
 
 # --- C6.2 every rank is reported, not only the last -------------------------
 
-@test "C6.2 the message reports all four ranks" {
+@test "035 C2.6 the message reports all FIVE ranks" {
   run _reconcile_routing_refusal "/x/007-legacy-cleanup" "${CFG}" "${CFG_DIR}" "false" ""
   [[ "${output}" == *"Rule route:"* ]]
   [[ "${output}" == *"Team route:"* ]]
+  [[ "${output}" == *"Its own record:"* ]]
   [[ "${output}" == *"Your team:"* ]]
   [[ "${output}" == *"Default:"* ]]
+}
+
+@test "035 C2.6 the record clause says the specification carries no marker yet" {
+  # This refusal is reachable only for an UNBOUND specification: a bound one
+  # yields a marker project and resolves at rank 3, and markers naming two
+  # projects refuse earlier still. The clause has exactly one honest state.
+  run _reconcile_routing_refusal "/x/007-legacy-cleanup" "${CFG}" "${CFG_DIR}" "false" ""
+  [[ "${output}" == *"Its own record: no ticket marker"* ]]
+}
+
+@test "035 C2.6 the operator-team clause is no longer labelled rank 3" {
+  # An operator reading "rank 3" for the person would look for the wrong thing
+  # in docs/07-configuration-and-secrets.md, where rank 3 is now the record.
+  run grep -c 'Rank 3'"'"'s three states are kept apart' "${ROOT}/scripts/bash/commands/reconcile.sh"
+  [ "$output" = "0" ]
+}
+
+@test "035 C2.6 the unreachable already-bound branch is gone from both ports" {
+  # It named the right answer and acted on none of it. A bound specification
+  # cannot reach this refusal any more, so the branch reported a state that
+  # cannot occur.
+  run grep -c "already bound, so its project is fixed by its own markers" "${ROOT}/scripts/bash/commands/reconcile.sh"
+  [ "$output" = "0" ]
+  run grep -c "already bound, so its project is fixed by its own markers" "${ROOT}/scripts/powershell/commands/Reconcile.psm1"
+  [ "$output" = "0" ]
 }
 
 @test "C6.2 the message names the specification it could not place" {
@@ -71,22 +97,26 @@ teardown() {
   [[ "${output}" != *"does not exist"* ]]
 }
 
-@test "C6.3 state 3: the specification is already bound, so rank 3 never ran" {
-  run _reconcile_routing_refusal "/x/008-bound" "${CFG}" "${CFG_DIR}" "true" ""
-  [[ "${output}" == *"already bound"* ]]
-  # The operator must NOT be told to select a team: it would not have helped.
-  [[ "${output}" != *"no team is selected"* ]]
+@test "035 C2.6 the `bound` parameter is now inert — it can no longer be true here" {
+  # Kept in the signature so no caller changes, but a bound specification never
+  # reaches this refusal: it resolves at rank 3. Passing "true" must therefore
+  # produce the SAME message as passing "false".
+  local as_bound as_unbound
+  as_bound="$(_reconcile_routing_refusal "/x/008-bound" "${CFG}" "${CFG_DIR}" "true" "")"
+  as_unbound="$(_reconcile_routing_refusal "/x/008-bound" "${CFG}" "${CFG_DIR}" "false" "")"
+  [ "${as_bound}" = "${as_unbound}" ]
 }
 
-@test "C6.3 the three states produce three different messages" {
-  local s1 s2 s3
+@test "C6.3 the two reachable rank-4 states still produce different messages" {
+  # 035 retires the third: "already bound" cannot occur here any more. The two
+  # that remain have different remedies — create the file, or uncomment a line
+  # — so conflating them would still send one operator to edit a file that is
+  # already correct.
+  local s1 s2
   s1="$(_reconcile_routing_refusal "/x/007" "${CFG}" "${CFG_DIR}" "false" "")"
   printf '# no team here\n' > "${CFG_DIR}/personal.yml"
   s2="$(_reconcile_routing_refusal "/x/007" "${CFG}" "${CFG_DIR}" "false" "")"
-  s3="$(_reconcile_routing_refusal "/x/007" "${CFG}" "${CFG_DIR}" "true" "")"
   [ "${s1}" != "${s2}" ]
-  [ "${s2}" != "${s3}" ]
-  [ "${s1}" != "${s3}" ]
 }
 
 # --- C6.5 routing_default is not prescribed as the sole remedy ---------------

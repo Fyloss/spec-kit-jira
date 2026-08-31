@@ -25,15 +25,16 @@
 # It governs TWO things:
 #   * naming — the folder prefix and branch pattern your features are created
 #     under, from your team's catalogue entry;
-#   * routing — where a specification is mirrored when no committed rule and no
-#     team folder prefix places it. Your team's project is used ahead of
-#     config.yml's routing_default, so a repository shared by several teams
-#     never mirrors your work into someone else's project.
+#   * routing — where a specification is mirrored when no committed rule, no
+#     team folder prefix and no existing ticket marker places it. Your team's
+#     project is used ahead of config.yml's routing_default, so a repository
+#     shared by several teams never mirrors your work into someone else's
+#     project.
 #
 # The routing half applies only while a specification is still unbound. Once its
-# stories carry ticket markers the specification fixes its own project, and
-# changing this key will not move it — which is what stops two developers from
-# mirroring the same spec into two projects.
+# markers carry tickets the specification fixes its own project, and changing
+# this key will not move it — which is what stops two developers from mirroring
+# the same spec into two projects.
 # team: ijt
 
 # Exceptional, auditable convention override: ship under a different naming

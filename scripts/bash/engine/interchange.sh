@@ -189,13 +189,15 @@ interchange_build() {
 # Resolve the ONE project a spec reconciles against (US8, FR 041, FR 042; 033
 # FR-001, contracts/routing-resolution.md C1.1–C2.5).
 #
-# FOUR ranks, first non-empty wins:
+# FIVE ranks, first non-empty wins:
 #   1  a committed `routing:` rule whose every declared condition holds;
 #   2  a committed `teams[]` entry whose folder_prefix prefixes the de-numbered
 #      folder name;
-#   3  the `project` of the `teams[]` entry whose id equals [team-id] — the team
+#   3  [marker-project] — the project the SPECIFICATION'"'"'S OWN bound markers
+#      record (035);
+#   4  the `project` of the `teams[]` entry whose id equals [team-id] — the team
 #      the OPERATOR selected in their gitignored personal.yml (033);
-#   4  `routing_default`, which is optional since 033.
+#   5  `routing_default`, which is optional since 033.
 # Nothing left: refused with EXIT_CONFIG (zero writes downstream).
 #
 # A rule matches only when EVERY condition it declares holds (a rule with no
@@ -203,11 +205,23 @@ interchange_build() {
 # shipped template's placeholder rule must not become a match-everything rule
 # that shadows the implicit team route).
 #
-# Ranks 1 and 2 stay ahead of rank 3 unconditionally (C2.5). They reason about
-# the SPECIFICATION; rank 3 reasons about the PERSON, and a specification that
-# says where it belongs must outrank whoever happens to be reconciling it —
-# otherwise a gitignored file would override a team's committed routing, which
-# is the same imposition 033 removes, pointed the other way.
+# Ranks 1 and 2 stay ahead of ranks 3 and 4 unconditionally (033 C2.5, 035
+# C2.3). They reason about where the specification BELONGS; rank 3 reports only
+# where it currently LIVES, and rank 4 reasons about the PERSON. A team that
+# commits a decision must still be able to move a specification, and a
+# gitignored file must never override a team's committed routing.
+#
+# Rank 3 is the 035 repair. 033 suppressed rank 4 for a bound specification,
+# citing "the specification itself records which project it lives in" — and then
+# never read that record, so resolution fell through to `routing_default`, free
+# to name a different project entirely. What the run DOES when ranks 1 or 2
+# contradict the record is the command layer's business (035 C3.2), not the
+# resolver's: this function still only answers "which project".
+#
+# [marker-project] is OPTIONAL and MAY be empty (035 C2.5); empty is not an
+# error, produces no diagnostic, and yields output byte-identical to the
+# four-input resolver for every possible configuration — the clause that makes
+# "every existing repository is untouched" true by construction.
 #
 # [team-id] is OPTIONAL and MAY be empty; empty is not an error and produces no
 # diagnostic (C2.3). It arrives already validated against the catalogue by
@@ -224,9 +238,9 @@ interchange_build() {
 # rank-3 lookup is folded into the jq programme that already runs.
 # Prints the resolved project key on stdout.
 routing_resolve() {
-  local folder="$1" labels="$2" cfg="$3" team="${4:-}" key
+  local folder="$1" labels="$2" cfg="$3" team="${4:-}" marker="${5:-}" key
   # kcov-excl-start — jq literal (string lines are not statements)
-  key="$(jq -r --arg folder "${folder}" --argjson labels "${labels}" --arg team "${team}" '
+  key="$(jq -r --arg folder "${folder}" --argjson labels "${labels}" --arg team "${team}" --arg marker "${marker}" '
     (.routing // []) as $rules
     | ( first(
           $rules[]
@@ -253,7 +267,8 @@ routing_resolve() {
           | select($team != "" and (.id // "") == $team)
           | .project
         ) // null ) as $personal_route
-    | ( $matched // $team_route // $personal_route // .routing_default // "" )
+    | ( if $marker == "" then null else $marker end ) as $marker_route
+    | ( $matched // $team_route // $marker_route // $personal_route // .routing_default // "" )
   ' <<< "${cfg}")"
   # kcov-excl-stop
 

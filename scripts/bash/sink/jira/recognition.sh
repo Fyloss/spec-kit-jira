@@ -80,10 +80,6 @@ _recognition_read() {
   return "${rc}"
 }
 
-# _recognition_project_of <issue-key> — the project-key prefix of an issue key.
-_recognition_project_of() {
-  printf '%s' "${1%%-*}"
-}
 
 # _recognition_read_parent <key> — one GET folding the identity property
 # into the issue fetch. 023, research R6: the field projection widens from
@@ -247,11 +243,13 @@ recognition_parent_run() {
 #
 # Prints the recognition result on success:
 #   {"bound":{<id>:{key,origin,current,status,flagged,blockers}}, "new":[ids],
-#    "blocked":[{story,reason,detail}],
-#    "rerouted":{<id>:{former_key,former_project}}}
-#   rerouted entries are also present in `new` (the story IS mirrored, into the
-#   routed project); the command layer uses the extra detail to emit the
-#   catalogued `re-routed` notice once the new key is recorded (T071).
+#    "blocked":[{story,reason,detail}]}
+#
+#   035 C5.1: the `rerouted` channel is GONE, and with it the branch that
+#   classified a recorded key naming another project as NEW and re-created it
+#   in the routed one. That state can no longer reach recognition: the command
+#   layer refuses on the mismatch before any read (C3.2), so the branch
+#   reported — and only outside --dry-run — an outcome that cannot occur.
 # Returns a transport exit code (>=2) with ZERO stdout when any read is
 # inconclusive — the whole specification fails closed (research R2/R3,
 # contract "The read").
@@ -265,7 +263,7 @@ recognition_run() {
   # off `stories` with their OWN `jq` call per item — the read is native
   # accumulation once instead: one `jq -r … | @tsv` call for the WHOLE array,
   # decoded into parallel bash arrays, so every loop below indexes memory
-  # rather than forking. `new`/`blocked`/`bound`/`rerouted` are collected the
+  # rather than forking. `new`/`blocked`/`bound` are collected the
   # same way `_parse_lines_to_json` (024, T026) collects lines — bash arrays
   # of already-JSON fragments, joined with ONE `jq -cs` at the very end —
   # rather than a `. + […]`/`. + {…}` merge re-parsed on every append (O(n²)
@@ -294,7 +292,7 @@ recognition_run() {
   local n="${_tsv_i}"
   local all_ids; all_ids="$(jq -c '[.[].local_id]' <<< "${stories}")"
 
-  local -a blocked_items=() new_items=() bound_frags=() rerouted_frags=()
+  local -a blocked_items=() new_items=() bound_frags=()
   local i
 
   # --- Parse-level marker problems: malformed / duplicate-in-section -------
@@ -348,18 +346,6 @@ recognition_run() {
       blocked_items+=("$(jq -cn --arg s "${id}" --arg r "duplicate-claim" \
         --arg d "Ticket ${key} is recorded for more than one ${kind} in ${spec_path}; nothing was written for any of them. Give each ${kind} its own ticket, or correct the ticket= value." \
         '{story:$s, reason:$r, detail:$d}')")
-      continue
-    fi
-
-    # A recorded key whose project differs from the routed one: mirror into
-    # the routed project instead (US3, Phase 5) — treated as NEW, former
-    # ticket left untouched. Recorded here so the command layer can emit the
-    # catalogued `re-routed` notice once the new key is known (T071).
-    local _key_proj; _key_proj="$(_recognition_project_of "${key}")"
-    if [[ -n "${project}" ]] && [[ "${_key_proj}" != "${project}" ]]; then
-      new_items+=("${id}")
-      rerouted_frags+=("$(jq -cn --arg s "${id}" --arg fk "${key}" --arg fp "${_key_proj}" \
-        '{($s): {former_key:$fk, former_project:$fp}}')")
       continue
     fi
 
@@ -472,11 +458,10 @@ recognition_run() {
     ' <<< "${read_result}")")
   done
 
-  local bound="{}" new="[]" blocked="[]" rerouted="{}"
+  local bound="{}" new="[]" blocked="[]"
   ((${#bound_frags[@]} > 0)) && bound="$(printf '%s\n' "${bound_frags[@]}" | jq -cs 'add')"
   ((${#new_items[@]} > 0)) && new="$(printf '%s\n' "${new_items[@]}" | jq -Rn -c '[inputs]')"
   ((${#blocked_items[@]} > 0)) && blocked="$(printf '%s\n' "${blocked_items[@]}" | jq -cs '.')"
-  ((${#rerouted_frags[@]} > 0)) && rerouted="$(printf '%s\n' "${rerouted_frags[@]}" | jq -cs 'add')"
 
   # 024, T053 real-machine finding: each of these four grows with story
   # count, and Linux caps a SINGLE jq argument at MAX_ARG_STRLEN (128 KiB)
@@ -488,7 +473,7 @@ recognition_run() {
   # would be swallowed (matches plan_apply.sh's own call sites).
   local _result
   # shellcheck disable=SC2016  # a jq filter: $b/$nw/$bl/$rr are jq variables
-  _result="$(json_build '{bound:$b, new:$nw, blocked:$bl, rerouted:$rr}' \
-    b "${bound}" nw "${new}" bl "${blocked}" rr "${rerouted}")" || return $?
+  _result="$(json_build '{bound:$b, new:$nw, blocked:$bl}' \
+    b "${bound}" nw "${new}" bl "${blocked}")" || return $?
   json_canonical <<< "${_result}"
 }

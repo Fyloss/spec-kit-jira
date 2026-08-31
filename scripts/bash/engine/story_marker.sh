@@ -137,32 +137,53 @@ story_marker_parse_line() {
   jq -cn --arg id "${idval}" '{kind:"malformed", id:$id}' | json_canonical
 }
 
-# story_marker_any_bound <content> — return 0 when ANY line of <content> carries
-# a story marker in the BOUND form, 1 otherwise (033, FR-004,
-# contracts/routing-resolution.md C3.3/C3.4).
+# marker_bound_projects <content> — print the SORTED, UNIQUE set of Jira
+# project keys carried by <content>'s BOUND markers, one per line (035,
+# contracts/marker-routing.md C1.1-C1.7; data-model.md §1).
 #
-# Routing rank 3 — the project of the team the operator selected in their
-# gitignored personal.yml — is consulted ONLY for a specification that is not
-# yet bound. Without that bound, routing would depend on a per-operator file:
-# two developers would resolve the same specification to different projects and
-# each run would mirror it afresh into the other one, leaving two live ticket
-# sets. The stopping condition is already in the filesystem (Constitution I) —
-# a bound marker is an earlier run's record of which project this spec lives in.
+# Supersedes story_marker_any_bound. Routing needs more than "is this bound":
+# it needs WHICH project the specification's own markers record. 033 named
+# that record as the reason rank 3 is suppressed for a bound specification and
+# then never read it, so resolution fell through to `routing_default` — a
+# committed value free to name a different project entirely, which is how a
+# bound specification came to plan a duplicate ticket set in the wrong place.
 #
-# Only the ticket-bearing form counts. `creating` is a run in flight and a bare
-# marker is assigned-but-not-created; neither pins a project yet.
+# The set's CARDINALITY answers three questions at once (C1.1):
+#   0  not bound            — today's resolution applies, untouched
+#   1  the marker rank      — and the value every tier is compared against
+#   2+ the markers disagree — a refusal, zero writes
 #
-# FORK-FREE by contract (C3.4). It deliberately does NOT reuse
+# ALL THREE marker grammars count: parent (`spec=`), story (`story=`) and task
+# (`task=`). Reading the parent is a deliberate widening over 033 C3.3, which
+# read stories only: a bound parent pins a project exactly as a bound story
+# does, and a specification whose parent alone is bound was invisible to the
+# old predicate (C1.3).
+#
+# Only the ticket-bearing form contributes (C1.2). `creating` is a run in
+# flight and a bare marker is assigned-but-not-created; neither pins a project.
+#
+# FORK-FREE by contract (C1.5). It deliberately does NOT reuse
 # story_marker_parse_line, which spends one `jq` per line — on a 200-story
 # document that is 200 processes against zero. The trim is inlined for the same
-# reason: `$(_smk_trim …)` forks a subshell per line.
-story_marker_any_bound() {
-  local content="$1" line t body idval tail
+# reason (`$(_smk_trim …)` forks a subshell per line), and the set is deduped
+# and sorted IN SHELL rather than through `sort -u`, which would be one process
+# more than the contract allows.
+#
+# `LC_ALL=C` is local to the call: the sort must be byte order on every host,
+# or two ports could emit two different orderings of the same set and the
+# conformance corpus would be comparing collation rather than behaviour.
+marker_bound_projects() {
+  local content="$1" line t body idval tail proj _mbp_seen _mbp_i
+  local LC_ALL=C
+  local -a projects=()
   local generic_re='^<!--[[:space:]]+speckit-jira[[:space:]]+(.*)-->[[:space:]]*$'
-  local story_re='^story=([^[:space:]]+)([[:space:]]+(.*))?$'
-  local ticket_re='^ticket=[A-Z][A-Z0-9_]*-[1-9][0-9]*$'
-  [[ -z "${content}" ]] && return 1
+  local marker_re='^(spec|story|task)=([^[:space:]]+)([[:space:]]+(.*))?$'
+  local ticket_re='^ticket=([A-Z][A-Z0-9_]*)-[1-9][0-9]*$'
+  [[ -z "${content}" ]] && return 0
   while IFS= read -r line || [[ -n "${line}" ]]; do
+    # NEVER a glob pattern holding $'\r\n' (docs/10-windows-portability.md):
+    # the MSYS matcher bends one onto a bare LF. A single-CR suffix strip is
+    # exact on every host (C1.7).
     line="${line%$'\r'}"
     t="${line#"${line%%[![:space:]]*}"}"
     t="${t%"${t##*[![:space:]]}"}"
@@ -172,15 +193,39 @@ story_marker_any_bound() {
     body="${BASH_REMATCH[1]}"
     body="${body#"${body%%[![:space:]]*}"}"
     body="${body%"${body##*[![:space:]]}"}"
-    [[ "${body}" =~ ${story_re} ]] || continue
-    idval="${BASH_REMATCH[1]}"
-    tail="${BASH_REMATCH[3]:-}"
+    [[ "${body}" =~ ${marker_re} ]] || continue
+    idval="${BASH_REMATCH[2]}"
+    tail="${BASH_REMATCH[4]:-}"
     [[ "${idval}" =~ ^[0-9a-f]{16}$ ]] || continue
     tail="${tail#"${tail%%[![:space:]]*}"}"
     tail="${tail%"${tail##*[![:space:]]}"}"
-    [[ "${tail}" =~ ${ticket_re} ]] && return 0
+    # A key that does not match the issue-key grammar contributes nothing
+    # (C1.4) — the same refusal to guess the old predicate applied.
+    [[ "${tail}" =~ ${ticket_re} ]] || continue
+    proj="${BASH_REMATCH[1]}"
+    _mbp_seen="false"
+    for _mbp_i in "${projects[@]:-}"; do
+      [[ "${_mbp_i}" == "${proj}" ]] && { _mbp_seen="true"; break; }
+    done
+    [[ "${_mbp_seen}" == "true" ]] || projects+=("${proj}")
   done <<< "${content}"
-  return 1
+
+  (( ${#projects[@]} == 0 )) && return 0
+
+  # Insertion sort: the set is the number of DISTINCT projects a document
+  # names, which is one in every healthy repository and two in the state C3.1
+  # refuses. Anything cleverer would be sorting a list that cannot grow.
+  local i j tmp
+  for ((i = 1; i < ${#projects[@]}; i++)); do
+    tmp="${projects[i]}"
+    j=$((i - 1))
+    while ((j >= 0)) && [[ "${projects[j]}" > "${tmp}" ]]; do
+      projects[j + 1]="${projects[j]}"
+      j=$((j - 1))
+    done
+    projects[j + 1]="${tmp}"
+  done
+  printf '%s\n' "${projects[@]}"
 }
 
 # _smk_scan_anchors <content> — the anchor line numbers (1-based), one per
