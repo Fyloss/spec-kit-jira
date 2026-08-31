@@ -29,6 +29,8 @@ source "${_cmd_reconcile_dir}/../engine/parse.sh"
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../engine/interchange.sh"
 # shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../engine/artifact_set.sh" # 036 — the feature directory as the engine sees it
+# shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../engine/story_marker.sh" # R5 step 1 — assign identifiers
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../engine/task_marker.sh" # Phase 3, US1 — the task tier's own identifier
@@ -2097,6 +2099,34 @@ _reconcile_run() {
   fi
 
   timing_phase_end "plan" "$(jira_request_count)"
+
+  # 036, contracts/artifact-publication.md C5.1 — the artifact privacy sweep.
+  #
+  # HERE, and not beside the upload. Publication runs after the description and
+  # story writes, so a guard placed there could only refuse the upload while the
+  # reconcile's own writes had already landed — and FR-016 with C3.8 require
+  # ZERO writes for the ENTIRE run, the reconcile's included. This is the last
+  # point before any Jira write of any kind, which is what makes the requirement
+  # achievable at all.
+  #
+  # It runs in dry-run too. A dry-run that predicted a publication the real run
+  # would refuse is a dry-run that lies (FR-020), and the scan touches nothing.
+  #
+  # The set is rebuilt here rather than threaded down from the parse: it must
+  # reflect the directory as it stands AFTER the marker writes above, which
+  # change spec.md and tasks.md, or the scan would clear content that is not
+  # what gets published.
+  local _pg_dir _pg_set _pg_rc=0
+  _pg_dir="$(dirname "${spec_file}")"
+  _pg_set="$(artifact_set_build "${_pg_dir}")" || _pg_set='[]'
+  privacy_guard_scan_artifacts "${_pg_dir}" "${_pg_set}" \
+    "$(_apply_known_coords '[]')" "${SPEC_KIT_JIRA_ALLOWLIST:-[]}" 2> /dev/null || _pg_rc=$?
+  if ((_pg_rc != 0)); then
+    _reconcile_fault "${_pg_rc}" \
+      "reconcile: $(privacy_guard_artifact_reason "${_pg_dir}" "${_pg_set}" "$(_apply_known_coords '[]')" "${SPEC_KIT_JIRA_ALLOWLIST:-[]}") — a feature artifact carries a blocked shape; zero writes performed (FR-016)"
+    return $?
+  fi
+
   timing_phase_begin "apply" "$(jira_request_count)"
 
   if [[ "${dry_run}" != "true" ]]; then
