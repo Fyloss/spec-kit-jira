@@ -364,6 +364,27 @@ function Build-JiraNeutralDocument {
         epic           = [ordered]@{ title = $epicTitle; description = $epicDesc; local_id = $epicLocalId; marker = $epicMarker }
         stories        = @($stories)
     }
+
+    # 036, data-model.md §4: the artifact set crosses the engine->sink boundary
+    # inside this document, so the builder puts it here — the validator alone
+    # guards a field nothing writes.
+    #
+    # Emitted only when non-empty. An empty set omits the key rather than
+    # writing `[]`, because the document is compared byte-for-byte across ports
+    # and machines and two spellings of "nothing" are one divergence waiting for
+    # a fixture that happens to hold no artifacts.
+    #
+    # The property is read DIRECTLY off $ctx, not through
+    # Get-JiraInterchangeProp: that accessor ends in a plain `return`, which
+    # unwraps a one-element collection, so a single-artifact set arrived as a
+    # bare object and was emitted as one — a divergence from the Bash port
+    # visible at exactly one artifact and at no other count. `@( … )` then
+    # re-wraps defensively for the same reason.
+    if (Test-JiraInterchangeProp $ctx 'artifacts') {
+        $artifacts = @($ctx.artifacts)
+        if ($artifacts.Count -gt 0) { $doc['artifacts'] = $artifacts }
+    }
+
     $json = ConvertTo-JiraJsonValue $doc
 
     if (-not (Test-JiraInterchange $json)) {

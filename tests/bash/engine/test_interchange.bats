@@ -337,3 +337,74 @@ _with_artifacts() {
   ]')"
   [ "$status" -ne 0 ]
 }
+
+# --- T108 [036, Convergence] — the artifact set reaches the document --------
+#
+# T015-T017 taught the validator about `artifacts`. Nothing WROTE it: the
+# builder assembled the document from parse plus context and never carried the
+# set, so the rules guarded a field no code produced. `/speckit-converge` found
+# that, and these are its cases.
+#
+# The key is emitted only when there is something to emit. An empty set omits
+# it entirely rather than writing `[]`, because the document is compared
+# byte-for-byte across ports and machines and two spellings of "nothing" are
+# one divergence waiting for a fixture that happens to have no artifacts.
+
+_build_parse() {
+  printf '%s' '{"epic":{"title":"E","description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}},"stories":[{"local_id":"s1","title":"S","description":{"blocks":[{"type":"paragraph","spans":[{"text":"n","marks":[]}]}]},"priority_logical":"P1"}]}'
+}
+
+_build_ctx_with_artifacts() {
+  jq -cn --argjson a "$1" \
+    '{spec_ref:{repo:"acme/app",spec_slug:"001-feature",folder:"specs/001-feature"},project_key:"PROJ",artifacts:$a}'
+}
+
+@test "T108 the built document carries the artifact set from the context" {
+  local ctx
+  ctx="$(_build_ctx_with_artifacts '[
+    {"path":"spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"},
+    {"path":"contracts/api.md","hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":3,"attachment_name":"contracts__api.md"}
+  ]')"
+  run interchange_build "$(_build_parse)" "${ctx}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.artifacts | length' <<< "$output")" -eq 2 ]
+  [ "$(jq -r '.artifacts[0].path' <<< "$output")" = "spec.md" ]
+  [ "$(jq -r '.artifacts[1].attachment_name' <<< "$output")" = "contracts__api.md" ]
+}
+
+@test "T108 a context carrying ONE artifact still emits an array of one" {
+  # The single-element case: the PowerShell twin unwraps a one-element
+  # collection on return, and this is where that divergence appears.
+  local ctx
+  ctx="$(_build_ctx_with_artifacts '[
+    {"path":"spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"}
+  ]')"
+  run interchange_build "$(_build_parse)" "${ctx}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.artifacts | type' <<< "$output")" = "array" ]
+  [ "$(jq -r '.artifacts | length' <<< "$output")" -eq 1 ]
+}
+
+@test "T108 a context with an EMPTY artifact set omits the key entirely" {
+  local ctx
+  ctx="$(_build_ctx_with_artifacts '[]')"
+  run interchange_build "$(_build_parse)" "${ctx}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("artifacts")' <<< "$output")" = "false" ]
+}
+
+@test "T108 a context with no artifacts key at all omits it, as every pre-036 caller does" {
+  local ctx='{"spec_ref":{"repo":"acme/app","spec_slug":"001-feature","folder":"specs/001-feature"},"project_key":"PROJ"}'
+  run interchange_build "$(_build_parse)" "${ctx}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("artifacts")' <<< "$output")" = "false" ]
+}
+
+@test "T108 an artifact set the validator refuses blocks the build, not just the write" {
+  local ctx
+  ctx="$(_build_ctx_with_artifacts '[
+    {"path":"/absolute/spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"}
+  ]')"
+  run interchange_build "$(_build_parse)" "${ctx}"
+  [ "$status" -ne 0 ]
+}
