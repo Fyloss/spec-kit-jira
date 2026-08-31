@@ -11,15 +11,24 @@
 # reference scenario (91 515 ms -> 147 774 ms). Never read a duration from a
 # run made under `helper_spawn_count_setup`'s PATH.
 
-# helper_spawn_count_setup <shim_dir> <count_file> — populate <shim_dir> with
-# a counting shim for jq, sed, awk, and curl, and truncate <count_file>.
-# Resolves each real tool from the caller's PATH *before* prepending
-# <shim_dir> to it, so the shim never recurses into itself.
+# helper_spawn_count_setup <shim_dir> <count_file> [extra-tool...] — populate
+# <shim_dir> with a counting shim for jq, sed, awk, and curl — plus any extra
+# tools named by the caller — and truncate <count_file>. Resolves each real
+# tool from the caller's PATH *before* prepending <shim_dir> to it, so the shim
+# never recurses into itself.
+#
+# The extra-tool arguments were added by 036: the artifact set's whole budget
+# is `git` invocations (one `ls-files`, one `hash-object --stdin-paths`), and a
+# helper that cannot see `git` reports 0 for a per-item implementation exactly
+# as it does for a correct one. The default four are unchanged, so every
+# existing caller is unaffected.
 helper_spawn_count_setup() {
-  local shim_dir="$1" count_file="$2" tool real
+  local shim_dir="$1" count_file="$2"
+  shift 2
+  local tool real
   mkdir -p "${shim_dir}"
   : > "${count_file}"
-  for tool in jq sed awk curl; do
+  for tool in jq sed awk curl "$@"; do
     # An unresolvable tool would bake `exec "" "$@"` into the shim: the count
     # file would stay empty, and an empty count file reads as "0 spawns" —
     # a budget assertion passing on an instrument that never worked. Fail

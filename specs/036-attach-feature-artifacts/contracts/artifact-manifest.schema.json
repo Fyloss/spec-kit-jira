@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Fyloss/spec-kit-jira-mirror/contracts/artifact-manifest.schema.json",
+  "title": "Artifact publication manifest",
+  "description": "The value of the `spec-kit-jira-artifacts` entity property on a specification-tier ticket. Records what the bridge has already published, one entry per artifact path, carrying the last published content hash. It is a CACHE, never the truth: when the ticket's real attachment list contradicts an entry, the artifact is republished (contracts/artifact-publication.md C4.3). It holds the CURRENT state only — the publication history lives in the ticket's comment stream — so its size is bounded by the number of artifacts, not by the number of runs.",
+  "type": "object",
+  "required": ["schema", "artifacts"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "description": "Shape version. A change to the SET of recorded fields bumps it. A reader that does not recognise the value treats the manifest as absent and republishes every artifact — never as an error, and never as a reason to write.",
+      "type": "integer",
+      "const": 1
+    },
+    "artifacts": {
+      "description": "Keyed by the artifact's path relative to the feature directory, `/`-separated on every host. Never an absolute path: it would carry the operator's home directory into a Jira record and break byte equivalence between ports and machines.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[^/\\\\][^\\\\]*$",
+        "not": { "pattern": "(^|/)\\.\\.(/|$)" }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["hash", "attachment_id", "run"],
+        "additionalProperties": false,
+        "properties": {
+          "hash": {
+            "description": "`git hash-object --no-filters` of the bytes last successfully published for this path. The comparison that decides published / revised / unchanged.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "attachment_id": {
+            "description": "The Jira attachment id returned for that publication. Lets a later run check the ticket's real attachment list and republish when the manifest is ahead of reality.",
+            "type": "string",
+            "minLength": 1
+          },
+          "run": {
+            "description": "The lifecycle event that published it. Diagnostic only — no decision reads this.",
+            "type": "string",
+            "enum": [
+              "before_specify",
+              "after_specify",
+              "after_clarify",
+              "after_plan",
+              "after_tasks",
+              "after_implement",
+              "after_analyze",
+              "after_converge",
+              "after_checklist"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": 1,
+      "artifacts": {
+        "spec.md": {
+          "hash": "0000000000000000000000000000000000000000",
+          "attachment_id": "10021",
+          "run": "after_plan"
+        },
+        "contracts/api.md": {
+          "hash": "1111111111111111111111111111111111111111",
+          "attachment_id": "10022",
+          "run": "after_plan"
+        }
+      }
+    }
+  ]
+}

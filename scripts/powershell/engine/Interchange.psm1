@@ -270,6 +270,61 @@ function Test-JiraInterchange {
         $errors.Add('two tasks share a local_id')
     }
 
+    # 036, data-model.md §4: the artifact set crosses the engine->sink boundary
+    # inside this document, so it is validated here like everything else that
+    # crosses it — a failure blocks every write of the run (Constitution VIII).
+    #
+    # The key is OPTIONAL: a document built before any artifact exists, or by a
+    # path that does not publish, omits it entirely. Its ABSENCE is the off
+    # switch, as it is for the task tier above.
+    #
+    # The absolute-path rule is the one with teeth. A path relative to the
+    # feature directory is a neutral fact; an absolute one carries the
+    # operator's home directory into a document written to disk and compared
+    # byte-for-byte across ports and machines (Constitution VI). The `..` rule
+    # is the same argument: a path escaping the feature directory is not this
+    # feature's record.
+    # Read the property DIRECTLY rather than through Get-JiraInterchangeProp:
+    # that accessor ends in `return $Object.$Name`, and a plain `return`
+    # unwraps a single-element collection, so a one-artifact array arrived as a
+    # bare object and was rejected as "artifacts must be an array" — while the
+    # Bash port accepted it. The divergence appears ONLY at exactly one
+    # artifact, which is why a two-artifact fixture would never have shown it.
+    # Get-JiraArrayCount carries the same warning for the same reason.
+    if (Test-JiraInterchangeProp $d 'artifacts') {
+        $artifactsVal = $d.artifacts
+        if ($null -ne $artifactsVal -and $artifactsVal -isnot [System.Array]) {
+            $errors.Add('artifacts must be an array')
+        }
+        else {
+            foreach ($af in @($artifactsVal)) {
+                $apath = [string](Get-JiraInterchangeProp $af 'path')
+                if ([string]::IsNullOrEmpty($apath)) {
+                    $errors.Add('artifact.path is required')
+                }
+                if ($apath.StartsWith('/')) {
+                    $errors.Add('artifact.path must be relative to the feature directory, never absolute')
+                }
+                if ($apath -match '(^|/)\.\.(/|$)') {
+                    $errors.Add('artifact.path must not escape the feature directory')
+                }
+                if ([string](Get-JiraInterchangeProp $af 'hash') -notmatch '^[0-9a-f]{40}$') {
+                    $errors.Add('artifact.hash must be 40 hexadecimal characters')
+                }
+                $asize = Get-JiraInterchangeProp $af 'size'
+                # StrictMode makes a missing property throw on dot-access, which
+                # is why every read here goes through Get-JiraInterchangeProp; a
+                # missing size arrives as $null and must fail, not pass.
+                if ($null -eq $asize -or $asize -isnot [System.ValueType] -or [double] $asize -lt 0) {
+                    $errors.Add('artifact.size must be a non-negative integer')
+                }
+                if ([string]::IsNullOrEmpty([string](Get-JiraInterchangeProp $af 'attachment_name'))) {
+                    $errors.Add('artifact.attachment_name is required')
+                }
+            }
+        }
+    }
+
     if ($errors.Count -eq 0) { return $true }
     foreach ($e in $errors) { [Console]::Error.WriteLine("interchange: $e") }
     return $false

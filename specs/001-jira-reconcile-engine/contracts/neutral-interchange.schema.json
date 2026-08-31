@@ -34,6 +34,29 @@
         }
       }
     },
+    "artifacts": {
+      "description": "036 data-model.md §4 — the feature directory's artifact set, as the engine built it. OPTIONAL: a document produced before any artifact exists, or by a code path that does not publish, omits the key entirely; its absence is the off switch, exactly as it is for the task tier. The sink resolves the real file path from the feature directory plus `path` at upload time; the engine never hands it a filesystem handle.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "hash", "size", "attachment_name"],
+        "properties": {
+          "path": {
+            "description": "Relative to the feature directory, `/`-separated on every host. Never absolute and never containing a `..` segment: an absolute path would carry the operator's home directory into a document that is written to disk and compared byte-for-byte across ports and machines (Constitution VI).",
+            "type": "string",
+            "minLength": 1
+          },
+          "hash": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "size": { "type": "integer", "minimum": 0 },
+          "attachment_name": {
+            "description": "The name the artifact carries as a Jira attachment: `path` with `/` replaced by `__` (research R7).",
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
     "epic": {
       "type": "object",
       "additionalProperties": false,
