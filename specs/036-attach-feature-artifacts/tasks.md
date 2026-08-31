@@ -25,6 +25,30 @@ Neither is complete alone: cross-port byte equivalence is what makes them one
 product (Principle VI), and a scenario green on one port and absent on the other
 proves nothing.
 
+## Progress — 2026-08-31
+
+**14 of 107 tasks complete** (T003–T012, T015–T018): Phase 1, and the engine
+half of Phase 2. Committed as `f475a60`, pushed to
+`feat/036-attach-feature-artifacts`.
+
+Verified, not assumed: bash 15/15, Pester 14/14 + 35/35, both ports emit
+byte-identical artifact-set JSON for the same fixture, `shellcheck` clean over
+all of `scripts/bash`, PSScriptAnalyzer clean, and the repository's own CI
+guards (boundary, jq path spelling, packaging surface) green.
+
+**T001/T002 are recorded as NOT done rather than skipped.** The baseline run
+was started before the tree was stable and its two failures turned out to be
+its own interference; the two suites it flagged were re-run clean afterwards,
+but that is a re-run, not a baseline. Whoever picks this up should take a real
+one first.
+
+**Stopped deliberately at T013.** The privacy guard (T013/T014) is the next
+task and it is a pair: a scanning function plus its wiring into the reconcile's
+existing pre-write sweep. Landing the function alone would ship code no caller
+reaches — dead on arrival under Principle XV — and the wiring is a change to a
+139 KB `reconcile.sh` whose correctness needs the command-level suites to
+verify. It is a clean seam to resume from, not a half-finished one.
+
 ---
 
 ## Phase 1: Setup
