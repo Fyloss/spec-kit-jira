@@ -172,3 +172,133 @@ privacy_path_excluded() {
   done < "${ignore}"
   return 1
 }
+
+# _privacy_normalise_bytes — read arbitrary bytes on stdin, write a payload
+# every host's grep will speak about on stdout.
+#
+# Two transformations, and neither is cosmetic:
+#
+#   * NUL bytes are dropped. Bash cannot hold one in a variable and drops it
+#     with a warning on stderr; doing it here deliberately keeps that warning
+#     out of the operator's output and makes the behaviour defined.
+#   * Every other non-printable byte becomes a space. THIS is the one that
+#     matters. Passing raw binary through a shell variable made `grep` stop
+#     reporting matches altogether: an `ATATT…` token appended to a PNG was
+#     present in the file and absent from the variable, and the guard returned
+#     clear. The bytes were there; grep declined to speak about them.
+#
+# Mapping non-printables to spaces cannot hide a BLOCKED shape, because all
+# three of them are printable ASCII — the token prefix, the host, and a known
+# coordinate. It costs no recall.
+#
+# `LC_ALL=C` on BOTH `tr` calls, not just the second: BSD `tr` aborts with
+# "Illegal byte sequence" on invalid UTF-8 under the ambient locale, so a single
+# unpinned call turns the whole scan into a silent no-op on macOS.
+_privacy_normalise_bytes() {
+  LC_ALL=C tr -d '\0' | LC_ALL=C tr -c '[:print:]\n' ' '
+}
+
+# privacy_guard_artifact_reason <feature-dir> <set-json> [known-coords] [allow]
+# — print "<path>: <reason>" for the first artifact carrying a BLOCKED shape;
+# print nothing when the whole set is clear (036 C5.2, FR-016).
+#
+# ONE PASS, not one per artifact (C5.4). The set is concatenated into a single
+# blob and scanned once, because privacy_guard_reason spawns processes of its
+# own and calling it per artifact is exactly the per-item spawn
+# `docs/11-process-budget.md` forbids. The blob is assembled by ONE
+# `xargs -0 cat`, which does its own splitting against the host's real argument
+# cap, so no command line grows with the set either.
+#
+# Attribution — working out WHICH artifact carried the shape — costs a second
+# pass, and it is paid only on the failure path, where the run is aborting
+# anyway and a message that names the file is worth far more than the cycles.
+# The clear path, which is every ordinary run, stays at one pass.
+#
+# Binary artifacts are scanned with no special case (research R12). The BLOCKED
+# shapes are ASCII byte sequences, so a byte scan finds them wherever they sit —
+# an API token pasted into an image's metadata is not hypothetical. Reading the
+# blob into a shell variable drops NUL bytes; that cannot hide a contiguous
+# ASCII match, so it costs no recall, and inventing a text/binary discriminator
+# would create a class of file the guard does not cover at all.
+privacy_guard_artifact_reason() {
+  local dir="$1" set_json="$2" coords="${3:-[]}" allow="${4:-[]}"
+
+  [[ -d "${dir}" ]] || return 0
+  local n
+  n="$(jq -r 'length' <<< "${set_json}" 2> /dev/null)" || return 0
+  [[ -n "${n}" ]] && [[ "${n}" -gt 0 ]] || return 0
+
+  local tmp
+  tmp="$(mktemp -d)" || return 1
+
+  # Absolute paths, NUL-separated, so a path holding a space or a newline
+  # survives the hand-off to xargs. `jq -j` writes no separator of its own; the
+  # NUL is emitted explicitly from the filter.
+  jq -jr --arg d "${dir}" '.[] | $d + "/" + .path + "\u0000"' <<< "${set_json}" > "${tmp}/paths_z" 2> /dev/null
+
+  # One `xargs -0 cat` for the whole set, then NORMALISE TO TEXT before the
+  # scan. Both halves of that are load-bearing and neither is obvious:
+  #
+  #   * `tr -d '\0'` — bash cannot hold a NUL in a variable and drops it with a
+  #     warning on stderr. Dropping it deliberately keeps the warning out of the
+  #     operator's output and makes the behaviour defined rather than incidental.
+  #   * `tr -c '[:print:]\n' ' '` — this is the one that MATTERS. Passing raw
+  #     binary through a shell variable made `grep` stop reporting matches
+  #     entirely: an `ATATT…` token appended to a PNG was present in the blob
+  #     FILE, absent from the blob VARIABLE, and the guard returned clear. The
+  #     bytes were there; grep declined to speak about them.
+  #
+  # Mapping every non-printable byte to a space cannot hide a BLOCKED shape,
+  # because all three of them are printable ASCII: the token prefix, the host,
+  # and a known coordinate. It costs no recall and buys a payload every host's
+  # grep treats identically.
+  xargs -0 cat < "${tmp}/paths_z" 2> /dev/null | _privacy_normalise_bytes > "${tmp}/blob" || true
+
+  local blob reason
+  blob="$(cat "${tmp}/blob" 2> /dev/null)"
+  reason="$(privacy_guard_reason "${blob}" "${coords}" "${allow}")"
+
+  if [[ -z "${reason}" ]]; then
+    rm -rf "${tmp}"
+    return 0
+  fi
+
+  # Failure path only: find the artifact so the message can name it.
+  local p per
+  while IFS= read -r p; do
+    [[ -z "${p}" ]] && continue
+    per="$(privacy_guard_reason \
+      "$(_privacy_normalise_bytes < "${dir}/${p}" 2> /dev/null)" \
+      "${coords}" "${allow}")"
+    if [[ -n "${per}" ]]; then
+      rm -rf "${tmp}"
+      printf '%s: %s' "${p}" "${per}"
+      return 0
+    fi
+  done < <(jq -r '.[].path' <<< "${set_json}" 2> /dev/null)
+
+  # The blob matched but no single artifact did: the shape straddles a file
+  # boundary in the concatenation. Report it without naming a file rather than
+  # letting the run proceed — fail closed on the ambiguous case.
+  rm -rf "${tmp}"
+  printf '(across the artifact set): %s' "${reason}"
+}
+
+# privacy_guard_scan_artifacts <feature-dir> <set-json> [coords] [allow] — the
+# pre-write gate for artifact content (036 C5.1, C5.3, C5.5, FR-016).
+#
+# Returns EXIT_BLOCK (9) with a located reason on stderr when any artifact
+# carries a BLOCKED shape; returns 0 when the set is clear. On a non-zero
+# return the caller must perform ZERO writes of EVERY kind — not merely zero
+# attachments. Publication runs after the description and story writes, so a
+# guard placed beside the upload could only refuse the upload while the rest
+# had already landed; this one runs at the pre-write sweep instead.
+privacy_guard_scan_artifacts() {
+  local reason
+  reason="$(privacy_guard_artifact_reason "$1" "$2" "${3:-[]}" "${4:-[]}")"
+  if [[ -n "${reason}" ]]; then
+    printf 'privacy: BLOCK — %s detected in a feature artifact; zero writes performed (FR-016)\n' "${reason}" >&2
+    return "$(cli_exit_code block)"
+  fi
+  return 0
+}
