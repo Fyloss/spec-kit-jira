@@ -88,7 +88,7 @@ reconcile's existing pre-write sweep, and it must exist before any task uploads
 artifact content anywhere.
 
 - [X] T013 [P] Write failing cases in `tests/bash/sink/test_privacy_guard_artifacts.bats` and its Pester twin `tests/powershell/sink/PrivacyGuard.Artifacts.Tests.ps1`: a BLOCK-tier coordinate inside `research.md` leaves the ticket **untouched** — zero calls of every write kind on the mock call log, not merely zero attachments (C5.5); the same for a BLOCK-tier byte sequence inside the **binary** artifact (research R12); the message names the artifact and the shape and never the value; an allowlisted Confluence link and an allowlisted corporate domain **inside artifact content** produce neither a block nor a warn (C5.2, C5.3, FR-016, SC-007)
-- [ ] T014 Fold the artifact scan into the existing pre-write sweep in `scripts/bash/commands/reconcile.sh` and `scripts/powershell/commands/Reconcile.psm1`, calling `scripts/bash/sink/jira/privacy_guard.sh` / `scripts/powershell/sink/jira/PrivacyGuard.psm1` once over the whole set — one pass, no per-artifact process, no second traversal, no text/binary special case (C5.1, C5.4)
+- [X] T014 Fold the artifact scan into the existing pre-write sweep in `scripts/bash/commands/reconcile.sh` and `scripts/powershell/commands/Reconcile.psm1`, calling `scripts/bash/sink/jira/privacy_guard.sh` / `scripts/powershell/sink/jira/PrivacyGuard.psm1` once over the whole set — one pass, no per-artifact process, no second traversal, no text/binary special case (C5.1, C5.4)
 
 ### The neutral document — Principle VIII, data-model §4
 
