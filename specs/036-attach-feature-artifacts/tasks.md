@@ -346,3 +346,15 @@ increments on top.
 4. **Phase 8's last two tasks are the real gates.** T106 and T107 answer the
    eight questions in research §R15 that nothing else can. Budget them: ~2 hours
    for the probe, a real Jira project for the dogfood.
+
+---
+
+## Phase 9: Convergence
+
+Appended by `/speckit-converge` on 2026-08-31, after the engine half of Phase 2
+landed. Each item is work the artifacts require that no earlier task covers —
+not a restatement of an unchecked task above.
+
+- [ ] T108 Thread the artifact set into the neutral document: extend `interchange_build` in `scripts/bash/engine/interchange.sh` and `Build-JiraNeutralDocument` in `scripts/powershell/engine/Interchange.psm1` to accept the set and emit it as the `artifacts` key, omitting the key entirely when the set is empty; write the failing cross-port case first, asserting both ports emit the identical document for one fixture. Without this the set never crosses the engine/sink boundary and the validation rules landed in T015–T017 guard a field nothing writes — per data-model §4, Principle VIII, FR-001 (missing)
+- [ ] T109 Cover `helper_spawn_count_setup`'s extra-tool parameter in `tests/bash/ci/test_spawn_count_helper.bats`: a caller naming `git` gets a shim that counts and delegates it, the default four are still shimmed when no extra is named, and an unresolvable extra tool still refuses rather than writing a shim that silently counts nothing. The parameter was added by this feature and every budget assertion that names a non-default tool rides on it — a shim that never fires reports 0 spawns, and a budget test against a dead instrument passes for the wrong reason — per Constitution XIII (missing)
+- [ ] T110 Guard the three statements of the `artifacts` rules against each other — `specs/001-jira-reconcile-engine/contracts/neutral-interchange.schema.json`, the jq programme in `scripts/bash/engine/interchange.sh`, and the PowerShell validator — so a rule added to one and not the others fails CI. Scope it to the `artifacts` key rather than the whole document: the wider drift is pre-existing and belongs to its own spec. The precedent is `run-summary.schema.json`, which sat 7 items behind both ports across three features because nothing compared them — per plan: schema-validated boundary (partial)
