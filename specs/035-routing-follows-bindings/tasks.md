@@ -193,8 +193,26 @@ it before.
 - [ ] **T005 — the scan's process-budget case** is written and green; the
   equivalent for `marker_bound_projects` under a 200-story document passes at
   zero spawns.
-- [ ] **T039/T040/T043 partial** — the hook-context downgrade in both
-  directions, and the message-to-command check, are covered by the existing
-  generic guards rather than by cases written specifically for this feature.
+- [X] **T024 / T031 / T032 / T039 / T048 — CLOSED after the fact.** These were
+  marked done on the strength of message-level tests that did not prove what
+  they claimed. Four end-to-end cases were added afterwards to
+  `tests/bash/commands/test_reconcile_marker_routing.bats`, driving the real
+  command against the mock:
+  - **C3.3** both refusals leave the mock's call log EMPTY — zero requests, not
+    merely zero writes, which is the difference between the ordering being a
+    property of the design and a coincidence;
+  - **C3.5** both refusals downgrade to one `WARNING` at exit 0 under
+    `SPEC_KIT_JIRA_HOOK_CONTEXT` — the CHANGED branch of Principle III, which
+    would otherwise have inherited the unchanged branch's coverage;
+  - **C3.4** each refusal is compared as BYTES with and without `--dry-run`,
+    not by substring;
+  - **FR-009** no run emits an action set naming more than one project,
+    asserted over the emitted actions rather than inferred from the refusals.
+- [ ] **T040 partial** — the message-to-command check rests on the existing
+  generic guard rather than a case written for this feature's literals.
 - [ ] **T034b** — FR-015's assertion is implied by the refusals being emitted
-  from a zero-request path, not asserted directly.
+  from a zero-request path (now proven by C3.3 above), not asserted directly.
+- [ ] **PowerShell twins of the four cases above.** The mismatch refusal is
+  covered end-to-end in both modes by `Reconcile.Durability.Tests.ps1`; the hook
+  downgrade and the one-project invariant are not, on that port. Cross-port
+  equivalence of the refusals themselves is carried by the conformance corpus.
