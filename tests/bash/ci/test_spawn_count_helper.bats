@@ -78,3 +78,70 @@ teardown() {
   [[ "${output}" == *"jq"* ]]
   [ ! -e "${BATS_TEST_TMPDIR}/absent_shims/sed" ]
 }
+
+# --- T109 [036, Convergence] — the extra-tool parameter ---------------------
+#
+# 036 added variadic extra tools to helper_spawn_count_setup: the artifact
+# set's whole budget is `git` invocations, and the default four (jq, sed, awk,
+# curl) cannot see them.
+#
+# This guard is not ceremony. A shim that never fires leaves the count file
+# empty, an empty count file reads as "0 spawns", and a budget assertion
+# against a dead instrument passes for the wrong reason — which is precisely
+# the failure this repository has already been bitten by. Every caller naming a
+# non-default tool rides on the parameter working.
+
+@test "T109 an extra tool named by the caller is shimmed, counted and delegated" {
+  local dir="${BATS_TEST_TMPDIR}/extra" file="${BATS_TEST_TMPDIR}/extra.log"
+  helper_spawn_count_setup "${dir}" "${file}" git
+  [ -x "${dir}/git" ]
+
+  run env PATH="${dir}:${PATH}" git --version
+  [ "$status" -eq 0 ]
+  # Delegated, not swallowed: the real tool's stdout still arrives.
+  [[ "$output" == git\ version* ]]
+  [ "$(helper_spawn_count_for "${file}" git)" -eq 1 ]
+}
+
+@test "T109 naming an extra tool does NOT stop the default four being shimmed" {
+  # The regression that would matter most: a caller asks for `git` and silently
+  # loses jq counting, so every existing budget assertion reads zero.
+  local dir="${BATS_TEST_TMPDIR}/both" file="${BATS_TEST_TMPDIR}/both.log"
+  helper_spawn_count_setup "${dir}" "${file}" git
+  for tool in jq sed awk curl git; do
+    [ -x "${dir}/${tool}" ]
+  done
+
+  PATH="${dir}:${PATH}" bash -c 'jq -n 1 > /dev/null; git --version > /dev/null'
+  [ "$(helper_spawn_count_for "${file}" jq)" -eq 1 ]
+  [ "$(helper_spawn_count_for "${file}" git)" -eq 1 ]
+  [ "$(helper_spawn_count_total "${file}")" -eq 2 ]
+}
+
+@test "T109 more than one extra tool may be named at once" {
+  local dir="${BATS_TEST_TMPDIR}/multi" file="${BATS_TEST_TMPDIR}/multi.log"
+  helper_spawn_count_setup "${dir}" "${file}" git env
+  [ -x "${dir}/git" ]
+  [ -x "${dir}/env" ]
+}
+
+@test "T109 no extra tool leaves exactly the default four, unchanged" {
+  local dir="${BATS_TEST_TMPDIR}/default" file="${BATS_TEST_TMPDIR}/default.log"
+  helper_spawn_count_setup "${dir}" "${file}"
+  local n
+  n="$(find "${dir}" -type f | wc -l | tr -d '[:space:]')"
+  [ "${n}" -eq 4 ]
+  [ ! -e "${dir}/git" ]
+}
+
+@test "T109 an unresolvable EXTRA tool refuses, exactly as an unresolvable default does" {
+  # Without this the helper would write `exec "" "$@"` for the extra tool: the
+  # count file stays empty and the budget assertion passes on an instrument
+  # that never worked. The default-tool case is already guarded above; the
+  # extra-tool path is a second entry into the same trap.
+  local dir="${BATS_TEST_TMPDIR}/bad" file="${BATS_TEST_TMPDIR}/bad.log"
+  run helper_spawn_count_setup "${dir}" "${file}" definitely-not-a-real-tool-036
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"definitely-not-a-real-tool-036"* ]]
+  [ ! -e "${dir}/definitely-not-a-real-tool-036" ]
+}

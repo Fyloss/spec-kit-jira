@@ -197,7 +197,20 @@ interchange_build() {
         marker: ($parse.epic.marker // {state:"absent", id:"", lines:[]})
       },
       stories: ($parse.stories // [])
-    }' parse "${parse}" ctx "${ctx}")" || rc=$?
+    }
+    # 036, data-model.md §4: the artifact set crosses the engine->sink boundary
+    # INSIDE this document, so the builder has to put it here — the validator
+    # alone guards a field nothing writes.
+    #
+    # Emitted only when non-empty. An empty set omits the key rather than
+    # writing `[]`, because the document is compared byte-for-byte across ports
+    # and machines and two spellings of "nothing" are one divergence waiting
+    # for a fixture that happens to hold no artifacts. Same shape as the
+    # optional fields of the identity marker.
+    # NOTE: no apostrophes in this comment — it sits inside a single-quoted jq
+    # program, where one would close the string and break the whole file.
+    + (if (($ctx.artifacts // []) | length) > 0 then {artifacts: $ctx.artifacts} else {} end)
+    ' parse "${parse}" ctx "${ctx}")" || rc=$?
   # kcov-excl-stop
   # json_canonical is applied to the CAPTURED value, not inside the pipeline
   # above: it exits 0 on empty input, which would swallow a json_build failure
