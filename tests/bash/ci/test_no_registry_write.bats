@@ -36,13 +36,13 @@ setup() {
   # environment override that used to redirect it. `ext_path`, the old local
   # name, is gone with the code that declared it.
   REGISTRY_TOKENS='extensions\.yml|SPEC_KIT_JIRA_EXTENSIONS_YML'
-  # The prohibition's own explanatory comments are the ONLY place the tokens may
-  # still appear: a rule that cannot name the thing it forbids is unreadable
-  # (Principle XVI). Every allowlisted line must be a comment.
-  ALLOWLIST='scripts/bash/lib/output.sh'
+  # NO file-level allowlist, deliberately. scan() already drops comment lines,
+  # so the prohibition's own explanatory comments are exempt by construction. A
+  # file exemption on top of that could only ever let real CODE through — it
+  # would weaken the guard rather than express it.
 }
 
-# scan <regex> — matching lines across the port, allowlisted comments removed.
+# scan <regex> — matching NON-COMMENT lines across the port.
 scan() {
   grep -rnE "$1" "${SCRIPTS}" --include='*.sh' \
     | grep -vE ':[0-9]+:[[:space:]]*#' || true
@@ -63,7 +63,7 @@ scan() {
   # reading or for writing — so this subsumes every write-verb check this file
   # used to carry.
   local bad
-  bad="$(scan "${REGISTRY_TOKENS}" | grep -vE "${ALLOWLIST}" || true)"
+  bad="$(scan "${REGISTRY_TOKENS}")"
   [ -z "${bad}" ] || { printf 'the hook registry is named in shipped code:\n%s\n' "${bad}" >&2; return 1; }
 }
 
@@ -78,11 +78,11 @@ scan() {
 }
 
 @test "no read verb is aimed at a registry-shaped path (FR-001)" {
-  # Subsumed by the absence test above, and kept anyway: the allowlist is the
-  # seam a future change would widen, and this catches a read that slips in
-  # through it by hiding behind a comment-shaped line.
+  # Subsumed by the absence test above, and kept anyway: it names the failure
+  # concretely when someone reintroduces a read, which is friendlier than a
+  # bare "the registry is named here".
   local bad
-  bad="$(scan '(cat|source|\.|jq|read|<)[^|]*extensions\.yml' | grep -vE "${ALLOWLIST}" || true)"
+  bad="$(scan '(cat|source|\.|jq|read|<)[^|]*extensions\.yml')"
   [ -z "${bad}" ] || { printf 'a read aimed at the hook registry:\n%s\n' "${bad}" >&2; return 1; }
 }
 

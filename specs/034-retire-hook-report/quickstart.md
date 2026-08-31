@@ -61,7 +61,8 @@ Then confirm the other three effects are unchanged in shape (US1 AC4):
 
 ```bash
 jq -S '.effects' /tmp/ceremony-correct.json
-# → exactly {discovery, gitignore, readme}, each with a write-outcome status
+# → exactly {discovery, field_defaults, gitignore, personal, readme, task_mirror},
+#   each with a write-outcome status — and no `hooks`
 ```
 
 ---
@@ -88,8 +89,11 @@ SPEC_KIT_JIRA_HOOK_CONTEXT=1 SPEC_KIT_JIRA_HOOK_EVENT=after_specify \
 line on stderr. This is the half of the hooks behaviour the feature must not touch.
 
 The standing proof is `tests/bash/hooks/test_hook_resilience.bats` and
-`tests/powershell/hooks/HookResilience.Tests.ps1` — they must pass **unmodified**.
-If a task needs to edit them, the deletion has reached further than the spec allows.
+`tests/powershell/hooks/HookResilience.Tests.ps1`. Their surviving **assertions**
+pass unchanged. Both files did need harness repair — their setup loaded the
+deleted module, so every test died before running — and three tests whose subject
+was retired behaviour were deleted with it. See `baseline.md`; the original
+wording here demanded they pass "unmodified", which was not achievable.
 
 ---
 
@@ -131,7 +135,7 @@ there is no pass banner, and the temp paths in the output are harness noise.
 Scenario disposition for this feature (research R9):
 
 - `us9-hook-registration` — retired with its subject.
-- `us021b-disabled-event` — re-pointed: the fixture stays, the expectation becomes
+- `us021b-disabled-event` → renamed `us021b-retired-disable-record`: the fixture stays, the expectation becomes
   the exit-4 located refusal of §5. This is what makes SC-004 a cross-port claim
   rather than two unit tests.
 - `us4-port-selection` — description reworded only.
@@ -165,7 +169,7 @@ in.
 ## 8. Suites and linters
 
 ```bash
-tests/run-bash.sh                          # ~190s locally
+tests/run-bash.sh                          # ~16 min (940 s measured; see AGENTS.md)
 pwsh -c 'Invoke-Pester tests/powershell'
 find scripts/bash -name '*.sh' -exec shellcheck -x -P scripts/bash {} +
 actionlint
@@ -181,10 +185,10 @@ Re-pointed rather than deleted:
   `JIRA_HOOK_EVENT_NAMES` from `lib/config.sh` instead of `HOOK_EVENTS` from the
   deleted module.
 - `NoRegistryWrite` guards — widened to absence (§0).
-- `test_config_three_effects.bats` / `Config.ThreeEffects.Tests.ps1` — the count
-  stays three but the membership changes. Its "three" was
-  discovery/hooks/readme, written before the gitignore effect existed; it becomes
-  discovery/readme/gitignore.
+- `test_config_three_effects.bats` / `Config.ThreeEffects.Tests.ps1` — the name
+  is historical. Its "three" was discovery/hooks/readme, written before the
+  gitignore, personal, field_defaults and task_mirror effects existed; the
+  asserted set is now those six minus `hooks`.
 - The two consumer-docs CI scans (`test_consumer_docs_invocation.bats`,
   `test_consumer_docs_naming_surface.bats`) if they hold the retired text.
 

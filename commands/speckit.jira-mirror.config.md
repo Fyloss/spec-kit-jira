@@ -303,6 +303,16 @@ A single run's effects are each reported **separately** in the summary:
 - **gitignore** — idempotent `.gitignore` coverage of the gitignored config
   layer (`config.local.yml`, `personal.yml`), plus the `.env` rule kept as a
   leftover-file guard even though nothing reads that file any more (FR-041).
+- **personal** — the per-operator `personal.yml`, created once if absent and
+  never rewritten after that (030).
+- **field_defaults** — the per-project field defaults spliced into the managed
+  region of `config.yml` (011).
+- **task_mirror** — the per-project task-mirroring mode recorded in the same
+  file (011, 022).
+
+Both the `--json` summary and the default prose output carry the full set: the
+prose renderer walks a fixed list, so an effect absent from that list would be
+dropped from the human output while still appearing in the JSON.
 
 ## Flags
 

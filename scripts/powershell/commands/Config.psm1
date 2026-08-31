@@ -1559,10 +1559,10 @@ function Invoke-JiraConfig {
         $projStyles[$pk]['roles'] = $rolesForProj
     }
 
-    # Build the effects summary (FR-054), byte-identical to the Bash port:
-    # discovery, hooks, README and gitignore each reported as a distinct section.
-    # The hooks effect was computed up front and is a READ-ONLY verification —
-    # nothing in this command writes the hook registry (003 FR-022).
+    # Build the effects summary (FR-054), byte-identical to the Bash port: each
+    # effect this ceremony performs is reported as its own named section. 034
+    # removed the `hooks` entry along with the registry reader that produced it —
+    # this command no longer opens `.specify/extensions.yml` for any purpose.
     $effects = [ordered]@{
         discovery      = [ordered]@{ status = $discStatus; detail = "$nproj project(s) discovered"; projects = $projStyles }
         readme         = [ordered]@{ status = $readmeStatus; detail = $readmeDetail }

@@ -37,11 +37,11 @@ BeforeAll {
     # used for it are gone with the code that declared them.
     $script:RegistryToken = 'extensions\.yml|SPEC_KIT_JIRA_EXTENSIONS_YML'
 
-    # The prohibition's own explanatory comments are the ONLY place the tokens
-    # may still appear: a rule that cannot name the thing it forbids is
-    # unreadable (Principle XVI). Every allowlisted line must be a comment, and
-    # Select-CodeLine already drops those.
-    $script:Allowlist = 'lib[\\/]Output\.psm1'
+    # NO file-level allowlist, deliberately. Select-CodeLine already drops
+    # comment lines, so the prohibition's own explanatory comments are exempt
+    # by construction and nothing further is needed. A file exemption on top of
+    # that could only ever let real CODE through — it would weaken the guard
+    # rather than express it.
 
     function Select-CodeLine {
         # Every non-comment line of every port module, with its origin.
@@ -71,8 +71,7 @@ Describe 'The hook registry is never opened, for reading or writing (FR-001, SC-
         # for reading or for writing — so this subsumes every write-verb check
         # this file used to carry.
         $bad = Select-CodeLine |
-            Where-Object { $_.Text -match $script:RegistryToken } |
-            Where-Object { $_.File -notmatch $script:Allowlist }
+            Where-Object { $_.Text -match $script:RegistryToken }
         $bad | ForEach-Object { Write-Host "registry named: $($_.File):$($_.Line): $($_.Text)" }
         $bad.Count | Should -Be 0
     }
