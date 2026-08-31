@@ -1227,3 +1227,86 @@ YAML
   [ "${out}" = "${somedir}/relative-jira" ]
   rm -rf "${somedir}"
 }
+
+# --- T029 [036 FR-019] — the two lifecycle events added by 036 --------------
+#
+# `phase_status_map` accepts the lifecycle events as keys, so widening the
+# declared set widens this validation for free. That is a side effect of the
+# set being shared, not a capability 036 asks for — but the validation lists
+# are hand-maintained in four places, and an event that fires while its
+# phase_status_map key is refused as unknown is green suites and broken config.
+
+@test "T029 phase_status_map accepts after_converge (036 FR-019)" {
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    style: company_managed
+    phase_status_map:
+      after_converge: "Converged"
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+}
+
+@test "T029 phase_status_map accepts after_checklist (036 FR-019)" {
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    style: company_managed
+    phase_status_map:
+      after_checklist: "Checklisted"
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+}
+
+@test "T029 phase_status_map accepts both new events under a role mapping" {
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    style: company_managed
+    phase_status_map:
+      specification:
+        after_converge: "Converged"
+      story:
+        after_checklist: "Checklisted"
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 0 ]
+}
+
+@test "T029 the unknown-key message lists all eight lifecycle events" {
+  # Eight, not nine: before_specify is a hook but not a PHASE — nothing moves
+  # a board before the specification exists.
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    style: company_managed
+    phase_status_map:
+      after_nonsense: "Nowhere"
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"after_converge"* ]]
+  [[ "$output" == *"after_checklist"* ]]
+}
+
+@test "T029 an event the manifest deliberately refuses is still an unknown key" {
+  # after_constitution writes outside the feature directory and after_taskstoissues
+  # writes nothing publishable, so neither is declared (Principle XV). Neither
+  # may quietly become a valid phase key either.
+  cat > "${DIR}/config.yml" <<'YAML'
+projects:
+  - key: PROJ
+    style: company_managed
+    phase_status_map:
+      after_constitution: "Ratified"
+routing_default: PROJ
+YAML
+  JIRA_CONFIG_DIR="${DIR}" run config_load
+  [ "$status" -eq 4 ]
+}

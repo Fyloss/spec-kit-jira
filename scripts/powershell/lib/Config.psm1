@@ -939,7 +939,7 @@ function Test-JiraTeamConfig {
                     }
                     else {
                         foreach ($k in $ks) {
-                            $errs.Add("projects[$i].phase_status_map declares unknown key ``$k``; the lifecycle events are after_specify, after_clarify, after_plan, after_tasks, after_implement, after_analyze and the roles are specification, story, task")
+                            $errs.Add("projects[$i].phase_status_map declares unknown key ``$k``; the lifecycle events are after_specify, after_clarify, after_plan, after_tasks, after_implement, after_analyze, after_converge, after_checklist and the roles are specification, story, task")
                         }
                     }
                 }
@@ -1855,7 +1855,7 @@ function Get-JiraPhaseStatusTargetSet {
 # decision nor honour it (Constitution X, amended 4.0.0).
 $script:JiraHookEventNames = @(
     'before_specify', 'after_specify', 'after_clarify', 'after_plan',
-    'after_tasks', 'after_implement', 'after_analyze'
+    'after_tasks', 'after_implement', 'after_analyze', 'after_converge', 'after_checklist'
 )
 
 # =============================================================================

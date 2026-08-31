@@ -88,7 +88,8 @@ projects:
     # your workflow is authoritative.
     #
     # The lifecycle events are after_specify, after_clarify, after_plan,
-    # after_tasks, after_implement and after_analyze; the roles are
+    # after_tasks, after_implement, after_analyze, after_converge and
+    # after_checklist; the roles are
     # specification, story and task. Declare one role, two, or all three. A
     # mapping whose keys are all lifecycle events is the STORY role's (the
     # pre-023 shape, still valid); mixing the two key sets in one mapping is

@@ -384,7 +384,7 @@ function Get-JiraReconcilePhaseOrder {
     [CmdletBinding()]
     param([string] $PhaseStatusMapJson = '{}')
     $pm = $PhaseStatusMapJson | ConvertFrom-Json -Depth 100
-    $canonicalOrder = @('before_specify', 'after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')
+    $canonicalOrder = @('before_specify', 'after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze', 'after_converge', 'after_checklist')
     $roleNames = Get-JiraRoleNameList
     $out = [ordered]@{}
     foreach ($role in $roleNames) {
@@ -2357,7 +2357,14 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
     # reflect the directory as it stands AFTER the marker writes above, which
     # change spec.md and tasks.md, or the scan would clear content that is not
     # what gets published.
+    # `Split-Path -Parent` returns an EMPTY STRING for a bare relative filename
+    # ("spec.md"), where `dirname` returns ".". Without the fallback a run
+    # invoked from inside the feature directory died on a parameter-binding
+    # error while the Bash port carried on — caught by the cross-port
+    # equivalence case in tests/bash/commands/test_reconcile.bats, and by
+    # nothing else.
     $pgDir = Split-Path -Parent $specFile
+    if ([string]::IsNullOrEmpty($pgDir)) { $pgDir = '.' }
     $pgSet = Get-JiraArtifactSet -FeatureDirectory $pgDir
     $pgAllow = if ($env:SPEC_KIT_JIRA_ALLOWLIST) { $env:SPEC_KIT_JIRA_ALLOWLIST } else { '[]' }
     $pgCoords = Get-JiraApplyKnownCoordinate -ExtraJson '[]'

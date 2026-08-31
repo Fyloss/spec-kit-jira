@@ -165,7 +165,7 @@ routing_default: PROJ
 YAML
   JIRA_CONFIG_DIR="${DIR}" run config_load
   [ "$status" -eq 4 ]
-  [[ "$output" == *'projects[0].phase_status_map declares unknown key `epic`; the lifecycle events are after_specify, after_clarify, after_plan, after_tasks, after_implement, after_analyze and the roles are specification, story, task'* ]]
+  [[ "$output" == *'projects[0].phase_status_map declares unknown key `epic`; the lifecycle events are after_specify, after_clarify, after_plan, after_tasks, after_implement, after_analyze, after_converge, after_checklist and the roles are specification, story, task'* ]]
 }
 
 @test "before_specify is never an accepted phase_status_map key (M7 wording)" {
