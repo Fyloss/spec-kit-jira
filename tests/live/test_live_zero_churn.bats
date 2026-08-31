@@ -10,7 +10,14 @@
 #   SPEC_KIT_JIRA_BASE_URL=https://<your-site>.atlassian.net \
 #   JIRA_EMAIL=you@example.com JIRA_API_TOKEN=… \
 #   SPEC_KIT_JIRA_PROJECT_KEY=SCRATCH \
+#   SPEC_KIT_JIRA_LIVE_OTHER_PROJECT=SCRATCH2 \
 #   bats tests/live/test_live_zero_churn.bats
+#
+# SPEC_KIT_JIRA_LIVE_OTHER_PROJECT is needed by the 035 case ALONE, and it must
+# name a SECOND, different project: that case asserts a bound specification
+# ignores a committed default pointing elsewhere, so a default agreeing with
+# the record would test nothing. The case skips, with the reason, rather than
+# defaulting the second key to the first — which would have made it inert.
 #
 # SC-001: a second reconcile of an unchanged corpus performs zero writes of every
 # kind, including the task tier's transition write kind (012, Constitution II —
@@ -322,13 +329,26 @@ teardown() {
   # The committed default is set to a project the specification is NOT in, so
   # the run has to choose between the record and the default. Zero writes on
   # the second pass is the only outcome that proves it chose the record.
+  # The whole point of this case is that the committed default names a project
+  # the specification is NOT in. Defaulting the second key to the first would
+  # make routing_default equal the routed project, and the test would pass
+  # while exercising nothing at all — an inert guard, which is worse than no
+  # guard because it reports coverage it does not have. Skip instead, and say
+  # which variable is missing.
+  [ -n "${SPEC_KIT_JIRA_LIVE_OTHER_PROJECT:-}" ] || \
+    skip "SPEC_KIT_JIRA_LIVE_OTHER_PROJECT not set — this case needs a SECOND project for routing_default to name"
+  [ "${SPEC_KIT_JIRA_LIVE_OTHER_PROJECT}" != "${SPEC_KIT_JIRA_PROJECT_KEY}" ] || \
+    skip "SPEC_KIT_JIRA_LIVE_OTHER_PROJECT must differ from SPEC_KIT_JIRA_PROJECT_KEY, or routing_default agrees with the record and nothing is tested"
+
   local cfg_dir="${WORK}/.specify/jira"
   mkdir -p "${cfg_dir}"
   cat > "${cfg_dir}/config.yml" <<EOF
 projects:
   - key: ${SPEC_KIT_JIRA_PROJECT_KEY}
     style: company_managed
-routing_default: ${SPEC_KIT_JIRA_LIVE_OTHER_PROJECT:-${SPEC_KIT_JIRA_PROJECT_KEY}}
+  - key: ${SPEC_KIT_JIRA_LIVE_OTHER_PROJECT}
+    style: company_managed
+routing_default: ${SPEC_KIT_JIRA_LIVE_OTHER_PROJECT}
 privacy:
   allowlist: []
 EOF
