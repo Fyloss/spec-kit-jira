@@ -268,10 +268,14 @@ cannot provide.
 | Unit suites — macos-latest | **pass** |
 | Unit suites — windows-latest | **pass** |
 | Conformance corpus 0–3/4 — macos, ubuntu | **pass** (8/8) |
-| Conformance corpus 0/4, 3/4 — windows | **pass** |
+| Conformance corpus 0–3/4 — windows | **pass** (4/4) |
 | **Bash coverage ≥ 80% (kcov)** | **pass** |
 | **PowerShell coverage ≥ 80% (Pester)** | **pass** |
-| Conformance corpus 1/4, 2/4 — windows | running |
+
+**FINAL: 24/24 checks pass, 0 failures.** Workflows CI, Gates and Boundary all
+completed `success`. All twelve conformance shards green across macOS, Ubuntu
+and Windows — Windows being the environment this machine cannot simulate and
+where, per `AGENTS.md`, a divergence may only be diagnosed on the real runner.
 
 **The coverage gate was the open risk and it held.** This feature deletes
 well-tested code *and* its tests, so the net direction of the percentage was not
