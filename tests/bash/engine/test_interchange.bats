@@ -267,3 +267,73 @@ setup() {
     [ "${bash_ok}" = "${ps_ok}" ]
   done
 }
+
+# --- T015 [036] — the artifact set crosses the boundary --------------------
+#
+# The engine builds the set; the sink turns it into attachments and a comment.
+# It therefore crosses the engine->sink interface and must travel INSIDE the
+# neutral document, schema-validated before any write (Constitution VIII,
+# 036 data-model.md §4).
+#
+# The field is OPTIONAL: a document built before any artifact exists, or by a
+# code path that does not publish, omits it entirely.
+#
+# The absolute-path rule is the one with teeth. A path relative to the feature
+# directory is a neutral fact; an absolute one carries the operator's home
+# directory into a document that is written to disk and compared byte-for-byte
+# across ports and machines (Constitution VI).
+
+_with_artifacts() {
+  jq -c --argjson a "$1" '. + {artifacts: $a}' < "${VALID}"
+}
+
+@test "036 §4 a document carrying a well-formed artifacts array validates" {
+  run interchange_validate <<< "$(_with_artifacts '[
+    {"path":"spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"},
+    {"path":"contracts/api.md","hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":3,"attachment_name":"contracts__api.md"}
+  ]')"
+  [ "$status" -eq 0 ]
+}
+
+@test "036 §4 a document omitting artifacts entirely still validates" {
+  run interchange_validate < "${VALID}"
+  [ "$status" -eq 0 ]
+}
+
+@test "036 §4 an empty artifacts array validates" {
+  run interchange_validate <<< "$(_with_artifacts '[]')"
+  [ "$status" -eq 0 ]
+}
+
+@test "036 §4 an ABSOLUTE artifact path is rejected" {
+  run interchange_validate <<< "$(_with_artifacts '[
+    {"path":"/Users/someone/repo/specs/036/spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"}
+  ]')"
+  [ "$status" -ne 0 ]
+}
+
+@test "036 §4 an artifact path escaping the feature directory is rejected" {
+  run interchange_validate <<< "$(_with_artifacts '[
+    {"path":"../other/spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"}
+  ]')"
+  [ "$status" -ne 0 ]
+}
+
+@test "036 §4 an artifact entry missing a required key is rejected" {
+  run interchange_validate <<< "$(_with_artifacts '[
+    {"path":"spec.md","size":12,"attachment_name":"spec.md"}
+  ]')"
+  [ "$status" -ne 0 ]
+}
+
+@test "036 §4 an artifacts value that is not an array is rejected" {
+  run interchange_validate <<< "$(_with_artifacts '{"spec.md":"x"}')"
+  [ "$status" -ne 0 ]
+}
+
+@test "036 §4 a negative artifact size is rejected" {
+  run interchange_validate <<< "$(_with_artifacts '[
+    {"path":"spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":-1,"attachment_name":"spec.md"}
+  ]')"
+  [ "$status" -ne 0 ]
+}

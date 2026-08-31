@@ -259,3 +259,67 @@ Describe 'Test-JiraInterchange — the task tier (Phase 2, T026/T028, data-model
         Test-JiraInterchange ($doc | ConvertTo-Json -Depth 100) 2>$null | Should -BeFalse
     }
 }
+
+Describe 'Test-JiraInterchange — the artifact set (036, T016, data-model.md §4)' {
+    # Twin of the `036 §4` cases in tests/bash/engine/test_interchange.bats.
+    #
+    # The single-artifact case is the one that matters most here and looks the
+    # least interesting: PowerShell unwraps a one-element collection on `return`,
+    # so a one-artifact document was rejected as "artifacts must be an array"
+    # while the Bash port accepted it. A two-artifact fixture never shows it.
+
+    BeforeAll {
+        function New-ArtifactDoc {
+            param([Parameter(Mandatory)][AllowEmptyString()][string] $ArtifactsJson)
+            $raw = Get-Content -Raw -LiteralPath $ValidPath
+            $doc = $raw | ConvertFrom-Json -Depth 100
+            $props = [ordered]@{}
+            foreach ($p in $doc.PSObject.Properties) { $props[$p.Name] = $p.Value }
+            $props['artifacts'] = ($ArtifactsJson | ConvertFrom-Json -Depth 100 -NoEnumerate)
+            return ([pscustomobject] $props | ConvertTo-Json -Depth 100)
+        }
+        $script:Good = '[{"path":"spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"}]'
+    }
+
+    It 'accepts a document carrying a well-formed artifacts array' {
+        Test-JiraInterchange -Json (New-ArtifactDoc $script:Good) | Should -BeTrue
+    }
+
+    It 'accepts a document carrying EXACTLY ONE artifact (the unwrapping trap)' {
+        ($script:Good | ConvertFrom-Json -NoEnumerate).Count | Should -Be 1
+        Test-JiraInterchange -Json (New-ArtifactDoc $script:Good) | Should -BeTrue
+    }
+
+    It 'accepts a document that omits artifacts entirely' {
+        Test-JiraInterchange -Json (Get-Content -Raw -LiteralPath $ValidPath) | Should -BeTrue
+    }
+
+    It 'accepts an empty artifacts array' {
+        Test-JiraInterchange -Json (New-ArtifactDoc '[]') | Should -BeTrue
+    }
+
+    It 'rejects an ABSOLUTE artifact path' {
+        $a = '[{"path":"/Users/someone/repo/spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"}]'
+        Test-JiraInterchange -Json (New-ArtifactDoc $a) 2>$null | Should -BeFalse
+    }
+
+    It 'rejects an artifact path escaping the feature directory' {
+        $a = '[{"path":"../other/spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"}]'
+        Test-JiraInterchange -Json (New-ArtifactDoc $a) 2>$null | Should -BeFalse
+    }
+
+    It 'rejects an artifact entry missing a required key' {
+        $a = '[{"path":"spec.md","size":12,"attachment_name":"spec.md"}]'
+        Test-JiraInterchange -Json (New-ArtifactDoc $a) 2>$null | Should -BeFalse
+    }
+
+    It 'rejects an artifacts value that is not an array' {
+        $a = '{"spec.md":"x"}'
+        Test-JiraInterchange -Json (New-ArtifactDoc $a) 2>$null | Should -BeFalse
+    }
+
+    It 'rejects a negative artifact size' {
+        $a = '[{"path":"spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":-1,"attachment_name":"spec.md"}]'
+        Test-JiraInterchange -Json (New-ArtifactDoc $a) 2>$null | Should -BeFalse
+    }
+}

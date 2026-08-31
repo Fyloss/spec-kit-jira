@@ -111,7 +111,34 @@ def blocks_errors: ((.blocks // [])[]? | block_errors);
   (.stories[]? | select(has("tasks") and ((.tasks | type) == "array")) | .tasks[]? | .description // {} | blocks_errors),
   (.stories[]? | select(has("tasks") and ((.tasks | type) == "array")) | .tasks[]? | if (.done | type) != "boolean" then "task.done must be a boolean" else empty end),
   ( ( [ .stories[]? | select(has("tasks") and ((.tasks | type) == "array")) | .tasks[]? | (.local_id // "") | select(length > 0) ] ) as $ids
-    | if ($ids | length) != ($ids | unique | length) then "two tasks share a local_id" else empty end )
+    | if ($ids | length) != ($ids | unique | length) then "two tasks share a local_id" else empty end ),
+  # 036, data-model.md §4: the artifact set crosses the engine->sink boundary
+  # INSIDE this document, so it is validated here like everything else that
+  # crosses it — a failure blocks every write of the run (Constitution VIII).
+  #
+  # The key is OPTIONAL: a document built before any artifact exists, or by a
+  # path that does not publish, omits it entirely. Its ABSENCE is the off
+  # switch, exactly as it is for the task tier above.
+  #
+  # The absolute-path rule is the one with teeth. A path relative to the
+  # feature directory is a neutral fact; an absolute one carries the operator
+  # home directory into a document written to disk and compared byte-for-byte
+  # across ports and machines (Constitution VI). Same reason the `..` rule
+  # exists: a path escaping the feature directory is not this feature record.
+  #
+  # The type guard mirrors the task tier note above: `.artifacts[]?` iterates
+  # the VALUES of an object, which would feed `.path` a string and kill the
+  # whole jq program with "input is not valid JSON" instead of reporting the
+  # error on the next line.
+  (if has("artifacts") and ((.artifacts | type) != "array") then "artifacts must be an array" else empty end),
+  (select(has("artifacts") and ((.artifacts | type) == "array")) | .artifacts[]? |
+     (if ((.path // "") | length) < 1 then "artifact.path is required" else empty end),
+     (if ((.path // "") | startswith("/")) then "artifact.path must be relative to the feature directory, never absolute" else empty end),
+     (if ((.path // "") | test("(^|/)\\.\\.(/|$)")) then "artifact.path must not escape the feature directory" else empty end),
+     (if ((.hash // "") | test("^[0-9a-f]{40}$") | not) then "artifact.hash must be 40 hexadecimal characters" else empty end),
+     (if ((.size | type) != "number") or (.size < 0) then "artifact.size must be a non-negative integer" else empty end),
+     (if ((.attachment_name // "") | length) < 1 then "artifact.attachment_name is required" else empty end)
+  )
 ]'
 # kcov-excl-stop
 
