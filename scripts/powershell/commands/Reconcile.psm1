@@ -35,6 +35,13 @@ Import-Module (Join-Path $PSScriptRoot '../sink/jira/PlanApply.psm1') -Force
 # gets both transitively for free from bash's lack of real module scoping.
 Import-Module (Join-Path $PSScriptRoot '../engine/Drift.psm1')
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Transitions.psm1')
+# 036 — the artifact set and the sweep that scans it (C5.1). ArtifactSet is
+# this module's own dependency and takes -Force like the others; PrivacyGuard
+# does NOT, for the same reason as Drift/Transitions above: PlanApply.psm1
+# already loads it, and a second -Force reimport here would tear its exports
+# out of PlanApply's scope and reattach them to this one.
+Import-Module (Join-Path $PSScriptRoot '../engine/ArtifactSet.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/PrivacyGuard.psm1')
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force # Phase 8, US5 — the completion pass's transitions read
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/DuplicateProbe.psm1') -Force # US4, droppable — the second, best-effort guard
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force          # the operator disable record
@@ -2332,6 +2339,37 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
     }
 
     Stop-JiraTimingPhase -Phase 'plan' -RequestCount (Get-JiraRequestCount)
+
+    # 036, contracts/artifact-publication.md C5.1 — the artifact privacy sweep.
+    # Mirror of the same block in commands/reconcile.sh.
+    #
+    # HERE, and not beside the upload. Publication runs after the description
+    # and story writes, so a guard placed there could only refuse the upload
+    # while the reconcile's own writes had already landed — and FR-016 with
+    # C3.8 require ZERO writes for the ENTIRE run, the reconcile's included.
+    # This is the last point before any Jira write of any kind.
+    #
+    # It runs in dry-run too. A dry-run that predicted a publication the real
+    # run would refuse is a dry-run that lies (FR-020), and the scan writes
+    # nothing.
+    #
+    # The set is rebuilt here rather than threaded down from the parse: it must
+    # reflect the directory as it stands AFTER the marker writes above, which
+    # change spec.md and tasks.md, or the scan would clear content that is not
+    # what gets published.
+    $pgDir = Split-Path -Parent $specFile
+    $pgSet = Get-JiraArtifactSet -FeatureDirectory $pgDir
+    $pgAllow = if ($env:SPEC_KIT_JIRA_ALLOWLIST) { $env:SPEC_KIT_JIRA_ALLOWLIST } else { '[]' }
+    $pgCoords = Get-JiraApplyKnownCoordinate -ExtraJson '[]'
+    $pgCode = Test-JiraArtifactPrivacy -FeatureDirectory $pgDir -SetJson $pgSet `
+        -KnownCoordinatesJson $pgCoords -AllowlistJson $pgAllow
+    if ($pgCode -ne 0) {
+        $pgReason = Get-JiraArtifactPrivacyReason -FeatureDirectory $pgDir -SetJson $pgSet `
+            -KnownCoordinatesJson $pgCoords -AllowlistJson $pgAllow
+        return (Get-JiraReconcileFaultCode -Code $pgCode `
+                -Message "reconcile: $pgReason — a feature artifact carries a blocked shape; zero writes performed (FR-016)")
+    }
+
     Start-JiraTimingPhase -Phase 'apply' -RequestCount (Get-JiraRequestCount)
 
     $rc = 0
