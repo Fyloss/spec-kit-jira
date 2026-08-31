@@ -47,13 +47,20 @@ teardown() {
 
 @test "no configuration ceremony is needed for the hooks to be registered (SC-001)" {
   # The whole point: nothing but the install ran, and the registry is complete.
+  #
+  # 034 deleted the extension's own registry reader, so this assertion is made
+  # from the harness rather than from `register_hooks_health`. That is the more
+  # honest shape anyway: the claim here is about what the HOST wrote, and using
+  # our own classifier to check it always risked the two being wrong together —
+  # which is precisely how the retired report came to be confidently wrong.
   harness_install "${REPO}"
-  # shellcheck source=/dev/null
-  source "${ROOT}/scripts/bash/hooks/register_hooks.sh"
-  local health
-  health="$(register_hooks_health "$(harness_registry_path "${REPO}")")"
-  [ "$(jq -r '.present | length' <<< "${health}")" -eq 7 ]
-  [ "$(jq -r '.missing | length' <<< "${health}")" -eq 0 ]
+  local e present=0
+  for e in "${EVENTS[@]}"; do
+    if [[ -n "$(harness_entries_for "${REPO}" "${e}" | awk -F'\t' '$1 == "jira-mirror" {print $2}')" ]]; then
+      present=$((present + 1))
+    fi
+  done
+  [ "${present}" -eq 7 ]
 }
 
 @test "two further --force reinstalls produce no duplicates (FR-005, SC-004)" {

@@ -57,9 +57,11 @@
       "additionalProperties": false,
       "properties": {
         "discovery": { "$ref": "#/$defs/effect" },
-        "hooks": { "$ref": "#/$defs/effect" },
         "readme": { "$ref": "#/$defs/effect" },
-        "gitignore": { "$ref": "#/$defs/effect" }
+        "gitignore": { "$ref": "#/$defs/effect" },
+        "personal": { "$ref": "#/$defs/effect" },
+        "field_defaults": { "$ref": "#/$defs/effect" },
+        "task_mirror": { "$ref": "#/$defs/effect" }
       }
     },
     "drift": {
@@ -95,32 +97,6 @@
         }
       }
     },
-    "hook_health": {
-      "type": "object",
-      "description": "Hook health checked and reported on every run (FR-047). A pure READ of the consuming repository's hook registry: computing it writes nothing, and the registry itself is never written by this extension in any state (003 FR-022).",
-      "additionalProperties": false,
-      "required": ["present", "missing", "disabled"],
-      "properties": {
-        "present": { "type": "array", "items": { "type": "string" } },
-        "missing": { "type": "array", "items": { "type": "string" } },
-        "disabled": { "type": "array", "items": { "type": "string" } },
-        "held_disabled": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Events the operator disabled, recorded in the gitignored local binding and honoured at dispatch whatever the registry currently says (003 FR-007, FR-029). A cross-cutting annotation, not a further partition: an event here may also be `present` when the last install re-enabled it."
-        },
-        "duplicated": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Events carrying a leftover pre-manifest entry of this extension — our command with no owning `extension` field. The official install cannot purge it (its predicate matches on that field), so it is duplicated rather than replaced and the operator must remove it by hand (003 FR-028)."
-        },
-        "unreadable": {
-          "type": "boolean",
-          "description": "The registry could not be read at all. When true the three partition lists are EMPTY: the extension has no evidence either way and MUST NOT report the events as missing (003 FR-024)."
-        },
-        "repair_hint": { "type": "string", "description": "The remedy for whatever is not `present`, named literally: the official install command for `missing`, the release flag for `held_disabled`, the manual edit for `duplicated`. Present only when something is not `present` (FR-047, 003 FR-021)." }
-      }
-    },
     "mutations": {
       "type": "array",
       "description": "Every mentioned-ticket mutation logged (FR-049).",
@@ -133,6 +109,23 @@
           "action": { "type": "string" }
         }
       }
+    },
+    "provisional": {
+      "type": "array",
+      "description": "Degraded-mode team-name proposals derived from local branch names, each flagged as unverified because Jira introspection was unavailable (030). Empty when the scan found nothing. Present only on a degraded `config` run.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["team_prefix", "provisional"],
+        "properties": {
+          "team_prefix": { "type": "string" },
+          "provisional": { "const": true }
+        }
+      }
+    },
+    "rerun_guidance": {
+      "type": "string",
+      "description": "What the operator must supply to turn a degraded run into a full one, named literally (Principle XVI). Present only on a degraded `config` run."
     },
     "exit_code": {
       "type": "integer",
@@ -147,19 +140,16 @@
       "required": ["status"],
       "properties": {
         "status": {
-          "description": "The first six are WRITE outcomes, for effects that write a file this extension owns. The last five are the READ-ONLY verification vocabulary of the hooks effect (003 contracts/hook-registry-entry.md): that effect classifies and reports the consuming repository's hook registry and never writes it, so no write outcome could honestly describe it.",
+          "description": "Every value is a WRITE outcome, because every effect writes a file this extension owns. `would_create` is the dry-run twin of `created`, predicted but not performed (Constitution XI); `inert` means the managed region exists but the run had nothing to put in it. 034 removed the five READ-ONLY values (healthy, incomplete, held_disabled, duplicated, unreadable) along with their sole producer, the hooks effect: the extension no longer reads the hook registry, so it makes no claim that a write outcome could not describe.",
           "enum": [
             "written",
             "unchanged",
             "created",
+            "would_create",
             "repaired",
             "refused",
             "skipped",
-            "healthy",
-            "incomplete",
-            "held_disabled",
-            "duplicated",
-            "unreadable"
+            "inert"
           ]
         },
         "detail": { "type": "string" },

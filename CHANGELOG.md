@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-30
+
+### Removed — BREAKING
+
+The extension no longer reads `.specify/extensions.yml`. It never wrote that
+file; it did read it on every configuration ceremony and every reconcile, to
+classify all seven declared lifecycle events and report a verdict. The verdict
+could act on nothing — the extension cannot register a missing event, re-enable
+a disabled one, or remove a duplicate — and it was observed being wrong: in a
+real repository it reported all seven events missing while the registry plainly
+carried them, most plausibly because the 0.22.0 id/command rename made every
+previously-written entry unrecognisable to it. The repair it recommended,
+reinstalling, changed the verdict not at all.
+
+Registration, and its survival across reinstalls, belongs to the host. Removed
+with the reader:
+
+- **`--enable-hook <event>`** on `/speckit.jira-mirror.config`. Supplying it is
+  now refused as an unknown flag.
+- **`hooks.disabled`** in `.specify/jira/config.local.yml` — the operator
+  disable record. A checkout still declaring it is refused with exit 4 and the
+  schema's existing unknown-key message, which names both the key and the file.
+  Deleting the two lines is the whole remedy.
+- **`effects.hooks`** from the configuration ceremony's `--json` run summary.
+- **`hook_health`** from reconcile's `--json` run summary.
+- **Five effect-status values** — `healthy`, `incomplete`, `held_disabled`,
+  `duplicated`, `unreadable` — whose only producer was the hooks effect.
+- **The silent dispatch hold.** Reconcile no longer exits 0 without a word when
+  the current lifecycle event was recorded as disabled.
+- **`SPEC_KIT_JIRA_EXTENSIONS_YML`**, the environment override that redirected
+  the registry path for tests.
+
+Two protections are given up deliberately, and are documented in `INSTALL.md`
+and in the managed README block rather than left to be discovered:
+
+- a repository whose hooks are **not** registered will simply see nothing
+  happen — there is no warning, because nothing looks;
+- a hook disabled by hand may be **re-enabled by a reinstall** without warning,
+  because `specify extension add` rewrites `enabled: true` unconditionally.
+
+### Fixed
+
+- `contracts/run-summary.schema.json` had drifted seven items behind both ports
+  across three features — `effects.personal`, `effects.field_defaults`,
+  `effects.task_mirror`, the `would_create` and `inert` statuses, and the
+  top-level `provisional` and `rerun_guidance`. With
+  `additionalProperties: false` that made every ceremony summary invalid against
+  its own published contract. All seven are now declared, and both commands'
+  summaries are checked against the schema by new suites.
+
 ## [0.23.0] - 2026-08-30
 
 ### Added

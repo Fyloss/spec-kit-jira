@@ -45,7 +45,6 @@ source "${_cmd_reconcile_dir}/../sink/jira/discovery.sh" # Phase 8, US5 — the 
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/duplicate_probe.sh" # US4, droppable — the second, best-effort guard
 # shellcheck source=/dev/null
-source "${_cmd_reconcile_dir}/../hooks/register_hooks.sh" # hook health — READ ONLY (003 FR-022)
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../lib/config.sh"          # the operator disable record
 # shellcheck source=/dev/null
@@ -62,25 +61,6 @@ source "${_cmd_reconcile_dir}/../lib/run_state.sh"       # the run-state short-c
 # is performing; it is the only thing that tells the bridge WHICH event fired.
 _reconcile_hook_event() {
   printf '%s' "${SPEC_KIT_JIRA_HOOK_EVENT:-}"
-}
-
-# _reconcile_is_held <event> — 0 when the operator disabled this event, 1 when
-# not, EXIT_CONFIG when the disable record cannot be read. A read failure must
-# never be silently treated as "not held" — an unreadable binding might be
-# hiding an operator's disable decision (Constitution X, contracts/
-# parse-failure.md §4: config_hooks_disabled_read propagates).
-#
-# Read at DISPATCH, before any prerequisite check and before any network work, so
-# the decision holds even in the window between an install that re-enabled the
-# registry entry and the next ceremony (003 FR-007, FR-020, research R5 step 2).
-# The registry's own `enabled` field is deliberately NOT consulted here: the
-# install rewrites it to `true` unconditionally, so it cannot carry the answer.
-_reconcile_is_held() {
-  local event="$1" disabled rc=0
-  [[ -z "${event}" ]] && return 1
-  disabled="$(config_hooks_disabled_read)" || rc=$?
-  ((rc != 0)) && return "${rc}"
-  jq -e --arg e "${event}" 'index($e) != null' <<< "${disabled}" > /dev/null 2>&1
 }
 
 # _reconcile_notice <line...> — the SINGLE message a degraded run is allowed
@@ -618,20 +598,15 @@ _reconcile_run() {
 
   timing_phase_begin "prereq" "$(jira_request_count)"
 
-  # (0) DISPATCH GUARD — the operator's disable decision, honoured before any
-  # prerequisite check, any config read and any network call (FR-020). The exit
-  # is INERT: no Jira call, and no warning either. A warning here would be noise
-  # on every single lifecycle command for an event the operator deliberately
-  # turned off, which is precisely what FR-020 forbids.
-  local hook_event rc_held=0
+  # The lifecycle event this run was dispatched for. 034 removed the DISPATCH
+  # GUARD that used to sit here and return 0 silently when the operator had
+  # recorded that event as disabled: the record it consulted is retired with the
+  # rest of the registry reader, and Constitution 4.0.0 gives up that protection
+  # deliberately (a reinstall may re-enable a hand-disabled hook, and this
+  # extension will neither prevent nor report it). The event itself is still
+  # read — run-state (021) and the lifecycle status map (023) both need it.
+  local hook_event
   hook_event="$(_reconcile_hook_event)"
-  _reconcile_is_held "${hook_event}" || rc_held=$?
-  if ((rc_held == 0)); then
-    return 0
-  elif ((rc_held == EXIT_CONFIG)); then
-    _reconcile_fault "${EXIT_CONFIG}" 'reconcile: the operator disable record could not be read (zero writes)'
-    return $?
-  fi
 
   # The spec file is the first positional argument.
   local spec_file=""
@@ -2122,15 +2097,6 @@ _reconcile_run() {
     fi
   fi
 
-  # Hook health is READ and reported on every run (FR-047). Nothing here writes
-  # the registry, in any state — reading it is the extension's whole
-  # relationship with that file (003 FR-022). The path is relative to the
-  # repository root (cwd), overridable for tests.
-  local ext_path hooks_health
-  ext_path="${SPEC_KIT_JIRA_EXTENSIONS_YML:-.specify/extensions.yml}"
-  hooks_health="$(register_hooks_health "${ext_path}" "$(config_hooks_disabled_read 2> /dev/null)")" || true
-  [[ -z "${hooks_health}" ]] && hooks_health='{"disabled":[],"duplicated":[],"held_disabled":[],"missing":[],"present":[],"unreadable":false}'
-
   # run_state_record (021, T031) below must see whether this run actually
   # applied every planned action — the hook-context downgrade just below
   # resets `rc` to 0 even on a real failure, so the pre-downgrade value is
@@ -2295,7 +2261,7 @@ _reconcile_run() {
     --argjson dry "${dry_run}" --argjson c "${created}" --argjson u "${updated}" \
     --argjson x "${rc}" --slurpfile actions_f "$(json_path_arg "${_disp_f}")" \
     --argjson wc "${warn_count}" --argjson w "${warns}" --argjson no "${notes}" \
-    --argjson hl "${has_lifecycle}" --argjson hooks "${hooks_health}" \
+    --argjson hl "${has_lifecycle}" \
     --argjson rec "${recognised_count}" --argjson asg "${assigned_count}" --argjson sk "${skipped_count}" \
     --argjson tc "${task_counts}" --argjson cc "${checklist_counts}" --argjson tr "${counts_transitioned}" '
     ($actions_f[0]) as $actions |
@@ -2310,7 +2276,7 @@ _reconcile_run() {
                 } end)),
      actions:$actions}
     + (if $hl then {warnings:$w, notes:$no} else {} end)
-    + {hook_health:$hooks, exit_code:$x}' | json_canonical)" || _disp_rc=$?
+    + {exit_code:$x}' | json_canonical)" || _disp_rc=$?
   rm -f "${_disp_f}"
   ((_disp_rc == 0)) || return "${_disp_rc}"
 

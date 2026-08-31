@@ -37,7 +37,7 @@ flowchart TD
     Apply -->|"yes"| Summary
     Apply -->|"no"| Write["10 · APPLY — privacy guard, then write<br/>stamp and record each created key immediately<br/>the resolved transition (023) is issued here, alongside content"]
     Write --> Complete["10a · COMPLETE — for each checked task,<br/>transition its recognised sub-task to a done-category status (012)"]
-    Complete --> Summary["11 · Run summary<br/>counts · actions · warnings · notes · hook health"]
+    Complete --> Summary["11 · Run summary<br/>counts · actions · warnings · notes"]
     Summary --> Hook{"Running inside a hook<br/>with a non-zero exit?"}
     Hook -->|"yes"| Downgrade(["one WARNING, exit downgraded to 0"])
     Hook -->|"no"| Exit(["exit with the mapped code"])
@@ -381,7 +381,6 @@ classDiagram
         +Action actions
         +list~string~ warnings
         +list~string~ notes
-        +HookHealth hook_health
         +int exit_code
     }
 
@@ -414,18 +413,8 @@ classDiagram
         +object body
     }
 
-    class HookHealth {
-        +list~string~ present
-        +list~string~ missing
-        +list~string~ disabled
-        +list~string~ duplicated
-        +list~string~ held_disabled
-        +bool unreadable
-    }
-
     RunSummary *-- Counts
     RunSummary "1" *-- "0..n" Action
-    RunSummary *-- HookHealth
 ```
 
 Two details that make the summary trustworthy:

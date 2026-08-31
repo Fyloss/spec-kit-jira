@@ -1,94 +1,95 @@
 #!/usr/bin/env bats
-# T057 [US6] — No code path in the Bash port can open the hook registry for
-# writing (FR-022, SC-011).
+# 034 [FR-001, FR-010, SC-002] — No code path in the Bash port can open the hook
+# registry AT ALL: not for writing, and now not for reading either.
 #
-# This is the mechanical enforcement of the feature's load-bearing constraint.
-# The behavioural test (test_registry_never_written.bats) proves the registry is
-# byte-identical after every documented state; this one proves something the
-# behavioural test cannot, because no test suite enumerates every future state:
-# that the CAPABILITY to write it does not exist in the source at all.
+# This file used to enumerate write verbs — redirection, mv/cp/rm/tee/truncate,
+# sed -i, mkdir, the config serialiser — because a write can be spelled many
+# ways and the extension still legitimately READ the file. Constitution 4.0.0
+# withdrew that permission and widened the prohibition: an extension that cannot
+# repair a fact must not assert it, so this port must not open
+# `.specify/extensions.yml` in any state, for any purpose.
+#
+# That makes the check categorically simpler AND stronger. A path the port
+# cannot name cannot be written, so the absence test below subsumes every
+# write-verb test it replaces. There is no exempted state and no safe spelling.
 #
 # It exists because the guarantee has to survive people. A later feature adding
-# "just one small write" in good faith — to repair a missing entry, to realign a
-# field, to migrate a leftover — would pass every behavioural test that does not
-# happen to exercise its trigger. This check fails the build the moment the
-# construct appears, whether or not anything calls it.
+# "just one small read" in good faith — to warn about a missing entry, to
+# classify a duplicate, to check a version — would pass every behavioural test
+# that does not happen to exercise its trigger. This fails the build the moment
+# the token appears, whether or not anything calls it.
 #
-# Why it matters that this is unconditional: the extension's YAML reader models a
-# deliberately restricted subset and drops every comment (research R3), so ANY
-# write it performs silently damages a file the operator is invited to edit and
-# other extensions co-own. There is no safe write, so there is no exempted state.
+# SPEC_KIT_JIRA_GUARD_ROOT points the scan at a different tree, which is how
+# this guard is demonstrated RED against the pre-change port (034 T007):
+#
+#   PRE=$(mktemp -d) && git archive HEAD scripts | tar -x -C "$PRE"
+#   SPEC_KIT_JIRA_GUARD_ROOT="$PRE/scripts/bash" bats tests/bash/ci/test_no_registry_write.bats
+#
+# A guard nobody has watched fail is not known to work: two of three guards
+# shipped in a previous feature here were inert, and an inert guard is silent
+# about it.
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
-  SCRIPTS="${ROOT}/scripts/bash"
-  # Everything that could denote the registry: the literal path, the environment
-  # override, and the two local names the code uses for it.
-  REGISTRY_TOKENS='extensions\.yml|SPEC_KIT_JIRA_EXTENSIONS_YML|ext_path'
+  SCRIPTS="${SPEC_KIT_JIRA_GUARD_ROOT:-${ROOT}/scripts/bash}"
+  # Everything that could denote the registry: the literal path and the
+  # environment override that used to redirect it. `ext_path`, the old local
+  # name, is gone with the code that declared it.
+  REGISTRY_TOKENS='extensions\.yml|SPEC_KIT_JIRA_EXTENSIONS_YML'
+  # NO file-level allowlist, deliberately. scan() already drops comment lines,
+  # so the prohibition's own explanatory comments are exempt by construction. A
+  # file exemption on top of that could only ever let real CODE through — it
+  # would weaken the guard rather than express it.
 }
 
-# offending <regex> — print matching non-comment lines across the Bash port.
-offending() {
+# scan <regex> — matching NON-COMMENT lines across the port.
+scan() {
   grep -rnE "$1" "${SCRIPTS}" --include='*.sh' \
     | grep -vE ':[0-9]+:[[:space:]]*#' || true
 }
 
-@test "no redirection writes to the registry (FR-022)" {
-  local bad
-  bad="$(offending ">>?[[:space:]]*\"?\\\$\\{?(${REGISTRY_TOKENS})")"
-  [ -z "${bad}" ] || { printf 'redirection into the hook registry:\n%s\n' "${bad}" >&2; return 1; }
+@test "the guard reads a non-empty tree — the instrument check" {
+  # If SCRIPTS pointed at nothing, every test below would pass while checking
+  # nothing at all. That failure mode is invisible from the outside, so it is
+  # asserted first and explicitly.
+  [ -d "${SCRIPTS}" ]
+  local n
+  n="$(find "${SCRIPTS}" -name '*.sh' | wc -l | tr -d ' ')"
+  [ "${n}" -gt 20 ]
 }
 
-@test "no mv/cp/rm/tee/truncate/sed -i targets the registry (FR-022)" {
+@test "the registry is never named outside an explanatory comment (FR-001, SC-002)" {
+  # The load-bearing test. A path that cannot be named cannot be opened — for
+  # reading or for writing — so this subsumes every write-verb check this file
+  # used to carry.
   local bad
-  bad="$(offending "\\b(mv|cp|rm|tee|truncate|install)\\b[^|]*(${REGISTRY_TOKENS})")"
-  [ -z "${bad}" ] || { printf 'file-mutating command targeting the hook registry:\n%s\n' "${bad}" >&2; return 1; }
-  bad="$(offending "sed[[:space:]]+-i[^|]*(${REGISTRY_TOKENS})")"
-  [ -z "${bad}" ] || { printf 'in-place sed targeting the hook registry:\n%s\n' "${bad}" >&2; return 1; }
+  bad="$(scan "${REGISTRY_TOKENS}")"
+  [ -z "${bad}" ] || { printf 'the hook registry is named in shipped code:\n%s\n' "${bad}" >&2; return 1; }
 }
 
-@test "no mkdir prepares a directory for the registry (FR-022)" {
-  # Creating the parent directory is only ever a prelude to creating the file.
+@test "the deleted reader has not come back under any name (FR-001)" {
+  # The module and every symbol it exported. A reintroduction under a new file
+  # name still has to spell one of these to be useful.
   local bad
-  bad="$(offending "mkdir[^|]*(${REGISTRY_TOKENS})")"
-  [ -z "${bad}" ] || { printf 'mkdir for the hook registry path:\n%s\n' "${bad}" >&2; return 1; }
+  bad="$(find "${SCRIPTS}" -name 'register_hooks.sh')"
+  [ -z "${bad}" ] || { printf 'the deleted hooks module is back: %s\n' "${bad}" >&2; return 1; }
+  bad="$(scan 'register_hooks_|HOOK_EXTENSION_ID|HOOK_COMMAND|HOOK_BEFORE_')"
+  [ -z "${bad}" ] || { printf 'a symbol of the deleted reader is back:\n%s\n' "${bad}" >&2; return 1; }
 }
 
-@test "the registry path is never passed to the config-file writer (FR-022)" {
-  # config_to_yaml is the serialiser every file this extension DOES own goes
-  # through. Reaching it with the registry path is the exact shape of the write
-  # this feature removed.
+@test "no read verb is aimed at a registry-shaped path (FR-001)" {
+  # Subsumed by the absence test above, and kept anyway: it names the failure
+  # concretely when someone reintroduces a read, which is friendlier than a
+  # bare "the registry is named here".
   local bad
-  bad="$(offending "config_to_yaml[^|]*(${REGISTRY_TOKENS})")"
-  [ -z "${bad}" ] || { printf 'registry path piped to the config serialiser:\n%s\n' "${bad}" >&2; return 1; }
-  bad="$(offending "(${REGISTRY_TOKENS})[^|]*\\|[[:space:]]*config_to_yaml")"
-  [ -z "${bad}" ] || { printf 'registry path piped to the config serialiser:\n%s\n' "${bad}" >&2; return 1; }
+  bad="$(scan '(cat|source|\.|jq|read|<)[^|]*extensions\.yml')"
+  [ -z "${bad}" ] || { printf 'a read aimed at the hook registry:\n%s\n' "${bad}" >&2; return 1; }
 }
 
-@test "the deleted writer has not come back under any name (FR-022, SC-011)" {
-  run grep -rnE 'register_hooks_write|_register_hooks_merge|_register_hooks_entry' "${SCRIPTS}" --include='*.sh'
-  [ "$status" -ne 0 ]
-}
-
-@test "the hooks module names no write construct at all (SC-011)" {
-  # Belt and braces on the one module that handles the registry path: it must
-  # contain no file-mutating verb whatsoever, on any line, for any file. The
-  # module's whole job is to read and classify, so there is nothing it could
-  # legitimately be writing.
-  local module="${SCRIPTS}/hooks/register_hooks.sh"
+@test "the operator disable record has no reader or writer left (FR-005)" {
+  # `hooks.disabled` was the only thing the extension wrote in response to what
+  # it read in the registry. Retired with it; its accessors must not survive.
   local bad
-  bad="$(grep -nE '(^|[^a-z_])(mv|cp|rm|tee|truncate|mkdir|touch)[[:space:]]|sed[[:space:]]+-i|>[[:space:]]*"?\$' "${module}" \
-    | grep -vE ':[0-9]+:[[:space:]]*#' || true)"
-  [ -z "${bad}" ] || { printf 'write construct in the read-only hooks module:\n%s\n' "${bad}" >&2; return 1; }
-}
-
-@test "config_to_yaml — the writer for files we DO own — is never reached with the registry" {
-  # The serialiser every file this extension owns goes through. A registry path
-  # arriving here is the exact shape of the write this feature removed, and the
-  # one a later feature would most plausibly reintroduce.
-  local bad
-  bad="$(grep -rn 'config_to_yaml' "${SCRIPTS}" --include='*.sh' \
-    | grep -vE ':[0-9]+:[[:space:]]*#' \
-    | grep -E "${REGISTRY_TOKENS}" || true)"
-  [ -z "${bad}" ] || { printf 'registry path reaching the config serialiser:\n%s\n' "${bad}" >&2; return 1; }
+  bad="$(scan 'config_hooks_disabled')"
+  [ -z "${bad}" ] || { printf 'the retired disable record is still accessed:\n%s\n' "${bad}" >&2; return 1; }
 }

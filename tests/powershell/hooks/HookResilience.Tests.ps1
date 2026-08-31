@@ -8,7 +8,6 @@ BeforeAll {
     $CmdDir = Join-Path $Root 'scripts/powershell/commands'
     $HookDir = Join-Path $Root 'scripts/powershell/hooks'
     Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
-    Import-Module (Join-Path $HookDir 'RegisterHooks.psm1') -Force
     Import-Module (Join-Path $Root 'scripts/powershell/lib/Config.psm1') -Force
     Import-Module (Join-Path $Root 'scripts/powershell/lib/Output.psm1') -Force
 
@@ -40,7 +39,6 @@ Describe 'Hook resilience' {
         # a real key with a matching epic-strategy override — both bypass
         # config.yml, which this isolated work dir never has.
         $env:SPEC_KIT_JIRA_PROJECT_KEY = 'TEST'
-        $env:SPEC_KIT_JIRA_EXTENSIONS_YML = Join-Path $Work '.specify/extensions.yml'
         $env:JIRA_NO_SLEEP = '1'
         $env:JIRA_MAX_ATTEMPTS = '1'
         $env:JIRA_EMAIL = 'user@example.com'
@@ -84,25 +82,6 @@ Describe 'Hook resilience' {
         finally { Remove-Item Env:SPEC_KIT_JIRA_LIFECYCLE -ErrorAction SilentlyContinue }
     }
 
-    It 'is inert at dispatch for a recorded event — no Jira call, no warning (FR-020)' {
-        # The operator's decision lives in OUR file, so it survives the reinstall
-        # that rewrote the registry to `enabled: true`. The guarantee is on the
-        # EFFECT (no bridge step runs), not on the registry field, which upstream
-        # rewrites unconditionally (research R5).
-        $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
-        $env:JIRA_CONFIG_DIR = $dir
-        try {
-            $null = Add-JiraHooksDisabled -LifecycleEvent 'after_specify' -ConfigDir $dir
-            $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_specify'
-            (Invoke-ReconcileCode @('reconcile', '--json', $Spec)) | Should -Be 0
-        }
-        finally {
-            Remove-Item Env:SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
-            Remove-Item Env:JIRA_CONFIG_DIR -ErrorAction SilentlyContinue
-            Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
-        }
-    }
 
     It 'an unreadable local binding inside a hook leaves the host exit 0 with the three lines plus one WARNING (007 FR-011)' {
         $cfgDir = Join-Path $Work '.specify/jira'
@@ -126,14 +105,6 @@ Describe 'Hook resilience' {
         $text | Should -Match 'cannot parse this line as a mapping entry'
     }
 
-    It 'never brings the hook registry into existence (FR-022, SC-011)' {
-        $ext = $env:SPEC_KIT_JIRA_EXTENSIONS_YML
-        Remove-Item -Force $ext -ErrorAction SilentlyContinue
-        $env:SPEC_KIT_JIRA_HOOK_CONTEXT = '1'
-        $null = Invoke-ReconcileCode @('reconcile', '--json', $Spec)
-        $null = Invoke-ReconcileCode @('reconcile', '--dry-run', '--json', $Spec)
-        Test-Path -LiteralPath $ext | Should -BeFalse
-    }
 }
 
 Describe 'T110b [Phase 8, 022] — a checklist-caused fault downgrades identically' {

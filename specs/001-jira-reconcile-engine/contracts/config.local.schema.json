@@ -25,28 +25,6 @@
       "type": "object",
       "description": "Per-user overrides of team config fields. Same schema constraints as the corresponding config.yml fields.",
       "additionalProperties": true
-    },
-    "hooks": {
-      "type": "object",
-      "description": "The operator disable record (003 FR-029). It lives HERE, and not in the hook registry, for two reasons: the official install rewrites `enabled: true` unconditionally on every reinstall and upgrade, so the registry cannot remember the decision (003 research R5); and this file is gitignored and outside .specify/extensions/, so it survives both (Constitution V).",
-      "additionalProperties": false,
-      "properties": {
-        "disabled": {
-          "type": "array",
-          "description": "Lifecycle events for which no bridge step is performed, whatever the registry's `enabled` field currently says. Removable only by an explicit operator action (003 FR-007, FR-029). A name outside the closed set of seven is reported and ignored rather than failing the run — the file is human-editable and a typo must not break mirroring.",
-          "items": {
-            "enum": [
-              "before_specify",
-              "after_specify",
-              "after_clarify",
-              "after_plan",
-              "after_tasks",
-              "after_implement",
-              "after_analyze"
-            ]
-          }
-        }
-      }
     }
   }
 }

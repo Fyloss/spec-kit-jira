@@ -1014,7 +1014,7 @@ function Test-JiraLocalConfig {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Object)
     $errs = [System.Collections.Generic.List[string]]::new()
-    $allowed = @('site_alias', 'bound_site', 'resolved_ids', 'overrides', 'hooks')
+    $allowed = @('site_alias', 'bound_site', 'resolved_ids', 'overrides')
     if ($Object -is [System.Collections.IDictionary]) {
         foreach ($k in (Get-JiraOrdinalSorted $Object.Keys)) {
             if ($allowed -cnotcontains [string]$k) { $errs.Add("unknown config.local key: $k") }
@@ -1027,25 +1027,6 @@ function Test-JiraLocalConfig {
     $boundSite = Get-CfgProp $Object 'bound_site'
     if ($null -ne $boundSite -and $boundSite -isnot [string]) {
         $errs.Add('bound_site must be a string')
-    }
-    # The operator disable record (003 FR-029). Only the SHAPE is validated
-    # here: an event name outside the closed set is reported and ignored at read
-    # time, not refused, because this file is human-editable and a typo must not
-    # break mirroring. Same error strings as the Bash port's jq program.
-    $hooks = Get-CfgProp $Object 'hooks'
-    if ($null -ne $hooks) {
-        if ($hooks -isnot [System.Collections.IDictionary]) { $errs.Add('hooks must be a mapping') }
-        else {
-            foreach ($k in (Get-JiraOrdinalSorted $hooks.Keys)) {
-                if ([string]$k -cne 'disabled') { $errs.Add("unknown hooks key: $k") }
-            }
-            if ($hooks.Contains('disabled')) {
-                $d = $hooks['disabled']
-                if (($d -is [string]) -or (($null -ne $d) -and ($d -isnot [System.Collections.IEnumerable]))) {
-                    $errs.Add('hooks.disabled must be a list of lifecycle event names')
-                }
-            }
-        }
     }
     # Per-project style provenance keys (002 US1): when present under a
     # resolved_ids entry they must carry the enum values — same error strings as
@@ -1854,25 +1835,24 @@ function Get-JiraPhaseStatusTargetSet {
 }
 
 # =============================================================================
-# The operator disable record (003 T013, FR-007/FR-029). Mirror of the
-# config_hooks_disabled_* functions in lib/config.sh.
+# The lifecycle event set
 # =============================================================================
 #
-# `specify extension add` writes `enabled: true` unconditionally for every entry
-# it re-adds, with no read of the existing value (003 research R5). So the hook
-# registry CANNOT remember that the operator disabled an event: the next install
-# or upgrade silently re-enables it. Constitution X forbids that outcome, and
-# FR-022 forbids the obvious fix of writing the value back.
+# The closed set of seven lifecycle events the extension's manifest declares and
+# the host registers. It is declared HERE, once per port, and every consumer
+# reads it from here — tests/powershell/ci/Manifest.Hooks.Tests.ps1 fails the
+# build if this set and extension.yml's `hooks:` block ever diverge.
 #
-# The decision is therefore recorded here instead, in the gitignored local
-# binding, which lives outside `.specify/extensions/` and survives a reinstall by
-# Principle V — and it is honoured at DISPATCH, so it holds even in the window
-# between an install that re-enabled the entry and the next ceremony.
-
-# The closed set of seven lifecycle events — the `hooks.disabled` enum of
-# contracts/config.local.schema.json. Declared here because this module encodes
-# that schema; hooks/RegisterHooks.psm1 consumes it rather than redeclaring it,
-# so the set has exactly one source per port (data-model § Lifecycle event).
+# Its surviving consumer is Get-JiraAfterEventNameList below: the six
+# after-events are the closed key set a role's lifecycle mapping accepts (023,
+# contracts/role-lifecycle-config.md §2), which is what phase_status_map is
+# validated against.
+#
+# It used to have a second purpose — the `hooks.disabled` enum of
+# config.local.schema.json, the operator disable record. 034 retired that record
+# along with the rest of the hook-registry reader: the extension no longer opens
+# .specify/extensions.yml, so it can neither observe an operator's disable
+# decision nor honour it (Constitution X, amended 4.0.0).
 $script:JiraHookEventNames = @(
     'before_specify', 'after_specify', 'after_clarify', 'after_plan',
     'after_tasks', 'after_implement', 'after_analyze'
@@ -2010,122 +1990,13 @@ function Get-CfgLocalObject {
     return $o
 }
 
-function Get-JiraHooksDisabled {
-    <#
-    .SYNOPSIS
-      The recorded set as a canonical JSON array of event names, sorted and
-      deduplicated. An absent record is the empty set. A name outside the closed
-      set is REPORTED on stderr and ignored rather than failing the run: this
-      file is human-editable and a typo must not stop the mirror.
-      Mirror of config_hooks_disabled_read.
-    #>
-    [CmdletBinding()]
-    param([string] $ConfigDir = (Get-JiraConfigDirPath))
-
-    $obj = Get-CfgLocalObject -ConfigDir $ConfigDir
-    $hooks = Get-CfgProp $obj 'hooks'
-    $raw = @()
-    if ($hooks -is [System.Collections.IDictionary] -and $hooks.Contains('disabled')) {
-        $d = $hooks['disabled']
-        if (($null -ne $d) -and ($d -isnot [string]) -and ($d -is [System.Collections.IEnumerable])) { $raw = @($d) }
-    }
-
-    $known = [System.Collections.Generic.List[string]]::new()
-    $unknown = [System.Collections.Generic.List[string]]::new()
-    foreach ($x in $raw) {
-        $s = [string]$x
-        if ($script:JiraHookEventNames -ccontains $s) {
-            if (-not $known.Contains($s)) { $known.Add($s) }
-        }
-        elseif (-not $unknown.Contains($s)) { $unknown.Add($s) }
-    }
-    foreach ($u in ($unknown | Sort-Object)) {
-        [Console]::Error.WriteLine("config: $(Get-CfgLocalPath -ConfigDir $ConfigDir): unknown lifecycle event in hooks.disabled: $u — ignored")
-    }
-    $sorted = [string[]]@($known)
-    [System.Array]::Sort($sorted, [System.StringComparer]::Ordinal)
-    return (ConvertTo-JiraJsonValue $sorted)
-}
-
-function Set-CfgHooksDisabled {
-    # Persist the record, preserving every other key the operator owns
-    # (site_alias, overrides) and every machine-owned key (resolved_ids). Writes
-    # through the canonical serialiser, so a re-run producing the same set writes
-    # byte-identical bytes. Mirror of _cfg_hooks_disabled_set.
-    param([string] $ConfigDir, [bool] $DryRun, [string[]] $NewSet)
-    if ($DryRun) { return }
-
-    $obj = Get-CfgLocalObject -ConfigDir $ConfigDir
-    $map = [ordered]@{}
-    foreach ($k in $obj.Keys) { $map[[string]$k] = $obj[$k] }
-
-    $hooks = [ordered]@{}
-    if ($map.Contains('hooks') -and ($map['hooks'] -is [System.Collections.IDictionary])) {
-        foreach ($k in $map['hooks'].Keys) { if ([string]$k -cne 'disabled') { $hooks[[string]$k] = $map['hooks'][$k] } }
-    }
-    if ($NewSet.Count -gt 0) { $hooks['disabled'] = $NewSet }
-
-    if ($hooks.Count -eq 0) { $map.Remove('hooks') } else { $map['hooks'] = $hooks }
-
-    $yaml = ConvertTo-JiraConfigYaml -Json (ConvertTo-JiraJsonValue $map)
-    if (-not (Test-Path -LiteralPath $ConfigDir)) { New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null }
-    [System.IO.File]::WriteAllText((Get-CfgLocalPath -ConfigDir $ConfigDir), $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
-}
-
-function Add-JiraHooksDisabled {
-    <#
-    .SYNOPSIS
-      Record the operator's decision to disable one event. Returns `recorded`,
-      `unchanged`, or `ignored` (an unknown name). Under -DryRun the status is
-      computed and nothing is written (Constitution XI). Never fails the run.
-      Mirror of config_hooks_disabled_add.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)] [string] $LifecycleEvent,
-        [string] $ConfigDir = (Get-JiraConfigDirPath),
-        [bool] $DryRun = $false
-    )
-    if ($script:JiraHookEventNames -cnotcontains $LifecycleEvent) {
-        [Console]::Error.WriteLine("config: not a lifecycle event: $LifecycleEvent — nothing recorded")
-        return 'ignored'
-    }
-    $current = @((Get-JiraHooksDisabled -ConfigDir $ConfigDir) | ConvertFrom-Json)
-    if ($current -ccontains $LifecycleEvent) { return 'unchanged' }
-    $next = [string[]]@(@($current) + @($LifecycleEvent))
-    [System.Array]::Sort($next, [System.StringComparer]::Ordinal)
-    Set-CfgHooksDisabled -ConfigDir $ConfigDir -DryRun $DryRun -NewSet $next
-    return 'recorded'
-}
-
-function Remove-JiraHooksDisabled {
-    <#
-    .SYNOPSIS
-      The operator's explicit release (FR-029: removable only by an explicit
-      operator action). Returns `released` or `unrecorded`. Under -DryRun the
-      status is computed and nothing is written (Constitution XI).
-      Mirror of config_hooks_disabled_remove.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)] [string] $LifecycleEvent,
-        [string] $ConfigDir = (Get-JiraConfigDirPath),
-        [bool] $DryRun = $false
-    )
-    $current = @((Get-JiraHooksDisabled -ConfigDir $ConfigDir) | ConvertFrom-Json)
-    if ($current -cnotcontains $LifecycleEvent) { return 'unrecorded' }
-    $next = [string[]]@($current | Where-Object { $_ -cne $LifecycleEvent })
-    Set-CfgHooksDisabled -ConfigDir $ConfigDir -DryRun $DryRun -NewSet $next
-    return 'released'
-}
-
 Export-ModuleMember -Function Get-JiraConfigDirPath, Resolve-JiraConfigDir, Get-JiraExtensionVersion, Assert-JiraSingleVersionSource, `
     ConvertFrom-JiraConfigYaml, ConvertTo-JiraConfigYaml, Read-JiraConfigYamlObject, `
     Get-JiraConfigCredentialError, Test-JiraTeamConfig, Test-JiraLocalConfig, Test-JiraConfigFieldError, Import-JiraConfig, `
     Test-JiraPersonalObject, Import-JiraPersonalConfig, Resolve-JiraConnection, `
     Get-JiraStatusClassification, Get-JiraPhaseStatusTargetSet, `
     Test-JiraPlaceholderKey, Get-JiraPlaceholderKey, `
-    Get-JiraHookEventNameList, Get-JiraAfterEventNameList, Get-JiraHooksDisabled, Add-JiraHooksDisabled, Remove-JiraHooksDisabled, `
+    Get-JiraHookEventNameList, Get-JiraAfterEventNameList, `
     Get-CfgLocalPath, Get-CfgLocalObject, Get-JiraRoleNameList, Get-JiraFieldDefaultsFor, `
     Test-JiraConnectionPin, Get-JiraConnectionPinStatus, Get-JiraConnectionPinMessage, Get-JiraPinnedOrigin, Get-JiraPinEnvSupplied, Test-JiraCeremonyPin, `
     Get-JiraPersonalTeam, `

@@ -162,12 +162,22 @@ teardown() {
   grep -qF "${parent_key}" "${SPEC}"
 }
 
-@test "SC-008: a forced reinstall preserves the team config and the registered hooks" {
+@test "SC-008: a second ceremony run preserves the operator's binding, byte for byte" {
+  # 034 narrowed this test. It used to assert the hook registry too, through
+  # SPEC_KIT_JIRA_EXTENSIONS_YML — an override that is retired along with every
+  # other way this extension could name that file. There is nothing left to
+  # assert about it here: the ceremony no longer opens it in any state, so its
+  # bytes are untouched by construction rather than by discipline, and the
+  # mechanical proof lives in tests/bash/ci/test_no_registry_write.bats.
+  #
+  # 034 also removed a WRITE KIND from this path — the ceremony's conditional
+  # write of the operator disable record into config.local.yml, which fired
+  # whenever it observed an `enabled: false` entry. One fewer conditional write
+  # means the byte-identity below is now unconditional (Principle II).
   require_live
   # shellcheck source=/dev/null
   source "${CMD_DIR}/config.sh"
   export JIRA_CONFIG_DIR="${WORK}/.specify/jira"
-  export SPEC_KIT_JIRA_EXTENSIONS_YML="${WORK}/.specify/extensions.yml"
   export SPEC_KIT_JIRA_README="${WORK}/README.md"
   mkdir -p "${JIRA_CONFIG_DIR}"
   printf 'projects:\n  - key: %s\n    style: company_managed\n' "${SPEC_KIT_JIRA_PROJECT_KEY}" \
@@ -175,17 +185,13 @@ teardown() {
 
   cmd_config config --json > /dev/null
   [ -f "${JIRA_CONFIG_DIR}/config.local.yml" ]
-  [ -f "${SPEC_KIT_JIRA_EXTENSIONS_YML}" ]
-  local before_cfg before_hooks
+  local before_cfg
   before_cfg="$(cat "${JIRA_CONFIG_DIR}/config.local.yml")"
-  before_hooks="$(cat "${SPEC_KIT_JIRA_EXTENSIONS_YML}")"
 
-  # A forced reinstall (a second config run) must not lose either artifact.
+  # A second run must not lose or rewrite the binding.
   cmd_config config --json > /dev/null
   [ -f "${JIRA_CONFIG_DIR}/config.local.yml" ]
-  [ -f "${SPEC_KIT_JIRA_EXTENSIONS_YML}" ]
   [ "$(cat "${JIRA_CONFIG_DIR}/config.local.yml")" = "${before_cfg}" ]
-  [ "$(cat "${SPEC_KIT_JIRA_EXTENSIONS_YML}")" = "${before_hooks}" ]
 }
 
 @test "027: seeding from real issues, then a second reconcile, issues zero writes of every write kind this feature adds" {

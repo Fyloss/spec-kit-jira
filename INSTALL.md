@@ -94,8 +94,7 @@ for why that is a choice to make knowingly, not merely a convenience.
 
 ## The lifecycle hooks: active from install
 
-Four properties, and they are worth stating plainly because the previous release
-got all four wrong:
+Three properties, worth stating plainly:
 
 - **Registered and active from the install itself.** The extension manifest
   declares all seven lifecycle events, so `specify extension add` writes them
@@ -112,127 +111,49 @@ got all four wrong:
   — no binding yet, no credentials, Jira unreachable — the host command completes
   with its normal outcome and you get at most one message saying why.
 
-- **The extension never modifies the hook registry.** `.specify/extensions.yml` is
-  read-only to this extension in every state, from every command: it is not
-  created, modified, reordered or reformatted, and your comments survive every
-  run. The official install is that file's only writer. What the configuration
-  ceremony does instead is read it, classify every event, and report:
+### The hook registry belongs to the host, not to this extension
 
-  | Report | What it means, and what to do |
-  | --- | --- |
-  | `healthy` | All seven events present and enabled |
-  | `incomplete` | An event has no entry. Re-run `specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force` (confirm the untrusted-source prompt with `y`) |
-  | `held_disabled` | You disabled an event. No mirroring runs for it, whatever the registry says. Release it with `/speckit.jira-mirror.config --enable-hook <event>` |
-  | `duplicated` | A leftover entry from a version before manifest-declared hooks. Neither the install nor the extension can remove it — the report gives you the exact edit |
-  | `unreadable` | The registry could not be read. The file is named; no claim is made about the hooks |
+`.specify/extensions.yml` is **not opened by this extension at all** — not for
+writing, and no longer for reading either. `specify extension add`
+writes it from the manifest and is its only writer; keeping those entries
+registered across reinstalls and upgrades is the host's job.
 
-### Disabling one event
+Two consequences follow, and both are deliberate. They are stated here because
+you would otherwise have to discover them:
 
-Set `enabled: false` on its entry in `.specify/extensions.yml` and run
-`/speckit.jira-mirror.config` once. The ceremony records your decision in the gitignored
-`.specify/jira/config.local.yml`, and from then on no mirroring runs for that
-event **even though a later `specify extension add` will set `enabled: true` back
-in the registry** — the official install rewrites that field unconditionally and
-this extension may not correct it. Release the event with
-`/speckit.jira-mirror.config --enable-hook <event>`.
+- **If the hooks are not registered, nothing happens — and nothing says so.**
+  You will not get a warning, because the extension no longer looks. The signal
+  is the silence: you finish a `/speckit.*` command and no ticket moves. The
+  remedy is the host's own install command.
 
-### Upgrading from a release that registered its own hooks
+- **A hook you disable by hand may be re-enabled by a reinstall, without
+  warning.** Setting `enabled: false` on an entry stops that event — until the
+  next `specify extension add`, which rewrites the field to `true`
+  unconditionally. This extension will neither prevent that nor report it.
 
-Versions before manifest-declared hooks registered them themselves, in a
-four-field shape carrying no owning-extension field. The official install matches on that field when it
-purges, so those entries are **not replaced** — a second entry is added beside
-each one, and every lifecycle step fires twice.
+Earlier versions reported on the registry and offered a repair. That report was
+removed because it was an assertion about a fact the extension could not act on,
+and because it was observed being confidently **wrong**: in a real repository it
+reported all seven events missing while the registry plainly carried them, and
+the reinstall it recommended changed nothing.
 
-The extension reports this as `duplicated` and names each affected event. Removing
-it is a one-time manual edit: open `.specify/extensions.yml` and delete, under
-each named event, the entry that has **no** `extension: jira-mirror` line. The
-remaining entry is the canonical one the install wrote.
+### Checking the hooks yourself
 
-### Upgrading to the parent-hierarchy release
-
-Every installation that ran `/speckit.jira-mirror.config` on a release before the
-parent hierarchy shipped is bound, but its `.specify/jira/config.local.yml`
-records issue types as a plain name-to-id map with no hierarchy level and no
-sub-task flag — the shape this release replaces. The first `reconcile` after
-upgrading refuses with:
-
-> `reconcile: the local binding for <PROJECT> predates parent support and does
-> not record issue-type hierarchy. The project is bound — its binding is
-> simply a version behind. Run /speckit.jira-mirror.config to refresh it (zero
-> writes)`
-
-This is expected, and nothing is written and nothing is lost. (The refusal is
-raised while the run is already in its plan phase, after the reads that phase
-performs — it is fail-closed on *writes*, which is what matters here, but it is
-not literally the first thing the run does. An earlier edition of this document
-claimed it was.) Run `/speckit.jira-mirror.config` once — the ceremony
-rediscovers the project's issue types in the new shape, may ask which type
-mirrors a user story when the base hierarchy level holds more than one
-candidate, and then `reconcile` proceeds normally. Tickets already mirrored
-flat (no parent, created before this release) are left exactly as they are —
-they are not migrated; see the CHANGELOG's Migration note.
-
-### Upgrading to the destination-pinning release
-
-Every installation configured before this release records no bound Jira
-destination, so the first `reconcile` after upgrading refuses:
-
-> `config: this checkout records no bound Jira destination, so the one this
-> repository declares (https://your-site.atlassian.net) cannot be verified.
-> Zero requests issued, nothing written. Run /speckit.jira-mirror.config once
-> to bind it`
-
-Run `/speckit.jira-mirror.config` once. The ceremony records the site it
-actually reaches, into the gitignored `.specify/jira/config.local.yml`, and
-every later run compares the site `config.yml` declares against that record.
-No question is asked and no extra step is added — the ceremony was already
-contacting Jira to resolve ids.
-
-Why the refusal rather than adopting whatever `config.yml` currently says:
-adopting it on sight would bind the checkout to a value an incoming change
-controls, which is the case this exists to catch.
-
-**When the site legitimately changes** — a real migration — the ceremony will
-not re-record it on its own either, because otherwise following the refusal's
-printed instruction would be enough to accept a redirection somebody else
-introduced. Name the new destination:
+Open the file:
 
 ```bash
-/speckit.jira-mirror.config --accept-site https://your-new-site.atlassian.net
+cat .specify/extensions.yml
 ```
 
-A destination supplied through `SPEC_KIT_JIRA_BASE_URL` is exempt from all of
-this and is never recorded: an environment variable is typed by the operator
-and cannot be introduced by a pull request.
+Each of the seven events should carry an entry with `extension: jira-mirror` and
+`enabled: true`. If one is missing or disabled, re-run the install:
 
-### Upgrading to the provenance-label release
+```bash
+specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force
+```
 
-Every ticket the mirror manages now carries a `speckit-<slug>` label. An
-existing consumer's first `reconcile` after upgrading back-fills it onto
-every ticket that predates this release — one `PUT` per ticket, counted in
-`counts.updated` exactly like an ordinary content change. A repository that also
-declares a `task` role sees its sub-tasks back-filled the same way, counted
-under the task tier's own `counts.tasks.updated` rather than `counts.updated`. This is expected,
-not a sign anything else changed: any labels an operator already applied by
-hand are kept, and a specification with nothing else to reconcile will still
-report updates for this reason alone, once.
+(confirm the untrusted-source prompt with `y`).
 
-### Upgrading to the boundary-preservation release
-
-Every managed description now carries a boundary marker separating the
-mirror's own content from anything else in the ticket. A ticket this mirror
-wrote before this release has no marker yet; its first `reconcile` after
-upgrading gains one, counted in `counts.updated` exactly like an ordinary
-content change — no manual step, no command of its own. Where the mirror can
-identify its own former output unambiguously, the transition duplicates
-nothing: that content becomes the managed region and everything above it is
-kept as human text. Where it cannot — most often because the description was
-also hand-edited before this release — the whole existing description is
-kept above a fresh managed region instead of guessing, the mirror's own prior
-output may then appear twice, and the run's `warnings` names the ticket so a
-human can trim the duplicate by hand. Nothing is ever discarded either way. A
-second reconcile after the transition reports zero writes, the same
-zero-churn guarantee as any other settled ticket.
 
 ## Verifying the install
 

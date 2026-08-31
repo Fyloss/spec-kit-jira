@@ -57,7 +57,6 @@ teardown() {
   (
     cd "${BARE}" || exit 1
     unset SPEC_KIT_JIRA_BASE_URL
-    unset SPEC_KIT_JIRA_EXTENSIONS_YML
     cmd_reconcile reconcile --json "${spec}" > /dev/null 2>&1 || true
   )
   [ ! -f "${BARE}/.specify/extensions.yml" ]

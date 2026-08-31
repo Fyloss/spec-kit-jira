@@ -1,7 +1,10 @@
-# T021b [021, US2] fixture: the operator has disabled the after_specify
-# lifecycle event (data-model.md § Operator disable record). No resolved_ids
-# are needed here — the dispatch guard (FR-020) must return before config is
-# ever read for real, so this fixture never exercises that path.
+# 034 fixture: a checkout still carrying the RETIRED operator disable record.
+#
+# Until 034 this key was accepted and honoured at dispatch. It is now outside
+# the local binding's accepted key set, so loading this file is refused with
+# exit 4 and the schema's pre-existing unknown-key message — which names both
+# the key and the file, with zero lines of code added to obtain it (FR-005,
+# SC-004). Deleting the two lines below is the whole remedy.
 hooks:
   disabled:
     - after_specify

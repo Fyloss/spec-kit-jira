@@ -180,7 +180,8 @@ bash .specify/extensions/jira-mirror/scripts/bash/spec-kit-jira.sh --help
 ```
 
 The ceremony discovers the project metadata, writes `.specify/jira/config.yml`,
-covers the gitignored config layer, and reports the hook registration.
+covers the gitignored config layer. It does not look at the hook registry —
+registering the hooks, and keeping them registered, belongs to the install.
 
 It will report a **degraded run**, naming two settings it does not invent for
 you. Supply them now that the files exist:

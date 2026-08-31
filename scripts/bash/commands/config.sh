@@ -46,7 +46,6 @@ source "${_cmd_config_dir}/../sink/jira/plan_apply.sh" # plan_resolve_field_defa
 # shellcheck source=/dev/null
 source "${_cmd_config_dir}/../hooks/readme_block.sh"
 # shellcheck source=/dev/null
-source "${_cmd_config_dir}/../hooks/register_hooks.sh"
 
 : "${EXIT_CONFIG:=4}"
 : "${JIRA_CONFIG_DIR:=.specify/jira}"
@@ -124,25 +123,24 @@ config_resolved_ids_for() {
 }
 
 # _config_degraded_run <json:true|false> <dry_run:true|false> <missing-vars>
-# <hooks_status> <hooks_detail> <gitignore_status> <personal_status>
-# <personal_detail> [cred_reason]
+# <gitignore_status> <personal_status> <personal_detail> [cred_reason]
 # The degraded, report-only path (002 US2, FR-008/FR-009): entered ONLY when
 # connection parameters are undefined, BEFORE any Jira call. Scans local branch
 # names for `<prefix>-<number>/…` shapes (the command layer may read git;
 # research §4), proposes the distinct prefixes as PROVISIONAL team candidates,
 # prints exactly one warning naming the missing variables plus copy-pasteable
 # re-run guidance. `discovery` and `readme` still report `skipped` — they need
-# Jira. `hooks`, `gitignore` and `personal` report their TRUE status (030,
-# research R5): the fresh-setup case IS degraded mode, and it is exactly when
-# personal.yml must be created and covered by the ignore rule.
+# Jira. `gitignore` and `personal` report their TRUE status (030, research R5):
+# the fresh-setup case IS degraded mode, and it is exactly when personal.yml
+# must be created and covered by the ignore rule.
 #
 # `cred_reason` (030, FR-038, C6.4–C6.6) is the located C3.x reason when
 # `JIRA_PAT_COMMAND` was declared and failed — appended to `detail` and already
 # printed to stderr by the caller. Empty when no retrieval command was
 # declared: that half of the trigger stays silent, exactly as before.
 _config_degraded_run() {
-  local json="$1" dry_run="$2" missing="$3" hooks_status="$4" hooks_detail="$5"
-  local gitignore_status="$6" personal_status="$7" personal_detail="$8" cred_reason="${9:-}"
+  local json="$1" dry_run="$2" missing="$3"
+  local gitignore_status="$4" personal_status="$5" personal_detail="$6" cred_reason="${7:-}"
   local branches proposals
   branches="$(git for-each-ref refs/heads --format='%(refname:short)' 2> /dev/null || true)"
   proposals="$(printf '%s\n' "${branches}" \
@@ -158,16 +156,14 @@ _config_degraded_run() {
   local detail="degraded mode: Jira connection parameters undefined"
   [[ -n "${cred_reason}" ]] && detail="${detail}; ${cred_reason}"
   local effects summary
-  # The hooks effect is reported even here. It needs no Jira at all — it reads
-  # two local files — and an operator running the ceremony to release a held
-  # event with --enable-hook is very likely to be doing it before the credentials
-  # are in place. Reporting it "skipped" would have been a lie about work that
-  # was in fact performed. The gitignore and personal effects need the same
-  # argument (030, research R5).
-  effects="$(jq -cn --arg d "${detail}" --arg hs "${hooks_status}" --arg hd "${hooks_detail}" \
+  # The gitignore and personal effects are reported even here: they need no
+  # Jira at all, and the fresh-setup case IS degraded mode, which is exactly
+  # when personal.yml must be created and covered by the ignore rule (030,
+  # research R5). Reporting them "skipped" would be a lie about work that was
+  # in fact performed.
+  effects="$(jq -cn --arg d "${detail}" \
     --arg gs "${gitignore_status}" --arg ps "${personal_status}" --arg pd "${personal_detail}" '{
     discovery: {status: "skipped", detail: $d},
-    hooks:     {status: $hs, detail: $hd},
     readme:    {status: "skipped", detail: $d},
     gitignore: {status: $gs, detail: "personal.yml gitignore coverage"},
     personal:  {status: $ps, detail: $pd}
@@ -885,113 +881,12 @@ _config_personal_effect() {
   _CONFIG_PERSONAL_STATUS="created"
 }
 
-# =============================================================================
-# The hooks effect (003 US6, FR-021 – FR-025, FR-028, FR-029)
-# =============================================================================
-
-# The three values _config_hooks_effect produces: a status token, a prose detail,
-# and the health object the run summary carries.
-#
-# They are returned through globals, and the function MUST NOT be invoked through
-# command substitution: a subshell would compute all three and then discard them
-# with the subshell itself. That is the same trap lib/config.sh documents for its
-# recursive parsers, and it produced a silently empty hook_health here first.
-_CONFIG_HOOKS_STATUS=''
-_CONFIG_HOOKS_DETAIL=''
-_CONFIG_HOOKS_HEALTH='{}'
-
-# _config_hooks_effect <registry-path> <config-dir> <dry-run> <enable-hooks>
-# Read the hook registry, classify every declared event, record what needs
-# recording in OUR file, and set _CONFIG_HOOKS_STATUS / _CONFIG_HOOKS_DETAIL /
-# _CONFIG_HOOKS_HEALTH. Call it DIRECTLY, never in `$(...)`. The registry itself is never
-# opened for writing — in any state, including this one (FR-022).
-#
-# Two writes happen here, and both are to the gitignored local binding, never to
-# the registry:
-#   * an entry the registry shows as `enabled: false` is RECORDED, so the
-#     operator's decision survives the next `specify extension add`, which
-#     rewrites `enabled: true` unconditionally (research R5 step 1);
-#   * each `--enable-hook <event>` clears one recorded event (FR-029).
-# The health classification itself writes nothing anywhere; the ceremony performs
-# the write, on the same terms as its other writes — predicted by --dry-run,
-# never performed by it (Constitution XI).
-_config_hooks_effect() {
-  local ext_path="$1" configdir="$2" dry_run="$3" enable_hooks="$4"
-  local health event
-
-  # The operator's explicit releases come FIRST, so a release and the report that
-  # names it cannot disagree within one run.
-  local released=""
-  for event in ${enable_hooks}; do
-    [[ -z "${event}" ]] && continue
-    local status
-    status="$(config_hooks_disabled_remove "${event}" "${configdir}" "${dry_run}")"
-    [[ "${status}" == "released" ]] && released="${released}${released:+, }${event}"
-  done
-
-  # The reader returns EXIT_CONFIG for an unreadable registry, which is a
-  # REPORT here rather than a failure — `|| true` keeps it from aborting the run
-  # under the dispatcher's `set -e`, and the `unreadable` flag below is what the
-  # branch actually keys on.
-  health="$(register_hooks_health "${ext_path}" "$(config_hooks_disabled_read "${configdir}" 2> /dev/null)")" || true
-
-  if [[ "$(jq -r '.unreadable // false' <<< "${health}")" == "true" ]]; then
-    _CONFIG_HOOKS_HEALTH="${health}"
-    _CONFIG_HOOKS_DETAIL="$(jq -r '.repair_hint' <<< "${health}")"
-    _CONFIG_HOOKS_STATUS='unreadable'
-    return 0
-  fi
-
-  # Record every entry the registry shows as disabled. This is the capture the
-  # whole disable record depends on: the extension only ever learns of the
-  # operator's decision by reading the file, and the next install erases the
-  # evidence (data-model § Operator disable record, Capture window).
-  while IFS= read -r event; do
-    [[ -z "${event}" ]] && continue
-    config_hooks_disabled_add "${event}" "${configdir}" "${dry_run}" > /dev/null
-  done <<< "$(jq -r '.disabled[]?' <<< "${health}")"
-
-  # Re-read so the reported health reflects what this run just recorded.
-  health="$(register_hooks_health "${ext_path}" "$(config_hooks_disabled_read "${configdir}" 2> /dev/null)")" || true
-  _CONFIG_HOOKS_HEALTH="${health}"
-
-  local n_missing n_dup n_held hint
-  n_missing="$(jq -r '.missing | length' <<< "${health}")"
-  n_dup="$(jq -r '.duplicated | length' <<< "${health}")"
-  n_held="$(jq -r '(.disabled + .held_disabled) | unique | length' <<< "${health}")"
-  hint="$(jq -r '.repair_hint // ""' <<< "${health}")"
-
-  # One status token, chosen by severity: a missing entry means the mirror is not
-  # wired at all, a leftover means the next install will duplicate it, and a held
-  # event is a deliberate operator choice rather than a fault. The detail carries
-  # every applicable clause, so nothing is hidden by the precedence.
-  local status
-  if ((n_missing > 0)); then
-    status="incomplete"
-  elif ((n_dup > 0)); then
-    status="duplicated"
-  elif ((n_held > 0)); then
-    status="held_disabled"
-  else
-    status="healthy"
-  fi
-
-  local detail
-  case "${status}" in
-    healthy) detail="all seven lifecycle hooks present and enabled; the registry was not modified" ;;
-    *) detail="${hint}" ;;
-  esac
-  [[ -n "${released}" ]] && detail="${detail}; released: ${released}"
-  _CONFIG_HOOKS_DETAIL="${detail}"
-  _CONFIG_HOOKS_STATUS="${status}"
-}
-
 # cmd_config <argv...> — the deterministic install ceremony (US1). Echoes the run
 # summary to stdout and returns the exit code.
 cmd_config() {
   # Parse flags (config-read, no model judgement). The dispatcher already handled
   # --help; re-parse here so the command is runnable standalone.
-  local parsed json="false" dry_run="false" exit_code="0" error="" styles="" args="" enable_hooks="" issue_types=""
+  local parsed json="false" dry_run="false" exit_code="0" error="" styles="" args="" issue_types=""
   local field_defaults=""
   local task_mirrors=""
   local accept_site=""
@@ -1002,7 +897,6 @@ cmd_config() {
       dry_run) dry_run="${value}" ;;
       styles) styles="${value}" ;;
       issue_types) issue_types="${value}" ;;
-      enable_hooks) enable_hooks="${value}" ;;
       field_defaults) field_defaults="${value}" ;;
       task_mirrors) task_mirrors="${value}" ;;
       accept_site) accept_site="${value}" ;;
@@ -1017,18 +911,6 @@ cmd_config() {
   fi
 
   local configdir="${JIRA_CONFIG_DIR}"
-
-  # Hooks effect (003 US6): computed UP FRONT, because it needs no Jira and no
-  # committed config — it reads the registry and the local binding, and nothing
-  # else. Computing it here means the report is truthful in the degraded run too,
-  # and that `--enable-hook` works in a repository that is not yet connected,
-  # which is exactly where an operator is most likely to reach for it.
-  local ext_path hooks_status hooks_detail hooks_health
-  ext_path="${SPEC_KIT_JIRA_EXTENSIONS_YML:-$(dirname "${configdir}")/extensions.yml}"
-  _config_hooks_effect "${ext_path}" "${configdir}" "${dry_run}" "${enable_hooks}"
-  hooks_status="${_CONFIG_HOOKS_STATUS}"
-  hooks_health="${_CONFIG_HOOKS_HEALTH}"
-  hooks_detail="${_CONFIG_HOOKS_DETAIL}"
 
   # Config read: load and validate the committed team config (US4).
   local cfg
@@ -1091,7 +973,7 @@ cmd_config() {
   fi
   if [[ -n "${degraded_missing}" ]]; then
     _config_degraded_run "${json}" "${dry_run}" "${degraded_missing}" \
-      "${hooks_status}" "${hooks_detail}" "${gitignore_status}" \
+      "${gitignore_status}" \
       "${personal_status}" "${personal_detail}" "${cred_reason}"
     return $?
   fi
@@ -1462,7 +1344,6 @@ cmd_config() {
   effects="$(jq -cn \
     --arg ds "${disc_status}" --arg dd "${nproj} project(s) discovered" \
     --argjson dp "${dp}" \
-    --arg hs "${hooks_status}" --arg hd "${hooks_detail}" \
     --arg rs "${readme_status}" --arg rd "${readme_detail}" \
     --arg gs "${gitignore_status}" \
     --arg ps "${personal_status}" --arg pd "${personal_detail}" \
@@ -1470,7 +1351,6 @@ cmd_config() {
     --arg tms "${tm_write_status}" '
     {
       discovery: {status: $ds, detail: $dd, projects: $dp},
-      hooks:     {status: $hs, detail: $hd},
       readme:    {status: $rs, detail: $rd},
       gitignore: {status: $gs, detail: "personal.yml gitignore coverage"},
       personal:  {status: $ps, detail: $pd},
@@ -1483,11 +1363,10 @@ cmd_config() {
   [[ -n "${role_notes}" ]] && printf '%s\n' "${role_notes}" >&2
 
   local summary
-  summary="$(jq -cn --argjson effects "${effects}" --argjson dry "${dry_run}" --argjson w "${run_warnings}" \
-    --argjson hooks "${hooks_health}" '
+  summary="$(jq -cn --argjson effects "${effects}" --argjson dry "${dry_run}" --argjson w "${run_warnings}" '
     {schema_version: "1.0", command: "config", dry_run: $dry,
      counts: {created: 0, updated: 0, skipped: 0, warnings: $w, errors: 0},
-     effects: $effects, hook_health: $hooks, exit_code: 0}' | json_canonical)"
+     effects: $effects, exit_code: 0}' | json_canonical)"
 
   if [[ "${json}" == "true" ]]; then
     printf '%s\n' "${summary}"

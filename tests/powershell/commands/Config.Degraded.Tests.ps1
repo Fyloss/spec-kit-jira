@@ -144,10 +144,8 @@ Describe 'Degraded causes are told apart (T047, 003 US5)' {
         $env:JIRA_CONFIG_DIR = Join-Path $script:Work '.specify/jira'
         $lines = @('projects:', '  - key: TEAM', 'routing_default: TEAM')
         [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines -join "`n") + "`n"))
-        $env:SPEC_KIT_JIRA_EXTENSIONS_YML = Join-Path $script:Work '.specify/extensions.yml'
     }
     AfterEach {
-        Remove-Item Env:\SPEC_KIT_JIRA_EXTENSIONS_YML -ErrorAction SilentlyContinue
         Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
         Remove-Item -Recurse -Force $script:Work -ErrorAction SilentlyContinue
     }
@@ -190,43 +188,6 @@ Describe 'Degraded causes are told apart (T047, 003 US5)' {
         $guidance | Should -Not -Match '(^|[^/])spec-kit-jira\s+config'
     }
 
-    It 'reports an unreadable registry as its OWN cause (T062, FR-017, FR-024)' {
-        Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
-        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
-        [System.IO.File]::WriteAllText($env:SPEC_KIT_JIRA_EXTENSIONS_YML,
-            "hooks:`n  after_plan:`n   - broken`n     : : :`n", (New-Object System.Text.UTF8Encoding($false)))
-        $r = Invoke-ConfigCaptured @('config', '--json')
-        $r.ExitCode | Should -Be 0
-        $obj = $r.Out.Trim() | ConvertFrom-Json
-        # The discovery effect is skipped for the connection; the hooks effect is
-        # unreadable for the file. Two causes, two reports, one run.
-        $obj.effects.discovery.status | Should -BeExactly 'skipped'
-        $obj.effects.hooks.status | Should -BeExactly 'unreadable'
-        # It must not tell the operator to reinstall over a file it merely failed
-        # to parse — the install would not fix it, and the hooks may be fine.
-        $obj.effects.hooks.detail | Should -Not -Match 'specify extension add'
-        $obj.effects.hooks.detail | Should -Match 'no claim is made about the hooks'
-    }
-
-    It 'names a YAML anchor as the construct that defeated the reader (T062, FR-024)' {
-        Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
-        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
-        [System.IO.File]::WriteAllText($env:SPEC_KIT_JIRA_EXTENSIONS_YML,
-            "defaults: &defaults`n  enabled: true`nhooks:`n  after_plan:`n    - extension: jira-mirror`n",
-            (New-Object System.Text.UTF8Encoding($false)))
-        $obj = (Invoke-ConfigCaptured @('config', '--json')).Out.Trim() | ConvertFrom-Json
-        $obj.effects.hooks.status | Should -BeExactly 'unreadable'
-        $obj.effects.hooks.detail | Should -Match 'anchor'
-    }
-
-    It 'leaves an unreadable registry byte-identical (FR-022, FR-023)' {
-        Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
-        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
-        $broken = "hooks:`n  after_plan:`n   - broken`n     : : :`n"
-        [System.IO.File]::WriteAllText($env:SPEC_KIT_JIRA_EXTENSIONS_YML, $broken, (New-Object System.Text.UTF8Encoding($false)))
-        $null = Invoke-ConfigCaptured @('config', '--json')
-        (Get-Content -Raw -LiteralPath $env:SPEC_KIT_JIRA_EXTENSIONS_YML) | Should -BeExactly $broken
-    }
 
     It 'T053 [011] — degraded mode asks no field-default question and writes nothing to config.yml (FR-009)' {
         Remove-Item Env:\SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
@@ -294,5 +255,82 @@ Describe 'T044c — the degraded trigger splits the credential reason' {
         $r.Err | Should -Match 'could not be executed'
         $obj = $r.Out.Trim() | ConvertFrom-Json
         $obj.effects.personal.status | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe '034 — the ceremony says nothing about the hook registry (FR-002, SC-001)' {
+    # Mirror of the 034 block in tests/bash/commands/test_config_degraded.bats.
+    #
+    # The three states are asserted together because the claim is about their
+    # EQUALITY rather than about any one of them: a correct registry, an absent
+    # one and a malformed one must produce summaries identical in hook-related
+    # content, and that content must be none.
+    #
+    # The malformed case is the load-bearing one. Before 034 the extension
+    # parsed this file, so unparseable bytes produced an `unreadable` verdict.
+    # A file the extension never opens cannot do that. If this case ever
+    # diverges from the other two, something is still reading the registry.
+    BeforeAll {
+        # Pester 5 executes It blocks in a scope that sees only helpers defined
+        # in BeforeAll — one declared in the Describe body is invisible there,
+        # and fails at run time with CommandNotFoundException.
+        function Set-Registry {
+            param([Parameter(Mandatory)] [string] $State, [Parameter(Mandatory)] [string] $Path)
+            switch ($State) {
+                'absent' { Remove-Item -LiteralPath $Path -ErrorAction SilentlyContinue }
+                'malformed' { [System.IO.File]::WriteAllText($Path, "hooks:`n  - [unclosed`n`t`tbroken`n") }
+                'correct' {
+                    $sb = [System.Text.StringBuilder]::new()
+                    [void]$sb.AppendLine('hooks:')
+                    foreach ($e in @('before_specify', 'after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')) {
+                        [void]$sb.AppendLine("  ${e}:")
+                        [void]$sb.AppendLine('  - extension: jira-mirror')
+                        [void]$sb.AppendLine('    command: speckit.jira-mirror.reconcile')
+                        [void]$sb.AppendLine('    enabled: true')
+                        [void]$sb.AppendLine('    optional: false')
+                    }
+                    [System.IO.File]::WriteAllText($Path, $sb.ToString())
+                }
+            }
+        }
+    }
+
+    BeforeEach {
+        Import-Module (Join-Path $PSScriptRoot '../../../scripts/powershell/commands/Config.psm1') -Force
+        $script:Work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+        New-Item -ItemType Directory -Path (Join-Path $Work '.specify/jira') -Force | Out-Null
+        $env:JIRA_CONFIG_DIR = Join-Path $Work '.specify/jira'
+        $lines = @('projects:', '  - key: TEAM', 'routing_default: TEAM')
+        [System.IO.File]::WriteAllText((Join-Path $env:JIRA_CONFIG_DIR 'config.yml'), (($lines -join "`n") + "`n"))
+        Push-Location $Work
+        git init -q -b main
+        git -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m init
+        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+        Remove-Item Env:SPEC_KIT_JIRA_BASE_URL -ErrorAction SilentlyContinue
+    }
+    AfterEach {
+        Pop-Location
+        Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
+    }
+
+    It 'gives identical hook content — none — for a correct, absent and malformed registry (SC-001)' {
+        $reg = Join-Path $Work '.specify/extensions.yml'
+        $seen = @()
+        $codes = @()
+        foreach ($state in @('correct', 'absent', 'malformed')) {
+            Set-Registry -State $state -Path $reg
+            $r = Invoke-ConfigCaptured @('config', '--json')
+            $obj = $r.Out.Trim() | ConvertFrom-Json
+            # Each summary individually carries no registry claim (US1 AC1-AC3).
+            $obj.PSObject.Properties.Name | Should -Not -Contain 'hook_health'
+            $obj.effects.PSObject.Properties.Name | Should -Not -Contain 'hooks'
+            $seen += ($obj.effects.PSObject.Properties.Name | Sort-Object) -join ','
+            $codes += $r.ExitCode
+        }
+        # ...and the three agree with each other, which is the actual SC-001 claim.
+        $seen[0] | Should -BeExactly $seen[1]
+        $seen[1] | Should -BeExactly $seen[2]
+        $codes[0] | Should -Be $codes[1]
+        $codes[1] | Should -Be $codes[2]
     }
 }

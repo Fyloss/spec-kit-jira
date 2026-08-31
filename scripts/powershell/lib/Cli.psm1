@@ -133,7 +133,6 @@ function Invoke-JiraCliParse {
     $styles = [System.Collections.Generic.List[string]]::new()
     $childTypes = [System.Collections.Generic.List[string]]::new()
     $issueTypes = [System.Collections.Generic.List[string]]::new()
-    $enableHooks = [System.Collections.Generic.List[string]]::new()
     $fieldDefaults = [System.Collections.Generic.List[string]]::new()
     $fieldValues = [System.Collections.Generic.List[string]]::new()
     $taskMirrors = [System.Collections.Generic.List[string]]::new()
@@ -304,23 +303,6 @@ function Invoke-JiraCliParse {
                 }
                 break
             }
-            '^--enable-hook$' {
-                # The operator's explicit release of a held lifecycle event (003
-                # FR-007, FR-029). Repeatable. It exists because `specify
-                # extension add` rewrites `enabled: true` unconditionally, so the
-                # extension cannot tell an operator's re-enable from the
-                # install's — and guessing would silently discard a deliberate
-                # choice (research R5). One explicit flag, named in the
-                # ceremony's own report, is the honest mechanism.
-                if ($idx + 1 -ge $Arguments.Count) {
-                    $parseError = '--enable-hook requires a lifecycle event (--enable-hook <event>)'
-                }
-                else {
-                    $idx++
-                    $enableHooks.Add($Arguments[$idx])
-                }
-                break
-            }
             '^--parent$' {
                 # 027, contract seed-cli-contract.md §2: at most once — key,
                 # URL, or free text (may contain spaces). ParentSeen is
@@ -392,7 +374,6 @@ function Invoke-JiraCliParse {
         $lines.Add("issue_types=$($issueTypes -join ' ')")
         $lines.Add("use_team=$useTeam")
         $lines.Add("reuse=$reuse")
-        $lines.Add("enable_hooks=$($enableHooks -join ' ')")
         # Joined with ASCII Unit Separator (\x1f, not a space — mirror of
         # cli.sh's field_defaults_joined/field_values_joined): a VALUE may
         # itself contain spaces (011, T017).

@@ -16,7 +16,7 @@ BeforeAll {
     $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:ManifestPath = Join-Path $script:Root 'extension.yml'
     $script:ManifestLines = (Get-Content -Raw -LiteralPath $script:ManifestPath) -split "`r?`n"
-    Import-Module (Join-Path $script:Root 'scripts/powershell/hooks/RegisterHooks.psm1') -Force
+    Import-Module (Join-Path $script:Root 'scripts/powershell/lib/Config.psm1') -Force
 
     function Get-ManifestBlock {
         # The lines of a top-level block, excluding its header. A block runs
@@ -82,12 +82,18 @@ Describe 'Coverage (research R9)' {
         }
     }
 
-    It 'agrees with the set the reader classifies' {
-        # An event added to one and forgotten in the other would ship half-wired:
-        # the install would register a hook nothing reports on, or the report
-        # would name an event the install never registers.
+    It 'agrees with the PORT declaration (034 FR-009)' {
+        # An event added to one and forgotten in the other ships half-wired. The
+        # consequence changed with 034 but the check did not lose its point: it
+        # used to guard the hook-registry reader's classified set, which is
+        # deleted. It now guards $script:JiraHookEventNames in lib/Config.psm1 —
+        # the surviving declaration, whose six after-events are the closed key
+        # set phase_status_map is validated against (023,
+        # contracts/role-lifecycle-config.md §2). A manifest event missing from
+        # that array would be registered by the host and then rejected by our
+        # own schema.
         ((Get-HookEvents) | Sort-Object) -join ' ' |
-            Should -BeExactly (((Get-JiraHookEventList) | Sort-Object) -join ' ')
+            Should -BeExactly (((Get-JiraHookEventNameList) | Sort-Object) -join ' ')
     }
 }
 

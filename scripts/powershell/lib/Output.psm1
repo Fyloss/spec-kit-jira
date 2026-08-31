@@ -227,11 +227,16 @@ function ConvertTo-JiraSummaryProse {
     }
     $lines.Add("Warnings: $($s.counts.warnings), Errors: $($s.counts.errors)")
     # The config ceremony's effects, reported separately (FR-054), in a fixed
-    # order (discovery, hooks, readme, gitignore, personal) so both ports
-    # match byte-for-byte.
+    # order so both ports match byte-for-byte. The list must carry EVERY effect
+    # the summary can hold: the renderer skips an absent status silently, so an
+    # effect missing from here is dropped from the human output without a trace
+    # while still appearing in --json. `field_defaults` and `task_mirror` (011)
+    # were missing exactly that way until 034 declared them in the contract and
+    # this list caught up. 034 removed `hooks`: the extension no longer reads
+    # the hook registry, so there is no such effect to render.
     if ($s.PSObject.Properties.Name -contains 'effects') {
         $lines.Add('Effects:')
-        foreach ($effect in @('discovery', 'hooks', 'readme', 'gitignore', 'personal')) {
+        foreach ($effect in @('discovery', 'readme', 'gitignore', 'personal', 'field_defaults', 'task_mirror')) {
             $e = if ($s.effects.PSObject.Properties.Name -contains $effect) { $s.effects.$effect } else { $null }
             if ($null -eq $e) { continue }
             $status = $e.status

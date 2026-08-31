@@ -17,7 +17,7 @@ flowchart TB
         TeamCfg[(".specify/jira/config.yml<br/>committed")]
         LocalCfg[(".specify/jira/config.local.yml<br/>gitignored")]
         Personal[(".specify/jira/personal.yml<br/>gitignored, human-owned")]
-        Registry[(".specify/extensions.yml<br/>hook registry — read only")]
+        Registry[(".specify/extensions.yml<br/>hook registry — host-owned,<br/>never opened by the bridge")]
         Readme[("README.md<br/>managed block")]
     end
 
@@ -78,11 +78,15 @@ Two consequences worth internalising:
 
 - **The hook registry has exactly one writer, and it is not this extension.**
   `specify extension add` writes `.specify/extensions.yml` from the manifest's
-  top-level `hooks:` block. The bridge only reads and reports on it — a CI test
-  (`tests/bash/ci/test_no_registry_write.bats`) fails the build if a writer ever
-  comes back. The reason: this port parses a deliberately restricted YAML
-  subset that drops comments, so any round-trip would silently damage a file
-  the extension neither owns nor can faithfully reproduce.
+  top-level `hooks:` block. The bridge never opens it at all — a CI test
+  (`tests/bash/ci/test_no_registry_write.bats`) fails the build if a reader or a
+  writer ever comes back. Two reasons, and the second is the one that removed
+  the reader in 034: this port parses a deliberately restricted YAML subset that
+  drops comments, so any round-trip would silently damage a file the extension
+  neither owns nor can faithfully reproduce; and an extension that cannot repair
+  a fact must not assert it — the report the bridge used to emit about this
+  registry was observed being confidently wrong about it (Constitution X, as
+  amended in 4.0.0).
 
 - **Configuration never lives inside the extension folder.** It lives in
   `.specify/jira/` at the repository root, so `specify extension add --force`

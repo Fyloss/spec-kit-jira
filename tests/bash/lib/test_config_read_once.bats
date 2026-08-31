@@ -131,23 +131,20 @@ _spawn_count_for_config() {
   [ "${output}" = "rc=2" ]
 }
 
-@test "T035: a self-write in this process is reflected by a later read, not the pre-write cache entry (FR-013)" {
-  ROOT2="${ROOT}"
-  run bash -c '
-    source "'"${ROOT2}"'/scripts/bash/commands/reconcile.sh"
-    DIR="'"${BATS_TEST_TMPDIR}"'/selfwrite"
-    mkdir -p "${DIR}"
-    printf "resolved_ids: {}\n" > "${DIR}/config.local.yml"
-    config_yaml_cache_prime
-    before="$(config_hooks_disabled_read "${DIR}")"
-    config_hooks_disabled_add "before_specify" "${DIR}" "false" > /dev/null
-    after="$(config_hooks_disabled_read "${DIR}")"
-    printf "before=%s after=%s" "${before}" "${after}"
-  '
-  [ "${status}" -eq 0 ]
-  [[ "${output}" == *"before=[]"* ]]
-  [[ "${output}" == *'after=["before_specify"]'* ]]
-}
+# T035 RETIRED by 034 — "a self-write in this process is reflected by a later
+# read, not the pre-write cache entry (FR-013)".
+#
+# The behaviour is not merely untested now; it has no producer. That test drove
+# the cache through `config_hooks_disabled_add`, which was the ONLY code path in
+# either port that wrote a config source from inside a running process. 034
+# retired the operator disable record along with the rest of the hook-registry
+# reader, so the last in-process writer is gone — and with it
+# `config_yaml_cache_invalidate`, whose sole caller it was.
+#
+# Both the helper and this test were removed together. Re-introducing an
+# in-process config write means re-introducing the invalidation AND this test:
+# the cache is primed once per run, so a writer that does not invalidate would
+# serve a later read its own pre-write answer.
 
 @test "T036a: the team/local merge answer is identical whether the cache is warm or cold (FR-011)" {
   ROOT2="${ROOT}"

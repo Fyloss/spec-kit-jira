@@ -812,95 +812,6 @@ Describe 'Import-JiraConfig' {
     }
 }
 
-Describe 'The operator disable record (T009, FR-007, FR-029)' {
-    # Twin of the T008 cases in tests/bash/lib/test_config.bats. The registry
-    # cannot carry the operator's decision across a reinstall (research R5), so
-    # it is recorded in the gitignored local binding instead.
-    BeforeEach {
-        $script:Dir = New-TempConfigDir
-    }
-    AfterEach {
-        Remove-Item -Recurse -Force $script:Dir -ErrorAction SilentlyContinue
-    }
-
-    It 'reads an absent record as the empty set' {
-        Get-JiraHooksDisabled -ConfigDir $script:Dir | Should -BeExactly '[]'
-    }
-
-    It 'reads a local binding with no hooks key as the empty set' {
-        Set-Content -Path (Join-Path $script:Dir 'config.local.yml') -Value "site_alias: `"prod`"`n" -NoNewline
-        Get-JiraHooksDisabled -ConfigDir $script:Dir | Should -BeExactly '[]'
-    }
-
-    It 'round-trips a written record' {
-        (Add-JiraHooksDisabled -LifecycleEvent 'after_implement' -ConfigDir $script:Dir) | Should -BeExactly 'recorded'
-        Get-JiraHooksDisabled -ConfigDir $script:Dir | Should -BeExactly '["after_implement"]'
-    }
-
-    It 'reports an already-recorded event unchanged and never duplicates it' {
-        $null = Add-JiraHooksDisabled -LifecycleEvent 'after_implement' -ConfigDir $script:Dir
-        (Add-JiraHooksDisabled -LifecycleEvent 'after_implement' -ConfigDir $script:Dir) | Should -BeExactly 'unchanged'
-        @((Get-JiraHooksDisabled -ConfigDir $script:Dir) | ConvertFrom-Json).Count | Should -Be 1
-    }
-
-    It 'orders the record so two runs write byte-identical bytes (FR-003)' {
-        $null = Add-JiraHooksDisabled -LifecycleEvent 'after_tasks' -ConfigDir $script:Dir
-        $null = Add-JiraHooksDisabled -LifecycleEvent 'after_clarify' -ConfigDir $script:Dir
-        Get-JiraHooksDisabled -ConfigDir $script:Dir | Should -BeExactly '["after_clarify","after_tasks"]'
-    }
-
-    It 'reports an unknown event name and IGNORES it rather than failing the run' {
-        Set-Content -Path (Join-Path $script:Dir 'config.local.yml') `
-            -Value "hooks:`n  disabled:`n    - after_implement`n    - after_typo`n" -NoNewline
-        Get-JiraHooksDisabled -ConfigDir $script:Dir | Should -BeExactly '["after_implement"]'
-    }
-
-    It 'reports an unknown event name on record and does not fail the run' {
-        $null = Add-JiraHooksDisabled -LifecycleEvent 'not_an_event' -ConfigDir $script:Dir
-        Get-JiraHooksDisabled -ConfigDir $script:Dir | Should -BeExactly '[]'
-    }
-
-    It 'predicts the record write under -DryRun without performing it (Constitution XI)' {
-        (Add-JiraHooksDisabled -LifecycleEvent 'after_plan' -ConfigDir $script:Dir -DryRun $true) | Should -BeExactly 'recorded'
-        Test-Path -LiteralPath (Join-Path $script:Dir 'config.local.yml') | Should -BeFalse
-        Get-JiraHooksDisabled -ConfigDir $script:Dir | Should -BeExactly '[]'
-    }
-
-    It 'clears an event from the record on release (FR-007, FR-029)' {
-        $null = Add-JiraHooksDisabled -LifecycleEvent 'after_implement' -ConfigDir $script:Dir
-        $null = Add-JiraHooksDisabled -LifecycleEvent 'after_plan' -ConfigDir $script:Dir
-        (Remove-JiraHooksDisabled -LifecycleEvent 'after_implement' -ConfigDir $script:Dir) | Should -BeExactly 'released'
-        Get-JiraHooksDisabled -ConfigDir $script:Dir | Should -BeExactly '["after_plan"]'
-    }
-
-    It 'reports releasing an unrecorded event as a no-op' {
-        (Remove-JiraHooksDisabled -LifecycleEvent 'after_implement' -ConfigDir $script:Dir) | Should -BeExactly 'unrecorded'
-    }
-
-    It 'predicts the release under -DryRun without performing it (Constitution XI)' {
-        $null = Add-JiraHooksDisabled -LifecycleEvent 'after_implement' -ConfigDir $script:Dir
-        (Remove-JiraHooksDisabled -LifecycleEvent 'after_implement' -ConfigDir $script:Dir -DryRun $true) | Should -BeExactly 'released'
-        Get-JiraHooksDisabled -ConfigDir $script:Dir | Should -BeExactly '["after_implement"]'
-    }
-
-    It "preserves the operator's site_alias and overrides" {
-        Set-Content -Path (Join-Path $script:Dir 'config.local.yml') `
-            -Value "overrides:`n  routing_default: OPS`nsite_alias: `"prod`"`n" -NoNewline
-        $null = Add-JiraHooksDisabled -LifecycleEvent 'after_implement' -ConfigDir $script:Dir
-        $json = ConvertFrom-JiraConfigYaml -Path (Join-Path $script:Dir 'config.local.yml') | ConvertFrom-Json
-        $json.site_alias | Should -BeExactly 'prod'
-        $json.overrides.routing_default | Should -BeExactly 'OPS'
-        $json.hooks.disabled[0] | Should -BeExactly 'after_implement'
-    }
-
-    It 'accepts the hooks key in local-binding schema validation (T013)' {
-        Set-Content -Path (Join-Path $script:Dir 'config.yml') -Value $script:ValidTeam -NoNewline
-        Set-Content -Path (Join-Path $script:Dir 'config.local.yml') `
-            -Value "hooks:`n  disabled:`n    - after_implement`n" -NoNewline
-        (Import-JiraConfig -ConfigDir $script:Dir).ExitCode | Should -Be 0
-    }
-}
-
 Describe 'Empty collections round-trip (003 T010 regression)' {
     # Twin of the bats case: the writer emits `key: []` / `key: {}` and the
     # reader must return a collection, not the string "[]" / "{}". The hook
@@ -976,16 +887,6 @@ Describe 'An empty local binding is tolerated (003 T013)' {
         $r = Import-JiraConfig -ConfigDir $d
         $r.ExitCode | Should -Be 0
         ($r.Json | ConvertFrom-Json).routing_default | Should -BeExactly 'PROJ'
-        Remove-Item -Recurse -Force $d
-    }
-
-    It 'leaves a loadable local binding after releasing the last held event' {
-        $d = New-TempConfigDir
-        Set-Content -Path (Join-Path $d 'config.yml') -Value $script:ValidTeam -NoNewline
-        $null = Add-JiraHooksDisabled -LifecycleEvent 'after_implement' -ConfigDir $d
-        $null = Remove-JiraHooksDisabled -LifecycleEvent 'after_implement' -ConfigDir $d
-        (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 0
-        (Get-JiraHooksDisabled -ConfigDir $d) | Should -BeExactly '[]'
         Remove-Item -Recurse -Force $d
     }
 }
@@ -1080,6 +981,42 @@ Describe 'Resolve-JiraConnection' {
         $d = New-TempConfigDir
         Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`nbase_url: `"not-a-url`"`n" -NoNewline
         (Resolve-JiraConnection -ConfigDir $d) | Should -Be 4
+        Remove-Item -Recurse -Force $d
+    }
+}
+
+Describe '034 — the retired local-binding key (FR-005, SC-004)' {
+    # Twin of the 034 block in tests/bash/commands/test_config_refusal.bats.
+    #
+    # The refusal is produced by a path that ALREADY EXISTED. Nothing was added
+    # to obtain it (SC-004): the key simply left the accepted set, and the
+    # schema's existing unknown-key rule handles whatever remains. There is no
+    # dedicated retired-key rule and no bespoke message, because the extension
+    # has exactly one operator and there was no installed base to spare.
+    #
+    # The assertion is on the MESSAGE, not only the exit code. A refactor that
+    # dropped the file path from the report would keep the code green while
+    # losing the only part an operator can act on.
+    It 'refuses a config.local.yml declaring hooks, naming both key and file' {
+        $d = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+        New-Item -ItemType Directory -Path $d -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $d 'config.yml'), "projects:`n  - key: PROJ`nrouting_default: PROJ`n")
+        [System.IO.File]::WriteAllText((Join-Path $d 'config.local.yml'), "hooks:`n  disabled:`n    - after_specify`n")
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        # Import-JiraConfig reports through .Errors, not the console.
+        $text = ($r.Errors -join "`n")
+        $text | Should -Match 'hooks'
+        $text | Should -Match 'config\.local\.yml'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'still validates a config.local.yml declaring none of the withdrawn keys' {
+        $d = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+        New-Item -ItemType Directory -Path $d -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $d 'config.yml'), "projects:`n  - key: PROJ`nrouting_default: PROJ`n")
+        [System.IO.File]::WriteAllText((Join-Path $d 'config.local.yml'), "site_alias: prod`n")
+        (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Not -Be 4
         Remove-Item -Recurse -Force $d
     }
 }

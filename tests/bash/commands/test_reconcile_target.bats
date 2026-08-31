@@ -100,16 +100,34 @@ teardown() {
   unset SPEC_KIT_JIRA_HOOK_EVENT
 }
 
-@test "a disabled event silences even the rejected-target refusal (§5 T6, research R1)" {
-  # shellcheck source=/dev/null
-  source "${ROOT}/scripts/bash/lib/config.sh"
-  config_hooks_disabled_add after_plan "${JIRA_CONFIG_DIR}" > /dev/null
+@test "034 T032 — a dispatched event now reaches the target guard instead of exiting silently" {
+  # THE CHANGED BRANCH. This test replaces "a disabled event silences even the
+  # rejected-target refusal", which asserted the opposite: that a lifecycle
+  # event recorded as disabled made reconcile return 0 with no output at all,
+  # before the target guard ever ran.
+  #
+  # 034 removed that dispatch hold along with the record it consulted.
+  # Constitution 4.0.0 gives up the protection deliberately — a reinstall may
+  # re-enable a hand-disabled hook and this extension will neither prevent nor
+  # report it — so the event no longer short-circuits anything. What must still
+  # hold is everything downstream: the target guard still refuses a non-spec.md
+  # target, and hook context still keeps the host command at exit 0.
+  #
+  # Principle III's posture is narrowed here, and the narrowed branch is the one
+  # that needed its own test; the unchanged branch is covered by
+  # tests/bash/hooks/test_hook_resilience.bats.
   export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
+  export SPEC_KIT_JIRA_HOOK_CONTEXT=1
   run cmd_reconcile reconcile --json "${PLAN}"
+  # Hook context still downgrades to 0 — that half is untouched (FR-007).
   [ "$status" -eq 0 ]
-  [ -z "$output" ]
+  # But the run is no longer SILENT: the target guard spoke, where the retired
+  # dispatch hold used to have returned before it.
+  [[ "$output" == *"is not a feature specification"* ]]
+  # And still zero Jira calls — the refusal happens before any network work.
   [ -z "$(mock_calls)" ]
   unset SPEC_KIT_JIRA_HOOK_EVENT
+  unset SPEC_KIT_JIRA_HOOK_CONTEXT
 }
 
 @test "a valid spec.md run behaves exactly as before this feature (§5 T7)" {

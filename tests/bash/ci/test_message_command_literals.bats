@@ -149,28 +149,3 @@ declared_commands() {
 # Cross-check: the literals the reader emits at runtime
 # =============================================================================
 
-@test "the repair hints the reader emits pass all three classes (FR-018)" {
-  # The hint strings are assembled at runtime from constants, so checking the
-  # source is not quite checking the message. Build each one and check the result.
-  # shellcheck source=/dev/null
-  source "${ROOT}/scripts/bash/hooks/register_hooks.sh"
-  local work hint declared
-  declared="$(declared_commands)"
-  work="$(mktemp -d)"
-
-  # missing -> the official install command, in its runnable form.
-  hint="$(register_hooks_health "${work}/absent.yml" | jq -r '.repair_hint')"
-  [[ "${hint}" == *"specify extension add jira-mirror --from https://github.com/Fyloss/spec-kit-jira-mirror/releases/latest/download/spec-kit-jira-mirror.zip --force"* ]]
-
-  # held disabled -> the release flag on a declared command.
-  printf 'hooks: {}\n' > "${work}/e.yml"
-  hint="$(register_hooks_health "${work}/e.yml" '["after_plan"]' | jq -r '.repair_hint')"
-  [[ "${hint}" == *"/speckit.jira-mirror.config --enable-hook after_plan"* ]]
-  grep -qxF 'speckit.jira-mirror.config' <<< "${declared}"
-
-  # No hint may contain a bare bridge invocation.
-  run grep -qE '(^|[^/])spec-kit-jira(\.sh|\.ps1)?[[:space:]]+(config|reconcile)' <<< "${hint}"
-  [ "$status" -ne 0 ]
-
-  rm -rf "${work}"
-}

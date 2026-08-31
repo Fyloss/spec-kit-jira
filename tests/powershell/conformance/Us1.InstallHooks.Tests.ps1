@@ -14,7 +14,6 @@
 BeforeAll {
     $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     . (Join-Path $script:Root 'tests/conformance/InstallHarness.ps1')
-    Import-Module (Join-Path $script:Root 'scripts/powershell/hooks/RegisterHooks.psm1') -Force
     $script:Events = @('before_specify', 'after_specify', 'after_clarify', 'after_plan',
         'after_tasks', 'after_implement', 'after_analyze')
     $script:Available = Test-HarnessAvailable
@@ -48,10 +47,21 @@ Describe 'The official install registers the hooks' {
     It 'needs no configuration ceremony for the hooks to be registered (SC-001)' {
         if (-not $script:Available) { Set-ItResult -Skipped -Because $script:Skip; return }
         # The whole point: nothing but the install ran, and the registry is complete.
+        #
+        # 034 deleted the extension's own registry reader, so this is asserted
+        # from the harness rather than from Get-JiraHookHealth. That is the more
+        # honest shape anyway: the claim is about what the HOST wrote, and using
+        # our own classifier to check it always risked the two being wrong
+        # together — which is how the retired report came to be confidently wrong.
         Install-HarnessExtension -Repo $script:Repo
-        $h = Get-JiraHookHealth -Path (Get-HarnessRegistryPath -Repo $script:Repo) | ConvertFrom-Json -Depth 100
-        @($h.present).Count | Should -Be 7
-        @($h.missing).Count | Should -Be 0
+        $present = 0
+        foreach ($e in $script:Events) {
+            $cmd = (Get-HarnessEntriesFor -Repo $script:Repo -LifecycleEvent $e |
+                Where-Object { $_.Extension -eq 'jira-mirror' } |
+                Select-Object -First 1).Command
+            if ($cmd) { $present++ }
+        }
+        $present | Should -Be 7
     }
 
     It 'produces no duplicates across two further --force reinstalls (FR-005, SC-004)' {

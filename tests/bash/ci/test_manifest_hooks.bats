@@ -125,14 +125,19 @@ hook_events() {
   [ "$status" -ne 0 ]
 }
 
-@test "the manifest's event set and the reader's classified set are identical" {
-  # An event added to one and forgotten in the other would ship half-wired: the
-  # install would register a hook nothing reports on, or the report would name an
-  # event the install never registers (data-model § Lifecycle event, Validation).
+@test "the manifest's event set and the PORT's declaration are identical (034 FR-009)" {
+  # An event added to one and forgotten in the other ships half-wired. The
+  # consequence changed with 034 but the check did not lose its point: it used
+  # to guard the hook-registry reader's classified set, which is deleted. It now
+  # guards `JIRA_HOOK_EVENT_NAMES` in lib/config.sh — the surviving declaration,
+  # whose six after-events are the closed key set `phase_status_map` is
+  # validated against (023, contracts/role-lifecycle-config.md §2). A manifest
+  # event missing from that array would be registered by the host and then
+  # rejected by our own schema.
   # shellcheck source=/dev/null
-  source "${ROOT}/scripts/bash/hooks/register_hooks.sh"
-  local from_manifest from_reader
+  source "${ROOT}/scripts/bash/lib/config.sh"
+  local from_manifest from_port
   from_manifest="$(hook_events | LC_ALL=C sort | tr '\n' ' ')"
-  from_reader="$(printf '%s\n' "${HOOK_EVENTS[@]}" | LC_ALL=C sort | tr '\n' ' ')"
-  [ "${from_manifest}" = "${from_reader}" ]
+  from_port="$(printf '%s\n' "${JIRA_HOOK_EVENT_NAMES[@]}" | LC_ALL=C sort | tr '\n' ' ')"
+  [ "${from_manifest}" = "${from_port}" ]
 }

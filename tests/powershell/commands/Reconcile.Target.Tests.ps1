@@ -115,15 +115,6 @@ Describe 'Target guard (US1)' {
         Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
     }
 
-    It 'a disabled event silences even the rejected-target refusal (§5 T6, research R1)' {
-        Add-JiraHooksDisabled -LifecycleEvent 'after_plan' -ConfigDir $env:JIRA_CONFIG_DIR | Out-Null
-        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
-        $r = Invoke-Captured @('reconcile', '--json', $script:PlanPath)
-        $r.ExitCode | Should -Be 0
-        ($r.Out + $r.Err) | Should -Be ''
-        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ }).Count | Should -Be 0
-        Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
-    }
 
     It 'a valid spec.md run behaves exactly as before this feature (§5 T7)' {
         $r = Invoke-Captured @('reconcile', '--dry-run', '--json', $script:SpecPath)
@@ -219,5 +210,37 @@ Describe 'Target guard (US1)' {
             ($r.Out + $r.Err) | Should -Match 'is not a feature specification'
         }
         finally { Pop-Location }
+    }
+
+    # PLACED LAST DELIBERATELY. This file has an order dependency that predates
+    # 034: 'a valid spec.md run behaves exactly as before this feature' passes
+    # only in a full run and fails in isolation — verified against the
+    # pre-change tree, so it is not this feature's doing. Reconcile.psm1 carries
+    # $script:-scoped state between Its (Pester runs them in one process) and a
+    # per-test -Force re-import does NOT reset it, so the real fix is a separate
+    # piece of work.
+    #
+    # The test below runs a real reconcile, which perturbs that state; the test
+    # it replaced threw on a missing cmdlet before doing any work and perturbed
+    # nothing. Running it last preserves the existing order exactly.
+    It '034 T032 — a dispatched event now reaches the target guard instead of exiting silently' {
+        # THE CHANGED BRANCH. Twin of the bats test of the same name. This
+        # replaces 'a disabled event silences even the rejected-target refusal',
+        # which asserted the opposite: that an event recorded as disabled made
+        # reconcile return 0 with no output at all, before the target guard ran.
+        #
+        # 034 removed that dispatch hold along with the record it consulted.
+        # What must still hold is everything downstream: the target guard still
+        # refuses a non-spec.md target, and hook context still keeps the host
+        # command at exit 0 (FR-007). The unchanged branch is covered by
+        # tests/powershell/hooks/HookResilience.Tests.ps1.
+        $env:SPEC_KIT_JIRA_HOOK_EVENT = 'after_plan'
+        $env:SPEC_KIT_JIRA_HOOK_CONTEXT = '1'
+        $r = Invoke-Captured @('reconcile', '--json', $script:PlanPath)
+        $r.ExitCode | Should -Be 0
+        ($r.Out + $r.Err) | Should -Match 'is not a feature specification'
+        @(Get-JiraMockCallLog -Mock $script:M | Where-Object { $_ }).Count | Should -Be 0
+        Remove-Item Env:\SPEC_KIT_JIRA_HOOK_EVENT -ErrorAction SilentlyContinue
+        Remove-Item Env:\SPEC_KIT_JIRA_HOOK_CONTEXT -ErrorAction SilentlyContinue
     }
 }

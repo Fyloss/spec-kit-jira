@@ -262,12 +262,17 @@ summary_render_prose() {
   fi
   printf 'Warnings: %s, Errors: %s\n' "${warnings}" "${errors}"
   # The config ceremony's effects, reported separately (FR-054). Rendered in a
-  # fixed order (discovery, hooks, readme, gitignore, personal) so both ports
-  # match byte-for-byte.
+  # fixed order so both ports match byte-for-byte. The list must carry EVERY
+  # effect the summary can hold: the renderer skips an absent status silently,
+  # so an effect missing from here is dropped from the human output without a
+  # trace while still appearing in --json. `field_defaults` and `task_mirror`
+  # (011) were missing exactly that way until 034 declared them in the contract
+  # and this list caught up. 034 removed `hooks`: the extension no longer reads
+  # the hook registry, so there is no such effect to render.
   if [[ "$(jq -r 'has("effects")' <<< "${json}")" == "true" ]]; then
     printf 'Effects:\n'
     local effect status detail line
-    for effect in discovery hooks readme gitignore personal; do
+    for effect in discovery readme gitignore personal field_defaults task_mirror; do
       status="$(jq -r --arg e "${effect}" '.effects[$e].status // empty' <<< "${json}")"
       [[ -z "${status}" ]] && continue
       detail="$(jq -r --arg e "${effect}" '.effects[$e].detail // empty' <<< "${json}")"

@@ -16,14 +16,23 @@ teardown() {
   rm -rf "${TMP}"
 }
 
-@test "T021b — a disabled lifecycle event exits 0 silently, with zero requests, state file untouched" {
+@test "034 — a retired disable record is REFUSED, with zero requests and the state file untouched" {
+  # This test used to assert the opposite: that a lifecycle event recorded as
+  # disabled produced exit 0 with no output at all. 034 retired that record —
+  # `hooks.disabled` left config.local.yml's accepted key set — so the same
+  # fixture now falls to the schema's pre-existing unknown-key refusal.
+  #
+  # What the placement claim still needs, and still gets: the refusal happens
+  # BEFORE the state phase. Zero requests, and the recorded state document is
+  # byte-identical afterwards — the run never reached the code that reads it.
   STATE_REL=".specify/jira/state/001-billing-invoices.json"
   FIXTURE="${CONF}/fixtures/repo-with-disabled-event/${STATE_REL}"
-  bash "${HARNESS}" "${CONF}/scenarios/us021b-disabled-event.json" bash "${TMP}/out" > /dev/null
-  [ "$(cat "${TMP}/out/exit")" = "0" ]
+  bash "${HARNESS}" "${CONF}/scenarios/us021b-retired-disable-record.json" bash "${TMP}/out" > /dev/null
+  [ "$(cat "${TMP}/out/exit")" = "4" ]
   [ ! -s "${TMP}/out/calls.log" ]
-  [ ! -s "${TMP}/out/stdout" ]
-  [ ! -s "${TMP}/out/stderr" ]
+  # The refusal names the key and the file (FR-005, SC-004).
+  grep -q 'hooks' "${TMP}/out/stderr"
+  grep -q 'config.local.yml' "${TMP}/out/stderr"
   diff "${FIXTURE}" "${TMP}/out/workdir/${STATE_REL}"
 }
 

@@ -67,7 +67,7 @@ setup() {
 style_audit_json() {
   # Two projects, deliberately declared out of order, so the renderer's own
   # ordering (project key, ordinal) is what is asserted.
-  printf '%s' '{"command":"config","counts":{"created":0,"errors":0,"skipped":0,"updated":0,"warnings":0},"dry_run":false,"effects":{"discovery":{"detail":"2 project(s) discovered","projects":{"WEX":{"style":"company_managed","style_source":"operator"},"IJT":{"style":"team_managed","style_source":"api"}},"status":"written"},"gitignore":{"detail":"personal.yml gitignore coverage","status":"unchanged"},"hooks":{"detail":"lifecycle hooks already registered","status":"unchanged"},"readme":{"detail":"block present","status":"unchanged"}},"exit_code":0,"schema_version":"1.0"}'
+  printf '%s' '{"command":"config","counts":{"created":0,"errors":0,"skipped":0,"updated":0,"warnings":0},"dry_run":false,"effects":{"discovery":{"detail":"2 project(s) discovered","projects":{"WEX":{"style":"company_managed","style_source":"operator"},"IJT":{"style":"team_managed","style_source":"api"}},"status":"written"},"gitignore":{"detail":"personal.yml gitignore coverage","status":"unchanged"},"readme":{"detail":"block present","status":"unchanged"}},"exit_code":0,"schema_version":"1.0"}'
 }
 
 line_of() {
@@ -88,11 +88,13 @@ line_of() {
   disc_ln="$(line_of '  discovery: ')"
   ijt_ln="$(line_of 'IJT: ')"
   wex_ln="$(line_of 'WEX: ')"
-  hooks_ln="$(line_of '  hooks: ')"
-  # discovery < IJT < WEX < hooks: ordinal key order, inside the discovery block.
+  # The boundary marker is the NEXT effect in the renderer's fixed order. It
+  # was `hooks` until 034 removed that effect; `readme` now follows discovery.
+  next_ln="$(line_of '  readme: ')"
+  # discovery < IJT < WEX < readme: ordinal key order, inside the discovery block.
   [ "$disc_ln" -lt "$ijt_ln" ]
   [ "$ijt_ln" -lt "$wex_ln" ]
-  [ "$wex_ln" -lt "$hooks_ln" ]
+  [ "$wex_ln" -lt "$next_ln" ]
 }
 
 @test "an empty projects map adds no style-audit lines (degraded run) (T098)" {
@@ -113,7 +115,7 @@ line_of() {
 # --- T083 [Phase 9] — the §7.1 per-role audit, in prose (010) --------------
 
 role_audit_json() {
-  printf '%s' '{"command":"config","counts":{"created":0,"errors":0,"skipped":0,"updated":0,"warnings":0},"dry_run":false,"effects":{"discovery":{"detail":"1 project(s) discovered","projects":{"CONSUMER":{"style":"company_managed","style_source":"api","roles":{"specification":{"logical_name":"Epic","source":"declared"},"story":{"logical_name":"Tâche","source":"derived"},"task":{"logical_name":"Sous-tâche","source":"operator"}}}},"status":"written"},"gitignore":{"detail":"personal.yml gitignore coverage","status":"unchanged"},"hooks":{"detail":"lifecycle hooks already registered","status":"unchanged"},"readme":{"detail":"block present","status":"unchanged"}},"exit_code":0,"schema_version":"1.0"}'
+  printf '%s' '{"command":"config","counts":{"created":0,"errors":0,"skipped":0,"updated":0,"warnings":0},"dry_run":false,"effects":{"discovery":{"detail":"1 project(s) discovered","projects":{"CONSUMER":{"style":"company_managed","style_source":"api","roles":{"specification":{"logical_name":"Epic","source":"declared"},"story":{"logical_name":"Tâche","source":"derived"},"task":{"logical_name":"Sous-tâche","source":"operator"}}}},"status":"written"},"gitignore":{"detail":"personal.yml gitignore coverage","status":"unchanged"},"readme":{"detail":"block present","status":"unchanged"}},"exit_code":0,"schema_version":"1.0"}'
 }
 
 @test "prose renders one role-audit line per resolved role, under the project's style line (010, contract §7.1)" {
@@ -196,4 +198,44 @@ _output_wrapper() {
     Import-Module '${PS_LIB}/Output.psm1' -Force
     [Console]::Out.Write((ConvertTo-JiraSummaryProse -Json '${json}'))")"
   [ "${b}" = "${p}" ]
+}
+
+# =============================================================================
+# 034 T013 [US1] — the human `Effects:` renderer never names the hook registry
+# (FR-002, FR-008).
+# =============================================================================
+#
+# `summary_render_prose` is a THIRD consumer of the effects object, separate
+# from the two that assert on the JSON, and it does not iterate the object's own
+# keys — it walks a fixed list so both ports render byte-identically. A `hooks`
+# entry left in that list survives every JSON-level assertion in the suite while
+# still shipping the retired word in the port.
+#
+# It also degrades silently: the renderer skips an effect whose status is absent,
+# so a stale entry in the list breaks nothing and shows nothing. That is exactly
+# why it needs its own test rather than being left to the SC-006 grep.
+
+effects_without_hooks_json() {
+  printf '%s' '{"command":"config","counts":{"created":0,"errors":0,"skipped":0,"updated":0,"warnings":0},"dry_run":false,"effects":{"discovery":{"detail":"2 project(s) discovered","status":"written"},"gitignore":{"detail":"personal.yml gitignore coverage","status":"unchanged"},"personal":{"detail":"per-operator file","status":"created"},"readme":{"detail":"block present","status":"unchanged"}},"exit_code":0,"schema_version":"1.0"}'
+}
+
+@test "034 — the prose Effects block renders every effect present and never the word hooks" {
+  run bash -c "$(declare -f effects_without_hooks_json); effects_without_hooks_json | { source '${LIB_DIR}/output.sh'; summary_render_prose; }"
+  [ "$status" -eq 0 ]
+  # Every effect the summary carries is rendered...
+  [[ "$output" == *"  discovery: written"* ]]
+  [[ "$output" == *"  readme: unchanged"* ]]
+  [[ "$output" == *"  gitignore: unchanged"* ]]
+  [[ "$output" == *"  personal: created"* ]]
+  # ...and the retired one is not named at all, in any form.
+  [[ "$output" != *"hooks"* ]]
+}
+
+@test "034 — the renderer's fixed effect list no longer contains hooks (FR-008)" {
+  # The assertion above passes while `hooks` merely sits unused in the list,
+  # because the renderer skips an absent status. This one reads the list itself,
+  # which is the thing that must actually change.
+  run grep -nE 'for effect in|foreach \(\$effect in' "${LIB_DIR}/output.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"hooks"* ]]
 }

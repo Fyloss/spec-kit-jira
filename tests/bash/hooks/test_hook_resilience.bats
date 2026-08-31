@@ -22,11 +22,8 @@
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
   CMD_DIR="${ROOT}/scripts/bash/commands"
-  HOOK_DIR="${ROOT}/scripts/bash/hooks"
   # shellcheck source=/dev/null
   source "${CMD_DIR}/reconcile.sh"
-  # shellcheck source=/dev/null
-  source "${HOOK_DIR}/register_hooks.sh"
   WORK="$(mktemp -d)"
   # An unreachable base makes every write fail-closed instantly (connection refused).
   export SPEC_KIT_JIRA_BASE_URL="http://127.0.0.1:1"
@@ -36,7 +33,6 @@ setup() {
   # with a matching epic-strategy override — both bypass config.yml, which
   # this isolated work dir never has.
   export SPEC_KIT_JIRA_PROJECT_KEY="TEST"
-  export SPEC_KIT_JIRA_EXTENSIONS_YML="${WORK}/.specify/extensions.yml"
   export JIRA_NO_SLEEP=1
   export JIRA_MAX_ATTEMPTS=1
   export JIRA_EMAIL="user@example.com"
@@ -106,66 +102,12 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
-@test "a recorded event is inert at dispatch — no Jira call, no warning (FR-020)" {
-  # The operator's decision lives in OUR file, so it survives the reinstall that
-  # rewrote the registry to `enabled: true`.
-  # shellcheck source=/dev/null
-  source "${ROOT}/scripts/bash/lib/config.sh"
-  export JIRA_CONFIG_DIR="${WORK}/.specify/jira"
-  mkdir -p "${JIRA_CONFIG_DIR}"
-  config_hooks_disabled_add after_specify "${JIRA_CONFIG_DIR}" > /dev/null
-
-  export SPEC_KIT_JIRA_HOOK_CONTEXT=1
-  export SPEC_KIT_JIRA_HOOK_EVENT=after_specify
-  run cmd_reconcile reconcile --json "${SPEC}"
-  [ "$status" -eq 0 ]
-  # Inert means SILENT: no warning, no summary, nothing at all. A notice on every
-  # lifecycle command for an event the operator deliberately turned off is exactly
-  # the noise FR-020 forbids.
-  [ -z "$output" ]
-}
-
-@test "the guard is honoured whatever the registry currently says (FR-007, SC-005)" {
-  # Reproduce the state a reinstall leaves behind: the registry says enabled,
-  # the record says the operator disabled it. The record wins at dispatch.
-  # shellcheck source=/dev/null
-  source "${ROOT}/scripts/bash/lib/config.sh"
-  export JIRA_CONFIG_DIR="${WORK}/.specify/jira"
-  mkdir -p "${JIRA_CONFIG_DIR}" "$(dirname "${SPEC_KIT_JIRA_EXTENSIONS_YML}")"
-  printf '%s\n' \
-    'hooks:' \
-    '  after_specify:' \
-    '    - extension: jira-mirror' \
-    '      command: speckit.jira-mirror.reconcile' \
-    '      enabled: true' > "${SPEC_KIT_JIRA_EXTENSIONS_YML}"
-  config_hooks_disabled_add after_specify "${JIRA_CONFIG_DIR}" > /dev/null
-
-  export SPEC_KIT_JIRA_HOOK_EVENT=after_specify
-  run cmd_reconcile reconcile --json "${SPEC}"
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
-
-  # An event that is NOT recorded still runs — the guard is per event, not global.
-  export SPEC_KIT_JIRA_HOOK_EVENT=after_plan
-  run cmd_reconcile reconcile --dry-run --json "${SPEC}"
-  [ -n "$output" ]
-}
-
-@test "no run of any kind brings the registry into existence (FR-022, SC-011)" {
-  rm -f "${SPEC_KIT_JIRA_EXTENSIONS_YML}"
-  export SPEC_KIT_JIRA_HOOK_CONTEXT=1
-  cmd_reconcile reconcile --json "${SPEC}" > /dev/null 2>&1 || true
-  cmd_reconcile reconcile --dry-run --json "${SPEC}" > /dev/null 2>&1 || true
-  [ ! -f "${SPEC_KIT_JIRA_EXTENSIONS_YML}" ]
-}
-
 @test "the PowerShell port downgrades a hook-context failure identically (NFR-1)" {
   if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
   local PS_CMD="${ROOT}/scripts/powershell/commands"
   local status_ps
   status_ps="$(SPEC_KIT_JIRA_BASE_URL="http://127.0.0.1:1" SPEC_KIT_JIRA_SPEC_SLUG="001-feature" \
     SPEC_KIT_JIRA_PLAN_CONTEXT='{"story_type_id":"10004"}' \
-    SPEC_KIT_JIRA_EXTENSIONS_YML="${SPEC_KIT_JIRA_EXTENSIONS_YML}" \
     SPEC_KIT_JIRA_HOOK_CONTEXT=1 JIRA_NO_SLEEP=1 JIRA_MAX_ATTEMPTS=1 \
     JIRA_EMAIL="user@example.com" JIRA_API_TOKEN="RAWSECRETXYZ" \
     pwsh -NoProfile -Command "

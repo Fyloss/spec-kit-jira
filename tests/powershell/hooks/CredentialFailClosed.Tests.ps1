@@ -16,7 +16,6 @@ BeforeAll {
     $Root = Join-Path $PSScriptRoot '../../..'
     $CmdDir = Join-Path $Root 'scripts/powershell/commands'
     Import-Module (Join-Path $CmdDir 'Reconcile.psm1') -Force
-    Import-Module (Join-Path $Root 'scripts/powershell/hooks/RegisterHooks.psm1') -Force
     Import-Module (Join-Path $Root 'scripts/powershell/lib/Config.psm1') -Force
     Import-Module (Join-Path $Root 'scripts/powershell/lib/Output.psm1') -Force
     Import-Module (Join-Path $Root 'tests/powershell/helpers/SecretStoreStub.psm1') -Force
@@ -35,7 +34,6 @@ Describe 'Hook resilience — the fail-closed credential departure' {
         $env:SPEC_KIT_JIRA_BASE_URL = 'http://127.0.0.1:1'
         $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-feature'
         $env:SPEC_KIT_JIRA_PROJECT_KEY = 'TEST'
-        $env:SPEC_KIT_JIRA_EXTENSIONS_YML = Join-Path $Work '.specify/extensions.yml'
         $env:JIRA_NO_SLEEP = '1'
         $env:JIRA_MAX_ATTEMPTS = '1'
         $env:JIRA_EMAIL = 'user@example.com'
