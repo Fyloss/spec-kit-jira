@@ -99,6 +99,12 @@ attachments_manifest_read() {
 #
 # `action` is one of published · revised · unchanged · withheld.
 #
+# The result is CANONICALISED (keys sorted) before it is printed. Not cosmetic:
+# these decisions reach the run summary, which Constitution VI requires to be
+# byte-identical across ports, and the PowerShell twin canonicalises by
+# construction. Without it the two agreed on every value and differed on every
+# key order — a divergence no unit test on either port alone would show.
+#
 # A decision that WILL be published carries the artifact's `hash`, because the
 # manifest is composed from the decision set and has nothing else to record it
 # from. Without it the manifest stores an empty hash, every later run reads
@@ -140,7 +146,7 @@ attachments_classify() {
             {path: $a.path, attachment_name: $a.attachment_name, hash: $a.hash, action: "published"}
           else
             {path: $a.path, attachment_name: $a.attachment_name, action: "unchanged"}
-          end ]'
+          end ]' | json_canonical
 }
 
 # attachments_comment_body <event> <decisions-json> — print the ADF document
@@ -201,7 +207,7 @@ attachments_manifest_compose() {
         | ($c[$i] // null) as $made
         | if $made == null then . else
             .[$p.path] = {hash: ($p.hash // ""), attachment_id: ($made.id | tostring), run: $ev}
-          end)'
+          end)' | json_canonical
 }
 
 # attachments_manifest_write <base-url> <ticket-key> <artifacts-json> — store
