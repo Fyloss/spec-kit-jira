@@ -91,8 +91,14 @@ if [[ "${_config_file}" == "-" ]]; then
     [[ -z "${_line}" ]] && continue
     _k="${_line%%=*}"
     _v="${_line#*=}"
-    _k="$(printf '%s' "${_k}" | sed 's/[[:space:]]*$//')"
-    _v="$(printf '%s' "${_v}" | sed 's/^[[:space:]]*//')"
+    # Trimmed with parameter expansion, not `sed`. This loop runs once per
+    # config LINE, and 036's multipart config carries one line per artifact —
+    # two `sed` processes each. The whole point of the spawn-budget guards is
+    # to measure the PORT, and a harness that spawns per artifact makes every
+    # such measurement report the harness's own cost as the port's. Measured:
+    # 61 -> 97 sed pairs between a 4-artifact and a 40-artifact run.
+    _k="${_k%"${_k##*[![:space:]]}"}"
+    _v="${_v#"${_v%%[![:space:]]*}"}"
     _v="$(_shim_unquote "${_v}")"
     case "${_k}" in
       url) _cfg_url="${_v}" ;;
@@ -128,8 +134,38 @@ query=""
 [[ "${target}" == *"?"* ]] && query="${target#*\?}"
 
 # ---- call log — appended before fault handling, mirroring mock-server.ps1 -----
+#
+# 036 T053: two routes carry an annotation, because they are the only ones whose
+# PAYLOAD the conformance corpus has to compare and whose payload reaches no
+# other capture. The publication phase runs after the planned action set is
+# composed, so the run summary's `actions[]` never sees the upload or the
+# comment; without this line a scenario compares two identical
+# `POST .../attachments` targets and is blind to a port that sent the parts in a
+# different order or announced them with a different body.
+#
+# Additive by construction: a request with neither parts nor body logs exactly
+# the bytes it logged before, so the 260 pre-036 scenarios are untouched. Kept
+# byte-for-byte in step with mock-server.ps1's own writer — a divergence HERE
+# would read as a divergence between the ports.
 
-printf '%s %s\n' "${method}" "${target}" >> "${MOCK_CALLLOG}"
+_calllog_suffix=""
+if [[ "${method}" == "POST" && "${path}" == */attachments && ${#_cfg_form[@]} -gt 0 ]]; then
+  # The flattened names only, in part order. Never the local file paths: they
+  # are the caller's own temp directory and differ between the two ports by
+  # construction.
+  _cl_names=""
+  for _cl_entry in "${_cfg_form[@]}"; do
+    [[ "${_cl_entry}" == file=@*';filename='* ]] || continue
+    _cl_names="${_cl_names:+${_cl_names},}${_cl_entry##*;filename=}"
+  done
+  [[ -n "${_cl_names}" ]] && _calllog_suffix=" parts=${_cl_names}"
+elif [[ "${method}" == "POST" && "${path}" == */comment && -n "${body}" ]]; then
+  # Verbatim, not a digest: the body is composed from pinned literals in two
+  # languages, and a digest would prove they differ without saying how.
+  _calllog_suffix=" body=${body}"
+fi
+
+printf '%s %s%s\n' "${method}" "${target}" "${_calllog_suffix}" >> "${MOCK_CALLLOG}"
 
 # ---- helpers ------------------------------------------------------------------
 
@@ -550,9 +586,18 @@ _shim_property_get() {
 # _shim_attachment_meta — GET /attachment/meta (036 C1.1). The limit is a SITE
 # fact the bridge must discover rather than assume (Principle VII), so the
 # config can pin it per scenario; the default mirrors a stock Cloud site.
+#
+# `//` is NOT usable for `enabled`: jq's alternative operator treats `false` as
+# a missing value, so `(.attachment_meta.enabled) // true` answers TRUE for a
+# config that says `false` — and the C3.9 "attachments switched off site-wide"
+# path could not be exercised at all. The presence test is spelled out instead,
+# matching mock-server.ps1's `ContainsKey('enabled')`. `uploadLimit` keeps `//`
+# because 0 is not a limit any site sets and the default is what a caller wants.
 _shim_attachment_meta() {
   RESP_STATUS=200
-  RESP_BODY="$(jq -c '{enabled: ((.attachment_meta.enabled) // true),
+  RESP_BODY="$(jq -c '{enabled: (if (.attachment_meta | type) == "object" and (.attachment_meta | has("enabled"))
+                                 then (.attachment_meta.enabled | if . then true else false end)
+                                 else true end),
                        uploadLimit: ((.attachment_meta.uploadLimit) // 10485760)}' \
     "${MOCK_CONFIG_PATH}")"
 }
@@ -578,6 +623,12 @@ _shim_create_attachments() {
   local n
   n="$(jq -r '(.counters["attachment"] // 0)' "${MOCK_STATE_PATH}" 2> /dev/null || printf '0')"
   [[ -n "${n}" && "${n}" != "null" ]] || n=0
+  # ONE jq for the whole part list, not one per part. Same reason as the config
+  # trim above: this shim is the instrument the port's own spawn budget is
+  # measured through, so a per-part process here is reported as the port's.
+  # The rows are accumulated as NUL-free text and folded in a single pass.
+  local rows="${tmp_rows:-}"
+  rows=""
   for entry in ${_cfg_form+"${_cfg_form[@]}"}; do
     [[ "${entry}" == file=@* ]] || continue
     name="${entry##*;filename=}"
@@ -586,9 +637,12 @@ _shim_create_attachments() {
     local size=0
     [[ -f "${file}" ]] && size="$(wc -c < "${file}" | tr -d '[:space:]')"
     n=$((n + 1))
-    created="$(jq -c --arg id "1000${n}" --arg fn "${name}" --argjson sz "${size}" \
-      '. + [{id: $id, filename: $fn, size: $sz}]' <<< "${created}")"
+    rows="${rows}1000${n}"$'\037'"${name}"$'\037'"${size}"$'\n'
   done
+  if [[ -n "${rows}" ]]; then
+    created="$(printf '%s' "${rows}" | jq -Rn '
+      [ inputs | split("\u001f") | {id: .[0], filename: .[1], size: (.[2] | tonumber)} ]')"
+  fi
 
   tmp="$(mktemp)"
   jq -c --arg k "${key}" --argjson a "${created}" --argjson n "${n}" '

@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-09-01
+
+### Added
+
+**Every file of the specification folder is now published on its Jira ticket.**
+Until now Jira received the three documents the mirror renders into descriptions
+— `spec.md`, `plan.md`, `tasks.md` — and nothing else. `research.md`, the data
+model, everything under `contracts/` and `checklists/`, and any diagram beside
+them existed only in the repository, so a Product Owner, a QA engineer or an
+auditor reading the ticket could not see that they existed at all.
+
+The reconcile now attaches the **whole folder** to the specification-tier
+ticket, in one multipart request whatever the file count, and posts one comment
+per publishing run listing what it attached and whether each file is new or a
+revision. Nested files attach under a flattened name, so `contracts/api.md`
+arrives as `contracts__api.md` and two folders cannot silently overwrite each
+other's `api.md`. Files your repository ignores are never sent.
+
+**Re-running is free.** Each file is compared by content hash against a manifest
+stored on the ticket as an entity property. A run over an unchanged folder makes
+exactly one call — the manifest read — and zero writes of every kind: no
+attachment, no comment, no property. Change one file and exactly that one is
+published, announced by exactly one comment.
+
+**Nothing is ever removed.** A revised file is attached again alongside the
+earlier copy rather than replacing it, so the ticket keeps the history of what
+the specification said and when. Deleting a file from the folder leaves its
+published copies on the ticket and writes nothing.
+
+**Two new lifecycle events, `after_converge` and `after_checklist`**, bringing
+the declared set to nine. They exist because two Spec Kit commands change the
+feature folder without firing any of the other seven: a convergence pass
+rewrites `tasks.md`, and `/speckit.checklist` writes a file under `checklists/`
+while the three rendered documents stay untouched. Teams gain both as
+`phase_status_map` keys for free, on the same terms as every other event.
+
+**The run summary carries a new `artifacts[]` array**, one entry per file with
+its outcome — `published`, `revised`, `unchanged` or `withheld` — and, for a
+withholding, the reason and the numbers needed to act on it: the size and the
+site's limit for an oversized file, the colliding path for a name collision.
+Under `--dry-run` the same array is produced with `would-publish` /
+`would-revise`, and the predicted set equals the real run's exactly.
+
+### Changed
+
+**The run-state short-circuit now considers every artifact.** It hashed
+`spec.md`, `plan.md` and `tasks.md`; a change confined to `research.md` or a
+contract left a run short-circuiting as unchanged, which would have made the
+publication unreachable for exactly the files this release adds. Run state moves
+to schema 3 and hashes the whole artifact set. An existing state file at
+schema 2 is treated as absent — one full run, then the new floor applies.
+
+### Fixed
+
+**The Bash port read a site with attachments disabled as having them enabled.**
+`jq`'s alternative operator treats `false` as a missing value, so
+`"enabled": false` from `attachment/meta` resolved back to `true`. The
+PowerShell port, which tests for the property's presence, always honoured it —
+a silent divergence on the one setting that switches the feature off site-wide.
+
+### Security
+
+**The privacy guard now scans artifact content before any Jira write.** A
+BLOCK-tier coordinate or credential shape anywhere in the specification folder —
+including inside a binary file — refuses the whole run with zero writes of every
+kind, not merely zero attachments. The scan sits at the reconcile's existing
+pre-write sweep rather than beside the upload, because a guard beside the upload
+could only abort the upload: the description and story writes would already have
+landed.
+
 ## [0.25.0] - 2026-08-31
 
 ### Fixed — BREAKING

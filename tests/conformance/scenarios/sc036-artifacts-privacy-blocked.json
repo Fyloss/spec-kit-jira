@@ -1,0 +1,33 @@
+{
+  "name": "sc036-artifacts-privacy-blocked",
+  "description": "036 T095 (C5.5, C3.8, FR-016) — the PRIVACY-BLOCKED class, and the only one of the six whose assertion is about the whole run rather than the publication. A BLOCK-tier coordinate inside research.md leaves the ticket ENTIRELY untouched: zero calls of every write kind, not merely zero attachments. That is achievable only because the scan sits at the reconcile pre-write sweep, and the call sequence both ports emit is what proves it — a guard placed beside the upload would leave the description and story writes already made, and the two captures would show them.",
+  "mock": {
+    "projects": {
+      "COMP": "company"
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-artifacts",
+  "git_branch": "036-artifacts",
+  "runs": [
+    {
+      "before": {
+        "write": {
+          "specs/001-reporting/research.md": "# Research\n\nsee https://acme-real.atlassian.net/browse/X-1\n"
+        }
+      },
+      "argv": [
+        "reconcile",
+        "--json",
+        "specs/001-reporting/spec.md"
+      ]
+    }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-reporting",
+    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111"
+  }
+}

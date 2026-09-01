@@ -1,11 +1,29 @@
 {
   "name": "us022-dry-run-full-preview",
   "description": "T022 [US2, contracts/run-state.md §3 row 2, S6]: reconcile a spec to completion, then reconcile it again unchanged with --dry-run. Even though the second run's inputs match what the first run just recorded, --dry-run must never consult the state document, so the preview still predicts the real run exactly — the second run's calls.log must NOT be empty.",
-  "mock": { "projects": { "COMP": "company" } },
+  "mock": {
+    "projects": {
+      "COMP": "company"
+    }
+  },
   "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec-clean",
+  "git_branch": "021-run-state",
   "runs": [
-    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] },
-    { "argv": ["reconcile", "--json", "--dry-run", "specs/001-billing-invoices/spec.md"] }
+    {
+      "argv": [
+        "reconcile",
+        "--json",
+        "specs/001-billing-invoices/spec.md"
+      ]
+    },
+    {
+      "argv": [
+        "reconcile",
+        "--json",
+        "--dry-run",
+        "specs/001-billing-invoices/spec.md"
+      ]
+    }
   ],
   "env": {
     "JIRA_EMAIL": "user@example.com",

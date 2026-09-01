@@ -50,10 +50,17 @@ _ATTACHMENTS_MANIFEST_SCHEMA=1
 #
 # Principle VII forbids compiling in 10 MB as though it were universal: sites
 # raise and lower it, and FR-017 requires the warning to state the real number.
+#
+# Keyed on the base URL, matching the PowerShell twin. A cache keyed on nothing
+# answers for the FIRST site anything asked about; this port never reaches that
+# state anyway — every caller captures it in a subshell, so the cache does not
+# survive a single call — but the twin does, where it made the C3.7/C3.9
+# withholding paths untestable. The two ports say the same thing here.
 _ATTACHMENTS_LIMIT_CACHE=""
+_ATTACHMENTS_LIMIT_CACHE_URL=""
 attachments_limit() {
   local base="$1"
-  if [[ -n "${_ATTACHMENTS_LIMIT_CACHE}" ]]; then
+  if [[ -n "${_ATTACHMENTS_LIMIT_CACHE}" && "${_ATTACHMENTS_LIMIT_CACHE_URL}" == "${base}" ]]; then
     printf '%s' "${_ATTACHMENTS_LIMIT_CACHE}"
     return 0
   fi
@@ -62,10 +69,16 @@ attachments_limit() {
     return 1
   fi
   local enabled limit
-  enabled="$(jq -r '.enabled // true' <<< "${body}" 2> /dev/null)"
+  # NOT `.enabled // true`: jq's alternative operator treats `false` as a
+  # missing value, so a site that answers `"enabled": false` reads back as
+  # enabled and C3.9 never fires — the ports diverge, because the PowerShell
+  # twin tests for the property's PRESENCE and honours the false. Absence still
+  # means enabled: an older site that omits the field is not a disabled one.
+  enabled="$(jq -r 'if has("enabled") then (.enabled | if . then "true" else "false" end) else "true" end' <<< "${body}" 2> /dev/null)"
   limit="$(jq -r '.uploadLimit // 0' <<< "${body}" 2> /dev/null)"
   [[ -n "${limit}" && "${limit}" != "null" ]] || return 1
   _ATTACHMENTS_LIMIT_CACHE="${enabled} ${limit}"
+  _ATTACHMENTS_LIMIT_CACHE_URL="${base}"
   printf '%s' "${_ATTACHMENTS_LIMIT_CACHE}"
 }
 
@@ -122,8 +135,13 @@ attachments_manifest_read() {
 # the property but died before the upload landed.
 attachments_classify() {
   local set_json="$1" manifest="${2:-\{\}}" limit="${3:-0}" ticket_ids="${4:-null}"
-  jq -c -n --argjson s "${set_json}" --argjson m "${manifest}" \
-    --argjson lim "${limit}" --argjson ids "${ticket_ids}" '
+  # json_build, not --argjson: the set, the manifest and the ticket's id list
+  # all grow with the artifact count, and a command-line argument is capped at
+  # ~32 767 bytes on Windows — reached at roughly the same directory size as
+  # the manifest's own cap (C4.4). `lim` stays a bound scalar; it is one
+  # integer whatever the input (docs/11-process-budget.md).
+  # shellcheck disable=SC2016  # a jq filter: $s/$m/$lim/$ids are jq variables
+  json_build '
     # Names shared by more than one artifact — the collision set (FR-005).
     ($s | group_by(.attachment_name) | map(select(length > 1)) | flatten
         | map(.attachment_name) | unique) as $collided
@@ -146,7 +164,8 @@ attachments_classify() {
             {path: $a.path, attachment_name: $a.attachment_name, hash: $a.hash, action: "published"}
           else
             {path: $a.path, attachment_name: $a.attachment_name, action: "unchanged"}
-          end ]' | json_canonical
+          end ]' \
+    s "${set_json}" m "${manifest}" lim "${limit}" ids "${ticket_ids}" | json_canonical
 }
 
 # attachments_comment_body <event> <decisions-json> — print the ADF document
@@ -161,13 +180,22 @@ attachments_classify() {
 # silence. They are reported in the run summary, where the operator can act.
 attachments_comment_body() {
   local event="$1" decisions="$2"
-  jq -c -n --arg ev "${event}" --argjson d "${decisions}" '
-    ([$d[] | select(.action == "published" or .action == "revised")]) as $pub
+  # json_build: the decision set grows with the artifact count. The event is a
+  # short token but travels the same way — json_build binds every value from a
+  # file, so it is JSON-encoded once rather than mixed with an --arg.
+  # shellcheck disable=SC2016  # a jq filter: $ev/$d are jq variables
+  json_build '
+    # The four spellings, not two: a --dry-run decision set carries
+    # `would-publish` / `would-revise`, and the comment it PREDICTS has to be
+    # the comment the real run would post, or the prediction is not one
+    # (FR-020, SC-006).
+    ([$d[] | select(.action == "published" or .action == "revised"
+                    or .action == "would-publish" or .action == "would-revise")]) as $pub
     # The lead is the same in both variants; only the tail changes. Kept as one
     # literal rather than two identical branches, so there is exactly one place
     # the PowerShell twin has to match.
     | "Spec Kit published these feature artifacts after " as $lead
-    | (if ([$pub[] | select(.action == "revised")] | length) > 0 then
+    | (if ([$pub[] | select(.action == "revised" or .action == "would-revise")] | length) > 0 then
          ". Revised files are attached again; earlier versions are kept."
        else
          ". They are attached to this ticket."
@@ -182,11 +210,12 @@ attachments_comment_body() {
           $pub[] | {type: "listItem", content: [
             {type: "paragraph", content: [
               {type: "text", text: .path, marks: [{type: "code"}]},
-              {type: "text", text: (if .action == "revised" then " — revised" else " — new" end)}
+              {type: "text", text: (if .action == "revised" or .action == "would-revise" then " — revised" else " — new" end)}
             ]}
           ]}
         ]}
-      ]}' | json_canonical
+      ]}' \
+    ev "$(jq -cn --arg t "${event}" '$t')" d "${decisions}" | json_canonical
 }
 
 # attachments_manifest_compose <manifest-json> <decisions-json> <created-json>
@@ -199,15 +228,19 @@ attachments_comment_body() {
 # describes reality.
 attachments_manifest_compose() {
   local manifest="${1:-\{\}}" decisions="$2" created="${3:-[]}" event="$4"
-  jq -c -n --argjson m "${manifest}" --argjson d "${decisions}" \
-    --argjson c "${created}" --arg ev "${event}" '
+  # json_build: the manifest, the decisions and the sink's response all grow
+  # with the artifact count (docs/11-process-budget.md).
+  # shellcheck disable=SC2016  # a jq filter: $m/$d/$c/$ev are jq variables
+  json_build '
     ([$d[] | select(.action == "published" or .action == "revised")]) as $pub
     | reduce range(0; ($pub | length)) as $i ($m;
         ($pub[$i]) as $p
         | ($c[$i] // null) as $made
         | if $made == null then . else
             .[$p.path] = {hash: ($p.hash // ""), attachment_id: ($made.id | tostring), run: $ev}
-          end)' | json_canonical
+          end)' \
+    m "${manifest}" d "${decisions}" c "${created}" \
+    ev "$(jq -cn --arg t "${event}" '$t')" | json_canonical
 }
 
 # attachments_manifest_write <base-url> <ticket-key> <artifacts-json> — store
@@ -216,8 +249,9 @@ attachments_manifest_compose() {
 # the call site where the decision set is known.
 attachments_manifest_write() {
   local base="$1" key="$2" artifacts="$3" body
-  body="$(jq -c -n --argjson sc "${_ATTACHMENTS_MANIFEST_SCHEMA}" --argjson a "${artifacts}" \
-    '{schema: $sc, artifacts: $a}')"
+  # shellcheck disable=SC2016  # a jq filter: $sc/$a are jq variables
+  body="$(json_build '{schema: $sc, artifacts: $a}' \
+    sc "${_ATTACHMENTS_MANIFEST_SCHEMA}" a "${artifacts}")"
   jira_request PUT "${base}/rest/api/3/issue/${key}/properties/${SPEC_KIT_JIRA_ARTIFACTS_KEY}" "${body}" > /dev/null
 }
 
@@ -228,15 +262,96 @@ attachments_manifest_write() {
 # the next run republish exactly the artifacts this one dropped, forever, which
 # is worse than not starting.
 attachments_manifest_oversized() {
-  local artifacts="$1" size
-  size="$(jq -c -n --argjson sc "${_ATTACHMENTS_MANIFEST_SCHEMA}" --argjson a "${artifacts}" \
-    '{schema: $sc, artifacts: $a}' | wc -c | tr -d '[:space:]')"
+  local size
+  size="$(attachments_manifest_size "$1")"
   ((size > SPEC_KIT_JIRA_PROPERTY_CAP))
+}
+
+# attachments_manifest_size <artifacts-json> — the composed document's size in
+# bytes. Its own function because C4.4.1's warning has to NAME the number, not
+# merely act on it: "more artifacts than one ticket can track" tells an operator
+# nothing they can do, where "412 artifacts, a 45 000-byte record, a 32 768-byte
+# cap" tells them exactly how far over they are (Principle XVI).
+attachments_manifest_size() {
+  # shellcheck disable=SC2016  # a jq filter: $sc/$a are jq variables
+  json_build '{schema: $sc, artifacts: $a}' \
+    sc "${_ATTACHMENTS_MANIFEST_SCHEMA}" a "$1" | wc -c | tr -d '[:space:]'
+}
+
+# attachments_property_cap — the assumed cap, as the code's single reading of it.
+attachments_property_cap() { printf '%s' "${SPEC_KIT_JIRA_PROPERTY_CAP}"; }
+
+# attachments_pending <decisions-json> — the entries a run intends to write, in
+# order. One reading of "will be written", shared by everything that has to ask:
+# the four spellings (`published`/`revised` and their two dry-run twins) drifted
+# apart across five call sites before this existed.
+attachments_pending() {
+  jq -c '[ .[] | select(.action == "published" or .action == "revised"
+                        or .action == "would-publish" or .action == "would-revise") ]' <<< "$1"
+}
+
+# attachments_predict <decisions-json> — the dry-run twin of a decision set:
+# the two WRITE actions become `would-publish` / `would-revise` (data-model §5,
+# the existing `would-` convention). Everything else is untouched — an
+# `unchanged` artifact is unchanged in a dry run too, and a withholding is
+# predicted exactly as it would happen.
+attachments_predict() {
+  jq -c '[ .[] | if .action == "published" then .action = "would-publish"
+                 elif .action == "revised" then .action = "would-revise"
+                 else . end ]' <<< "$1" | json_canonical
+}
+
+# attachments_withhold <decisions-json> <reason> — rewrite every entry this run
+# would have written into a `withheld` one carrying <reason>.
+#
+# For the withholdings that take down the WHOLE publication — the site has
+# attachments off, the limit could not be read, the manifest would overflow, the
+# upload was refused. Without this the summary reports `published` for artifacts
+# that reached nothing, which is the one thing an audit trail must never do
+# (FR-021, US4 AS3). An already-withheld entry keeps its own, more specific
+# reason: `oversized` tells the operator more than `upload-failed` does.
+attachments_withhold() {
+  local decisions="$1" reason="$2"
+  jq -c --arg r "${reason}" '
+    [ .[] | if .action == "published" or .action == "revised"
+               or .action == "would-publish" or .action == "would-revise"
+            then {path: .path, attachment_name: .attachment_name,
+                  action: "withheld", reason: $r}
+            else . end ]' <<< "${decisions}" | json_canonical
+}
+
+# attachments_actions <ticket-key> <decisions-json> <comment-adf-json> — the two
+# planned actions the publication contributes to the run summary (data-model §5).
+#
+# Composed HERE rather than in plan_apply.sh, which is where the sink's other
+# action kinds are planned: publication runs after the apply, because the
+# specification ticket may have been created by it (FR-006). The actions are
+# reported identically whether or not the run performed them, which is what
+# makes the dry-run report equal the real one (SC-006).
+attachments_actions() {
+  local key="$1" decisions="$2" adf="$3"
+  # shellcheck disable=SC2016  # a jq filter: $k/$p/$c are jq variables
+  json_build '
+    if ($p | length) == 0 then [] else
+      [ {method: "POST", url: ("/rest/api/3/issue/" + $k + "/attachments"),
+         body: {parts: [$p[] | .attachment_name]}},
+        {method: "POST", url: ("/rest/api/3/issue/" + $k + "/comment"),
+         body: {body: $c}} ]
+    end' \
+    k "$(jq -cn --arg t "${key}" '$t')" \
+    p "$(attachments_pending "${decisions}")" c "${adf}" | json_canonical
 }
 
 # attachments_upload <base-url> <ticket-key> <feature-dir> <decisions-json> —
 # upload every artifact this run decided to publish, in ONE request (C1.4).
-# Prints the sink's response array; empty on failure.
+#
+# Prints an ENVELOPE, `{"status": <http-status>, "created": [...]}`, not the bare
+# response array. C3.2, C3.3 and C3.4 are three different outcomes with three
+# different messages, and the status is the only thing that tells them apart —
+# but `JIRA_LAST_STATUS` is set by the transport in ITS shell, and every caller
+# here reaches this function through a command substitution, so the status
+# cannot travel any other way. `status` is 0 when the request never reached a
+# response at all (a network-level failure).
 attachments_upload() {
   local base="$1" key="$2" dir="$3" decisions="$4"
   local parts
@@ -244,10 +359,22 @@ attachments_upload() {
     [ .[] | select(.action == "published" or .action == "revised")
           | {attachment_name: .attachment_name, file: ($d + "/" + .path)} ]' <<< "${decisions}")"
   [[ "$(jq -r 'length' <<< "${parts}")" -gt 0 ]] || {
-    printf '[]'
+    printf '{"created":[],"status":0}'
     return 0
   }
-  jira_request_multipart POST "${base}/rest/api/3/issue/${key}/attachments" "${parts}"
+  # Redirection, NOT a command substitution: `$( … )` would run the transport in
+  # a subshell and JIRA_LAST_STATUS would die with it — the whole reason this
+  # function exists in this shape.
+  local respfile body
+  respfile="$(mktemp)"
+  JIRA_LAST_STATUS=0
+  jira_request_multipart POST "${base}/rest/api/3/issue/${key}/attachments" "${parts}" > "${respfile}" || true
+  body="$(cat "${respfile}" 2> /dev/null)"
+  rm -f "${respfile}"
+  # shellcheck disable=SC2016  # a jq filter: $s/$c are jq variables
+  json_build '{status: $s, created: $c}' \
+    s "${JIRA_LAST_STATUS:-0}" \
+    c "$(jq -c '.' <<< "${body}" 2> /dev/null || printf '[]')" | json_canonical
 }
 
 # attachments_comment_post <base-url> <ticket-key> <adf-json> — post the

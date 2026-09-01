@@ -123,3 +123,65 @@ Describe 'Invoke-JiraRequest -FormParts wiring (036 T021)' {
         $src | Should -Match "\`$header\['X-Atlassian-Token'\] = 'no-check'"
     }
 }
+
+# --- Constitution IV / NFR-3: the credential ----------------------------------
+#
+# T094 confirmed this file did NOT carry the assertion. T020/T021 were recorded
+# as covering "the credential appears in no argv, no log and no trace of the
+# multipart path" on both ports; the Bash twin does
+# (test_client_multipart.bats, "Principle IV the credential never reaches argv,
+# at maximum verbosity"), and this side covered the part shapes only. The task
+# exists precisely because "the twin covered it" is an assumption, and this is
+# what checking it produced.
+#
+# "Maximum verbosity" on this port is `Set-PSDebug -Trace 2` plus
+# `$VerbosePreference = 'Continue'`: statement-level tracing of every line
+# executed, with every verbose stream written out. If the credential can reach
+# a diagnostic channel at all, it reaches one here.
+
+Describe 'Principle IV — the credential at maximum verbosity (036 T094)' {
+    It 'never appears in a full statement trace of the multipart path' {
+        $dir = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $dir 'spec.md'), "spec body`n")
+        $parts = @(@{ Name = 'spec.md'; File = (Join-Path $dir 'spec.md') })
+
+        $env:JIRA_EMAIL = 'user@example.com'
+        $env:JIRA_API_TOKEN = 'RAWSECRETXYZ'
+
+        # The trace is taken in a CHILD pwsh: Set-PSDebug -Trace 2 in this one
+        # would trace Pester itself, and the assertion would then be about
+        # Pester's own output rather than about the transport.
+        $traceFile = Join-Path $TestDrive 'trace.txt'
+        $script = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+`$VerbosePreference = 'Continue'
+Import-Module '$((Join-Path $Root 'scripts/powershell/sink/jira/Client.psm1'))' -Force
+Set-PSDebug -Trace 2
+`$c = New-JiraMultipartContent -FormParts @(@{ Name = 'spec.md'; File = '$((Join-Path $dir 'spec.md'))' })
+`$null = `$c.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+Set-PSDebug -Off
+"@
+        $scriptFile = Join-Path $TestDrive 'trace-probe.ps1'
+        [System.IO.File]::WriteAllText($scriptFile, $script)
+        & (Get-Process -Id $PID).Path -NoProfile -File $scriptFile *> $traceFile
+
+        $trace = [System.IO.File]::ReadAllText($traceFile)
+        # The instrument first: a trace that captured nothing would pass this
+        # test forever. Trace 2 prints every executed line, so the module's own
+        # function name is in it whenever tracing really happened.
+        $trace | Should -Match 'New-JiraMultipartContent'
+
+        $trace | Should -Not -Match 'RAWSECRETXYZ'
+        # The base64 of "user@example.com:RAWSECRETXYZ" must not appear either —
+        # a credential encoded is still a credential.
+        $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes('user@example.com:RAWSECRETXYZ'))
+        $trace | Should -Not -Match ([regex]::Escape($b64))
+
+        # …and the composed body itself carries no credential: the header is set
+        # on the REQUEST, never on the content.
+        $text = Get-ComposedText -Content (New-JiraMultipartContent -FormParts $parts)
+        $text | Should -Not -Match 'RAWSECRETXYZ'
+        $text | Should -Not -Match 'Authorization'
+    }
+}

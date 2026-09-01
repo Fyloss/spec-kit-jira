@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # T007 [026] — the derivation of contracts/surface-derivation.md §2 yields
-# exactly the installable surface: 100 files, containing the manifest, both
+# exactly the installable surface: 102 files, containing the manifest, both
 # ports' entry points and all four command documents, and nothing under any
 # development-only directory.
 
@@ -10,11 +10,11 @@ setup() {
   source "${ROOT}/packaging/lib/surface.sh"
 }
 
-@test "the derived surface has exactly 100 members (quickstart.md step 1)" {
+@test "the derived surface has exactly 102 members (quickstart.md step 1)" {
   run packaging_derive_surface
   [ "$status" -eq 0 ]
   count="$(printf '%s\n' "$output" | grep -c .)"
-  [ "${count}" -eq 100 ]
+  [ "${count}" -eq 102 ]
 }
 
 @test "the derived surface contains the manifest, both entry points and the four command documents" {
@@ -53,15 +53,16 @@ setup() {
   # reading them under the caller's locale; under en_US.UTF-8 that mismatch
   # makes `comm` treat both inputs as unsorted and it silently stops
   # excluding anything, so the derived surface becomes every tracked file
-  # instead of the 100-file surface (SC-004, C2.1).
+  # instead of the 102-file surface (SC-004, C2.1).
 # 034 removed two shipped modules — hooks/register_hooks.sh and its PowerShell
 # twin, the hook-registry reader — taking the surface from 100 to 98; 036 then
-# added engine/artifact_set.sh and its PowerShell twin, taking it back to 100.
+# added engine/artifact_set.sh and its PowerShell twin, taking it back to 100,
+# and sink/jira/attachments.sh with ITS twin, taking it to 102.
 # The count is a hand-maintained literal: adding a port module means editing it
 # here, in two places, or this guard fails on a correct change.
   if ! locale -a 2> /dev/null | grep -qxF 'en_US.UTF-8'; then
     skip "en_US.UTF-8 locale is not installed on this host"
   fi
   count="$(LC_ALL=en_US.UTF-8 bash -c "source '${ROOT}/packaging/lib/surface.sh'; packaging_derive_surface | grep -c .")"
-  [ "${count}" -eq 100 ]
+  [ "${count}" -eq 102 ]
 }

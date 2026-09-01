@@ -35,7 +35,24 @@ $script:ManifestSchema = 1
 # An ASSUMED cap on an entity-property value, pending research §R15 item 4.
 # Declared as an assumption rather than a measured constant, because that is
 # what it is: nothing in this repository has observed the real limit.
-$script:PropertyCap = if ($env:SPEC_KIT_JIRA_PROPERTY_CAP) { [int] $env:SPEC_KIT_JIRA_PROPERTY_CAP } else { 32768 }
+$script:PropertyCapDefault = 32768
+
+# Read at the point of USE, not at import. A module lives for the whole
+# PowerShell session, so an import-time read answers with whatever the
+# environment held when the session started — and the Bash twin, sourced afresh
+# in every process, answers with what it holds NOW. Two ports disagreeing on
+# when an override takes effect is a divergence by construction, and it is
+# invisible until something sets the variable after the module is loaded.
+function Get-JiraPropertyCap {
+    if ($env:SPEC_KIT_JIRA_PROPERTY_CAP) { return [int] $env:SPEC_KIT_JIRA_PROPERTY_CAP }
+    return $script:PropertyCapDefault
+}
+
+# The four spellings of "this run intends to write it": the two write actions
+# and their --dry-run twins. One reading, shared by everything that has to ask —
+# they drifted apart across five call sites in the Bash port before the twin of
+# this constant existed there.
+$script:PendingActions = @('published', 'revised', 'would-publish', 'would-revise')
 
 $script:LimitCache = $null
 
@@ -53,7 +70,15 @@ function Get-JiraAttachmentLimit {
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $BaseUrl)
 
-    if ($null -ne $script:LimitCache) { return $script:LimitCache }
+    # Keyed on the base URL, not merely on "have we asked yet". The module lives
+    # for as long as the PowerShell session does, so a cache keyed on nothing
+    # answers for the FIRST site anything asked about — which is wrong the
+    # moment one session touches two sites, and which made the C3.7/C3.9
+    # withholding paths untestable: the second test in a file inherited the
+    # first one's answer and never called the site at all. The Bash twin cannot
+    # reach this state (every caller captures it in a subshell, so its cache
+    # never survives a single call), which is exactly why it went unnoticed.
+    if ($null -ne $script:LimitCache -and $script:LimitCacheUrl -eq $BaseUrl) { return $script:LimitCache }
     $r = Invoke-JiraRequest -Method 'GET' -Url "$BaseUrl/rest/api/3/attachment/meta"
     if ($r.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($r.Body)) { return $null }
     $parsed = $null
@@ -63,6 +88,7 @@ function Get-JiraAttachmentLimit {
     if ($parsed.PSObject.Properties.Name -contains 'enabled') { $enabled = [bool] $parsed.enabled }
     if ($parsed.PSObject.Properties.Name -contains 'uploadLimit') { $limit = [int64] $parsed.uploadLimit }
     $script:LimitCache = [pscustomobject]@{ Enabled = $enabled; UploadLimit = $limit }
+    $script:LimitCacheUrl = $BaseUrl
     return $script:LimitCache
 }
 
@@ -189,8 +215,8 @@ function New-JiraArtifactComment {
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $LifecycleEvent, [Parameter(Mandatory)] [AllowEmptyString()] [string] $DecisionsJson)
 
     $decisions = @($DecisionsJson | ConvertFrom-Json)
-    $published = @($decisions | Where-Object { $_.action -eq 'published' -or $_.action -eq 'revised' })
-    $anyRevised = @($published | Where-Object { $_.action -eq 'revised' }).Count -gt 0
+    $published = @($decisions | Where-Object { $_.action -in $script:PendingActions })
+    $anyRevised = @($published | Where-Object { $_.action -in 'revised', 'would-revise' }).Count -gt 0
 
     # One literal for the lead, as in the Bash port — exactly one place the two
     # have to match.
@@ -200,7 +226,7 @@ function New-JiraArtifactComment {
 
     $items = @()
     foreach ($p in $published) {
-        $suffix = if ($p.action -eq 'revised') { ' — revised' } else { ' — new' }
+        $suffix = if ($p.action -in 'revised', 'would-revise') { ' — revised' } else { ' — new' }
         $items += [ordered]@{
             type    = 'listItem'
             content = @([ordered]@{
@@ -285,14 +311,130 @@ function Test-JiraManifestOversized {
     param([Parameter(Mandatory)] [AllowEmptyString()] [string] $ArtifactsJson)
 
     $doc = "{`"schema`":$($script:ManifestSchema),`"artifacts`":$ArtifactsJson}"
-    return ([System.Text.Encoding]::UTF8.GetByteCount($doc) -gt $script:PropertyCap)
+    return ([System.Text.Encoding]::UTF8.GetByteCount($doc) -gt (Get-JiraPropertyCap))
+}
+
+function Get-JiraManifestSize {
+    <#
+    .SYNOPSIS
+      The composed manifest document's size in bytes.
+    .DESCRIPTION
+      Its own function because C4.4.1's warning has to NAME the number, not
+      merely act on it: "more artifacts than one ticket can track" tells an
+      operator nothing they can do, where "412 artifacts, a 45 000-byte record,
+      a 32 768-byte cap" tells them exactly how far over they are.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $ArtifactsJson)
+    return [System.Text.Encoding]::UTF8.GetByteCount("{`"schema`":$($script:ManifestSchema),`"artifacts`":$ArtifactsJson}")
+}
+
+function ConvertTo-JiraArtifactPrediction {
+    <#
+    .SYNOPSIS
+      The --dry-run twin of a decision set (data-model §5, FR-020).
+    .DESCRIPTION
+      The two WRITE actions become `would-publish` / `would-revise`, following
+      the existing `would-` convention. Everything else is untouched: an
+      `unchanged` artifact is unchanged in a dry run too, and a withholding is
+      predicted exactly as it would happen.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $DecisionsJson)
+
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($d in @($DecisionsJson | ConvertFrom-Json)) {
+        $e = [ordered]@{}
+        foreach ($p in $d.PSObject.Properties) { $e[$p.Name] = $p.Value }
+        if ($e['action'] -eq 'published') { $e['action'] = 'would-publish' }
+        elseif ($e['action'] -eq 'revised') { $e['action'] = 'would-revise' }
+        $out.Add($e)
+    }
+    return (ConvertTo-JiraCanonicalJson -Json (ConvertTo-Json -InputObject @($out) -Depth 10 -Compress))
+}
+
+function ConvertTo-JiraArtifactWithheld {
+    <#
+    .SYNOPSIS
+      Rewrite every entry this run would have written into a `withheld` one
+      carrying <Reason>.
+    .DESCRIPTION
+      For the withholdings that take down the WHOLE publication — the site has
+      attachments off, the limit could not be read, the manifest would overflow,
+      the upload was refused. Without this the summary reports `published` for
+      artifacts that reached nothing, which is the one thing an audit trail
+      cannot afford (FR-021, US4 AS3).
+
+      An already-withheld entry keeps its own, more specific reason:
+      `oversized` tells the operator more than `upload-failed` does.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $DecisionsJson,
+        [Parameter(Mandatory)] [string] $Reason
+    )
+
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($d in @($DecisionsJson | ConvertFrom-Json)) {
+        if ($d.action -in $script:PendingActions) {
+            $out.Add([ordered]@{
+                    path = $d.path; attachment_name = $d.attachment_name
+                    action = 'withheld'; reason = $Reason
+                })
+        }
+        else {
+            $e = [ordered]@{}
+            foreach ($p in $d.PSObject.Properties) { $e[$p.Name] = $p.Value }
+            $out.Add($e)
+        }
+    }
+    return (ConvertTo-JiraCanonicalJson -Json (ConvertTo-Json -InputObject @($out) -Depth 10 -Compress))
+}
+
+function New-JiraArtifactAction {
+    <#
+    .SYNOPSIS
+      The two planned actions the publication contributes to the run summary
+      (data-model §5).
+    .DESCRIPTION
+      Composed HERE rather than in PlanApply.psm1, where the sink's other action
+      kinds are planned: publication runs after the apply, because the
+      specification ticket may have been created by it (FR-006). The actions are
+      reported identically whether the run performed them or predicted them,
+      which is what makes the dry-run report equal the real one (SC-006).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $TicketKey,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $DecisionsJson,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $AdfJson
+    )
+
+    $pending = @(@($DecisionsJson | ConvertFrom-Json) | Where-Object { $_.action -in $script:PendingActions })
+    if ($pending.Count -eq 0) { return '[]' }
+    $names = @($pending | ForEach-Object { [string] $_.attachment_name })
+    $actions = @(
+        [ordered]@{
+            method = 'POST'; url = "/rest/api/3/issue/$TicketKey/attachments"
+            body   = [ordered]@{ parts = $names }
+        },
+        [ordered]@{
+            method = 'POST'; url = "/rest/api/3/issue/$TicketKey/comment"
+            body   = [ordered]@{ body = ($AdfJson | ConvertFrom-Json) }
+        }
+    )
+    return (ConvertTo-JiraCanonicalJson -Json (ConvertTo-Json -InputObject $actions -Depth 30 -Compress))
 }
 
 function Publish-JiraArtifactSet {
     <#
     .SYNOPSIS
       Upload every artifact this run decided to publish, in ONE request (C1.4).
-      Returns the sink's response JSON; '[]' when there is nothing to send.
+    .DESCRIPTION
+      Returns an ENVELOPE, `{"status": <http-status>, "created": [...]}`, not the
+      bare response array. C3.2, C3.3 and C3.4 are three different outcomes with
+      three different messages, and the status is the only thing that tells them
+      apart. `status` is 0 when the request never reached a response at all.
     #>
     [CmdletBinding()]
     param(
@@ -303,14 +445,15 @@ function Publish-JiraArtifactSet {
     )
 
     $published = @(@($DecisionsJson | ConvertFrom-Json) | Where-Object { $_.action -eq 'published' -or $_.action -eq 'revised' })
-    if ($published.Count -eq 0) { return '[]' }
+    if ($published.Count -eq 0) { return '{"created":[],"status":0}' }
     $parts = @()
     foreach ($p in $published) {
         $parts += @{ Name = [string] $p.attachment_name; File = (Join-Path $FeatureDirectory ([string] $p.path)) }
     }
     $r = Invoke-JiraRequest -Method 'POST' -Url "$BaseUrl/rest/api/3/issue/$TicketKey/attachments" -FormParts $parts
-    if ($r.ExitCode -ne 0) { return '' }
-    return $r.Body
+    $created = '[]'
+    if ($r.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($r.Body)) { $created = $r.Body }
+    return (ConvertTo-JiraCanonicalJson -Json "{`"status`":$([int] $r.Status),`"created`":$created}")
 }
 
 function Send-JiraArtifactComment {
@@ -345,7 +488,11 @@ function Save-JiraArtifactManifest {
     $body = "{`"schema`":$($script:ManifestSchema),`"artifacts`":$ArtifactsJson}"
     $r = Invoke-JiraRequest -Method 'PUT' `
         -Url "$BaseUrl/rest/api/3/issue/$TicketKey/properties/$($script:ArtifactsPropertyKey)" -Body $body
-    return ($r.ExitCode -eq 0)
+    # The STATUS travels with the answer, not merely "did it work": C4.4.2 needs
+    # to tell a site refusing the document (4xx — and size is the only property
+    # of it C4.4.1 could have mispredicted) from a transient failure, and the
+    # caller cannot see $r.
+    return (ConvertTo-JiraCanonicalJson -Json "{`"ok`":$(if ($r.ExitCode -eq 0) { 'true' } else { 'false' }),`"status`":$([int] $r.Status)}")
 }
 
 function Get-JiraTicketAttachmentId {
@@ -371,4 +518,6 @@ function Get-JiraTicketAttachmentId {
 Export-ModuleMember -Function Get-JiraAttachmentLimit, Get-JiraArtifactManifest,
 Get-JiraArtifactDecision, New-JiraArtifactComment, New-JiraArtifactManifest,
 Test-JiraManifestOversized, Publish-JiraArtifactSet, Send-JiraArtifactComment,
-Save-JiraArtifactManifest, Get-JiraTicketAttachmentId
+Save-JiraArtifactManifest, Get-JiraTicketAttachmentId, Get-JiraPropertyCap,
+Get-JiraManifestSize, ConvertTo-JiraArtifactPrediction, ConvertTo-JiraArtifactWithheld,
+New-JiraArtifactAction

@@ -11,6 +11,28 @@
 # argument (5th positional, before `field_values`) and the schema bumped
 # 1 -> 2 — every call site below carries an empty `""` hook_event unless a
 # test is specifically about it.
+#
+# 036, contracts/run-state-v3.md C2: `inputs` is no longer three fixed
+# documents. It is the ARTIFACT SET, supplied as a 7th positional argument, so
+# every call below passes `${FIXTURE_SET}` — a hand-built set for this
+# fixture's spec.md, since the engine that normally builds one needs a git
+# repository and these cases are about the document's OTHER fields. The
+# artifact-set rules themselves are covered in test_run_state_artifacts.bats.
+
+# _fixture_set — the artifact set for this fixture's feature directory, built
+# by hand rather than by the engine: `artifact_set_build` needs a git
+# repository, and every case in this file is about a field other than the set.
+# Recomputed on demand so a test that MUTATES a file gets the new hash.
+_fixture_set() {
+  local dir f out='[]'
+  dir="$(dirname "${SPEC}")"
+  for f in spec.md plan.md tasks.md; do
+    [[ -f "${dir}/${f}" ]] || continue
+    out="$(jq -c --arg p "${f}" --arg h "$(git hash-object --no-filters "${dir}/${f}")" \
+      '. + [{path: $p, hash: $h, size: 0, attachment_name: $p}]' <<< "${out}")"
+  done
+  printf '%s' "${out}"
+}
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
@@ -24,6 +46,7 @@ setup() {
   mkdir -p "${WORK}/specs/021-example"
   SPEC="${WORK}/specs/021-example/spec.md"
   printf '# Feature Specification: Example\n' > "${SPEC}"
+  FIXTURE_SET="$(_fixture_set)"
 }
 
 teardown() {
@@ -34,29 +57,29 @@ teardown() {
 
 @test "run_state_compose is deterministic across repeated calls" {
   local a b
-  a="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
-  b="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  a="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
+  b="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
   [ -n "${a}" ]
   [ "${a}" = "${b}" ]
 }
 
 @test "the composed document carries exactly the documented top-level fields, and no project_key" {
   local doc keys
-  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
   keys="$(jq -rS 'keys | join(",")' <<< "${doc}")"
   [ "${keys}" = "base_url,email,extension_version,field_values,hook_event,inputs,on_drift,schema" ]
 }
 
-@test "schema is the integer 2 since 023's hook_event/plan.md inputs (contracts/run-state-v2.md C1)" {
+@test "schema is the integer 3 since 036's artifact-set inputs (contracts/run-state-v3.md C1)" {
   local doc
-  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
-  [ "$(jq -r '.schema' <<< "${doc}")" = "2" ]
+  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
+  [ "$(jq -r '.schema' <<< "${doc}")" = "3" ]
   [ "$(jq -r '.schema | type' <<< "${doc}")" = "number" ]
 }
 
 @test "base_url, email, on_drift, and field_values are carried verbatim" {
   local doc
-  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "proceed" "" $'KEY=Story=Label=Value\x1fKEY=Task=Other=Val')"
+  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "proceed" "" $'KEY=Story=Label=Value\x1fKEY=Task=Other=Val' "$(_fixture_set)")"
   [ "$(jq -r '.base_url' <<< "${doc}")" = "https://acme.atlassian.net" ]
   [ "$(jq -r '.email' <<< "${doc}")" = "user@example.com" ]
   [ "$(jq -r '.on_drift' <<< "${doc}")" = "proceed" ]
@@ -65,15 +88,15 @@ teardown() {
 
 @test "hook_event is carried verbatim, empty string when a run has none" {
   local doc
-  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "after_plan" "")"
+  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "after_plan" "" "$(_fixture_set)")"
   [ "$(jq -r '.hook_event' <<< "${doc}")" = "after_plan" ]
-  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
   [ "$(jq -r '.hook_event' <<< "${doc}")" = "" ]
 }
 
 @test "the document never contains a credential-shaped string" {
   local doc
-  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
   [[ "${doc}" != *"Authorization"* ]]
   [[ "${doc}" != *"Basic "* ]]
   [[ "${doc}" != *"ATATT"* ]]
@@ -83,7 +106,7 @@ teardown() {
 
 @test "spec.md is always present, hashed with git hash-object --no-filters" {
   local doc want got
-  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
   want="$(git hash-object --no-filters "${SPEC}")"
   got="$(jq -r '.inputs["spec.md"]' <<< "${doc}")"
   [ "${got}" = "${want}" ]
@@ -91,11 +114,11 @@ teardown() {
 
 @test "tasks.md is omitted when absent, present with its hash when it exists" {
   local doc
-  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
   [ "$(jq 'has("tasks.md") | not' <<< "$(jq '.inputs' <<< "${doc}")")" = "true" ]
 
   printf '%s\n' '- [ ] T001 do the thing' > "$(dirname "${SPEC}")/tasks.md"
-  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
   local want got
   want="$(git hash-object --no-filters "$(dirname "${SPEC}")/tasks.md")"
   got="$(jq -r '.inputs["tasks.md"]' <<< "${doc}")"
@@ -104,11 +127,11 @@ teardown() {
 
 @test "plan.md is omitted when absent, present with its hash when it exists (contracts/run-state-v2.md C3)" {
   local doc
-  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
   [ "$(jq 'has("plan.md") | not' <<< "$(jq '.inputs' <<< "${doc}")")" = "true" ]
 
   printf '%s\n' '## Summary' > "$(dirname "${SPEC}")/plan.md"
-  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
   local want got
   want="$(git hash-object --no-filters "$(dirname "${SPEC}")/plan.md")"
   got="$(jq -r '.inputs["plan.md"]' <<< "${doc}")"
@@ -117,7 +140,7 @@ teardown() {
 
 @test "config.yml, config.local.yml, and personal.yml are each omitted when absent" {
   local doc inputs_keys
-  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
   inputs_keys="$(jq -r '.inputs | keys | join(",")' <<< "${doc}")"
   [ "${inputs_keys}" = "spec.md" ]
 }
@@ -127,7 +150,7 @@ teardown() {
   printf 'overrides: []\n' > "${JIRA_CONFIG_DIR}/config.local.yml"
   printf 'name: Ada\n' > "${JIRA_CONFIG_DIR}/personal.yml"
   local doc
-  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  doc="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
   [ "$(jq -r ".inputs[\"${JIRA_CONFIG_DIR}/config.yml\"]" <<< "${doc}")" = "$(git hash-object --no-filters "${JIRA_CONFIG_DIR}/config.yml")" ]
   [ "$(jq -r ".inputs[\"${JIRA_CONFIG_DIR}/config.local.yml\"]" <<< "${doc}")" = "$(git hash-object --no-filters "${JIRA_CONFIG_DIR}/config.local.yml")" ]
   [ "$(jq -r ".inputs[\"${JIRA_CONFIG_DIR}/personal.yml\"]" <<< "${doc}")" = "$(git hash-object --no-filters "${JIRA_CONFIG_DIR}/personal.yml")" ]
@@ -144,7 +167,7 @@ teardown() {
   local dir="${JIRA_CONFIG_DIR}/"
   printf 'projects: []\n' > "${dir}config.yml"
   local doc
-  doc="$(JIRA_CONFIG_DIR="${dir}" run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  doc="$(JIRA_CONFIG_DIR="${dir}" run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
   [ "$(jq -r --arg k "${dir}/config.yml" '.inputs | has($k)' <<< "${doc}")" = "true" ]
 }
 
@@ -157,73 +180,73 @@ teardown() {
 # --- run_state_matches ----------------------------------------------------------
 
 @test "run_state_matches is false when no state file exists" {
-  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
+  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
   [ "${status}" -ne 0 ]
 }
 
 @test "run_state_matches is true after run_state_record with the identical inputs" {
-  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
-  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
+  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
+  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
   [ "${status}" -eq 0 ]
 }
 
 @test "run_state_matches is false once spec.md changes" {
-  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
+  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
   printf '# Feature Specification: Example (touched)\n' > "${SPEC}"
-  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
+  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
   [ "${status}" -ne 0 ]
 }
 
 @test "run_state_matches is false once on_drift differs" {
-  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
-  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "proceed" "" ""
+  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
+  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "proceed" "" "" "$(_fixture_set)"
   [ "${status}" -ne 0 ]
 }
 
 @test "run_state_matches is false once field_values differs" {
-  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
-  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "KEY=Story=Label=New"
+  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
+  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "KEY=Story=Label=New" "$(_fixture_set)"
   [ "${status}" -ne 0 ]
 }
 
 @test "run_state_matches is false once hook_event differs — an unhonoured lifecycle event is never skipped (S1, S9)" {
-  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
-  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "after_plan" ""
+  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
+  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "after_plan" "" "$(_fixture_set)"
   [ "${status}" -ne 0 ]
 }
 
 @test "run_state_matches is true after run_state_record with the identical hook_event" {
-  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "after_plan" ""
-  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "after_plan" ""
+  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "after_plan" "" "$(_fixture_set)"
+  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "after_plan" "" "$(_fixture_set)"
   [ "${status}" -eq 0 ]
 }
 
 @test "run_state_matches is false when the recorded file is corrupt JSON" {
-  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
+  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
   printf 'not json' > "$(run_state_path "${SPEC}")"
-  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
+  run run_state_matches "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
   [ "${status}" -ne 0 ]
 }
 
 # --- run_state_record -------------------------------------------------------------
 
 @test "run_state_record writes a document byte-identical to a fresh compose" {
-  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
+  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
   local recorded fresh
   recorded="$(cat "$(run_state_path "${SPEC}")")"
-  fresh="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")"
+  fresh="$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")"
   [ "${recorded}" = "${fresh}" ]
 }
 
 @test "run_state_record creates the state directory and its self-ignoring .gitignore" {
   [ ! -d "${JIRA_CONFIG_DIR}/state" ]
-  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
+  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
   [ -d "${JIRA_CONFIG_DIR}/state" ]
   [ "$(cat "${JIRA_CONFIG_DIR}/state/.gitignore")" = "*" ]
 }
 
 @test "run_state_record leaves no sibling temp file behind on success" {
-  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
+  run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
   run bash -c "find '${JIRA_CONFIG_DIR}/state' -name '*.tmp.*'"
   [ -z "${output}" ]
 }
@@ -231,7 +254,7 @@ teardown() {
 @test "run_state_record never fails the run: a write error is a warning, not an exit code" {
   mkdir -p "${JIRA_CONFIG_DIR}/state"
   chmod 000 "${JIRA_CONFIG_DIR}/state"
-  run run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" ""
+  run run_state_record "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)"
   chmod 755 "${JIRA_CONFIG_DIR}/state"
   [ "${status}" -eq 0 ]
 }
@@ -247,9 +270,9 @@ teardown() {
 @test "T022 [022] — editing task_mirror in config.yml changes the recorded config.yml hash" {
   printf 'projects:\n  - key: CONSUMER\n    style: company_managed\nrouting_default: CONSUMER\n' > "${JIRA_CONFIG_DIR}/config.yml"
   local before after
-  before="$(jq -r ".inputs[\"${JIRA_CONFIG_DIR}/config.yml\"]" <<< "$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")")"
+  before="$(jq -r ".inputs[\"${JIRA_CONFIG_DIR}/config.yml\"]" <<< "$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")")"
   printf 'task_mirror:\n  CONSUMER: checklist\n' >> "${JIRA_CONFIG_DIR}/config.yml"
-  after="$(jq -r ".inputs[\"${JIRA_CONFIG_DIR}/config.yml\"]" <<< "$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "")")"
+  after="$(jq -r ".inputs[\"${JIRA_CONFIG_DIR}/config.yml\"]" <<< "$(run_state_compose "${SPEC}" "https://acme.atlassian.net" "user@example.com" "abort" "" "" "$(_fixture_set)")")"
   [ "${before}" != "${after}" ]
   [ "${after}" = "$(git hash-object --no-filters "${JIRA_CONFIG_DIR}/config.yml")" ]
 }
@@ -276,6 +299,14 @@ teardown() {
   # unrelated one.
   local work="${BATS_TEST_TMPDIR}/s6-repo"
   cp -R "${root}/tests/conformance/fixtures/repo-with-bound-story-due" "${work}"
+  # 036, contracts/run-state-v3.md: the recorded inputs ARE the artifact set,
+  # and the set is `git ls-files` over the feature directory. An empty set — a
+  # directory outside a repository — is never recorded and never short-circuits
+  # (it would otherwise match the next empty one). The priming run below has to
+  # actually record, so this fixture has to be a repository.
+  git -C "${work}" init --quiet
+  git -C "${work}" config user.email 'fixture@example.invalid'
+  git -C "${work}" config user.name 'fixture'
   local spec="${work}/specs/001-declared-mapping/spec.md"
   export JIRA_CONFIG_DIR="${work}/.specify/jira"
   export JIRA_EMAIL="user@example.com"

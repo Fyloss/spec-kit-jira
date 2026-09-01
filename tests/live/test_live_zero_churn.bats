@@ -38,6 +38,14 @@ setup() {
   CMD_DIR="${ROOT}/scripts/bash/commands"
   WORK="$(mktemp -d)"
   SPEC="${WORK}/spec.md"
+  # 036: the artifact set is `git ls-files` over the feature directory
+  # (research R5), so the working directory has to be a repository or the set
+  # is empty and every publication assertion below passes vacuously — the
+  # inert-guard failure mode this suite exists to avoid. A consumer's feature
+  # directory always is one.
+  git -C "${WORK}" init --quiet
+  git -C "${WORK}" config user.email 'live@example.invalid'
+  git -C "${WORK}" config user.name 'live'
   printf '%s\n' \
     '# Feature Specification: Live Zero-Churn' '' 'A spec mirrored to a live Jira project.' '' \
     '### User Story 1 - The core story (Priority: P1)' '' \
@@ -107,6 +115,25 @@ teardown() {
   # transitioned` (FR-011, present only when an event AND a declared step
   # exist) must stay absent/null here, live, not merely in the mock corpus.
   [ "$(jq -r '.counts.transitioned // 0' <<< "$output")" -eq 0 ]
+  # 036 (T093, Constitution II, SC-002): `attached` and `commented` are two new
+  # write kinds, and this assertion list stays EXHAUSTIVE in the same change
+  # that adds them to the sink — that is the principle's enforcement test, not
+  # a courtesy. They are read off `actions[]` rather than a counter because the
+  # publication reports itself there (data-model §5); a live Jira has no mock
+  # call log to consult.
+  #
+  # This is also SC-002's "verified against a real Jira instance" clause: every
+  # other assertion about zero-churn publication in this repository is made
+  # against a mock we wrote ourselves, which is the exact condition under which
+  # Principle II records three live-only bugs in the original extension.
+  [ "$(jq -r '[.actions[] | select(.url | endswith("/attachments"))] | length' <<< "$output")" -eq 0 ]
+  [ "$(jq -r '[.actions[] | select(.url | endswith("/comment"))] | length' <<< "$output")" -eq 0 ]
+  # …and the reason is that every artifact classified `unchanged`, not that the
+  # phase was skipped. A run whose artifact set were empty would report an
+  # absent `artifacts` key and satisfy the two lines above while proving
+  # nothing at all.
+  [ "$(jq -r '(.artifacts // []) | length' <<< "$output")" -gt 0 ]
+  [ "$(jq -r '[.artifacts[] | select(.action != "unchanged")] | length' <<< "$output")" -eq 0 ]
   # spec.md still names the SAME parent and the SAME ticket — neither
   # identifier was ever reassigned.
   grep -qF "${parent_key}" "${SPEC}"
@@ -123,7 +150,43 @@ teardown() {
     [ "$(jq -r '.counts.updated' <<< "$output")" -eq 0 ]
     [ "$(jq -r '.counts.tasks.transitioned' <<< "$output")" -eq 0 ]
     [ "$(jq -r '.counts.transitioned // 0' <<< "$output")" -eq 0 ]
+    # 036: the publication write kinds hold across all ten too — a permanent
+    # no-op, not a one-time recognition.
+    [ "$(jq -r '[.actions[] | select(.url | endswith("/attachments"))] | length' <<< "$output")" -eq 0 ]
+    [ "$(jq -r '[.actions[] | select(.url | endswith("/comment"))] | length' <<< "$output")" -eq 0 ]
   done
+}
+
+@test "036 SC-002: a first publication puts every artifact of the directory on the real ticket" {
+  # The other half of T093. Zero-churn above proves the second run is free; this
+  # proves the first run actually published, against a real instance — the seven
+  # API facts of research §R15 are what no mock we wrote can falsify, and this
+  # is the assertion that exercises them: several `file` parts in one request,
+  # the `X-Atlassian-Token` header alongside `Authorization`, and the
+  # `attachment/meta` response shape.
+  require_live
+  # shellcheck source=/dev/null
+  source "${CMD_DIR}/reconcile.sh"
+
+  printf '%s\n' '# Phase 0 — Research' '' 'Nothing sensitive.' > "${WORK}/research.md"
+  mkdir -p "${WORK}/contracts"
+  printf '%s\n' '# Contract' '' 'C1. It answers.' > "${WORK}/contracts/api.md"
+
+  local first
+  first="$(cmd_reconcile reconcile --json "${SPEC}")"
+
+  # Every file of the directory is named, and each as a first publication.
+  local expected actual
+  expected="$(cd "${WORK}" && git ls-files --cached --others --exclude-standard | LC_ALL=C sort | tr '\n' ' ')"
+  actual="$(jq -r '[.artifacts[].path] | sort | join(" ") + " "' <<< "${first}")"
+  [ "${actual}" = "${expected}" ]
+  [ "$(jq -r '[.artifacts[] | select(.action != "published")] | length' <<< "${first}")" -eq 0 ]
+
+  # ONE upload request and ONE comment, whatever the artifact count (FR-023).
+  [ "$(jq -r '[.actions[] | select(.url | endswith("/attachments"))] | length' <<< "${first}")" -eq 1 ]
+  [ "$(jq -r '[.actions[] | select(.url | endswith("/comment"))] | length' <<< "${first}")" -eq 1 ]
+  # The nested artifact travels under its flattened name (research R7).
+  [ "$(jq -r '[.actions[] | select(.url | endswith("/attachments"))][0].body.parts | index("contracts__api.md") != null' <<< "${first}")" = "true" ]
 }
 
 @test "T099 [Phase 8, US2/quickstart Step 12]: adding one story to an already-mirrored hierarchy creates only that story — the parent is untouched" {

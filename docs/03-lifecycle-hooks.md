@@ -3,7 +3,7 @@
 The extension is not something you run. Once installed, it runs itself on
 every spec-kit lifecycle step.
 
-## The seven declared events
+## The nine declared events
 
 `extension.yml` declares them at the **manifest root** — a sibling of
 `provides:`, not nested under it. Placement is load-bearing and its failure
@@ -24,6 +24,8 @@ flowchart LR
         A4["after_tasks"]
         A5["after_implement"]
         A6["after_analyze"]
+        A7["after_converge"]
+        A8["after_checklist"]
     end
 
     A1 --> R["/speckit.jira-mirror.reconcile"]
@@ -32,10 +34,22 @@ flowchart LR
     A4 --> R
     A5 --> R
     A6 --> R
+    A7 --> R
+    A8 --> R
 
     F -->|"names the branch and the spec folder"| Out1["ticket-first naming"]
     R -->|"mirrors spec.md"| Out2["Jira tickets"]
 ```
+
+**`after_converge` and `after_checklist` arrived with 036.** They exist because
+the feature's artifacts are published from the reconcile, and two Spec Kit
+commands change the feature directory without firing any of the other seven: a
+convergence pass rewrites `tasks.md`, and `/speckit.checklist` writes a file
+under `checklists/` while `spec.md`, `plan.md` and `tasks.md` stay untouched.
+Without these events, that work reached Jira only when some later, unrelated
+command happened to fire — which is to say, unpredictably. Both fire
+`/speckit.jira-mirror.reconcile`, both are non-optional, and both are accepted
+as `phase_status_map` keys like any other event.
 
 **`before_specify` does not always name the feature (029).** A ticket
 mentioned with no designator and no prior answer returns a closed reuse
@@ -61,7 +75,7 @@ sequenceDiagram
     Specify->>Manifest: read schema, commands, hooks
     Specify->>Specify: copy extension into .specify/extensions/jira-mirror/
     Note over Specify,Registry: .extensionignore keeps specs/, tests/,<br/>.specify/ and .github/ out of the install
-    Specify->>Registry: purge this extension's old entries, write the seven declared hooks
+    Specify->>Registry: purge this extension's old entries, write the nine declared hooks
     Registry-->>Specify: registry updated
 
     Dev->>Bridge: /speckit.jira-mirror.config

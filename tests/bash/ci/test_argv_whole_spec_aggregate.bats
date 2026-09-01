@@ -51,7 +51,13 @@ setup() {
 # specification, tasks.md, or the seeded set. Extending this list is how a new
 # aggregate gets the same protection; the behavioural threshold test is what
 # catches one nobody thought to add here.
-_AGGREGATES='doc|doc_for_write|parse|pre_parse|stories|recog|tasks_recog|tasks_parsed|tasks_parsed_raw|switch_back_parsed|tickets|actions|plan|tasks|provenance|delta'
+# 036 (T096) added five: every one of them grows with the FEATURE DIRECTORY
+# rather than with the specification, which is a second axis this guard had no
+# entry for. At ~120 bytes an artifact entry they cross the Windows cap at
+# roughly 290 files — the same directory size at which the publication
+# manifest's own cap bites (contract C4.4), so the two limits are reached
+# together and neither one covers for the other.
+_AGGREGATES='doc|doc_for_write|parse|pre_parse|stories|recog|tasks_recog|tasks_parsed|tasks_parsed_raw|switch_back_parsed|tickets|actions|plan|tasks|provenance|delta|artifact_decisions|artifact_actions|artifact_set|set_json|decisions'
 
 @test "no jq invocation is handed a whole-spec aggregate through argv (#46 B)" {
   local bad=""
@@ -87,8 +93,15 @@ _AGGREGATES='doc|doc_for_write|parse|pre_parse|stories|recog|tasks_recog|tasks_p
   for f in "${ROOT}/scripts/bash/engine/parse.sh" \
     "${ROOT}/scripts/bash/engine/interchange.sh" \
     "${ROOT}/scripts/bash/commands/reconcile.sh" \
+    "${ROOT}/scripts/bash/sink/jira/attachments.sh" \
+    "${ROOT}/scripts/bash/engine/artifact_set.sh" \
     "${ROOT}/scripts/bash/commands/seed.sh"; do
-    grep -qE 'json_build|--slurpfile' "${f}" || {
+    # `--rawfile` counts alongside `--slurpfile`: both bind jq's value from a
+    # FILE rather than from the argument vector, which is the property this
+    # asserts. engine/artifact_set.sh uses the raw form because its three
+    # intermediates are newline-separated text, not JSON — reading them as
+    # JSON would be the wrong primitive, not a safer one.
+    grep -qE 'json_build|--slurpfile|--rawfile' "${f}" || {
       printf '%s binds no value from a file — its payloads are in argv\n' "${f}" >&2
       return 1
     }
