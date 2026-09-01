@@ -25,6 +25,37 @@ Neither is complete alone: cross-port byte equivalence is what makes them one
 product (Principle VI), and a scenario green on one port and absent on the other
 proves nothing.
 
+## Progress — 2026-09-01
+
+**31 of 110 tasks complete.** Phase 1, Phase 9 (convergence), and all of
+Phase 2 except the two mock surfaces:
+
+- T003–T012, T015–T018 — the artifact set, both ports, byte-identical
+- T013/T014 — the privacy sweep over artifact content, both ports, wired at the
+  pre-write point
+- T019–T023 — the multipart transport, both ports
+- T027–T033 — `after_converge` and `after_checklist` declared, thirteen sites
+- T108–T110 — the convergence findings
+
+**Remaining in Phase 2: T024–T026, the two mock surfaces.** That is the next
+task and it is deliberately not started. `tests/conformance/mock-jira/curl-shim.sh`
+is not a stub — it is the Bash port's ENTIRE mock backend, installed first on
+PATH by `mock_start` so `jira_request` reaches it instead of a socket, with no
+process and no port. Teaching it the four new routes means teaching it to parse
+a `multipart/form-data` curl config, which is real work and the only place the
+Bash port's upload body is observable. `mock-server.ps1` needs the same four
+routes over HTTP. Starting that with no room to finish it would leave the one
+component both suites depend on in a half-taught state.
+
+Everything below Phase 2 (US1–US4, 59 tasks) is blocked on those routes: there
+is no way to assert an upload without a mock that accepts one.
+
+**Still true from the first pass**: T001/T002 are recorded as NOT done — the
+baseline run was started before the tree was stable and its failures were its
+own interference. And T106 (Windows probe, ~2 h of CI) and T107 (dogfood
+against a real Jira site) are outside what this session can execute at all;
+T107 carries the seven API facts no mock we write can falsify.
+
 ## Progress — 2026-08-31
 
 **17 of 110 tasks complete** (T003–T012, T015–T018, T108–T110): Phase 1, the
