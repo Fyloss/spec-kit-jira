@@ -25,6 +25,62 @@ Neither is complete alone: cross-port byte equivalence is what makes them one
 product (Principle VI), and a scenario green on one port and absent on the other
 proves nothing.
 
+## Handoff — traps measured in this session
+
+Written for whoever picks this up. Every item below cost real time to find and
+none of it is inferable from the code.
+
+**The two mocks are the Bash port's and the PowerShell port's, and they are not
+interchangeable.** `curl-shim.sh` IS the Bash backend — installed first on PATH
+by `mock_start` so `jira_request` reaches it instead of a socket. A route added
+to one mock and not the other is a green suite that proves nothing about the
+other port.
+
+**Three mock defects made zero-churn fail for reasons outside the code:**
+
+1. The property store recorded only for an issue the mock had itself CREATED,
+   so a PUT against a RECOGNISED issue was dropped — manifest written,
+   discarded, read back as absent. Fixed, **scoped to `spec-kit-jira-artifacts`
+   only**. Widening it to all keys was tried and REVERTED: it made the identity
+   property's PUT land where it had been dropped in favour of the config's
+   `identity` map, and recognition then refused the parent on the second run.
+   That difference between what the bridge writes and what the fixtures declare
+   is real and belongs to whoever owns identity stamping — do not "fix" it here.
+2. Neither mock served `GET /issue/{key}?fields=attachment`, so the trust rule
+   read "the id the manifest claims is not on the ticket" and republished
+   everything, every run.
+3. Attachment ids were per-issue, so an unseeded issue got the same id twice and
+   a revision was indistinguishable from its original.
+
+**PowerShell defects that PARSE and LINT clean and die at run time.** Three in
+one commit: a helper that did not exist (`Add-JiraWarning`), a variable that was
+never set (`$baseUrl`; it is `$base`), and a `Mandatory [string]` rejecting the
+empty lifecycle event a direct reconcile legitimately has. PSScriptAnalyzer sees
+none of these. **Run the thing end to end against the mock before believing it.**
+
+**The display layer silently drops words from file reads.** Verified while
+pinning `comment-body.md`'s literals: an `awk`/`sed` read showed text with words
+missing. Every assertion on those literals uses `md5`/`cmp` against the
+contract's own line, never a transcription. If you are comparing strings by
+eye, you are comparing something else.
+
+**`git hash-object --stdin-paths` resolves relative paths against the REPOSITORY
+ROOT**, not the process cwd. Feed absolute paths.
+
+**BSD `tr` does not understand `\x1f`** — it substitutes a literal `x`. Use
+octal `\037`. And `LC_ALL=C` must cover EVERY `tr` in a pipeline, not just the
+last: one unpinned call aborts on invalid UTF-8 and turns the whole step into a
+silent no-op on macOS.
+
+**`MultipartFormDataContent` implements IEnumerable**, so `return $content`
+makes PowerShell hand the caller the inner part. `return , $content`.
+
+**Adding a lifecycle event touches THIRTEEN sites** (research R10). The table
+there was wrong three times; run `tests/bash/ci` and `tests/bash/lib` and let
+them tell you what else pins the set.
+
+---
+
 ## Progress — 2026-09-01
 
 **Phase 1, Phase 2 and Phase 9 are COMPLETE.** Phase 3/4 have their engine and
