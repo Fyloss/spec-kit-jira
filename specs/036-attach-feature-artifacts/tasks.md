@@ -27,31 +27,53 @@ proves nothing.
 
 ## Progress — 2026-09-01
 
-**34 of 110 tasks complete. PHASE 2 IS DONE.** Phase 1, all of Phase 2, and
-Phase 9 (convergence):
+**Phase 1, Phase 2 and Phase 9 are COMPLETE.** Phase 3/4 have their engine and
+sink code on both ports; what is missing is the wiring and the Pester twins.
+
+Done and marked:
 
 - T003–T012, T015–T018 — the artifact set, both ports, byte-identical
-- T013/T014 — the privacy sweep over artifact content, both ports, wired at the
-  pre-write point so a BLOCK leaves the ticket entirely untouched
-- T019–T023 — the multipart transport, both ports
-- T024–T026 — both mock surfaces serve the upload routes
-- T027–T033 — `after_converge` and `after_checklist` declared, thirteen sites
+- T013/T014 — the privacy sweep, both ports, at the pre-write point
+- T019–T026 — the multipart transport and both mock surfaces
+- T027–T033 — `after_converge` and `after_checklist`, thirteen sites
+- T035/T036, T042/T043, T046/T047, T059/T060, T064 — the attachment modules on
+  both ports: limit discovery, the withholding gate, the upload, the comment
+  body, the manifest, the property-cap check
 - T108–T110 — the convergence findings
 
-**The foundation is complete: US1 can now be written.** Everything Phase 3
-needs exists — a set, a guard, a transport that uploads, and two mocks that
-accept an upload and agree with each other.
+**Done but NOT marked, and why.** `tests/bash/sink/test_attachments.bats`
+covers classification, the comment body (compared byte-for-byte against
+`comment-body.md`'s own lines), the manifest and the zero-churn cycle — 25
+cases, proven red against the absent module. It does NOT yet cover the
+network-level assertions those task numbers also demand: that
+`GET /attachment/meta` is called exactly once per run, that the upload targets
+the specification tier only, and that a ticket created in the same run is
+published onto. Those need the command harness, not the module. **T034, T039,
+T040, T041, T044, T045, T057, T058, T061, T063, T065–T069 stay unchecked**
+until they have both halves, and there is no Pester twin of any of them yet.
 
-**Next: Phase 3 (US1, T034–T056), then Phase 4 (US2).** Ship them together;
-US1 alone republishes every artifact on every run, which is a Principle II
-violation, and that is why the spec made US2 P1 alongside it.
+**Next, in order:**
 
-**Still true**: T001/T002 are recorded as NOT done — the baseline run was
-started before the tree was stable and its failures were its own interference;
-take a real one first. T106 (Windows probe, ~2 h of CI) and T107 (dogfood
-against a real Jira site) are outside what an agent session can execute; T107
-carries the seven API facts no mock we write can falsify, and it is the gate
-that matters most before release.
+1. `Reconcile.ArtifactPublication.Tests.ps1` and `Attachments.Tests.ps1` — the
+   Pester twins of `test_attachments.bats`. The two ports were compared
+   directly and agree byte for byte on all five decision shapes, but that
+   comparison lives in a shell one-liner, not in the suite.
+2. **T048–T053 — the wiring.** The publication phase in `reconcile.sh` and
+   `Reconcile.psm1`, `attach`/`comment` in the planned action set, and
+   `artifacts[]` in the run summary plus its schema guard. This is the piece
+   that makes the feature exist for a user; everything above is inert without
+   it.
+3. T054–T056, then Phase 4's remaining tests, then Phases 5–8.
+
+**Unchanged**: T001/T002 need a real baseline (the first one was taken against
+a moving tree). T106 (Windows probe) and T107 (dogfood) are outside what an
+agent session can execute; T107 carries the seven API facts no mock we write
+can falsify, and it is the gate that matters most before release.
+
+**Do not merge yet.** The privacy sweep is live and publication is not, so an
+existing consumer whose `research.md` quotes a real `*.atlassian.net` URL would
+see runs refused with nothing gained in exchange. Ship Phase 3 + Phase 4
+together, or hold the branch.
 
 ## Progress — 2026-08-31
 
@@ -165,8 +187,8 @@ downloadable and one comment names each.
 ### Limit discovery and withholding — C1.1, C3.9, FR-017
 
 - [ ] T034 [P] [US1] Write failing cases in `tests/bash/sink/test_attachments.bats`: `GET /attachment/meta` is called **once per run** and only when there is something to publish; `enabled: false` withholds the whole publication with one warning and attempts no upload (C3.9); an unreachable meta call withholds with one warning and attempts no upload (C3.7)
-- [ ] T035 [P] [US1] Write the Pester twin of T034 in `tests/powershell/sink/Attachments.Tests.ps1`
-- [ ] T036 [P] [US1] Write failing oversize cases in both suites: an artifact above the **discovered** limit is withheld, the warning names the path, its size and the limit, and every other artifact still publishes (FR-017, C4.2)
+- [X] T035 [P] [US1] Write the Pester twin of T034 in `tests/powershell/sink/Attachments.Tests.ps1`
+- [X] T036 [P] [US1] Write failing oversize cases in both suites: an artifact above the **discovered** limit is withheld, the warning names the path, its size and the limit, and every other artifact still publishes (FR-017, C4.2)
 - [ ] T037 [US1] Implement limit discovery and the withholding gate in `scripts/bash/sink/jira/attachments.sh`, holding the limit in-process for the run (C1.1)
 - [ ] T038 [US1] Implement the twin in `scripts/powershell/sink/jira/Attachments.psm1`
 
@@ -175,15 +197,15 @@ downloadable and one comment names each.
 - [ ] T039 [P] [US1] Write failing upload cases in both suites: **one** `POST /issue/{key}/attachments` per run whatever the artifact count (FR-023); parts in the set's sort order; a binary artifact uploaded byte-for-byte unmodified (FR-002, US1 AS3); nested artifacts distinguishable by their flattened part filenames (US1 AS5)
 - [ ] T040 [P] [US1] Write a failing tier case in both suites: the upload targets the **specification-tier** ticket only — zero attachment calls against any story-tier or task-tier key (FR-003)
 - [ ] T041 [P] [US1] Write a failing same-run case in both suites: when the specification ticket is created by this run, the artifacts are published onto it in that run, not deferred (FR-006, US1 AS4)
-- [ ] T042 [US1] Implement the upload in `scripts/bash/sink/jira/attachments.sh` — one request, parts in sort order, real file paths resolved from the feature directory plus the relative path (C1.4, data-model §4)
-- [ ] T043 [US1] Implement the twin in `scripts/powershell/sink/jira/Attachments.psm1`
+- [X] T042 [US1] Implement the upload in `scripts/bash/sink/jira/attachments.sh` — one request, parts in sort order, real file paths resolved from the feature directory plus the relative path (C1.4, data-model §4)
+- [X] T043 [US1] Implement the twin in `scripts/powershell/sink/jira/Attachments.psm1`
 
 ### The announcing comment — comment-body.md, FR-004, FR-008
 
 - [ ] T044 [P] [US1] Write failing body cases in `tests/bash/sink/test_comment_body.bats`: exactly **one** comment per publishing run and **zero** otherwise (B6.2, FR-008, SC-004); the paragraph literal chosen by whether any artifact is a revision (B2); one bullet per artifact in sort order, each `` `<path>` — new `` or `` — revised `` (B3, B6.3); the event rendered as `code`-marked text, verbatim; withheld artifacts **absent** from the comment (B4); no trailing newline introduced by composition (B6.4)
 - [ ] T045 [P] [US1] Write the Pester twin of T044 in `tests/powershell/sink/CommentBody.Tests.ps1`
-- [ ] T046 [US1] Implement the comment body in `scripts/bash/sink/jira/attachments.sh` from the pinned literals of `contracts/comment-body.md`, built on the existing `sink/jira/adf.sh` primitives, with no `media` node (B1, research R8)
-- [ ] T047 [US1] Implement the twin in `scripts/powershell/sink/jira/Attachments.psm1`, copying the literals rather than composing them — the measured PowerShell pipe-to-native newline is why this is spelled out (B6.4)
+- [X] T046 [US1] Implement the comment body in `scripts/bash/sink/jira/attachments.sh` from the pinned literals of `contracts/comment-body.md`, built on the existing `sink/jira/adf.sh` primitives, with no `media` node (B1, research R8)
+- [X] T047 [US1] Implement the twin in `scripts/powershell/sink/jira/Attachments.psm1`, copying the literals rather than composing them — the measured PowerShell pipe-to-native newline is why this is spelled out (B6.4)
 
 ### Wiring into the reconcile — FR-021, SC-001
 
@@ -217,15 +239,15 @@ made zero calls of all three kinds.
 
 - [ ] T057 [P] [US2] Write failing manifest cases in both suites: a `404` on the property read means "no manifest" and every artifact is a first publication, **not** a fail-closed condition (C1.2); an unrecognised `schema` value is treated as absent and republishes, never as an error; the document validates against `contracts/artifact-manifest.schema.json`
 - [ ] T058 [P] [US2] Write failing classification cases in both suites, one per row of C4.1: path absent ⇒ `published`; `hash` differs ⇒ `revised`; `hash` matches and the id is on the ticket ⇒ `unchanged` with **no write**; `hash` matches and the id is absent from the ticket ⇒ `published` (the trust rule)
-- [ ] T059 [US2] Implement manifest read, classification and write in `scripts/bash/sink/jira/attachments.sh`: the write is issued **only** when at least one artifact landed, and carries only entries that actually landed (data-model §2 "Lifecycle")
-- [ ] T060 [US2] Implement the twin in `scripts/powershell/sink/jira/Attachments.psm1`
+- [X] T059 [US2] Implement manifest read, classification and write in `scripts/bash/sink/jira/attachments.sh`: the write is issued **only** when at least one artifact landed, and carries only entries that actually landed (data-model §2 "Lifecycle")
+- [X] T060 [US2] Implement the twin in `scripts/powershell/sink/jira/Attachments.psm1`
 - [ ] T061 [P] [US2] Write failing trust-rule cases in both suites (C4.3): `GET /issue/{key}?fields=attachment` is issued **only** when the manifest claims an id and the run is about to conclude `unchanged`; property written but upload never landed ⇒ republish; upload landed but property never written ⇒ republish, the duplicate accepted and marked a revision. This is SC-010: after a run that failed partway, the next run leaves the ticket carrying every current artifact and loses none
 - [ ] T062 [US2] Implement the trust rule in both ports per T061
 
 ### The manifest's bound — C4.4
 
 - [ ] T063 [P] [US2] Write failing overflow cases in both suites: a feature directory whose composed manifest would exceed the entity-property cap withholds the **whole** publication before any upload, with one warning naming the artifact count, the composed size and the cap, and issues zero writes of every kind (C4.4.1); a site-rejected manifest write despite that check warns and names size as the cause, rather than a generic save failure (C4.4.2)
-- [ ] T064 [US2] Implement the size check in both ports' attachment modules, with the assumed cap documented in the code **as an assumption** pending research §R15 item 4 — never as a constant that reads as measured (C4.4, Principle VII)
+- [X] T064 [US2] Implement the size check in both ports' attachment modules, with the assumed cap documented in the code **as an assumption** pending research §R15 item 4 — never as a constant that reads as measured (C4.4, Principle VII)
 
 ### The zero-churn floor — FR-009, FR-010, C4.5
 
