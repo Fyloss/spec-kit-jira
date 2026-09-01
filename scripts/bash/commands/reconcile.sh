@@ -43,6 +43,8 @@ source "${_cmd_reconcile_dir}/../sink/jira/recognition.sh" # R5 step 2 — recog
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/plan_apply.sh"
 # shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../sink/jira/attachments.sh" # 036 — publishing the feature artifacts
+# shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/discovery.sh" # Phase 8, US5 — the completion pass's transitions read
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/duplicate_probe.sh" # US4, droppable — the second, best-effort guard
@@ -2163,6 +2165,118 @@ _reconcile_run() {
     fi
   fi
 
+
+  # ---- 036: publish the feature's artifacts onto the specification ticket ----
+  #
+  # AFTER every other write, and that ordering is deliberate. The specification
+  # ticket may have been CREATED by the apply above (FR-006, US1 AS4), so this
+  # is the earliest point at which its key is certainly known; and publication
+  # is additive, so nothing above depends on it having happened.
+  #
+  # The privacy sweep that guards this content already ran, far earlier, before
+  # any write at all (C5.1). Nothing here re-scans: a second sweep would be a
+  # second traversal for no gain, and the one that matters has already had its
+  # say.
+  #
+  # Every early `return` below leaves `artifact_decisions` as it stands, so the
+  # run summary reports what was decided even when the publication itself was
+  # withheld — the operator needs to see the reason, not an empty array.
+  local artifact_decisions='[]' artifact_pub_key=""
+  if [[ "$(jq -r 'length' <<< "${_pg_set}")" -gt 0 ]]; then
+    artifact_pub_key="$(jq -r '.key // empty' <<< "${recog_parent}" 2> /dev/null)"
+    # A run that created the parent in this pass knows its key only from the
+    # apply outcome; recognition ran before it existed.
+    if [[ -z "${artifact_pub_key}" && -n "${apply_outcome:-}" ]]; then
+      artifact_pub_key="$(jq -r '[(.created // [])[] | select(.role == "parent") | .key] | first // empty' <<< "${apply_outcome}" 2> /dev/null)"
+    fi
+  fi
+
+  if [[ -n "${artifact_pub_key}" ]]; then
+    local _ap_meta _ap_enabled="true" _ap_limit=0
+    if _ap_meta="$(attachments_limit "${base}")"; then
+      _ap_enabled="${_ap_meta%% *}"
+      _ap_limit="${_ap_meta##* }"
+    else
+      # C3.7: no upload is attempted without a known limit. Withhold and say so
+      # rather than guessing a default Principle VII forbids compiling in.
+      warns="$(jq -c --arg m 'reconcile: the site attachment limit could not be read; feature artifacts were not published (zero writes)' '. + [$m]' <<< "${warns}")"
+      warn_count=$((warn_count + 1))
+      _ap_enabled="unreadable"
+    fi
+
+    if [[ "${_ap_enabled}" == "false" ]]; then
+      # C3.9: attachments are switched off site-wide.
+      warns="$(jq -c --arg m 'reconcile: this Jira site has attachments disabled; feature artifacts were not published' '. + [$m]' <<< "${warns}")"
+      warn_count=$((warn_count + 1))
+    elif [[ "${_ap_enabled}" == "true" ]]; then
+      local _ap_manifest _ap_ids
+      _ap_manifest="$(attachments_manifest_read "${base}" "${artifact_pub_key}")"
+      # C4.3, the trust rule: the ticket's real attachment list is fetched ONLY
+      # when the manifest claims an id, which is the only case where it can
+      # disagree with reality.
+      _ap_ids='null'
+      if [[ "$(jq -r '[.[] | .attachment_id] | length' <<< "${_ap_manifest}" 2> /dev/null || printf 0)" -gt 0 ]]; then
+        _ap_ids="$(attachments_ticket_ids "${base}" "${artifact_pub_key}")"
+      fi
+      artifact_decisions="$(attachments_classify "${_pg_set}" "${_ap_manifest}" "${_ap_limit}" "${_ap_ids}")"
+
+      # Every withholding gets its own named warning: the summary carries the
+      # facts, but a warning is what an operator actually reads (Principle XVI).
+      local _ap_w
+      while IFS= read -r _ap_w; do
+        [[ -z "${_ap_w}" ]] && continue
+        warns="$(jq -c --arg m "${_ap_w}" '. + [$m]' <<< "${warns}")"
+        warn_count=$((warn_count + 1))
+      done < <(jq -r '
+        .[] | select(.action == "withheld")
+        | if .reason == "oversized"
+          then "reconcile: \(.path) is \(.size) bytes, over this site'"'"'s \(.limit)-byte attachment limit; it was not published"
+          else "reconcile: \(.path) and \(.collides_with) would both attach as \(.attachment_name); neither was published — rename one"
+          end' <<< "${artifact_decisions}")
+
+      local _ap_pending
+      _ap_pending="$(jq -r '[.[] | select(.action == "published" or .action == "revised")] | length' <<< "${artifact_decisions}")"
+
+      if [[ "${dry_run}" != "true" && "${_ap_pending}" -gt 0 ]]; then
+        local _ap_next
+        _ap_next="$(attachments_manifest_compose "${_ap_manifest}" "${artifact_decisions}" \
+          "$(jq -cn --argjson n "${_ap_pending}" '[range(0;$n) | {id: "pending"}]')" "${hook_event}")"
+        if attachments_manifest_oversized "${_ap_next}"; then
+          # C4.4.1: fail closed BEFORE any upload. A partial manifest would make
+          # the next run republish exactly what this one dropped, forever.
+          warns="$(jq -c --arg m "reconcile: this feature directory holds more artifacts than one ticket can track; nothing was published" '. + [$m]' <<< "${warns}")"
+          warn_count=$((warn_count + 1))
+        else
+          local _ap_created
+          _ap_created="$(attachments_upload "${base}" "${artifact_pub_key}" "${_pg_dir}" "${artifact_decisions}")"
+          if [[ -z "${_ap_created}" || "$(jq -r 'length' <<< "${_ap_created}" 2> /dev/null || printf 0)" -eq 0 ]]; then
+            # C3.2/C3.4: withheld, never fatal. A 403 here means the token lacks
+            # "Create attachments"; propagating it would fail EVERY reconcile
+            # for that team the day they upgrade, for a feature they did not
+            # ask for. The reconcile's own writes stand.
+            warns="$(jq -c --arg m 'reconcile: the feature artifacts could not be uploaded — the Jira token may lack the "Create attachments" permission on this project; the rest of the mirror was written' '. + [$m]' <<< "${warns}")"
+            warn_count=$((warn_count + 1))
+          else
+            # C3.5: the comment is announced separately, and a failure there
+            # does NOT unpublish the attachments — they landed.
+            if ! attachments_comment_post "${base}" "${artifact_pub_key}" \
+              "$(attachments_comment_body "${hook_event}" "${artifact_decisions}")"; then
+              warns="$(jq -c --arg m 'reconcile: the feature artifacts were attached, but the comment announcing them could not be posted' '. + [$m]' <<< "${warns}")"
+              warn_count=$((warn_count + 1))
+            fi
+            # C3.6: only what actually landed reaches the manifest. A failure
+            # here is a warning, not a loss — the next run re-derives.
+            if ! attachments_manifest_write "${base}" "${artifact_pub_key}" \
+              "$(attachments_manifest_compose "${_ap_manifest}" "${artifact_decisions}" "${_ap_created}" "${hook_event}")"; then
+              warns="$(jq -c --arg m 'reconcile: the feature artifacts were attached, but the record of them could not be saved; the next run will reconcile it' '. + [$m]' <<< "${warns}")"
+              warn_count=$((warn_count + 1))
+            fi
+          fi
+        fi
+      fi
+    fi
+  fi
+
   # Edge Cases (contract §6, final line; T084): a task checked before its
   # sub-task ever existed is created and transitioned in this SAME run. The
   # completion pass above deferred it — no key existed yet to read
@@ -2407,7 +2521,8 @@ _reconcile_run() {
     --argjson wc "${warn_count}" --argjson w "${warns}" --argjson no "${notes}" \
     --argjson hl "${has_lifecycle}" \
     --argjson rec "${recognised_count}" --argjson asg "${assigned_count}" --argjson sk "${skipped_count}" \
-    --argjson tc "${task_counts}" --argjson cc "${checklist_counts}" --argjson tr "${counts_transitioned}" '
+    --argjson tc "${task_counts}" --argjson cc "${checklist_counts}" --argjson tr "${counts_transitioned}" \
+    --argjson art "${artifact_decisions:-[]}" '
     ($actions_f[0]) as $actions |
     {schema_version:"1.0", command:"reconcile", dry_run:$dry,
      counts:({created:$c, updated:$u, skipped:$sk, warnings:$wc, errors:0,
@@ -2419,6 +2534,10 @@ _reconcile_run() {
                   entries:{completed:$cc.entries_completed}
                 } end)),
      actions:$actions}
+    # 036, data-model §5: one entry per artifact, with the reason on every
+    # withholding. Omitted entirely when there is nothing to say, so every
+    # pre-036 summary is byte-identical to what it was.
+    + (if ($art | length) > 0 then {artifacts: $art} else {} end)
     + (if $hl then {warnings:$w, notes:$no} else {} end)
     + {exit_code:$x}' | json_canonical)" || _disp_rc=$?
   rm -f "${_disp_f}"
