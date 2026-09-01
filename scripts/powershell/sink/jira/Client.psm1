@@ -61,6 +61,50 @@ function Get-JiraTransportBackoff {
     if (-not $env:JIRA_NO_SLEEP) { Start-Sleep -Seconds $seconds }
 }
 
+function New-JiraMultipartContent {
+    <#
+    .SYNOPSIS
+      Compose the multipart/form-data body for an artifact upload
+      (036 contracts/artifact-publication.md C2.2).
+    .DESCRIPTION
+      Its own function, and exported, so the composition can be asserted
+      without a network. The Bash port's equivalent assertion reads the `curl`
+      config it builds; this is the same idea — check what we hand to the HTTP
+      client, which IS what C2.2 specifies.
+
+      Each part's filename is set EXPLICITLY from the flattened name. A
+      FileInfo contributes its own basename by default, so `contracts/api.md`
+      would arrive as `api.md` — exactly the collision the flattening exists to
+      prevent. The ContentDispositionHeaderValue is built by hand because
+      -Form offers no other way to override it.
+
+      Part ORDER is the caller's order, unchanged, so both ports produce the
+      same sequence for the same artifact set (Constitution VI).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [object[]] $FormParts)
+
+    $content = [System.Net.Http.MultipartFormDataContent]::new()
+    foreach ($p in $FormParts) {
+        $bytes = [System.IO.File]::ReadAllBytes($p.File)
+        $part = [System.Net.Http.ByteArrayContent]::new($bytes)
+        $disp = [System.Net.Http.Headers.ContentDispositionHeaderValue]::new('form-data')
+        $disp.Name = '"file"'
+        $disp.FileName = '"' + $p.Name + '"'
+        $part.Headers.ContentDisposition = $disp
+        $content.Add($part)
+    }
+    # `, $content` — the comma is load-bearing and its absence is silent.
+    #
+    # MultipartFormDataContent implements IEnumerable<HttpContent>, so a plain
+    # `return $content` makes PowerShell ENUMERATE it: the caller receives the
+    # inner parts, not the container. With one artifact the body sent was that
+    # artifact's raw bytes with no boundary and no Content-Disposition at all —
+    # a request Jira would reject, from code that looked correct and threw
+    # nothing. The comma operator wraps it so the container itself is returned.
+    return , $content
+}
+
 function Invoke-JiraRequest {
     <#
     .SYNOPSIS
@@ -73,7 +117,11 @@ function Invoke-JiraRequest {
         [Parameter(Mandatory)] [string] $Method,
         [Parameter(Mandatory)] [string] $Url,
         [string] $Body,
-        [string] $Email = $env:JIRA_EMAIL
+        [string] $Email = $env:JIRA_EMAIL,
+        # 036, contracts/artifact-publication.md C2.2 — multipart form parts,
+        # one per artifact: @( @{ Name = <attachment name>; File = <abs path> } ).
+        # Mirror of jira_request_multipart's <parts-json> in the Bash port.
+        [object[]] $FormParts
     )
 
     $maxAttempts = if ($env:JIRA_MAX_ATTEMPTS) { [int] $env:JIRA_MAX_ATTEMPTS } else { 3 }
@@ -104,11 +152,33 @@ function Invoke-JiraRequest {
                 Uri                = $Url
                 Method             = $Method
                 Headers            = $header
-                ContentType        = 'application/json'
                 SkipHttpErrorCheck = $true
                 ErrorAction        = 'Stop'
             }
-            if ($Body) { $params.Body = $Body }
+            if ($FormParts) {
+                # 036 C2.2. THREE things happen here and each is load-bearing:
+                #
+                #   * ContentType is NOT set. `-Form` makes PowerShell compose
+                #     `multipart/form-data` and its boundary itself; setting one
+                #     by hand produces a body PowerShell did not build. Passing
+                #     both is an error, which is why the assignment moved out of
+                #     the hashtable literal above rather than being overwritten.
+                #   * The XSRF header Jira requires for an upload is added. It is
+                #     the one endpoint in this codebase needing a header the
+                #     transport does not already send.
+                #   * Each part's filename is set EXPLICITLY from the flattened
+                #     name. A FileInfo contributes its own basename by default,
+                #     so `contracts/api.md` would arrive as `api.md` — exactly
+                #     the collision the flattening exists to prevent. The
+                #     ContentDispositionHeaderValue is built by hand because
+                #     -Form offers no other way to override it.
+                $header['X-Atlassian-Token'] = 'no-check'
+                $params.Body = New-JiraMultipartContent -FormParts $FormParts
+            }
+            else {
+                $params.ContentType = 'application/json'
+                if ($Body) { $params.Body = $Body }
+            }
             $resp = Invoke-WebRequest @params
             $status = [int] $resp.StatusCode
             $bodyText = if ($null -ne $resp.Content) { [string] $resp.Content } else { '' }
@@ -142,4 +212,4 @@ function Invoke-JiraRequest {
     }
 }
 
-Export-ModuleMember -Function Invoke-JiraRequest, Get-JiraRequestCount
+Export-ModuleMember -Function Invoke-JiraRequest, Get-JiraRequestCount, New-JiraMultipartContent
