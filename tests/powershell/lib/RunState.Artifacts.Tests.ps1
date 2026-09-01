@@ -96,9 +96,20 @@ Describe 'Run state schema 3 — the inputs are the artifact set (036)' {
         # that wrote it. This is the assertion the PowerShell port has to work
         # for: Join-Path renormalises to `\` on Windows, and the set is built
         # by string work rather than by a path provider for exactly that reason.
+        #
+        # SCOPED TO THE ARTIFACT KEYS, exactly as the Bash twin is. The three
+        # configuration keys beside them are spelled `$configDir/<file>`
+        # verbatim and have been since schema 1, so on Windows they carry the
+        # backslashes $env:TEMP is spelled with. Sweeping every key for `\`
+        # therefore passed on macOS — where the temp path has none — and failed
+        # on windows-latest against keys this test was never about. Measured on
+        # the real runner, which is the only place that difference exists.
         $inputs = (New-Document -Spec $script:Spec -Dir $script:FeatureDir | ConvertFrom-Json).inputs
         $inputs.PSObject.Properties.Name | Should -Contain 'contracts/api.md'
-        @($inputs.PSObject.Properties.Name | Where-Object { $_ -like '*\*' }).Count | Should -Be 0
+        foreach ($p in (Get-ArtifactFixtureExpectedPath)) {
+            $p | Should -Not -Match '\\'
+            $inputs.PSObject.Properties.Name | Should -Contain $p
+        }
     }
 
     It 'C3.6 a set the module cannot read returns $null' {
