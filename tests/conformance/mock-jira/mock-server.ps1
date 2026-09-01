@@ -567,6 +567,21 @@ function Resolve-Route {
             }
         }
         '^/rest/api/3/issue/[^/]+$' {
+            # 036 C1.3 — the trust rule's read, keyed on the EXACT query as the
+            # other field-scoped branches are. Without it the generic issue GET
+            # answers with no `attachment` array, the trust rule reads "the id
+            # the manifest claims is not on the ticket", and every artifact is
+            # republished on every run.
+            if ($Method -eq 'GET' -and $Query -eq 'fields=attachment') {
+                $ikey = ($Path -split '/')[-1]
+                $atts = @()
+                if ($script:Issues.ContainsKey($ikey) -and $script:Issues[$ikey].ContainsKey('attachments')) {
+                    $atts = @($script:Issues[$ikey].attachments)
+                }
+                return @{ status = 200; body = (@{ key = $ikey; fields = @{ attachment = $atts } } | ConvertTo-Json -Depth 10 -Compress) }
+            }
+        }
+        '^/rest/api/3/issue/[^/]+$' {
             $ikey = ($Path -split '/')[-1]
             if ($Method -eq 'GET') {
                 # Mentioned-ticket validation (fields=project or, 029 contract

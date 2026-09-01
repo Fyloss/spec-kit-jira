@@ -447,17 +447,38 @@ _shim_issue_get() {
   fi
 }
 
+# 036's manifest key is stored under `.properties[<issue>]`, a map INDEPENDENT
+# of `.issues`; EVERY OTHER key keeps the pre-existing behaviour of recording
+# only for an issue the mock itself created.
+#
+# The narrow scope is not timidity, it is a measurement. 036 needs its key to
+# round-trip on a RECOGNISED issue — one a fixture pins by marker rather than
+# creating — and under the old rule that PUT was silently dropped, so the
+# manifest was written, discarded, read back as absent, and every zero-churn
+# check failed for a reason unrelated to the code under test.
+#
+# Widening the rule to all keys was tried and REVERTED: it made the identity
+# property's PUT land too, where it had previously been dropped in favour of
+# the config's `identity` map, and recognition then refused the parent on the
+# second run ("carries no spec-kit-jira parent identity"). That is a real
+# difference in what the bridge writes versus what the fixtures declare, and it
+# belongs to whoever owns identity stamping — not to 036, which must not change
+# the behaviour of a key it does not own.
 _shim_property_put() {
-  local key="$1" prop_key="$2" value_json="$3" tmp
+  local key="$1" prop_key="$2" value_json="$3" tmp filter
+  # shellcheck disable=SC2016 # jq programmes: $k/$pk/$v are jq variables
+  if [[ "${prop_key}" == "spec-kit-jira-artifacts" ]]; then
+    filter='.properties[$k][$pk] = $v'
+  else
+    filter='if (.issues | has($k)) then .issues[$k].properties[$pk] = $v else . end'
+  fi
   tmp="$(mktemp)"
   if jq -e . > /dev/null 2>&1 <<< "${value_json}"; then
-    jq -c --arg k "${key}" --arg pk "${prop_key}" --argjson v "${value_json}" '
-      if (.issues | has($k)) then .issues[$k].properties[$pk] = $v else . end
-    ' "${MOCK_STATE_PATH}" > "${tmp}"
+    jq -c --arg k "${key}" --arg pk "${prop_key}" --argjson v "${value_json}" "${filter}" \
+      "${MOCK_STATE_PATH}" > "${tmp}"
   else
-    jq -c --arg k "${key}" --arg pk "${prop_key}" --arg v "${value_json}" '
-      if (.issues | has($k)) then .issues[$k].properties[$pk] = $v else . end
-    ' "${MOCK_STATE_PATH}" > "${tmp}"
+    jq -c --arg k "${key}" --arg pk "${prop_key}" --arg v "${value_json}" "${filter}" \
+      "${MOCK_STATE_PATH}" > "${tmp}"
   fi
   mv "${tmp}" "${MOCK_STATE_PATH}"
   RESP_STATUS=204
@@ -498,6 +519,14 @@ _shim_get_identity_marker() {
 
 _shim_property_get() {
   local key="$1" prop_key="$2" has
+  # The decoupled store first (036's key lives there), then the per-issue one.
+  has="$(jq -r --arg k "${key}" --arg pk "${prop_key}" \
+    '((.properties // {}) | has($k)) and (((.properties // {})[$k]) | has($pk))' "${MOCK_STATE_PATH}")"
+  if [[ "${has}" == "true" ]]; then
+    RESP_STATUS=200
+    RESP_BODY="$(jq -c --arg pk "${prop_key}" --arg k "${key}" '{key: $pk, value: .properties[$k][$pk]}' "${MOCK_STATE_PATH}")"
+    return
+  fi
   has="$(jq -r --arg k "${key}" --arg pk "${prop_key}" '(.issues | has($k)) and (.issues[$k].properties | has($pk))' "${MOCK_STATE_PATH}")"
   if [[ "${has}" == "true" ]]; then
     RESP_STATUS=200
@@ -706,6 +735,18 @@ else
     elif [[ "${method}" == "GET" ]]; then
       _shim_property_get "${ikey}" "${propkey}"
     fi
+  elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)$ && "${method}" == "GET" && "${query}" == "fields=attachment" ]]; then
+    # 036 C1.3 — the trust rule's read. Keyed on the EXACT query, as every other
+    # field-scoped route here is: the mock serves a different fixture per
+    # `fields=` string, so a widened list silently gets the wrong one.
+    #
+    # Without this route the generic issue GET answered with no `attachment`
+    # array, the trust rule read "the id the manifest claims is not on the
+    # ticket", and every artifact was republished on every run — zero-churn
+    # failing for a reason entirely inside the mock.
+    RESP_STATUS=200
+    RESP_BODY="$(jq -c --arg k "${BASH_REMATCH[1]}" \
+      '{key: $k, fields: {attachment: ((.issues[$k].attachments) // [])}}' "${MOCK_STATE_PATH}")"
   elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)$ ]]; then
     ikey="${BASH_REMATCH[1]}"
     if [[ "${method}" == "GET" ]]; then

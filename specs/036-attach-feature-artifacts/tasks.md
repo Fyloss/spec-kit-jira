@@ -209,9 +209,9 @@ downloadable and one comment names each.
 
 ### Wiring into the reconcile — FR-021, SC-001
 
-- [ ] T048 [P] [US1] Write failing command-level cases in `tests/bash/commands/test_reconcile_artifacts.bats` using the T003 fixture: a first run publishes **every** artifact of the directory — none missing — and the summary's `artifacts[]` names each with `published` (SC-001, data-model §5)
+- [X] T048 [P] [US1] Write failing command-level cases in `tests/bash/commands/test_reconcile_artifacts.bats` using the T003 fixture: a first run publishes **every** artifact of the directory — none missing — and the summary's `artifacts[]` names each with `published` (SC-001, data-model §5)
 - [ ] T049 [P] [US1] Write the Pester twin of T048 in `tests/powershell/commands/Reconcile.Artifacts.Tests.ps1`
-- [ ] T050 [US1] Add the publication phase to `scripts/bash/commands/reconcile.sh` after the existing write phases, and add `attach` and `comment` to the planned action set in `scripts/bash/sink/jira/plan_apply.sh` (data-model §5). The privacy scan is **not** here — it is at the pre-write sweep, per T014 and C5.1
+- [X] T050 [US1] Add the publication phase to `scripts/bash/commands/reconcile.sh` after the existing write phases, and add `attach` and `comment` to the planned action set in `scripts/bash/sink/jira/plan_apply.sh` (data-model §5). The privacy scan is **not** here — it is at the pre-write sweep, per T014 and C5.1
 - [ ] T051 [US1] Implement the twins in `scripts/powershell/commands/Reconcile.psm1` and `scripts/powershell/sink/jira/PlanApply.psm1`
 - [ ] T052 [P] [US1] Add the `artifacts[]` array to `specs/001-jira-reconcile-engine/contracts/run-summary.schema.json` **and** extend the reconcile schema guard that consumes `tests/bash/helpers/summary_schema.bash`, so the published contract cannot drift behind the ports again (data-model §5 note)
 - [ ] T053 [P] [US1] Write the conformance scenario `tests/conformance/scenarios/sc036-artifacts-first-publication.json`: both ports produce byte-identical comment bodies, an identical multipart part list, an identical call sequence and an identical `artifacts[]` array — a reconcile fixture needs `resolved_ids` and **no** `base_url`, or the run is a silent exit-0 no-op (FR-022, SC-008, quickstart §4)
