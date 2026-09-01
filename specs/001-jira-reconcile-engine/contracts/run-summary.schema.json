@@ -73,6 +73,11 @@
         }
       }
     },
+    "artifact_warnings": {
+      "type": "array",
+      "description": "036, T112: the publication phase's OWN warnings, carried separately from `warnings` so the default prose rendering can print them without printing every other feature's. `warnings` is written by every feature since 021 and prose has only ever shown its count; surfacing that array wholesale would change the default output of runs this feature never touched. Present only when the publication warned. Each string also appears in `warnings`, which stays the complete list.",
+      "items": { "type": "string" }
+    },
     "warnings": {
       "type": "array",
       "description": "Human-readable lifecycle-safety warnings (withheld transitions, drift); present only when lifecycle facts were supplied.",

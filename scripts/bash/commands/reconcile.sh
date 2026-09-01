@@ -2210,6 +2210,14 @@ _reconcile_run() {
   # bridge's own ticket keys — not consumer content, and nothing the sweep
   # could have blocked. A second scan would be the second traversal C5.4
   # forbids, for a delta the bridge itself wrote.
+  # 036 (T112): the publication's warnings are identified by POSITION, not by
+  # a marker on each of the eight sites that raise one. `warns` is append-only,
+  # so everything added between this mark and the end of the phase is the
+  # publication's — one jq before, one after, and not a line changed at any
+  # warning site.
+  local _ap_warn_base
+  _ap_warn_base="$(jq -r 'length' <<< "${warns}")"
+
   local _pub_set="${_pg_set}"
   if [[ "${dry_run}" != "true" ]]; then
     _pub_set="$(artifact_set_build "${_pg_dir}")" || _pub_set="${_pg_set}"
@@ -2389,6 +2397,12 @@ _reconcile_run() {
         "$(attachments_comment_body "${hook_event}" "${artifact_decisions}")")"
     fi
   fi
+
+  # The slice is taken HERE, before the pending-create-complete block below can
+  # append a warning of its own — that one belongs to the task tier, not to the
+  # publication, and prose must not attribute it here.
+  local artifact_warns
+  artifact_warns="$(jq -c --argjson b "${_ap_warn_base}" '.[$b:]' <<< "${warns}")"
 
   # Edge Cases (contract §6, final line; T084): a task checked before its
   # sub-task ever existed is created and transitioned in this SAME run. The
@@ -2652,6 +2666,7 @@ _reconcile_run() {
     --argjson dry "${dry_run}" --argjson c "${created}" --argjson u "${updated}" \
     --argjson x "${rc}" --slurpfile actions_f "$(json_path_arg "${_disp_f}")" \
     --slurpfile art_f "$(json_path_arg "${_art_f}")" \
+    --argjson aw "${artifact_warns:-[]}" \
     --argjson wc "${warn_count}" --argjson w "${warns}" --argjson no "${notes}" \
     --argjson hl "${has_lifecycle}" \
     --argjson rec "${recognised_count}" --argjson asg "${assigned_count}" --argjson sk "${skipped_count}" \
@@ -2673,6 +2688,11 @@ _reconcile_run() {
     # withholding. Omitted entirely when there is nothing to say, so every
     # pre-036 summary is byte-identical to what it was.
     + (if ($art | length) > 0 then {artifacts: $art} else {} end)
+    # 036 T112: the warnings raised by the publication alone, so prose can
+    # print them without printing every other feature. No apostrophe in this
+    # comment: it sits INSIDE a single-quoted jq programme, where one ends the
+    # string and the whole call stops parsing.
+    + (if ($aw | length) > 0 then {artifact_warnings: $aw} else {} end)
     + (if $hl then {warnings:$w, notes:$no} else {} end)
     + {exit_code:$x}' | json_canonical)" || _disp_rc=$?
   rm -f "${_disp_f}" "${_art_f}"

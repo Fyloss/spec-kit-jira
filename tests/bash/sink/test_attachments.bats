@@ -271,3 +271,38 @@ _contract_line() { sed -n "$1p" "${CONTRACT}" | sed 's/^  //'; }
   [ "$(jq -r '.[0].action' <<< "${d2}")" = "revised" ]
   [ "$(jq -r '.[1].action' <<< "${d2}")" = "unchanged" ]
 }
+
+# --- C4.4: the composed size is a BYTE COUNT of the document, both ports ------
+
+@test "C4.4 the manifest size counts the document, not jq's trailing newline" {
+  # Found by the conformance corpus, in a message an operator reads: bash said
+  # a 6-artifact record needed 642 bytes and PowerShell said 641. `json_build`
+  # ends with `jq -cn`, which emits a trailing newline; `wc -c` counted it. The
+  # PUT body has no such byte, so the Bash port measured a document nobody
+  # sends — and, worse, applied a threshold one byte tighter than its twin, so
+  # at exactly one boundary size the two ports disagreed about whether a
+  # manifest overflows at all.
+  local d m size expected
+  d="$(attachments_classify "${SET}" '{}' 100)"
+  m="$(attachments_manifest_compose '{}' "${d}" '[{"id":"1"},{"id":"2"}]' after_plan)"
+  size="$(attachments_manifest_size "${m}")"
+
+  # The document exactly as attachments_manifest_write composes it for the body.
+  expected="$(printf '%s' "$(jq -cn --argjson sc 1 --argjson a "${m}" '{schema: $sc, artifacts: $a}')" | LC_ALL=C wc -c | tr -d '[:space:]')"
+  [ "${size}" -eq "${expected}" ]
+}
+
+@test "C4.4 both ports compute the identical manifest size" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local d m mine theirs f
+  d="$(attachments_classify "${SET}" '{}' 100)"
+  m="$(attachments_manifest_compose '{}' "${d}" '[{"id":"1"},{"id":"2"}]' after_plan)"
+  mine="$(attachments_manifest_size "${m}")"
+
+  # Through a FILE, never the -Command string: this JSON carries quote
+  # characters two shells each want to interpret.
+  f="${BATS_TEST_TMPDIR}/manifest.json"
+  printf '%s' "${m}" > "${f}"
+  theirs="$(pwsh -NoProfile -Command "Import-Module '${ROOT}/scripts/powershell/sink/jira/Attachments.psm1' -Force; [Console]::Out.Write((Get-JiraManifestSize -ArtifactsJson ([System.IO.File]::ReadAllText('${f}'))))")"
+  [ "${mine}" = "${theirs}" ]
+}

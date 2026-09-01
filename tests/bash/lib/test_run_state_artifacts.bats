@@ -164,9 +164,22 @@ _matches() {
   # taken from the commit that last carried schema 2.
   local old_module
   old_module="${BATS_TEST_TMPDIR}/run_state_v2.sh"
-  local rev
-  rev="$(git -C "${ROOT}" log --format=%H -S'_RUN_STATE_SCHEMA=2' -1 -- scripts/bash/lib/run_state.sh 2> /dev/null)"
-  [ -n "${rev}" ] || skip "cannot locate the schema-2 revision in this checkout"
+  # Find the newest commit whose BLOB still says schema 2, by reading the blobs
+  # — not `git log -S`, which answers "the newest commit that CHANGED how often
+  # this string appears". Once the bump was committed, that answer became the
+  # commit that REMOVED it, whose blob says schema 3, and this guard failed
+  # against a file that was never the thing it meant to test. It passed while
+  # the bump sat uncommitted in the working tree and broke the moment the work
+  # was committed, which is the worst possible time for a guard to move.
+  local rev="" c
+  while IFS= read -r c; do
+    if git -C "${ROOT}" show "${c}:scripts/bash/lib/run_state.sh" 2> /dev/null \
+      | grep -q '_RUN_STATE_SCHEMA=2'; then
+      rev="${c}"
+      break
+    fi
+  done < <(git -C "${ROOT}" log --format=%H -- scripts/bash/lib/run_state.sh 2> /dev/null)
+  [ -n "${rev}" ] || skip "cannot locate a schema-2 revision in this checkout"
   git -C "${ROOT}" show "${rev}:scripts/bash/lib/run_state.sh" > "${old_module}" 2> /dev/null || \
     skip "cannot retrieve the schema-2 module from git"
   grep -q '_RUN_STATE_SCHEMA=2' "${old_module}"

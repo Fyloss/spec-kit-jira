@@ -115,3 +115,38 @@ The conformance corpus asserts, for the same feature directory:
 
 B6.4 is not paranoia: it is the measured PowerShell pipe-to-native behaviour,
 which conformance caught only because a literal was pinned. Pin the literal.
+
+## B7. What identifies "the run" (FR-004, T114)
+
+FR-004 requires the announcement to identify **the lifecycle event and the run**
+that published the artifacts. B2 pins the event; nothing in the body names a
+run, and the publication manifest's `run` field records the event too. So two
+`after_plan` runs that both publish produce two paragraphs reading alike.
+
+**That is the decision, not an oversight.** The run's identity is the comment
+itself: Jira creates exactly one comment per publishing run (B6.2), stamps it
+with an author and a time, and orders it in the stream. A reader asking "which
+run put this version here?" points at a comment and has their answer — the
+event that triggered it, the moment it happened, and the exact list of files it
+carried. Two runs of one event are distinguished by every one of those.
+
+The alternative was considered and rejected: a synthetic run identifier — a
+counter, a state hash, a UUID — carried in the paragraph and in the manifest.
+It buys a reader nothing Jira does not already give them, and it costs the one
+thing this contract exists to protect. Principle XVI is that the comment is
+read by a human above all, and `Spec Kit published these feature artifacts
+after \`after_plan\` (run 7f3a91c)` is a machine token in the middle of a
+sentence written for a person. B2's literal stays as it is.
+
+Evidence that the stream really does discriminate two runs of one event, rather
+than that being an assertion made here: `T079` publishes the same artifact
+twice under the same event and asserts two distinct comments, each naming the
+file and marking it a revision, in run order — in both ports
+(`test_reconcile_artifacts_revision.bats`,
+`Reconcile.ArtifactsRevision.Tests.ps1`).
+
+The manifest's `run` field keeps its name and its meaning: the lifecycle event
+that published the entry, diagnostic only, read by no decision. Renaming it
+would change the stored document's shape, and a manifest whose shape a reader
+does not recognise is treated as absent — so every artifact on every existing
+ticket would republish once, to record a field nothing consults.

@@ -2473,6 +2473,12 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
     # The markers are the only difference between the two sets, and they are
     # the bridge's own ticket keys — not consumer content, and nothing the
     # sweep could have blocked.
+    # 036 (T112): the publication's warnings are identified by POSITION, not by
+    # a marker on each site that raises one. $warnsJson is append-only, so
+    # everything added between this mark and the end of the phase is the
+    # publication's.
+    $apWarnBase = @($warnsJson | ConvertFrom-Json).Count
+
     $pubSet = $pgSet
     if (-not $dryRun) {
         $rebuilt = Get-JiraArtifactSet -FeatureDirectory $pgDir
@@ -2652,6 +2658,15 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
             $artifactActions = New-JiraArtifactAction -TicketKey $artifactPubKey -DecisionsJson $artifactDecisions `
                 -AdfJson (New-JiraArtifactComment -LifecycleEvent $hookEvent -DecisionsJson $artifactDecisions)
         }
+    }
+
+    # Taken HERE, before the pending-create-complete block below can append a
+    # warning of its own — that one belongs to the task tier, not the
+    # publication, and prose must not attribute it here.
+    $allWarns = @($warnsJson | ConvertFrom-Json)
+    $artifactWarnings = @()
+    if ($allWarns.Count -gt $apWarnBase) {
+        $artifactWarnings = @($allWarns[$apWarnBase..($allWarns.Count - 1)])
     }
 
     # Edge Cases (contract §6, final line; T084): a task checked before its
@@ -2909,6 +2924,10 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
     # pre-036 summary is byte-identical to what it was.
     $artifactList = @($artifactDecisions | ConvertFrom-Json)
     if ($artifactList.Count -gt 0) { $summaryObj['artifacts'] = $artifactList }
+    # 036 T112: the warnings raised by the publication alone, so prose can print
+    # them without printing every other feature. They also stay in `warnings`,
+    # which is still the complete list.
+    if ($artifactWarnings.Count -gt 0) { $summaryObj['artifact_warnings'] = @($artifactWarnings) }
     $summaryObj['exit_code'] = $rc
     $summary = ConvertTo-JiraJsonValue $summaryObj
 

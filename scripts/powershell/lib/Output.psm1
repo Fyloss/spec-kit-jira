@@ -226,6 +226,47 @@ function ConvertTo-JiraSummaryProse {
         $lines.Add("Recognised: $($s.counts.recognised), Assigned: $($s.counts.assigned)")
     }
     $lines.Add("Warnings: $($s.counts.warnings), Errors: $($s.counts.errors)")
+
+    # 036 (T111), FR-021 / FR-017 / Principle XVI: the artifact block, in the
+    # DEFAULT rendering. Byte-for-byte twin of summary_render_prose's — a tally
+    # always, then one detail line per artifact that is NOT `unchanged`. The
+    # precedent is `actions`, which prose has never rendered: the arrays live in
+    # `--json`, the actionable summary lives here.
+    #
+    # The two --dry-run twins fold into the `published` and `revised` tallies
+    # rather than growing two more columns: the Command line already says
+    # `(dry-run)`, and each detail line prints its action verbatim.
+    if ($s.PSObject.Properties.Name -contains 'artifacts' -and $null -ne $s.artifacts) {
+        $arts = @($s.artifacts)
+        $pub = @($arts | Where-Object { $_.action -in 'published', 'would-publish' }).Count
+        $rev = @($arts | Where-Object { $_.action -in 'revised', 'would-revise' }).Count
+        $unc = @($arts | Where-Object { $_.action -eq 'unchanged' }).Count
+        $wit = @($arts | Where-Object { $_.action -eq 'withheld' }).Count
+        $lines.Add("Artifacts: $pub published, $rev revised, $unc unchanged, $wit withheld")
+        foreach ($a in $arts) {
+            if ($a.action -eq 'unchanged') { continue }
+            $detail = ''
+            if ($a.PSObject.Properties.Name -contains 'reason' -and $null -ne $a.reason) {
+                $detail = switch ($a.reason) {
+                    'oversized' { " — $($a.reason) ($($a.size) bytes, limit $($a.limit))" }
+                    'name-collision' { " — $($a.reason) (collides with $($a.collides_with))" }
+                    default { " — $($a.reason)" }
+                }
+            }
+            $lines.Add("  $($a.path): $($a.action)$detail")
+        }
+    }
+
+    # 036 (T112): the publication's own warnings, in prose. Read from
+    # `artifact_warnings` and never from the shared `warnings` array — see the
+    # schema's note on why that distinction is the whole point.
+    if ($s.PSObject.Properties.Name -contains 'artifact_warnings' -and $null -ne $s.artifact_warnings) {
+        $aw = @($s.artifact_warnings)
+        if ($aw.Count -gt 0) {
+            $lines.Add('Artifact warnings:')
+            foreach ($w in $aw) { $lines.Add("  $w") }
+        }
+    }
     # The config ceremony's effects, reported separately (FR-054), in a fixed
     # order so both ports match byte-for-byte. The list must carry EVERY effect
     # the summary can hold: the renderer skips an absent status silently, so an

@@ -301,6 +301,37 @@ _count() { mock_calls | grep -cE "$1" || true; }
   [ "$(jq -r '[.warnings[] | select(test("assumed cap"))] | length' <<< "${output}")" -eq 1 ]
 }
 
+# ---- T113 / C3.3: the row the fault table had and the suite did not ---------
+
+@test "T113 C3.3 a 413 names the file count and the site limit, and is not a generic failure" {
+  # The row T090 skipped. Both ports translated a 413 from the day the
+  # publication shipped and NO test on either exercised it — code without the
+  # test Constitution XIII requires to precede it, on a message-composing
+  # branch, which is the exact shape of this feature's two run-time-only
+  # defects (an unset `$baseUrl`, a StrictMode read of `$applyOutcome`): parses
+  # clean, lints clean, dies when reached.
+  _start_faulted 'rest/api/3/issue/COMP-1/attachments' 413
+
+  run cmd_reconcile reconcile "${SPEC}" --json
+  # Withheld, never fatal — the same departure C3.2 makes, for the same reason.
+  [ "$status" -eq 0 ]
+
+  local summary="${output}"
+  # NOT the generic "could not be uploaded" wording: a 413 is the one upload
+  # failure the operator can act on by making something smaller, and it has to
+  # say so.
+  [ "$(jq -r '[.warnings[] | select(test("rejected by COMP-1 as too large"))] | length' <<< "${summary}")" -eq 1 ]
+  # Both numbers: how many files were offered, and the per-file limit the site
+  # declared. A message with neither is a generic failure with extra words.
+  [ "$(jq -r '[.warnings[] | select(test("offered [0-9]+ files"))] | length' <<< "${summary}")" -eq 1 ]
+  [ "$(jq -r '[.warnings[] | select(test("[0-9]+-byte per-file limit"))] | length' <<< "${summary}")" -eq 1 ]
+
+  # …and the artifacts are reported withheld rather than published.
+  [ "$(jq -r '[.artifacts[] | select(.reason == "upload-failed")] | length' <<< "${summary}")" -gt 0 ]
+  # C3.4's rule holds for this row too: nothing landed, so nothing is recorded.
+  [ "$(_count '^PUT .*properties/spec-kit-jira-artifacts')" -eq 0 ]
+}
+
 # ---- T092 / FR-018 / SC-011 / Principle III: never fail the host command ----
 
 @test "T092 SC-011 a publication failure in HOOK context leaves exit 0 and one warning" {
@@ -311,4 +342,37 @@ _count() { mock_calls | grep -cE "$1" || true; }
   [ "$status" -eq 0 ]
   # Exactly one actionable warning about the publication, not a stack of them.
   [ "$(grep -cE 'Warnings: [1-9]' <<< "${output}")" -eq 1 ]
+}
+
+# ---- T111 / T112: the DEFAULT output carries what an operator must act on ----
+
+@test "T111 T112 the default prose output names the withheld artifacts and the remedy" {
+  # No `--json` here, and that is the whole point: prose is the DEFAULT
+  # rendering, and until T111/T112 a 403 printed `Warnings: 2, Errors: 0` and
+  # nothing else — no file, no reason, no remedy.
+  _start_faulted 'rest/api/3/issue/COMP-1/attachments' 403
+
+  run cmd_reconcile reconcile "${SPEC}"
+  [ "$status" -eq 0 ]
+
+  # FR-021: per artifact, what happened.
+  [[ "$output" == *"Artifacts: 0 published"* ]]
+  [[ "$output" == *"withheld — upload-failed"* ]]
+  # FR-018 / Principle XVI: the remedy, which exists only in the warning text.
+  [[ "$output" == *"Artifact warnings:"* ]]
+  [[ "$output" == *"Create attachments"* ]]
+  [[ "$output" == *"COMP-1"* ]]
+}
+
+@test "T111 FR-017 the default output names an oversized artifact, its size and the limit" {
+  local cfg="${BATS_TEST_TMPDIR}/small2.json"
+  printf '%s' '{"projects":{"COMP":"company"},"attachment_meta":{"enabled":true,"uploadLimit":8}}' > "${cfg}"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  run cmd_reconcile reconcile "${SPEC}"
+  [ "$status" -eq 0 ]
+  # All three facts FR-017 requires, in the DEFAULT output.
+  [[ "$output" == *"withheld — oversized ("* ]]
+  [[ "$output" == *" bytes, limit 8)"* ]]
 }
