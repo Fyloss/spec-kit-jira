@@ -74,6 +74,10 @@ done
 _cfg_url=""
 _cfg_method=""
 _cfg_data_file=""
+# 036 C2.1 — one entry per `form =` line, in config order. The Bash port's
+# multipart upload puts its parts here rather than on argv, so this array IS
+# the only place the request body is observable to the shim.
+_cfg_form=()
 
 _shim_unquote() {
   local s="$1"
@@ -94,6 +98,7 @@ if [[ "${_config_file}" == "-" ]]; then
       url) _cfg_url="${_v}" ;;
       request) _cfg_method="${_v}" ;;
       data) [[ "${_v}" == @* ]] && _cfg_data_file="${_v#@}" ;;
+      form) _cfg_form+=("${_v}") ;;
       header) : ;; # NEVER read or log (the Authorization header lives here)
       *) : ;;
     esac
@@ -510,6 +515,87 @@ _shim_property_get() {
   RESP_BODY='{"errorMessages":["not found"],"errors":{}}'
 }
 
+
+# ---- 036: attachments, comments, and the upload limit -------------------------
+
+# _shim_attachment_meta — GET /attachment/meta (036 C1.1). The limit is a SITE
+# fact the bridge must discover rather than assume (Principle VII), so the
+# config can pin it per scenario; the default mirrors a stock Cloud site.
+_shim_attachment_meta() {
+  RESP_STATUS=200
+  RESP_BODY="$(jq -c '{enabled: ((.attachment_meta.enabled) // true),
+                       uploadLimit: ((.attachment_meta.uploadLimit) // 10485760)}' \
+    "${MOCK_CONFIG_PATH}")"
+}
+
+# _shim_create_attachments <key> — POST /issue/{key}/attachments (036 C1.4).
+#
+# Reads the parts out of `_cfg_form`, each spelled `file=@<path>;filename=<name>`
+# by jira_request_multipart. Records them on the issue so a later
+# `GET /issue/{key}?fields=attachment` can list them, and answers with the array
+# Jira answers with — in PART ORDER, which is what the ports are asserted on.
+#
+# Duplicate filenames are ACCEPTED, deliberately: Jira allows several
+# attachments with one name, each with its own id, and 036 depends on that —
+# a revised artifact is published again under the same name and the earlier
+# copy must survive (FR-014).
+_shim_create_attachments() {
+  local key="$1" entry name file created='[]' tmp
+  # The id counter is SESSION-wide, held in `.counters`, not derived from the
+  # issue's own recorded attachment list. Jira ids are globally unique, and the
+  # per-issue derivation handed the same id to two uploads whenever the issue
+  # was not seeded into `.issues` — which made a revision indistinguishable
+  # from its original, exactly the thing FR-014's tests need to tell apart.
+  local n
+  n="$(jq -r '(.counters["attachment"] // 0)' "${MOCK_STATE_PATH}" 2> /dev/null || printf '0')"
+  [[ -n "${n}" && "${n}" != "null" ]] || n=0
+  for entry in ${_cfg_form+"${_cfg_form[@]}"}; do
+    [[ "${entry}" == file=@* ]] || continue
+    name="${entry##*;filename=}"
+    file="${entry#file=@}"
+    file="${file%%;filename=*}"
+    local size=0
+    [[ -f "${file}" ]] && size="$(wc -c < "${file}" | tr -d '[:space:]')"
+    n=$((n + 1))
+    created="$(jq -c --arg id "1000${n}" --arg fn "${name}" --argjson sz "${size}" \
+      '. + [{id: $id, filename: $fn, size: $sz}]' <<< "${created}")"
+  done
+
+  tmp="$(mktemp)"
+  jq -c --arg k "${key}" --argjson a "${created}" --argjson n "${n}" '
+    .counters["attachment"] = $n
+    | if (.issues | has($k))
+      then .issues[$k].attachments = (((.issues[$k].attachments) // []) + $a)
+      else . end' "${MOCK_STATE_PATH}" > "${tmp}"
+  mv "${tmp}" "${MOCK_STATE_PATH}"
+
+  RESP_STATUS=200
+  RESP_BODY="${created}"
+}
+
+# _shim_create_comment <key> <body-json> — POST /issue/{key}/comment (036 C1.5).
+# Appends to the issue's recorded comment list so a run that posts twice is
+# distinguishable from one that posts once — which is exactly what the
+# zero-churn assertions read.
+_shim_create_comment() {
+  local key="$1" body="$2" tmp n
+  n="$(jq -r --arg k "${key}" '((.issues[$k].comments) // []) | length' "${MOCK_STATE_PATH}" 2> /dev/null || printf '0')"
+  [[ -n "${n}" ]] || n=0
+  n=$((n + 1))
+  local comment
+  comment="$(jq -cn --arg id "2000${n}" --argjson b "$(jq -c '.body // {}' <<< "${body}" 2> /dev/null || printf '{}')" \
+    '{id: $id, body: $b}')"
+  tmp="$(mktemp)"
+  jq -c --arg k "${key}" --argjson c "${comment}" '
+    if (.issues | has($k))
+    then .issues[$k].comments = (((.issues[$k].comments) // []) + [$c])
+    else . end' "${MOCK_STATE_PATH}" > "${tmp}"
+  mv "${tmp}" "${MOCK_STATE_PATH}"
+
+  RESP_STATUS=201
+  RESP_BODY="${comment}"
+}
+
 # ---- fault check (before routing; call already logged above) ------------------
 
 RESP_STATUS=404
@@ -607,6 +693,12 @@ else
     _shim_label_search "${query}"
   elif [[ ( "${path}" == "/rest/api/3/search" || "${path}" == "/rest/api/3/search/jql" ) && "${method}" == "GET" ]]; then
     _read_fixture 'search-siblings'
+  elif [[ "${path}" == "/rest/api/3/attachment/meta" && "${method}" == "GET" ]]; then
+    _shim_attachment_meta
+  elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)/attachments$ && "${method}" == "POST" ]]; then
+    _shim_create_attachments "${BASH_REMATCH[1]}"
+  elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)/comment$ && "${method}" == "POST" ]]; then
+    _shim_create_comment "${BASH_REMATCH[1]}" "${body}"
   elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)/properties/([^/]+)$ ]]; then
     ikey="${BASH_REMATCH[1]}" propkey="${BASH_REMATCH[2]}"
     if [[ "${method}" == "PUT" ]]; then
