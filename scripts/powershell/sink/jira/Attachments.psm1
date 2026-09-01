@@ -180,8 +180,13 @@ function New-JiraArtifactComment {
       can now download, and naming a file that is not there is worse than
       silence. They are reported in the run summary instead.
     #>
+    # [AllowEmptyString()] on the event: a reconcile invoked directly rather
+    # than from a lifecycle hook has no event, and the Bash port renders that as
+    # an empty `code` span without complaint. A Mandatory [string] rejects it at
+    # bind time, so the whole publication died on a run that had nothing wrong
+    # with it.
     [CmdletBinding()]
-    param([Parameter(Mandatory)] [string] $LifecycleEvent, [Parameter(Mandatory)] [AllowEmptyString()] [string] $DecisionsJson)
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $LifecycleEvent, [Parameter(Mandatory)] [AllowEmptyString()] [string] $DecisionsJson)
 
     $decisions = @($DecisionsJson | ConvertFrom-Json)
     $published = @($decisions | Where-Object { $_.action -eq 'published' -or $_.action -eq 'revised' })
@@ -244,7 +249,7 @@ function New-JiraArtifactManifest {
         [string] $ManifestJson = '{}',
         [Parameter(Mandatory)] [AllowEmptyString()] [string] $DecisionsJson,
         [string] $CreatedJson = '[]',
-        [Parameter(Mandatory)] [string] $LifecycleEvent
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $LifecycleEvent
     )
 
     $manifest = @{}
