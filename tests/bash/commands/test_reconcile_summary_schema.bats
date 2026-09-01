@@ -23,6 +23,12 @@
 # `effects` is config-only, so the drift class that motivated these suites cannot
 # occur here. What CAN occur, and what this file is for, is a new top-level key
 # added to reconcile's summary alone — which the config suite would never see.
+#
+# A FOURTH shape arrived with 036 (T052): PUBLISHING, where the summary carries
+# `artifacts[]`. It needs its own setup because the three above cannot reach it:
+# the artifact set is `git ls-files` over the feature directory, and a fixture
+# copied out of `tests/conformance/fixtures` is not a repository, so those runs
+# emit no artifacts at all and would judge the new key vacuously.
 
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
@@ -112,4 +118,81 @@ _record_defaults() {
   summary="$(cmd_reconcile reconcile "${SPEC}" --accept-defaults --json 2> /dev/null)" || rc=$?
   [ "${rc}" -eq 2 ]
   helper_summary_assert_conformant "${summary}" "${SCHEMA}" "reconcile (fail-closed)"
+}
+
+# ---- 036 T052: the publishing shape ------------------------------------------
+
+# _make_publishing_feature — turn the copied fixture into a real repository and
+# give the feature directory one artifact of every decision class the summary
+# can report. Prints the mock config path to start with.
+#
+# The three classes are deliberate and each one exercises a different part of
+# the contract: a plain file publishes, a pair sharing a flattened name is
+# withheld as a collision, and a file over the site's DISCOVERED limit is
+# withheld as oversized. A run producing only publications would leave the
+# `reason`, `size`, `limit` and `collides_with` keys — the four the schema is
+# most likely to fall behind on — completely unjudged.
+_make_publishing_feature() {
+  git -C "${WORK}" init --quiet
+  git -C "${WORK}" config user.email 'fixture@example.invalid'
+  git -C "${WORK}" config user.name 'fixture'
+
+  local dir="${WORK}/specs/001-reporting"
+  mkdir -p "${dir}/contracts"
+  printf '%s\n' '# Contract: reporting' 'C1. It reports.' > "${dir}/contracts/api.md"
+  # Collides with the above: a literal `__` in a top-level name flattens to the
+  # same attachment name as `contracts/api.md` does.
+  printf '%s\n' 'the collision' > "${dir}/contracts__api.md"
+  # Over the limit pinned below, and nothing else in the tree is.
+  head -c 4096 /dev/zero | tr '\0' 'x' > "${dir}/research.md"
+
+  local cfg="${BATS_TEST_TMPDIR}/publishing.json"
+  jq -c '. + {attachment_meta: {enabled: true, uploadLimit: 2048}}' \
+    "${MOCK}/configs/mandatory-field.json" > "${cfg}"
+  printf '%s' "${cfg}"
+}
+
+@test "the publishing reconcile summary declares every artifact key it emits" {
+  local cfg
+  cfg="$(_make_publishing_feature)"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  _record_defaults
+
+  local summary
+  summary="$(cmd_reconcile reconcile "${SPEC}" --accept-defaults --json 2> /dev/null)"
+
+  # First that the key is there at all. Without this the conformance assertion
+  # below passes on an absent array and proves nothing — the exact way a guard
+  # goes inert.
+  [ "$(jq -r '(.artifacts // []) | length' <<< "${summary}")" -gt 0 ]
+  # …and that all three decision classes are present, so every key the schema
+  # declares for a withholding is actually being judged.
+  [ "$(jq -r '[.artifacts[] | select(.action == "published")] | length' <<< "${summary}")" -gt 0 ]
+  [ "$(jq -r '[.artifacts[] | select(.reason == "name-collision")] | length' <<< "${summary}")" -eq 2 ]
+  [ "$(jq -r '[.artifacts[] | select(.reason == "oversized")] | length' <<< "${summary}")" -eq 1 ]
+
+  helper_summary_assert_conformant "${summary}" "${SCHEMA}" "reconcile (publishing)"
+}
+
+@test "the publishing summary is judged against the PRE-036 schema and fails" {
+  # The red-proof, run in the suite rather than described in a commit message.
+  # A guard nobody has watched fail is not known to work, and this repository
+  # has shipped two inert ones out of three.
+  local cfg
+  cfg="$(_make_publishing_feature)"
+  mock_start "${cfg}"
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+  _record_defaults
+
+  local summary old violations
+  summary="$(cmd_reconcile reconcile "${SPEC}" --accept-defaults --json 2> /dev/null)"
+  old="${BATS_TEST_TMPDIR}/pre-036-schema.json"
+  jq 'del(.properties.artifacts)' "${SCHEMA}" > "${old}"
+
+  violations="$(helper_summary_violations "${summary}" "${old}")"
+  [[ "${violations}" == *"top-level key not declared by the schema: artifacts"* ]]
+  # Not merely the top-level key: every entry's keys are reported too, which is
+  # what proves the per-entry reading is live rather than defaulted into silence.
+  [[ "${violations}" == *"artifacts[0] key not declared by the schema: action"* ]]
 }

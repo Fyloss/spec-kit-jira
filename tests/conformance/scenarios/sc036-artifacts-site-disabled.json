@@ -1,0 +1,28 @@
+{
+  "name": "sc036-artifacts-site-disabled",
+  "description": "036 T095 (C3.9) — the SITE-DISABLED withholding class. `attachment/meta` answers `enabled: false` and the whole publication is withheld with one warning, zero writes of every kind, and every artifact reported `withheld` with reason `site-disabled` rather than `published`. Worth its own scenario for a measured reason: jq resolves `false // true` to TRUE, so the Bash port and its shim both read this site state as ENABLED until a case set it — while the PowerShell port, which tests for the property presence, always honoured it. A cross-port divergence on the one path that switches the feature off.",
+  "mock": {
+    "projects": {
+      "COMP": "company"
+    },
+    "attachment_meta": {
+      "enabled": false,
+      "uploadLimit": 10485760
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-artifacts",
+  "git_branch": "036-artifacts",
+  "argv": [
+    "reconcile",
+    "--json",
+    "specs/001-reporting/spec.md"
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-reporting",
+    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111"
+  }
+}

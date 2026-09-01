@@ -1,0 +1,25 @@
+{
+  "name": "sc036-artifacts-manifest-overflow",
+  "description": "036 T095 (C4.4.1) — the MANIFEST-OVERFLOW withholding class. The publication is withheld BEFORE any upload, with one warning naming the artifact count, the composed record size and the cap. Failing closed is the point: a partial manifest would make the next run republish exactly the artifacts this one dropped, forever. The cap is lowered through its environment override rather than the fixture widened to ~290 artifacts — the assertion is about the decision, and both ports must compose the same three numbers into the same sentence. The override is read at the point of USE in both ports, which is itself a cross-port fix this scenario would catch a regression of.",
+  "mock": {
+    "projects": {
+      "COMP": "company"
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-artifacts",
+  "git_branch": "036-artifacts",
+  "argv": [
+    "reconcile",
+    "--json",
+    "specs/001-reporting/spec.md"
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-reporting",
+    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111",
+    "SPEC_KIT_JIRA_PROPERTY_CAP": "1"
+  }
+}

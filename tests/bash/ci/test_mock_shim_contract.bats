@@ -246,6 +246,70 @@ teardown() {
   [ "$(jq -r '.value.artifacts["spec.md"].hash' <<< "$output")" = "aaaa" ]
 }
 
+# --- T053 [036] — the call log carries what conformance has to compare --------
+#
+# `calls.log` is the only cross-port record of what a run actually SENT, and it
+# held method and target alone. For every route before 036 that was enough,
+# because the two things a scenario must compare — the multipart part list and
+# the announcing comment's body — did not exist. They do now, and neither
+# reaches the run summary: the publication phase runs after the planned action
+# set is composed, so `actions[]` never sees them.
+#
+# Without these two annotations sc036-artifacts-first-publication compares two
+# identical `POST .../attachments` lines and is blind to a port sending the
+# parts in a different order, under different names, or announcing them with a
+# different body. That is the divergence class Principle VI exists for, so the
+# instrument has to see it.
+
+@test "T053 the attachment POST is logged with its part list, in part order" {
+  mock_start "${MOCK}/configs/default.json"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/bash/sink/jira/client.sh"
+  export JIRA_EMAIL="user@example.com" JIRA_API_TOKEN="TOK" JIRA_NO_SLEEP=1
+  export SPEC_KIT_JIRA_BASE_URL="${MOCK_BASE_URL}"
+
+  local d="${BATS_TEST_TMPDIR}/parts"
+  mkdir -p "${d}/contracts"
+  printf 'spec\n' > "${d}/spec.md"
+  printf 'api\n' > "${d}/contracts/api.md"
+  local parts
+  parts="$(jq -cn --arg d "${d}" '[
+    {attachment_name:"spec.md",           file:($d + "/spec.md")},
+    {attachment_name:"contracts__api.md", file:($d + "/contracts/api.md")}
+  ]')"
+  jira_request_multipart POST "${MOCK_BASE_URL}/rest/api/3/issue/COMP-1/attachments" "${parts}" > /dev/null
+
+  local line
+  line="$(mock_calls | grep '/attachments')"
+  # The names, comma-joined, in the order they were sent — an order swap is the
+  # divergence this exists to catch, so the assertion is on the whole string.
+  [ "${line}" = "POST /rest/api/3/issue/COMP-1/attachments parts=spec.md,contracts__api.md" ]
+}
+
+@test "T053 the comment POST is logged with its body, verbatim" {
+  mock_start "${MOCK}/configs/default.json"
+  local body='{"body":{"content":[],"type":"doc","version":1}}'
+  curl -s -X POST -d "${body}" \
+    "${MOCK_BASE_URL}/rest/api/3/issue/COMP-1/comment" > /dev/null
+
+  local line
+  line="$(mock_calls | grep '/comment')"
+  # The body as sent, on one line: the comment is composed from pinned literals
+  # in two languages, and a digest would prove they differ without saying how.
+  [ "${line}" = "POST /rest/api/3/issue/COMP-1/comment body=${body}" ]
+}
+
+@test "T053 a route with neither parts nor body is logged exactly as before" {
+  # The annotation is additive. Every pre-036 scenario compares this log line
+  # for line, and a trailing space or an empty `parts=` would diverge all 260
+  # of them at once.
+  mock_start "${MOCK}/configs/default.json"
+  curl -s "${MOCK_BASE_URL}/rest/api/3/project/COMP" > /dev/null
+  local line
+  line="$(mock_calls | grep '/project/COMP')"
+  [ "${line}" = "GET /rest/api/3/project/COMP" ]
+}
+
 @test "T024 an unpublished manifest key answers 404, not a stale fixture" {
   # C1.2: a 404 means "no manifest", and every artifact is a first publication.
   # A mock that answered a fixture here would make the zero-churn tests pass

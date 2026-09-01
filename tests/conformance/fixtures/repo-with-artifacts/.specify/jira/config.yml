@@ -1,0 +1,14 @@
+# Team config for the US5 (plan-on-parent) conformance fixture (committable,
+# credential-free). Business-language keys; see the extension README.
+projects:
+  - key: COMP
+    style: company_managed
+    priority_map:
+      P1: Highest
+      P2: Medium
+      P3: Low
+routing:
+  - match:
+      folder_prefix: "001-"
+    project: COMP
+routing_default: COMP

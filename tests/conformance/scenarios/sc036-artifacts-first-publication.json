@@ -1,0 +1,16 @@
+{
+  "name": "sc036-artifacts-first-publication",
+  "description": "036 T053, FR-022/SC-008 — a first publication of a whole feature directory, compared across the two ports. Every artifact of specs/001-reporting reaches the specification ticket in ONE multipart request, announced by ONE comment, and both ports must agree byte for byte on four things at once: the comment's ADF body, the multipart part list and its order, the Jira call sequence, and the summary's artifacts[] array. `git_branch` is required, not decorative: the artifact set is `git ls-files` over the feature directory (research R5), and without a repository the set is empty and this scenario compares two identical no-ops. The fixture holds only text artifacts — a tracked binary is subject to the checkout's own line-ending conversion on a Windows runner, which would make the divergence a property of git rather than of either port; byte fidelity for binaries is asserted at the unit level, where the fixture is written at run time.",
+  "mock": { "projects": { "COMP": "company" } },
+  "fixture": "tests/conformance/fixtures/repo-with-artifacts",
+  "git_branch": "036-artifacts",
+  "argv": ["reconcile", "--json", "specs/001-reporting/spec.md"],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-reporting",
+    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111"
+  }
+}

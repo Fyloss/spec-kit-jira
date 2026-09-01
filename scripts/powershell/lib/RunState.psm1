@@ -20,7 +20,7 @@ Import-Module (Join-Path $PSScriptRoot 'Output.psm1')   # ConvertTo-JiraJsonValu
 # Shape version of the run-state document (data-model.md §1). A change to the
 # *set* of recorded inputs bumps it, invalidating every existing file.
 # 023, contracts/run-state-v2.md C1: 1 -> 2 for `hook_event` and `plan.md`.
-$script:RunStateSchema = 2
+$script:RunStateSchema = 3
 
 function Get-JiraConfigDir {
     # Mirror of Credentials.psm1's private helper of the same name — every
@@ -87,37 +87,44 @@ function New-JiraRunStateDocument {
         # from $env:SPEC_KIT_JIRA_HOOK_EVENT itself — keeps this module a pure
         # function of its arguments, like BaseUrl/Email/OnDrift/FieldValues.
         [AllowEmptyString()] [string] $HookEvent = '',
-        [string] $FieldValues = ''
+        [string] $FieldValues = '',
+        # 036, contracts/run-state-v3.md C2/C3: the ARTIFACT SET — every
+        # publishable file of the feature directory, already carrying the
+        # `git hash-object --no-filters --stdin-paths` hashes the engine
+        # computed in ONE call (C3.4). Passed in rather than built here: this
+        # module is `lib/` and the set is built in `engine/`, which is the
+        # wrong direction to import, and the reconcile already holds it.
+        [AllowEmptyString()] [string] $ArtifactSetJson = '[]'
     )
     if (-not (Test-Path -LiteralPath $SpecPath -PathType Leaf)) { return $null }
 
     $extVersion = Get-JiraExtensionVersion
     if ($extVersion -isnot [string]) { return $null }
 
-    $specHash = Get-JiraGitHash -Path $SpecPath
-    if (-not $specHash) { return $null }
-
-    $inputs = [ordered]@{ 'spec.md' = $specHash }
-
-    $tasksPath = Join-Path (Split-Path -Parent $SpecPath) 'tasks.md'
-    if (Test-Path -LiteralPath $tasksPath -PathType Leaf) {
-        $hash = Get-JiraGitHash -Path $tasksPath
-        if (-not $hash) { return $null }
-        $inputs['tasks.md'] = $hash
+    # C3.1/C3.3: the key set IS the artifact set's paths — relative to the
+    # feature directory and `/`-separated on every host, because this document
+    # is byte-compared across ports and machines. No hashing happens here: the
+    # set arrives hashed, which is what makes C5's bounded budget hold.
+    #
+    # Under schema 2 this recorded three fixed documents, and a run fired after
+    # only `research.md` changed found all three hashes matching and
+    # short-circuited with zero Jira calls — leaving the artifact unpublished
+    # forever (C4). That is the whole reason for the bump.
+    $inputs = [ordered]@{}
+    try {
+        foreach ($a in @($ArtifactSetJson | ConvertFrom-Json)) {
+            $inputs[[string] $a.path] = [string] $a.hash
+        }
     }
-
-    # C3 (contracts/run-state-v2.md §1): plan.md is read on every run and
-    # spliced onto the parent's description, so a change to it must
-    # invalidate — the same "present when the file exists, key omitted
-    # otherwise" rule tasks.md already has.
-    $planPath = Join-Path (Split-Path -Parent $SpecPath) 'plan.md'
-    if (Test-Path -LiteralPath $planPath -PathType Leaf) {
-        $hash = Get-JiraGitHash -Path $planPath
-        if (-not $hash) { return $null }
-        $inputs['plan.md'] = $hash
-    }
+    catch { return $null }
 
     $configDir = Get-JiraConfigDir
+    # C3.2's "an absent file is not in the set" rule covers the feature
+    # directory. It does NOT cover the three configuration files below: they
+    # live outside it, they are read on every run, and a change to any of them
+    # changes what the run would write. Dropping them would silently weaken the
+    # short-circuit into ignoring a re-pointed project — so they keep both
+    # their hashing and v2's "key omitted when absent" rule.
     foreach ($f in @('config.yml', 'config.local.yml', 'personal.yml')) {
         # Two spellings on purpose. Join-Path is the right way to REACH the
         # file, and $p keeps that job. The recorded key is a different thing:
@@ -166,7 +173,8 @@ function Test-JiraRunStateMatch {
         [Parameter(Mandatory)] [AllowEmptyString()] [string] $Email,
         [Parameter(Mandatory)] [string] $OnDrift,
         [AllowEmptyString()] [string] $HookEvent = '',
-        [string] $FieldValues = ''
+        [string] $FieldValues = '',
+        [AllowEmptyString()] [string] $ArtifactSetJson = '[]'
     )
     $recordedPath = Get-JiraRunStatePath -SpecPath $SpecPath
     if (-not (Test-Path -LiteralPath $recordedPath -PathType Leaf)) { return $false }
@@ -181,7 +189,7 @@ function Test-JiraRunStateMatch {
     }
     catch { return $false }
 
-    $fresh = New-JiraRunStateDocument -SpecPath $SpecPath -BaseUrl $BaseUrl -Email $Email -OnDrift $OnDrift -HookEvent $HookEvent -FieldValues $FieldValues
+    $fresh = New-JiraRunStateDocument -SpecPath $SpecPath -BaseUrl $BaseUrl -Email $Email -OnDrift $OnDrift -HookEvent $HookEvent -FieldValues $FieldValues -ArtifactSetJson $ArtifactSetJson
     if (-not $fresh) { return $false }
 
     return [string]::Equals($recorded, $fresh, [System.StringComparison]::Ordinal)
@@ -202,7 +210,8 @@ function Save-JiraRunState {
         [Parameter(Mandatory)] [AllowEmptyString()] [string] $Email,
         [Parameter(Mandatory)] [string] $OnDrift,
         [AllowEmptyString()] [string] $HookEvent = '',
-        [string] $FieldValues = ''
+        [string] $FieldValues = '',
+        [AllowEmptyString()] [string] $ArtifactSetJson = '[]'
     )
     $recordedPath = Get-JiraRunStatePath -SpecPath $SpecPath
     $stateDir = Split-Path -Parent $recordedPath
@@ -229,7 +238,7 @@ function Save-JiraRunState {
         }
     }
 
-    $doc = New-JiraRunStateDocument -SpecPath $SpecPath -BaseUrl $BaseUrl -Email $Email -OnDrift $OnDrift -HookEvent $HookEvent -FieldValues $FieldValues
+    $doc = New-JiraRunStateDocument -SpecPath $SpecPath -BaseUrl $BaseUrl -Email $Email -OnDrift $OnDrift -HookEvent $HookEvent -FieldValues $FieldValues -ArtifactSetJson $ArtifactSetJson
     if (-not $doc) {
         Write-JiraWarning 'run-state: could not compose the state document; state not recorded'
         return

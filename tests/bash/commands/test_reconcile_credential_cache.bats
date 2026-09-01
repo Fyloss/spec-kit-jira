@@ -28,6 +28,14 @@ setup() {
 
   WORK="${BATS_TEST_TMPDIR}/repo"
   cp -R "${FIXTURE}" "${WORK}"
+  # 036, contracts/run-state-v3.md: the recorded inputs ARE the artifact set,
+  # built with `git ls-files` over the feature directory. An empty set — a
+  # directory outside a repository — is never recorded and never
+  # short-circuits, and the cases below are about what a SHORT-CIRCUITED run
+  # does not do.
+  git -C "${WORK}" init --quiet
+  git -C "${WORK}" config user.email 'fixture@example.invalid'
+  git -C "${WORK}" config user.name 'fixture'
   SPEC="${WORK}/specs/001-feature/spec.md"
 
   BIN="${BATS_TEST_TMPDIR}/bin"

@@ -731,7 +731,36 @@ try {
                 $body = $Utf8NoBom.GetString($buf, 0, $read)
             }
 
-            [System.IO.File]::AppendAllText($CallLogPath, "$method $target`n", $Utf8NoBom)
+            # 036 T053: two routes carry an annotation, because they are the
+            # only ones whose PAYLOAD the conformance corpus has to compare and
+            # whose payload reaches no other capture — the publication phase
+            # runs after the planned action set is composed, so the run
+            # summary's `actions[]` never sees the upload or the comment.
+            #
+            # Byte-for-byte the same construction as curl-shim.sh's own writer.
+            # A divergence HERE would read as a divergence between the ports,
+            # which is the most expensive kind of false positive this corpus can
+            # produce. Additive: a request with neither parts nor body logs
+            # exactly what it logged before, leaving the pre-036 scenarios
+            # untouched.
+            $callSuffix = ''
+            if ($method -eq 'POST' -and $path -match '/attachments$') {
+                # The flattened names only, in part order, straight out of the
+                # raw multipart body — never the local file paths, which are
+                # each port's own temp directory and differ by construction.
+                $names = @()
+                foreach ($m in [regex]::Matches($body, 'filename="([^"]*)"')) {
+                    $names += $m.Groups[1].Value
+                }
+                if ($names.Count -gt 0) { $callSuffix = " parts=$($names -join ',')" }
+            } elseif ($method -eq 'POST' -and $path -match '/comment$' -and $body -ne '') {
+                # Verbatim, not a digest: the body is composed from pinned
+                # literals in two languages, and a digest would prove they
+                # differ without saying how.
+                $callSuffix = " body=$body"
+            }
+
+            [System.IO.File]::AppendAllText($CallLogPath, "$method $target$callSuffix`n", $Utf8NoBom)
 
             # Fault selection is path-keyed by project; POST /issue has no project
             # in its path, so a create fault is keyed by the body's project key.

@@ -26,6 +26,17 @@ setup() {
   mkdir -p "${WORK}/.specify/jira" "${WORK}/specs/001-billing-invoices"
   SPEC="${WORK}/specs/001-billing-invoices/spec.md"
 
+  # 036, contracts/run-state-v3.md: the recorded inputs ARE the artifact set,
+  # and the set is `git ls-files` over the feature directory. Outside a
+  # repository the set is empty, and an empty set never short-circuits (it
+  # would otherwise compare equal to the next empty one and skip a run whose
+  # spec.md had changed). Every consumer tree is a repository; this fixture
+  # has to be one too, or the short-circuit these cases exist to prove can
+  # never fire.
+  git -C "${WORK}" init --quiet
+  git -C "${WORK}" config user.email 'fixture@example.invalid'
+  git -C "${WORK}" config user.name 'fixture'
+
   cat > "${WORK}/.specify/jira/config.yml" << 'YAML'
 projects:
   - key: COMP
