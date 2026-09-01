@@ -99,11 +99,11 @@ artifact content anywhere.
 
 ### The transport — contract C2, FR-023, Principle IV
 
-- [ ] T019 [P] Write failing multipart cases in `tests/bash/sink/test_client_multipart.bats`: the request carries `X-Atlassian-Token: no-check`; one `form =` line per artifact; each line spells the path through `_jira_curl_path` (`cygpath -m` under a forced `JIRA_PATH_STYLE=native`); each carries an explicit `;filename=` equal to the flattened name; the whole config still travels on **stdin** (C2.1)
-- [ ] T020 [P] Write the failing credential case in the same file: with maximum verbosity enabled, the credential appears in no argv, no log and no trace of the multipart path — the test Constitution IV names verbatim (Principle IV, NFR-3)
-- [ ] T021 [P] Write the Pester twin of T019/T020 in `tests/powershell/sink/Client.Multipart.Tests.ps1`, including that `ContentType` is **not** set when form parts are supplied and that each part's filename is the flattened name, not the `FileInfo` basename (C2.2, research R14)
-- [ ] T022 Extend `scripts/bash/sink/jira/client.sh` to emit `header =` and `form =` directives into the stdin config when the caller supplies form parts, changing nothing about the existing retry, backoff or exit-code mapping (C2.1)
-- [ ] T023 Add `-FormParts` to `Invoke-JiraRequest` in `scripts/powershell/sink/jira/Client.psm1`: suppress `ContentType`, add the token header, set each part's filename explicitly (C2.2)
+- [X] T019 [P] Write failing multipart cases in `tests/bash/sink/test_client_multipart.bats`: the request carries `X-Atlassian-Token: no-check`; one `form =` line per artifact; each line spells the path through `_jira_curl_path` (`cygpath -m` under a forced `JIRA_PATH_STYLE=native`); each carries an explicit `;filename=` equal to the flattened name; the whole config still travels on **stdin** (C2.1)
+- [X] T020 [P] Write the failing credential case in the same file: with maximum verbosity enabled, the credential appears in no argv, no log and no trace of the multipart path — the test Constitution IV names verbatim (Principle IV, NFR-3)
+- [X] T021 [P] Write the Pester twin of T019/T020 in `tests/powershell/sink/Client.Multipart.Tests.ps1`, including that `ContentType` is **not** set when form parts are supplied and that each part's filename is the flattened name, not the `FileInfo` basename (C2.2, research R14)
+- [X] T022 Extend `scripts/bash/sink/jira/client.sh` to emit `header =` and `form =` directives into the stdin config when the caller supplies form parts, changing nothing about the existing retry, backoff or exit-code mapping (C2.1)
+- [X] T023 Add `-FormParts` to `Invoke-JiraRequest` in `scripts/powershell/sink/jira/Client.psm1`: suppress `ContentType`, add the token header, set each part's filename explicitly (C2.2)
 
 ### The two mock surfaces — research R13
 

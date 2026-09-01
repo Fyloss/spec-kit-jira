@@ -253,4 +253,130 @@ jira_request() {
   [[ "${_xt}" == 1 ]] && set -x
   return "${rc}"
 }
+
+# jira_request_multipart <method> <url> <parts-json> — a multipart/form-data
+# request carrying one `file` part per entry of <parts-json>
+# (036 contracts/artifact-publication.md C2.1; FR-023).
+#
+# <parts-json> is an array of `{attachment_name, file}` objects: the name the
+# part must carry, and the absolute on-disk path to read it from.
+#
+# This is a SIBLING of jira_request rather than a flag on it, and deliberately
+# so: the two build different configs (this one sets no Content-Type, because
+# curl composes the multipart boundary itself, and adds the XSRF header Jira
+# requires for uploads) while sharing everything that matters — the credential
+# on stdin, the bounded retry, the monotonic exit-code mapping. A flag would
+# have put two request shapes inside one already long function.
+#
+# Three constraints meet here and only this shape satisfies all three:
+#
+#   * The credential stays OFF ARGV. The parts join the config that already
+#     travels on stdin; they never become `-F` arguments (NFR-3 / SC-007).
+#   * Every path is spelled for the curl that will OPEN it, through
+#     `_jira_curl_path` — the measured MSYS behaviour recorded at the top of
+#     this file (posix=26, win=26, mixed=7 against a dead port).
+#   * The argument vector does not grow with the artifact set. One `-F` per
+#     artifact would, and the cap that binds is Windows counting the WHOLE
+#     command line against ~32767 bytes, not this host's.
+#
+# `;filename=` is not optional: without it curl derives the part name from the
+# path's basename, and `contracts/api.md` would arrive as `api.md` — exactly
+# the collision the flattening exists to prevent.
+jira_request_multipart() {
+  local method="$1" url="$2" parts="$3"
+  local email="${JIRA_EMAIL:-}"
+
+  # Suspend xtrace for the whole function, as jira_request does: the config
+  # piped on stdin carries the base64 credential and must never be traced.
+  local _xt=0
+  case "$-" in *x*) _xt=1; set +x ;; esac
+
+  local rc=0 attempt=1 delay
+  local hdrfile respfile
+  hdrfile="$(mktemp)"
+  respfile="$(mktemp)"
+
+  while :; do
+    : > "${hdrfile}"
+    : > "${respfile}"
+
+    local cfg
+    if ! cfg="$(cred_curl_config "${email}" "${url}")"; then
+      rc="$(cli_exit_code auth)"
+      break
+    fi
+    cfg="${cfg}"$'\n'"url = \"${url}\""
+    cfg="${cfg}"$'\n'"request = \"${method}\""
+    cfg="${cfg}"$'\n'"header = \"Accept: application/json\""
+    # Jira's XSRF check rejects an upload without this. It is the one endpoint
+    # in this codebase that needs a header the transport does not already send.
+    cfg="${cfg}"$'\n'"header = \"X-Atlassian-Token: no-check\""
+    # NO Content-Type: curl composes `multipart/form-data` and its boundary
+    # itself, and setting one by hand produces a body curl did not build.
+
+    local name file
+    while IFS=$'\x1f' read -r name file; do
+      [[ -z "${file}" ]] && continue
+      cfg="${cfg}"$'\n'"form = \"file=@$(_jira_curl_path "${file}");filename=${name}\""
+    # `\037` in OCTAL, not `\x1f`: BSD `tr` does not understand a hex escape and
+    # silently substitutes a literal `x`, which merges the two columns into one
+    # field and leaves `file` empty — so every form line vanishes and the
+    # request uploads nothing while still returning 200. Caught by the tests;
+    # invisible in a run that looks like it worked.
+    #
+    # `\037` rather than the tab itself for the reason recorded in
+    # sink/jira/plan_apply.sh: bash's `read` treats tab as IFS *whitespace* and
+    # silently squeezes an empty field.
+    done < <(jq -r '.[] | [.attachment_name, .file] | @tsv' <<< "${parts}" 2> /dev/null | tr '\t' '\037')
+
+    JIRA_REQUEST_COUNT=$((JIRA_REQUEST_COUNT + 1))
+    [[ -n "${_JIRA_REQUEST_COUNT_FILE}" ]] && { printf 'x' >> "${_JIRA_REQUEST_COUNT_FILE}"; } 2> /dev/null
+    local http_code curl_rc
+    http_code="$(
+      printf '%s\n' "${cfg}" | curl --silent --config - \
+        --output "${respfile}" --dump-header "${hdrfile}" \
+        --write-out '%{http_code}' 2> /dev/null
+    )"
+    curl_rc=$?
+
+    if [[ "${curl_rc}" -ne 0 ]]; then
+      JIRA_LAST_STATUS=0
+      rc="$(cli_exit_code fail_closed)"
+      break
+    fi
+    # shellcheck disable=SC2034 # read by the sink modules sourced into this SAME process, as jira_request's twin assignment is
+    JIRA_LAST_STATUS="${http_code}"
+    # shellcheck disable=SC2034 # same as JIRA_LAST_STATUS above
+    JIRA_LAST_ERROR_BODY="$(cat "${respfile}" 2> /dev/null)"
+    case "${http_code}" in
+      2*)
+        cat "${respfile}"
+        rc=0
+        break
+        ;;
+      401 | 403)
+        rc="$(cli_exit_code auth)"
+        break
+        ;;
+      429)
+        if ((attempt < JIRA_MAX_ATTEMPTS)); then
+          delay="$(_jira_retry_after "${hdrfile}" "${attempt}")"
+          _jira_sleep "${delay}"
+          attempt=$((attempt + 1))
+          continue
+        fi
+        rc="$(cli_exit_code fail_closed)"
+        break
+        ;;
+      *)
+        rc="$(cli_exit_code fail_closed)"
+        break
+        ;;
+    esac
+  done
+
+  rm -f "${hdrfile}" "${respfile}"
+  [[ "${_xt}" == 1 ]] && set -x
+  return "${rc}"
+}
 # kcov-excl-stop
