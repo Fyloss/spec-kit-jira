@@ -340,6 +340,15 @@ Describe 'Invoke-JiraReconcile — S6, --dry-run under a resolved transition (co
         $work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
         Copy-Item -Recurse $Fixture $work
         $spec = Join-Path $work 'specs/001-declared-mapping/spec.md'
+        # 036, contracts/run-state-v3.md: the recorded inputs ARE the artifact
+        # set, and the set is `git ls-files` over the feature directory. Outside
+        # a repository the set is empty, and an empty set is never recorded and
+        # never short-circuits (it would otherwise match the next empty one).
+        # Every consumer tree is a repository; this fixture has to be one too,
+        # or the state write these cases turn on never happens.
+        & git -C $work init --quiet
+        & git -C $work config user.email 'fixture@example.invalid'
+        & git -C $work config user.name 'fixture'
         $env:JIRA_CONFIG_DIR = Join-Path $work '.specify/jira'
         $env:SPEC_KIT_JIRA_REPO = 'acme/app'
         $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-declared-mapping'

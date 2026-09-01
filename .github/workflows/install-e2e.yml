@@ -206,15 +206,22 @@ jobs:
           Set-Location "${{ runner.temp }}/consumer"
           & ./.specify/extensions/jira-mirror/scripts/powershell/spec-kit-jira.ps1 --help
 
-      - name: All seven lifecycle events are registered and enabled (C4.4)
+      # 036 took this from seven to NINE: `after_converge` and `after_checklist`
+      # join the set, because a convergence pass rewrites tasks.md and
+      # /speckit.checklist writes under checklists/ without firing any of the
+      # other seven — and both change what the mirror must publish (FR-019).
+      # This assertion lives in a workflow rather than in either test suite, so
+      # research R10's list of sites an added event touches missed it and the
+      # install job was the only thing that failed.
+      - name: All nine lifecycle events are registered and enabled (C4.4)
         shell: bash
         run: |
           set -euo pipefail
           registry="${{ runner.temp }}/consumer/.specify/extensions.yml"
           [ -f "${registry}" ]
           count="$(grep -c 'enabled: true' "${registry}")"
-          [ "${count}" -eq 7 ] || {
-            echo "::error::expected 7 enabled hook entries, found ${count}" >&2
+          [ "${count}" -eq 9 ] || {
+            echo "::error::expected 9 enabled hook entries, found ${count}" >&2
             cat "${registry}" >&2
             exit 1
           }

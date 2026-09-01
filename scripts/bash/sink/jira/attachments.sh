@@ -273,9 +273,22 @@ attachments_manifest_oversized() {
 # nothing they can do, where "412 artifacts, a 45 000-byte record, a 32 768-byte
 # cap" tells them exactly how far over they are (Principle XVI).
 attachments_manifest_size() {
+  # The document is CAPTURED and re-emitted with `printf '%s'` before it is
+  # measured. `json_build` ends in `jq -cn`, which appends a newline; the PUT
+  # body has no such byte, so piping jq straight into `wc -c` measured a
+  # document nobody sends. Command substitution strips the trailing newline and
+  # `printf '%s'` adds none back.
+  #
+  # One byte, and it mattered twice: the size reaches an operator through
+  # C4.4.1's warning (bash said 642 where the twin said 641 — the conformance
+  # corpus caught it in the message text), and it is compared against the cap,
+  # so at exactly one boundary size the two ports disagreed about whether a
+  # manifest overflows at all. `LC_ALL=C` because this is a byte count.
+  local _ms_doc
   # shellcheck disable=SC2016  # a jq filter: $sc/$a are jq variables
-  json_build '{schema: $sc, artifacts: $a}' \
-    sc "${_ATTACHMENTS_MANIFEST_SCHEMA}" a "$1" | wc -c | tr -d '[:space:]'
+  _ms_doc="$(json_build '{schema: $sc, artifacts: $a}' \
+    sc "${_ATTACHMENTS_MANIFEST_SCHEMA}" a "$1")"
+  printf '%s' "${_ms_doc}" | LC_ALL=C wc -c | tr -d '[:space:]'
 }
 
 # attachments_property_cap — the assumed cap, as the code's single reading of it.

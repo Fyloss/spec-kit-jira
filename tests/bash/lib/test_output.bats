@@ -239,3 +239,124 @@ effects_without_hooks_json() {
   [ "$status" -eq 0 ]
   [[ "$output" != *"hooks"* ]]
 }
+
+# T111 [036] — the artifact block reaches the DEFAULT output.
+#
+# `--json` carried `artifacts[]` from the day the feature shipped; prose carried
+# nothing. A run that withheld three oversized artifacts printed
+# `Warnings: 3, Errors: 0` and not one word about which files, why, or against
+# what limit — so FR-021's "report, per artifact, whether it was published,
+# unchanged, or skipped, and for a skip, the reason" and FR-017's "a named
+# warning stating the artifact, its size and the limit" held only for a caller
+# who passed `--json`. Prose is the DEFAULT rendering, and a human reading it is
+# what Principle XVI is about.
+#
+# WHAT IS RENDERED, and why not everything. A counts line always, then one
+# detail line per artifact that is NOT `unchanged`. The precedent is `actions`,
+# which prose has never rendered: the arrays live in `--json`, the actionable
+# summary lives in prose. Printing every `unchanged` entry would put forty lines
+# of "nothing happened" on every zero-churn run of a forty-file folder, which is
+# the opposite of readable — the tally reports them, and `--json` names them.
+
+_artifacts_json() {
+  printf '%s' '{"command":"reconcile","counts":{"created":0,"errors":0,"skipped":0,"updated":0,"warnings":3},"dry_run":false,"exit_code":0,"schema_version":"1.0","artifacts":[
+    {"action":"published","attachment_name":"research.md","hash":"aaa","path":"research.md"},
+    {"action":"revised","attachment_name":"spec.md","hash":"bbb","path":"spec.md"},
+    {"action":"unchanged","attachment_name":"plan.md","path":"plan.md"},
+    {"action":"withheld","attachment_name":"assets__demo.mov","limit":10485760,"path":"assets/demo.mov","reason":"oversized","size":41943040},
+    {"action":"withheld","attachment_name":"contracts__api.md","collides_with":"contracts__api.md","path":"checklists/api.md","reason":"name-collision"}
+  ]}'
+}
+
+@test "T111 FR-021 prose reports the artifact tally" {
+  run bash -c "$(declare -f _artifacts_json); _artifacts_json | { source '${LIB_DIR}/output.sh'; summary_render_prose; }"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Artifacts: 1 published, 1 revised, 1 unchanged, 2 withheld"* ]]
+}
+
+@test "T111 FR-017 a withheld artifact names itself, its reason and the numbers" {
+  run bash -c "$(declare -f _artifacts_json); _artifacts_json | { source '${LIB_DIR}/output.sh'; summary_render_prose; }"
+  [ "$status" -eq 0 ]
+  # The size and the limit, both, because FR-017 names both.
+  [[ "$output" == *"assets/demo.mov: withheld — oversized (41943040 bytes, limit 10485760)"* ]]
+  # The collision names the OTHER path, which is the only thing an operator can
+  # act on: one of the two has to be renamed.
+  [[ "$output" == *"checklists/api.md: withheld — name-collision (collides with contracts__api.md)"* ]]
+}
+
+@test "T111 FR-021 published and revised are named; unchanged is left to the tally" {
+  run bash -c "$(declare -f _artifacts_json); _artifacts_json | { source '${LIB_DIR}/output.sh'; summary_render_prose; }"
+  [[ "$output" == *"research.md: published"* ]]
+  [[ "$output" == *"spec.md: revised"* ]]
+  # …and the forty-lines-of-nothing case does not happen.
+  [[ "$output" != *"plan.md: unchanged"* ]]
+}
+
+@test "T111 a summary with no artifacts key renders exactly as it did before" {
+  # Every pre-036 summary, and every run outside a feature directory, must be
+  # byte-for-byte what it was.
+  json="$(summary_build_json reconcile false 1 2 3 0 0 0)"
+  run bash -c "printf '%s' '$json' | { source '${LIB_DIR}/output.sh'; summary_render_prose; }"
+  [[ "$output" != *"Artifacts:"* ]]
+}
+
+@test "T111 the artifact block is byte-identical across ports" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local json bash_out ps_out f
+  json="$(_artifacts_json)"
+  bash_out="$(printf '%s' "${json}" | summary_render_prose)"
+  # Through a FILE, never the -Command string: this JSON carries the quote
+  # characters two shells each want to interpret, and a mangled argument
+  # produces an empty answer that reads exactly like a cross-port divergence.
+  f="${BATS_TEST_TMPDIR}/summary.json"
+  printf '%s' "${json}" > "${f}"
+  ps_out="$(pwsh -NoProfile -Command "Import-Module '${PS_LIB}/Output.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraSummaryProse ([System.IO.File]::ReadAllText('${f}'))))")"
+  [ "${bash_out}" = "${ps_out}" ]
+}
+
+# T112 [036] — the publication's own warnings reach the DEFAULT output.
+#
+# MEASURED FIRST, because the task turned on it: the hook path DOES pass
+# `--json` (commands/speckit.jira-mirror.reconcile.md instructs both ports to),
+# so FR-018's "surface one actionable warning" was already met where it is
+# about — a lifecycle hook. What was not met is the operator running the bridge
+# by hand: after T111 they learn WHICH artifacts were withheld and under what
+# category, and never that the fix for `upload-failed` is granting the token
+# "Create attachments".
+#
+# Rendered from `artifact_warnings`, a key only the publication phase writes —
+# NOT from the shared `warnings` array. That array is written by every feature
+# since 021, and rendering it wholesale would change the default output of runs
+# 036 never touched; a change that wide needs its own spec (Principle XV).
+
+_artifact_warnings_json() {
+  printf '%s' '{"command":"reconcile","counts":{"created":0,"errors":0,"skipped":0,"updated":0,"warnings":1},"dry_run":false,"exit_code":0,"schema_version":"1.0","artifacts":[
+    {"action":"withheld","attachment_name":"spec.md","path":"spec.md","reason":"upload-failed"}
+  ],"artifact_warnings":["reconcile: the feature artifacts could not be attached to COMP-1 — this Jira token lacks the \"Create attachments\" permission on that project"]}'
+}
+
+@test "T112 the publication warning text reaches prose, not only its count" {
+  run bash -c "$(declare -f _artifact_warnings_json); _artifact_warnings_json | { source '${LIB_DIR}/output.sh'; summary_render_prose; }"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Artifact warnings:"* ]]
+  # The REMEDY is the part that only exists in the message — the artifacts
+  # block above it already named the file and the category.
+  [[ "$output" == *"Create attachments"* ]]
+  [[ "$output" == *"COMP-1"* ]]
+}
+
+@test "T112 a summary with no artifact_warnings renders no such block" {
+  run bash -c "$(declare -f _artifacts_json); _artifacts_json | { source '${LIB_DIR}/output.sh'; summary_render_prose; }"
+  [[ "$output" != *"Artifact warnings:"* ]]
+}
+
+@test "T112 the artifact-warning block is byte-identical across ports" {
+  if ! command -v pwsh > /dev/null 2>&1; then skip "pwsh not available"; fi
+  local json bash_out ps_out f
+  json="$(_artifact_warnings_json)"
+  bash_out="$(printf '%s' "${json}" | summary_render_prose)"
+  f="${BATS_TEST_TMPDIR}/warn-summary.json"
+  printf '%s' "${json}" > "${f}"
+  ps_out="$(pwsh -NoProfile -Command "Import-Module '${PS_LIB}/Output.psm1' -Force; [Console]::Out.Write((ConvertTo-JiraSummaryProse ([System.IO.File]::ReadAllText('${f}'))))")"
+  [ "${bash_out}" = "${ps_out}" ]
+}

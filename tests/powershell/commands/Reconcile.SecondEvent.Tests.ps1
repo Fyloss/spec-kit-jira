@@ -121,6 +121,17 @@ Describe 'Invoke-JiraReconcile — a second event over unchanged files still adv
         $script:Work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
         New-Item -ItemType Directory -Force -Path (Join-Path $script:Work '.specify/jira') | Out-Null
         New-Item -ItemType Directory -Force -Path (Join-Path $script:Work 'specs/001-billing-invoices') | Out-Null
+
+        # 036, contracts/run-state-v3.md: the recorded inputs ARE the artifact
+        # set, and the set is `git ls-files` over the feature directory. Outside
+        # a repository the set is empty, and an empty set is never recorded and
+        # never short-circuits (it would otherwise compare equal to the next
+        # empty one and skip a run whose spec.md had changed). Every consumer
+        # tree is a repository; this fixture has to be one too, or the
+        # short-circuit these cases exist to prove can never fire.
+        & git -C $script:Work init --quiet
+        & git -C $script:Work config user.email 'fixture@example.invalid'
+        & git -C $script:Work config user.name 'fixture'
         $script:Spec = Join-Path $script:Work 'specs/001-billing-invoices/spec.md'
         Set-Content -NoNewline -Path (Join-Path $script:Work '.specify/jira/config.yml') -Value $script:ConfigYaml
         Set-Content -NoNewline -Path (Join-Path $script:Work '.specify/jira/config.local.yml') -Value $script:ConfigLocalYaml

@@ -201,6 +201,49 @@ Describe 'Invoke-JiraReconcile — predicting and surviving a publication failur
         @($r.Json.warnings | Where-Object { $_ -match 'assumed cap' }).Count | Should -Be 1
     }
 
+    It 'T113 C3.3 a 413 names the file count and the site limit, not a generic failure' {
+        # The row T090 skipped. Both ports translated a 413 from the day the
+        # publication shipped and NO test on either exercised it — code without
+        # the test Constitution XIII requires to precede it, on a
+        # message-composing branch, which is the exact shape of this port's
+        # StrictMode defect: parses clean, lints clean, dies when reached.
+        Start-Faulted -Fragment 'rest/api/3/issue/COMP-1/attachments' -Status 413
+        $r = Invoke-Run @('reconcile', $script:Spec, '--json')
+
+        $r.ExitCode | Should -Be 0
+        @($r.Json.warnings | Where-Object { $_ -match 'rejected by COMP-1 as too large' }).Count | Should -Be 1
+        @($r.Json.warnings | Where-Object { $_ -match 'offered \d+ files' }).Count | Should -Be 1
+        @($r.Json.warnings | Where-Object { $_ -match '\d+-byte per-file limit' }).Count | Should -Be 1
+        @($r.Json.artifacts | Where-Object { $_.reason -eq 'upload-failed' }).Count | Should -BeGreaterThan 0
+        (Measure-Call '^PUT .*properties/spec-kit-jira-artifacts') | Should -Be 0
+    }
+
+    It 'T111 T112 the default prose output names the withheld artifacts and the remedy' {
+        # No `--json` here, and that is the whole point: prose is the DEFAULT
+        # rendering, and until T111/T112 a 403 printed `Warnings: 2, Errors: 0`
+        # and nothing else — no file, no reason, no remedy.
+        Start-Faulted -Fragment 'rest/api/3/issue/COMP-1/attachments' -Status 403
+        $r = Invoke-Run @('reconcile', $script:Spec)
+
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Match 'Artifacts: 0 published'
+        $r.Out | Should -Match 'withheld — upload-failed'
+        $r.Out | Should -Match 'Artifact warnings:'
+        $r.Out | Should -Match 'Create attachments'
+        $r.Out | Should -Match 'COMP-1'
+    }
+
+    It 'T111 FR-017 the default output names an oversized artifact, its size and the limit' {
+        $cfg = Write-JiraMockConfig -Json '{"projects":{"COMP":"company"},"attachment_meta":{"enabled":true,"uploadLimit":8}}'
+        $script:M = Start-JiraMock -ConfigPath $cfg
+        $env:SPEC_KIT_JIRA_BASE_URL = $script:M.BaseUrl
+
+        $r = Invoke-Run @('reconcile', $script:Spec)
+        $r.ExitCode | Should -Be 0
+        $r.Out | Should -Match 'withheld — oversized \('
+        $r.Out | Should -Match ' bytes, limit 8\)'
+    }
+
     It 'T092 SC-011 a publication failure in HOOK context leaves exit 0' {
         $env:SPEC_KIT_JIRA_HOOK_CONTEXT = '1'
         Start-Faulted -Fragment 'rest/api/3/issue/COMP-1/attachments' -Status 403

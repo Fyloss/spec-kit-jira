@@ -81,6 +81,59 @@ them tell you what else pins the set.
 
 ---
 
+## Progress — 2026-09-01 (third session, Phase 10)
+
+**110 of 112 tasks complete.** T111–T114 are done; only T106 (Windows probe)
+and T107 (dogfood) remain, and both are outside what an agent session can
+execute — T106 needs a push to `ci/windows-probe` and ~2 h, T107 needs a real
+Jira project.
+
+Measured: `tests/run-bash.sh` **286 files, 2844 tests, 0 failures, 17:37**;
+Pester over the affected suites **654 tests, 0 failures**; the nine `sc036-*`
+conformance scenarios byte-identical across ports on all four captures;
+`shellcheck`, PSScriptAnalyzer and `actionlint` clean.
+
+**T112's premise turned out to be wrong, and the measurement is the deliverable.**
+The task said to determine first whether the hook path passes `--json`. It does
+— `commands/speckit.jira-mirror.reconcile.md` instructs both ports to — so
+FR-018's "surface one actionable warning" was already satisfied where FR-018 is
+about. The unmet case was narrower: an operator running the bridge by hand.
+That is what T112 fixes, through a `artifact_warnings` key only the publication
+writes, rather than by rendering the shared `warnings` array — which every
+feature since 021 writes, and which would have changed the default output of
+runs 036 never touched.
+
+**Two defects the Phase 10 work uncovered, neither of them in Phase 10's scope:**
+
+1. **The composed manifest size was one byte too large in the Bash port.**
+   `json_build` ends in `jq -cn`, which appends a newline, and `wc -c` counted
+   it — so the port measured a document nobody sends. It mattered twice: the
+   number reaches an operator through C4.4.1's warning (642 against the twin's
+   641, which is how the conformance corpus caught it), and it is compared
+   against the cap, so at exactly one boundary size the two ports disagreed
+   about whether a manifest overflows at all. Fixed, with a cross-port size
+   test that fails against the old form.
+
+2. **T071's own red-proof broke the moment the work was committed.** It located
+   the schema-2 module with `git log -S`, which answers "the newest commit that
+   CHANGED how often this string appears" — and once the bump was committed,
+   that answer was the commit that REMOVED it, whose blob says schema 3. The
+   guard then compared against a file that was never the thing it meant to
+   test. It now reads the blobs and takes the newest one that still says
+   schema 2. A guard that passes in the working tree and fails on commit is
+   worse than one that never passed.
+
+**The T114 decision, recorded rather than left to omission** (`comment-body.md`
+§B7): the run's identity is the comment itself — Jira creates exactly one per
+publishing run, stamps and orders it, and the paragraph names the event. A
+synthetic run identifier was rejected: it buys a reader nothing Jira does not
+already give them, and it puts a machine token in the middle of a sentence
+written for a person, which is what Principle XVI exists to prevent. The
+evidence that the stream really does discriminate two runs of one event is
+T079, in both ports, not an assertion made in the contract.
+
+---
+
 ## Progress — 2026-09-01 (second session)
 
 **108 of 110 tasks complete.** Only T106 (Windows probe) and T107 (dogfood)
@@ -580,7 +633,7 @@ not a restatement of an unchecked task above. Nothing here is `missing` or
 `contradicts`: every requirement has code, and all four findings are shortfalls
 in the reporting surface or in test coverage.
 
-- [ ] T111 Render `artifacts[]` in the DEFAULT prose summary, in both ports — `summary_render_prose` (`scripts/bash/lib/output.sh`) and `ConvertTo-JiraSummaryProse` (`scripts/powershell/lib/Output.psm1`) know no such key, so a run reports per-artifact outcomes only under `--json`. Measured: a run withholding three oversized artifacts prints `Warnings: 3, Errors: 0` and nothing else, where FR-021 requires the summary to say, per artifact, whether it was published, unchanged or skipped and — for a skip — the reason. Write the failing case first in `tests/bash/commands/test_reconcile_artifacts.bats` and its Pester twin, asserting the withheld artifact's path, size and limit appear in the prose output; then render, in a fixed order both ports share, so Constitution VI's byte-identity holds for prose as it already does for `--json`. Note the blast radius before writing: every run that publishes now gains prose lines, so the reconcile suites asserting on that output have to be read, not assumed — per FR-021, Principle XVI (`partial`)
-- [ ] T112 Surface the publication WARNINGS in the prose summary, in both ports — the same two renderers print a warning count and never the text, so FR-017's warning naming the artifact, its size and the site limit, and C3.2's naming the ticket and the "Create attachments" remedy, reach no operator who did not pass `--json`. FR-018 requires a hook-context failure to "surface one actionable warning", and a count is not actionable. Determine FIRST whether the hook path passes `--json` (that decides whether this is a defect in practice or only in the direct-invocation path), and record the answer in the task's completion note. Scope the change to the publication warnings rather than rendering the whole `warnings` array: that array is written by every feature since 021, and rendering it wholesale changes the default output of runs this feature never touched — a wider change than 036 authorises (Principle XV). Failing test first, both ports — per FR-017, FR-018, Principle XVI (`partial`)
-- [ ] T113 Cover contract row C3.3 — a `413` on the upload — on BOTH ports, failing test first. Both ports already translate it (`reconcile.sh`, `Reconcile.psm1`: the warning names the offered file count and the site's per-file limit) and NO test on either port exercises it: T090 enumerated C3.4, C3.5 and C3.6 and omitted this row, so the branch shipped without the test Constitution XIII requires to precede it. Inject the fault the way `test_reconcile_artifacts_faults.bats` does — the mock's `faults` map keyed on the attachments path — and assert the warning names both numbers and that the run's exit code is unchanged. This is the branch class that produced this feature's two run-time-only defects (an unset `$baseUrl`, a StrictMode read of `$applyOutcome`): a message-composing path that parses and lints clean and dies when reached — per Constitution XIII, contract C3.3 (`partial`)
-- [ ] T114 Close FR-004's "and the run that published it". The comment identifies the lifecycle EVENT (`contracts/comment-body.md` B2 pins that literal and never addresses the run), and the manifest's `run` field records the event too — so two `after_plan` runs that both publish are indistinguishable in the record, and a reader asking "which run put this version here?" is answered only by Jira's own comment timestamp. Decide it deliberately rather than leaving it decided by omission: either carry a discriminator the record and the comment can both name, or amend `contracts/comment-body.md` to state that the comment's position and timestamp in Jira's stream ARE the run's identity and that FR-004 is met by them. Do not edit `spec.md` — per FR-004 (`partial`)
+- [X] T111 Render `artifacts[]` in the DEFAULT prose summary, in both ports — `summary_render_prose` (`scripts/bash/lib/output.sh`) and `ConvertTo-JiraSummaryProse` (`scripts/powershell/lib/Output.psm1`) know no such key, so a run reports per-artifact outcomes only under `--json`. Measured: a run withholding three oversized artifacts prints `Warnings: 3, Errors: 0` and nothing else, where FR-021 requires the summary to say, per artifact, whether it was published, unchanged or skipped and — for a skip — the reason. Write the failing case first in `tests/bash/commands/test_reconcile_artifacts.bats` and its Pester twin, asserting the withheld artifact's path, size and limit appear in the prose output; then render, in a fixed order both ports share, so Constitution VI's byte-identity holds for prose as it already does for `--json`. Note the blast radius before writing: every run that publishes now gains prose lines, so the reconcile suites asserting on that output have to be read, not assumed — per FR-021, Principle XVI (`partial`)
+- [X] T112 Surface the publication WARNINGS in the prose summary, in both ports — the same two renderers print a warning count and never the text, so FR-017's warning naming the artifact, its size and the site limit, and C3.2's naming the ticket and the "Create attachments" remedy, reach no operator who did not pass `--json`. FR-018 requires a hook-context failure to "surface one actionable warning", and a count is not actionable. Determine FIRST whether the hook path passes `--json` (that decides whether this is a defect in practice or only in the direct-invocation path), and record the answer in the task's completion note. Scope the change to the publication warnings rather than rendering the whole `warnings` array: that array is written by every feature since 021, and rendering it wholesale changes the default output of runs this feature never touched — a wider change than 036 authorises (Principle XV). Failing test first, both ports — per FR-017, FR-018, Principle XVI (`partial`)
+- [X] T113 Cover contract row C3.3 — a `413` on the upload — on BOTH ports, failing test first. Both ports already translate it (`reconcile.sh`, `Reconcile.psm1`: the warning names the offered file count and the site's per-file limit) and NO test on either port exercises it: T090 enumerated C3.4, C3.5 and C3.6 and omitted this row, so the branch shipped without the test Constitution XIII requires to precede it. Inject the fault the way `test_reconcile_artifacts_faults.bats` does — the mock's `faults` map keyed on the attachments path — and assert the warning names both numbers and that the run's exit code is unchanged. This is the branch class that produced this feature's two run-time-only defects (an unset `$baseUrl`, a StrictMode read of `$applyOutcome`): a message-composing path that parses and lints clean and dies when reached — per Constitution XIII, contract C3.3 (`partial`)
+- [X] T114 Close FR-004's "and the run that published it". The comment identifies the lifecycle EVENT (`contracts/comment-body.md` B2 pins that literal and never addresses the run), and the manifest's `run` field records the event too — so two `after_plan` runs that both publish are indistinguishable in the record, and a reader asking "which run put this version here?" is answered only by Jira's own comment timestamp. Decide it deliberately rather than leaving it decided by omission: either carry a discriminator the record and the comment can both name, or amend `contracts/comment-body.md` to state that the comment's position and timestamp in Jira's stream ARE the run's identity and that FR-004 is met by them. Do not edit `spec.md` — per FR-004 (`partial`)
