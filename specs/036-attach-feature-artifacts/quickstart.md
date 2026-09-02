@@ -38,8 +38,9 @@ patience accordingly rather than assuming the scoping is broken.
 
 ```bash
 bats -r tests/bash/engine/test_artifact_set.bats
-bats -r tests/bash/sink/test_artifact_publication.bats
-pwsh -c "Invoke-Pester tests/powershell/Engine/ArtifactSet.Tests.ps1"
+bats -r tests/bash/sink/test_attachments.bats
+pwsh -c "Invoke-Pester tests/powershell/engine/ArtifactSet.Tests.ps1"
+pwsh -c "Invoke-Pester tests/powershell/sink/Attachments.Tests.ps1"
 ```
 
 The `-r` is load-bearing: without it `bats` silently runs nothing and reports
