@@ -259,3 +259,138 @@ Describe 'Test-JiraInterchange — the task tier (Phase 2, T026/T028, data-model
         Test-JiraInterchange ($doc | ConvertTo-Json -Depth 100) 2>$null | Should -BeFalse
     }
 }
+
+Describe 'Test-JiraInterchange — the artifact set (036, T016, data-model.md §4)' {
+    # Twin of the `036 §4` cases in tests/bash/engine/test_interchange.bats.
+    #
+    # The single-artifact case is the one that matters most here and looks the
+    # least interesting: PowerShell unwraps a one-element collection on `return`,
+    # so a one-artifact document was rejected as "artifacts must be an array"
+    # while the Bash port accepted it. A two-artifact fixture never shows it.
+
+    BeforeAll {
+        function New-ArtifactDoc {
+            param([Parameter(Mandatory)][AllowEmptyString()][string] $ArtifactsJson)
+            $raw = Get-Content -Raw -LiteralPath $ValidPath
+            $doc = $raw | ConvertFrom-Json -Depth 100
+            $props = [ordered]@{}
+            foreach ($p in $doc.PSObject.Properties) { $props[$p.Name] = $p.Value }
+            $props['artifacts'] = ($ArtifactsJson | ConvertFrom-Json -Depth 100 -NoEnumerate)
+            return ([pscustomobject] $props | ConvertTo-Json -Depth 100)
+        }
+        $script:Good = '[{"path":"spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"}]'
+    }
+
+    It 'accepts a document carrying a well-formed artifacts array' {
+        Test-JiraInterchange -Json (New-ArtifactDoc $script:Good) | Should -BeTrue
+    }
+
+    It 'accepts a document carrying EXACTLY ONE artifact (the unwrapping trap)' {
+        ($script:Good | ConvertFrom-Json -NoEnumerate).Count | Should -Be 1
+        Test-JiraInterchange -Json (New-ArtifactDoc $script:Good) | Should -BeTrue
+    }
+
+    It 'accepts a document that omits artifacts entirely' {
+        Test-JiraInterchange -Json (Get-Content -Raw -LiteralPath $ValidPath) | Should -BeTrue
+    }
+
+    It 'accepts an empty artifacts array' {
+        Test-JiraInterchange -Json (New-ArtifactDoc '[]') | Should -BeTrue
+    }
+
+    It 'rejects an ABSOLUTE artifact path' {
+        $a = '[{"path":"/Users/someone/repo/spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"}]'
+        Test-JiraInterchange -Json (New-ArtifactDoc $a) 2>$null | Should -BeFalse
+    }
+
+    It 'rejects an artifact path escaping the feature directory' {
+        $a = '[{"path":"../other/spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"}]'
+        Test-JiraInterchange -Json (New-ArtifactDoc $a) 2>$null | Should -BeFalse
+    }
+
+    It 'rejects an artifact entry missing a required key' {
+        $a = '[{"path":"spec.md","size":12,"attachment_name":"spec.md"}]'
+        Test-JiraInterchange -Json (New-ArtifactDoc $a) 2>$null | Should -BeFalse
+    }
+
+    It 'rejects an artifacts value that is not an array' {
+        $a = '{"spec.md":"x"}'
+        Test-JiraInterchange -Json (New-ArtifactDoc $a) 2>$null | Should -BeFalse
+    }
+
+    It 'rejects a negative artifact size' {
+        $a = '[{"path":"spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":-1,"attachment_name":"spec.md"}]'
+        Test-JiraInterchange -Json (New-ArtifactDoc $a) 2>$null | Should -BeFalse
+    }
+}
+
+Describe 'Build-JiraNeutralDocument — the artifact set (036, T108)' {
+    # Twin of the `T108` cases in tests/bash/engine/test_interchange.bats.
+    #
+    # T015-T017 taught both validators about `artifacts`; nothing wrote it, so
+    # the rules guarded a field no code produced. /speckit-converge found that.
+    #
+    # The one-artifact case is the one that matters: PowerShell unwraps a
+    # one-element collection on `return`, so the set arrived as a bare object
+    # and was emitted as one. The divergence exists at exactly one artifact.
+
+    BeforeAll {
+        $script:ParseJson = '{"epic":{"title":"E","description":{"blocks":[{"type":"paragraph","spans":[{"text":"x","marks":[]}]}]}},"stories":[{"local_id":"s1","title":"S","description":{"blocks":[{"type":"paragraph","spans":[{"text":"n","marks":[]}]}]},"priority_logical":"P1"}]}'
+        function New-Ctx {
+            param([Parameter(Mandatory)][AllowEmptyString()][string] $ArtifactsJson)
+            $base = '{"spec_ref":{"repo":"acme/app","spec_slug":"001-feature","folder":"specs/001-feature"},"project_key":"PROJ"}'
+            if ([string]::IsNullOrEmpty($ArtifactsJson)) { return $base }
+            $o = $base | ConvertFrom-Json
+            $props = [ordered]@{}
+            foreach ($p in $o.PSObject.Properties) { $props[$p.Name] = $p.Value }
+            $props['artifacts'] = ($ArtifactsJson | ConvertFrom-Json -Depth 100 -NoEnumerate)
+            return ([pscustomobject] $props | ConvertTo-Json -Depth 100)
+        }
+        $script:One = '[{"path":"spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"}]'
+        $script:Two = '[{"path":"spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"},{"path":"contracts/api.md","hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":3,"attachment_name":"contracts__api.md"}]'
+    }
+
+    It 'carries the artifact set from the context into the document' {
+        $r = Build-JiraNeutralDocument -ParseJson $script:ParseJson -ContextJson (New-Ctx $script:Two)
+        $r.Valid | Should -BeTrue
+        $d = $r.Document | ConvertFrom-Json
+        @($d.artifacts).Count | Should -Be 2
+        @($d.artifacts)[0].path | Should -Be 'spec.md'
+        @($d.artifacts)[1].attachment_name | Should -Be 'contracts__api.md'
+    }
+
+    It 'emits an array of one for a single-artifact set (the unwrapping trap)' {
+        $r = Build-JiraNeutralDocument -ParseJson $script:ParseJson -ContextJson (New-Ctx $script:One)
+        $r.Valid | Should -BeTrue
+        # Asserted on the JSON TEXT, not the parsed object: ConvertFrom-Json
+        # would unwrap a one-element array on the way back and hide the very
+        # defect this case exists for.
+        $r.Document | Should -Match '"artifacts":\['
+        @(($r.Document | ConvertFrom-Json -Depth 100).artifacts).Count | Should -Be 1
+    }
+
+    It 'omits the key entirely for an EMPTY artifact set' {
+        $r = Build-JiraNeutralDocument -ParseJson $script:ParseJson -ContextJson (New-Ctx '[]')
+        $r.Valid | Should -BeTrue
+        $r.Document | Should -Not -Match '"artifacts"'
+    }
+
+    It 'omits the key for a context that never had one, as every pre-036 caller does' {
+        $r = Build-JiraNeutralDocument -ParseJson $script:ParseJson -ContextJson (New-Ctx '')
+        $r.Valid | Should -BeTrue
+        $r.Document | Should -Not -Match '"artifacts"'
+    }
+
+    It 'an empty set and an absent key produce the SAME document' {
+        $empty = (Build-JiraNeutralDocument -ParseJson $script:ParseJson -ContextJson (New-Ctx '[]')).Document
+        $absent = (Build-JiraNeutralDocument -ParseJson $script:ParseJson -ContextJson (New-Ctx '')).Document
+        $empty | Should -Be $absent
+    }
+
+    It 'an artifact set the validator refuses blocks the build, not just the write' {
+        $bad = '[{"path":"/absolute/spec.md","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":12,"attachment_name":"spec.md"}]'
+        $r = Build-JiraNeutralDocument -ParseJson $script:ParseJson -ContextJson (New-Ctx $bad) 2>$null
+        $r.Valid | Should -BeFalse
+        $r.Document | Should -Be ''
+    }
+}

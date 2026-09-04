@@ -960,7 +960,7 @@ def branchpattern:
                  elif ($ks | any(. as $k | ($events | index($k) != null) or ($roles | index($k) != null))) then
                    "projects[\($i)].phase_status_map mixes lifecycle events and hierarchy roles; declare either one mapping for the story role, or one mapping per role (specification, story, task)"
                  else
-                   ( $ks[] | "projects[\($i)].phase_status_map declares unknown key `\(.)`; the lifecycle events are after_specify, after_clarify, after_plan, after_tasks, after_implement, after_analyze and the roles are specification, story, task" )
+                   ( $ks[] | "projects[\($i)].phase_status_map declares unknown key `\(.)`; the lifecycle events are after_specify, after_clarify, after_plan, after_tasks, after_implement, after_analyze, after_converge, after_checklist and the roles are specification, story, task" )
                  end
              end)
          else empty end),
@@ -1062,7 +1062,7 @@ _cfg_schema_errors() {
 # along with the rest of the hook-registry reader: the extension no longer opens
 # `.specify/extensions.yml`, so it can neither observe an operator's disable
 # decision nor honour it (Constitution X, amended 4.0.0).
-JIRA_HOOK_EVENT_NAMES=(before_specify after_specify after_clarify after_plan after_tasks after_implement after_analyze)
+JIRA_HOOK_EVENT_NAMES=(before_specify after_specify after_clarify after_plan after_tasks after_implement after_analyze after_converge after_checklist)
 
 # _cfg_hook_events_json — the closed set as a JSON array.
 _cfg_hook_events_json() {

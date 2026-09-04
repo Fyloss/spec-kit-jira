@@ -29,6 +29,8 @@ source "${_cmd_reconcile_dir}/../engine/parse.sh"
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../engine/interchange.sh"
 # shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../engine/artifact_set.sh" # 036 — the feature directory as the engine sees it
+# shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../engine/story_marker.sh" # R5 step 1 — assign identifiers
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../engine/task_marker.sh" # Phase 3, US1 — the task tier's own identifier
@@ -40,6 +42,8 @@ source "${_cmd_reconcile_dir}/../sink/jira/hierarchy.sh" # the mandatory-field g
 source "${_cmd_reconcile_dir}/../sink/jira/recognition.sh" # R5 step 2 — recognise recorded tickets
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/plan_apply.sh"
+# shellcheck source=/dev/null
+source "${_cmd_reconcile_dir}/../sink/jira/attachments.sh" # 036 — publishing the feature artifacts
 # shellcheck source=/dev/null
 source "${_cmd_reconcile_dir}/../sink/jira/discovery.sh" # Phase 8, US5 — the completion pass's transitions read
 # shellcheck source=/dev/null
@@ -306,7 +310,7 @@ _reconcile_phase_order() {
   [[ -z "${resolved}" ]] && resolved='{}'
   jq -cn --argjson pm "${resolved}" '
     def order_for($m):
-      ["before_specify","after_specify","after_clarify","after_plan","after_tasks","after_implement","after_analyze"]
+      ["before_specify","after_specify","after_clarify","after_plan","after_tasks","after_implement","after_analyze","after_converge","after_checklist"]
       | map($m[.] // empty)
       | reduce .[] as $s ([]; if (index($s) != null) then . else . + [$s] end);
     { specification: order_for($pm.specification // {}),
@@ -776,7 +780,22 @@ _reconcile_run() {
   local short_circuited="false"
   local email="${JIRA_EMAIL:-}"
   if [[ "${force}" != "true" && "${dry_run}" != "true" ]]; then
-    if run_state_matches "${spec_file}" "${base}" "${email}" "${on_drift}" "${hook_event}" "${field_values}"; then
+    # 036, contracts/run-state-v3.md C2: the comparison is over the WHOLE
+    # artifact set, not three fixed documents. Built here, at the state phase,
+    # and deliberately BEFORE the marker writes further down — which is the
+    # same point in the file's life the previous run recorded, since that run
+    # recorded after its own marker writes and this one has none to add unless
+    # something changed. If something did change, spec.md's hash differs and
+    # the run proceeds, which is the outcome either way.
+    local _rs_set
+    _rs_set="$(artifact_set_build "$(dirname "${spec_file}")")" || _rs_set='[]'
+    # An EMPTY set is never a match. The set is `git ls-files`, so it is empty
+    # for a directory outside a repository — and under schema 3 the inputs ARE
+    # the set, so an empty one would compare equal to another empty one and
+    # short-circuit a run whose spec.md had changed underneath it. Every doubt
+    # fails open (contracts/run-state.md §9): no set, no short-circuit.
+    if [[ "$(jq -r 'length' <<< "${_rs_set}")" -gt 0 ]] \
+      && run_state_matches "${spec_file}" "${base}" "${email}" "${on_drift}" "${hook_event}" "${field_values}" "${_rs_set}"; then
       short_circuited="true"
     fi
   fi
@@ -2097,6 +2116,34 @@ _reconcile_run() {
   fi
 
   timing_phase_end "plan" "$(jira_request_count)"
+
+  # 036, contracts/artifact-publication.md C5.1 — the artifact privacy sweep.
+  #
+  # HERE, and not beside the upload. Publication runs after the description and
+  # story writes, so a guard placed there could only refuse the upload while the
+  # reconcile's own writes had already landed — and FR-016 with C3.8 require
+  # ZERO writes for the ENTIRE run, the reconcile's included. This is the last
+  # point before any Jira write of any kind, which is what makes the requirement
+  # achievable at all.
+  #
+  # It runs in dry-run too. A dry-run that predicted a publication the real run
+  # would refuse is a dry-run that lies (FR-020), and the scan touches nothing.
+  #
+  # The set is rebuilt here rather than threaded down from the parse: it must
+  # reflect the directory as it stands AFTER the marker writes above, which
+  # change spec.md and tasks.md, or the scan would clear content that is not
+  # what gets published.
+  local _pg_dir _pg_set _pg_rc=0
+  _pg_dir="$(dirname "${spec_file}")"
+  _pg_set="$(artifact_set_build "${_pg_dir}")" || _pg_set='[]'
+  privacy_guard_scan_artifacts "${_pg_dir}" "${_pg_set}" \
+    "$(_apply_known_coords '[]')" "${SPEC_KIT_JIRA_ALLOWLIST:-[]}" 2> /dev/null || _pg_rc=$?
+  if ((_pg_rc != 0)); then
+    _reconcile_fault "${_pg_rc}" \
+      "reconcile: $(privacy_guard_artifact_reason "${_pg_dir}" "${_pg_set}" "$(_apply_known_coords '[]')" "${SPEC_KIT_JIRA_ALLOWLIST:-[]}") — a feature artifact carries a blocked shape; zero writes performed (FR-016)"
+    return $?
+  fi
+
   timing_phase_begin "apply" "$(jira_request_count)"
 
   if [[ "${dry_run}" != "true" ]]; then
@@ -2132,6 +2179,230 @@ _reconcile_run() {
       created="$(jq '[(.created // [])[] | select(.role == "parent" or .role == "story")] | length' <<< "${apply_outcome}")"
     fi
   fi
+
+
+  # ---- 036: publish the feature's artifacts onto the specification ticket ----
+  #
+  # AFTER every other write, and that ordering is deliberate. The specification
+  # ticket may have been CREATED by the apply above (FR-006, US1 AS4), so this
+  # is the earliest point at which its key is certainly known; and publication
+  # is additive, so nothing above depends on it having happened.
+  #
+  # The privacy sweep that guards this content already ran, far earlier, before
+  # any write at all (C5.1). Nothing here re-scans: a second sweep would be a
+  # second traversal for no gain, and the one that matters has already had its
+  # say.
+  #
+  # Every early `return` below leaves `artifact_decisions` as it stands, so the
+  # run summary reports what was decided even when the publication itself was
+  # withheld — the operator needs to see the reason, not an empty array.
+  # The set is REBUILT here, after the apply, and that is not a duplicate of the
+  # one the privacy sweep used. The sweep's set has to be the pre-write one — a
+  # blocked artifact must stop the run before anything is written (C5.1) — but
+  # the apply then stamps ticket markers INTO spec.md, so the pre-write bytes
+  # are no longer the bytes on disk. Publishing against the stale set attached
+  # the file the run had already superseded and recorded a hash matching
+  # neither: every following run read "the hash differs" and published spec.md
+  # again, and the run-state document recorded a hash the next run could never
+  # reproduce, so nothing ever short-circuited. Both were traced to this line.
+  #
+  # The markers are the only difference between the two sets, and they are the
+  # bridge's own ticket keys — not consumer content, and nothing the sweep
+  # could have blocked. A second scan would be the second traversal C5.4
+  # forbids, for a delta the bridge itself wrote.
+  # 036 (T112): the publication's warnings are identified by POSITION, not by
+  # a marker on each of the eight sites that raise one. `warns` is append-only,
+  # so everything added between this mark and the end of the phase is the
+  # publication's — one jq before, one after, and not a line changed at any
+  # warning site.
+  local _ap_warn_base
+  _ap_warn_base="$(jq -r 'length' <<< "${warns}")"
+
+  local _pub_set="${_pg_set}"
+  if [[ "${dry_run}" != "true" ]]; then
+    _pub_set="$(artifact_set_build "${_pg_dir}")" || _pub_set="${_pg_set}"
+  fi
+
+  local artifact_decisions='[]' artifact_pub_key="" artifact_actions='[]'
+  if [[ "$(jq -r 'length' <<< "${_pub_set}")" -gt 0 ]]; then
+    artifact_pub_key="$(jq -r '.key // empty' <<< "${recog_parent}" 2> /dev/null)"
+    # A run that created the parent in this pass knows its key only from the
+    # apply outcome; recognition ran before it existed.
+    if [[ -z "${artifact_pub_key}" && -n "${apply_outcome:-}" ]]; then
+      artifact_pub_key="$(jq -r '[(.created // [])[] | select(.role == "parent") | .key] | first // empty' <<< "${apply_outcome}" 2> /dev/null)"
+    fi
+  fi
+
+  # FR-020, US4 AS1: a --dry-run against a specification with no ticket yet
+  # still has to say what it would publish. There is no key to name, so the
+  # placeholder the planned action set already uses for a same-run parent
+  # stands in — and there is no manifest to read either, because a ticket that
+  # does not exist carries nothing. Every artifact is therefore a first
+  # publication, which is exactly what the following real run performs.
+  local _ap_predict_only="false"
+  if [[ -z "${artifact_pub_key}" && "${dry_run}" == "true"     && "$(jq -r 'length' <<< "${_pg_set}")" -gt 0 ]]; then
+    artifact_pub_key="<resolved at apply time>"
+    _ap_predict_only="true"
+  fi
+
+  if [[ -n "${artifact_pub_key}" ]]; then
+    local _ap_meta _ap_enabled="true" _ap_limit=0
+    if _ap_meta="$(attachments_limit "${base}")"; then
+      _ap_enabled="${_ap_meta%% *}"
+      _ap_limit="${_ap_meta##* }"
+    else
+      # C3.7: no upload is attempted without a known limit. Withhold and say so
+      # rather than guessing a default Principle VII forbids compiling in.
+      warns="$(jq -c --arg m 'reconcile: the site attachment limit could not be read; feature artifacts were not published (zero writes)' '. + [$m]' <<< "${warns}")"
+      warn_count=$((warn_count + 1))
+      _ap_enabled="unreadable"
+    fi
+
+    # A publication the site refuses outright never classifies against a
+    # manifest — there is no point reading one — but the summary must still
+    # account for every artifact, and account for it truthfully. Classified
+    # locally against an empty manifest and an unlimited size, then withheld as
+    # a whole: `withheld` with a reason is what an operator can act on, where
+    # `published` for a file that reached nothing is a lie the audit trail
+    # cannot afford (FR-021, US4 AS3).
+    if [[ "${_ap_enabled}" == "false" ]]; then
+      # C3.9: attachments are switched off site-wide.
+      artifact_decisions="$(attachments_withhold \
+        "$(attachments_classify "${_pub_set}" '{}' 0)" 'site-disabled')"
+      warns="$(jq -c --arg m 'reconcile: this Jira site has attachments disabled; feature artifacts were not published' '. + [$m]' <<< "${warns}")"
+      warn_count=$((warn_count + 1))
+    elif [[ "${_ap_enabled}" == "unreadable" ]]; then
+      # C3.7, continued: the warning was raised where the read failed; the
+      # artifact record is completed here so the two agree.
+      artifact_decisions="$(attachments_withhold \
+        "$(attachments_classify "${_pub_set}" '{}' 0)" 'limit-unreadable')"
+    elif [[ "${_ap_enabled}" == "true" ]]; then
+      local _ap_manifest _ap_ids
+      if [[ "${_ap_predict_only}" == "true" ]]; then
+        # No ticket, so no manifest — and no request for one either.
+        _ap_manifest='{}'
+      else
+        _ap_manifest="$(attachments_manifest_read "${base}" "${artifact_pub_key}")"
+      fi
+      # C4.3, the trust rule: the ticket's real attachment list is fetched ONLY
+      # when the manifest claims an id, which is the only case where it can
+      # disagree with reality.
+      _ap_ids='null'
+      if [[ "$(jq -r '[.[] | .attachment_id] | length' <<< "${_ap_manifest}" 2> /dev/null || printf 0)" -gt 0 ]]; then
+        _ap_ids="$(attachments_ticket_ids "${base}" "${artifact_pub_key}")"
+      fi
+      artifact_decisions="$(attachments_classify "${_pub_set}" "${_ap_manifest}" "${_ap_limit}" "${_ap_ids}")"
+
+      # Every withholding gets its own named warning: the summary carries the
+      # facts, but a warning is what an operator actually reads (Principle XVI).
+      local _ap_w
+      while IFS= read -r _ap_w; do
+        [[ -z "${_ap_w}" ]] && continue
+        warns="$(jq -c --arg m "${_ap_w}" '. + [$m]' <<< "${warns}")"
+        warn_count=$((warn_count + 1))
+      done < <(jq -r '
+        .[] | select(.action == "withheld")
+        | if .reason == "oversized"
+          then "reconcile: \(.path) is \(.size) bytes, over this site'"'"'s \(.limit)-byte attachment limit; it was not published"
+          else "reconcile: \(.path) and \(.collides_with) would both attach as \(.attachment_name); neither was published — rename one"
+          end' <<< "${artifact_decisions}")
+
+      local _ap_pending
+      _ap_pending="$(jq -r '[.[] | select(.action == "published" or .action == "revised")] | length' <<< "${artifact_decisions}")"
+
+      if [[ "${dry_run}" == "true" ]]; then
+        # FR-020, US4 AS1: predict, write nothing. The predicted set is the
+        # decision set with the two write actions renamed — the same
+        # classification the real run performs, so SC-006's "prediction equals
+        # reality" holds by construction rather than by two code paths
+        # agreeing by luck.
+        artifact_decisions="$(attachments_predict "${artifact_decisions}")"
+      elif [[ "${_ap_pending}" -gt 0 ]]; then
+        local _ap_next _ap_next_size
+        _ap_next="$(attachments_manifest_compose "${_ap_manifest}" "${artifact_decisions}" \
+          "$(jq -cn --argjson n "${_ap_pending}" '[range(0;$n) | {id: "pending"}]')" "${hook_event}")"
+        _ap_next_size="$(attachments_manifest_size "${_ap_next}")"
+        if attachments_manifest_oversized "${_ap_next}"; then
+          # C4.4.1: fail closed BEFORE any upload. A partial manifest would make
+          # the next run republish exactly what this one dropped, forever.
+          artifact_decisions="$(attachments_withhold "${artifact_decisions}" 'manifest-overflow')"
+          warns="$(jq -c --arg m "reconcile: this feature directory holds more artifacts than one ticket can track — $(jq -r 'length' <<< "${_pub_set}") artifacts need a ${_ap_next_size}-byte record and the assumed limit is $(attachments_property_cap) bytes; nothing was published" '. + [$m]' <<< "${warns}")"
+          warn_count=$((warn_count + 1))
+        else
+          local _ap_env _ap_created _ap_status
+          _ap_env="$(attachments_upload "${base}" "${artifact_pub_key}" "${_pg_dir}" "${artifact_decisions}")"
+          _ap_created="$(jq -c '.created // []' <<< "${_ap_env}" 2> /dev/null || printf '[]')"
+          _ap_status="$(jq -r '.status // 0' <<< "${_ap_env}" 2> /dev/null || printf 0)"
+          if [[ "$(jq -r 'length' <<< "${_ap_created}" 2> /dev/null || printf 0)" -eq 0 ]]; then
+            # Withheld, never fatal — on every one of these rows. The shared
+            # transport maps 401/403 to the `auth` exit code; propagating it
+            # here would fail EVERY reconcile for a team whose token lacks
+            # "Create attachments", the day they upgrade, for a feature they
+            # did not ask for (C3.2). The reconcile's own writes stand.
+            artifact_decisions="$(attachments_withhold "${artifact_decisions}" 'upload-failed')"
+            local _ap_msg
+            case "${_ap_status}" in
+              401 | 403)
+                # C3.2: the ticket, the missing capability, and the remedy.
+                _ap_msg="reconcile: the feature artifacts could not be attached to ${artifact_pub_key} — this Jira token lacks the \"Create attachments\" permission on that project; grant it to the token's account and the next run will publish them. The rest of the mirror was written"
+                ;;
+              413)
+                # C3.3: the set's own size against the limit the site declared.
+                _ap_msg="reconcile: the feature artifacts were rejected by ${artifact_pub_key} as too large — the run offered ${_ap_pending} files against this site's ${_ap_limit}-byte per-file limit; they were not published"
+                ;;
+              *)
+                # C3.4: transient. The manifest is NOT written, so the next run
+                # retries exactly this set.
+                _ap_msg="reconcile: the feature artifacts could not be uploaded to ${artifact_pub_key} (the site answered ${_ap_status}); nothing was recorded, so the next run will try again. The rest of the mirror was written"
+                ;;
+            esac
+            warns="$(jq -c --arg m "${_ap_msg}" '. + [$m]' <<< "${warns}")"
+            warn_count=$((warn_count + 1))
+          else
+            # C3.5: the comment is announced separately, and a failure there
+            # does NOT unpublish the attachments — they landed.
+            if ! attachments_comment_post "${base}" "${artifact_pub_key}" \
+              "$(attachments_comment_body "${hook_event}" "${artifact_decisions}")"; then
+              warns="$(jq -c --arg m "reconcile: the feature artifacts were attached to ${artifact_pub_key}, but the comment announcing them could not be posted; they are on the ticket and nothing is lost" '. + [$m]' <<< "${warns}")"
+              warn_count=$((warn_count + 1))
+            fi
+            # C3.6: only what actually landed reaches the manifest. A failure
+            # here is a warning, not a loss — the next run re-derives through
+            # the trust rule (C4.3) rather than duplicating.
+            local _ap_final _ap_final_size
+            _ap_final="$(attachments_manifest_compose "${_ap_manifest}" "${artifact_decisions}" "${_ap_created}" "${hook_event}")"
+            _ap_final_size="$(attachments_manifest_size "${_ap_final}")"
+            if ! attachments_manifest_write "${base}" "${artifact_pub_key}" "${_ap_final}"; then
+              local _ap_mmsg="reconcile: the feature artifacts were attached to ${artifact_pub_key}, but the record of them could not be saved; the next run will reconcile it"
+              # C4.4.2: a 4xx here is the site refusing the DOCUMENT, and size
+              # is the only property of it C4.4.1 could have mispredicted. The
+              # operator is told which number to look at rather than left with
+              # a generic save failure — and the cap is named as the assumption
+              # it is, because nothing has measured the real one (§R15 item 4).
+              if [[ "${JIRA_LAST_STATUS:-0}" =~ ^4 ]]; then
+                _ap_mmsg="reconcile: the feature artifacts were attached to ${artifact_pub_key}, but ${artifact_pub_key} refused the ${_ap_final_size}-byte record of them (assumed cap $(attachments_property_cap) bytes); the next run will publish them again"
+              fi
+              warns="$(jq -c --arg m "${_ap_mmsg}" '. + [$m]' <<< "${warns}")"
+              warn_count=$((warn_count + 1))
+            fi
+          fi
+        fi
+      fi
+
+      # data-model §5: the two actions the publication contributes, reported
+      # identically whether the run performed them or predicted them. Composed
+      # AFTER every withholding above, so an action set never names an artifact
+      # the run has already decided not to write.
+      artifact_actions="$(attachments_actions "${artifact_pub_key}" "${artifact_decisions}" \
+        "$(attachments_comment_body "${hook_event}" "${artifact_decisions}")")"
+    fi
+  fi
+
+  # The slice is taken HERE, before the pending-create-complete block below can
+  # append a warning of its own — that one belongs to the task tier, not to the
+  # publication, and prose must not attribute it here.
+  local artifact_warns
+  artifact_warns="$(jq -c --argjson b "${_ap_warn_base}" '.[$b:]' <<< "${warns}")"
 
   # Edge Cases (contract §6, final line; T084): a task checked before its
   # sub-task ever existed is created and transitioned in this SAME run. The
@@ -2311,6 +2582,20 @@ _reconcile_run() {
     disp_parent="$(jq -c --arg b "${base}" '.url |= ltrimstr($b) | del(.local_id, .identity_stamp)' <<< "${parent_action}")"
     disp_actions="$(jq -c --argjson p "${disp_parent}" '[$p] + .' <<< "${disp_actions}")"
   fi
+  # 036, data-model §5: the publication's `attach` and `comment` join the SAME
+  # displayed list, LAST — publication is the last thing a run does, and the
+  # order here is the order of the writes. Already host-relative: they are
+  # composed from the ticket key rather than from a full URL, so no base needs
+  # stripping. Empty whenever the run has nothing to publish, which is what
+  # keeps every summary that predates this feature byte-identical.
+  if [[ "$(jq -r 'length' <<< "${artifact_actions}")" -gt 0 ]]; then
+    # json_build, not --argjson: the attach action's `parts` array grows with
+    # the artifact count and the comment action carries the whole ADF body, so
+    # both cross Windows' ~32 767-byte command-line cap on a large feature
+    # directory (docs/11-process-budget.md).
+    # shellcheck disable=SC2016  # a jq filter: $d/$a are jq variables
+    disp_actions="$(json_build '$d + $a' d "${disp_actions}" a "${artifact_actions}")"
+  fi
 
   # Phase 3, US1 (data-model.md §6, SC-006): the task tier's own nested
   # counts, emitted ONLY when a `task` role is declared (research R8) —
@@ -2367,18 +2652,28 @@ _reconcile_run() {
   # git-bash cannot open an MSYS `/dev/fd/N`, and this call composes the run
   # summary: failing here empties it, which is the silent failure the comment
   # above already warns about.
-  local _disp_f
+  local _disp_f _art_f
   _disp_f="$(mktemp)"
   printf '%s' "${disp_actions}" > "${_disp_f}"
+  # 036: `artifacts[]` grows with the feature directory — ~120 bytes an entry,
+  # so it crosses Windows' ~32 767-byte command-line cap at roughly the same
+  # directory size as the manifest's own cap (C4.4). Same file treatment as the
+  # action set beside it, for the same reason (docs/11-process-budget.md).
+  _art_f="$(mktemp)"
+  printf '%s' "${artifact_decisions:-[]}" > "${_art_f}"
   local _disp_rc=0
   summary="$(jq -cn \
     --argjson dry "${dry_run}" --argjson c "${created}" --argjson u "${updated}" \
     --argjson x "${rc}" --slurpfile actions_f "$(json_path_arg "${_disp_f}")" \
+    --slurpfile art_f "$(json_path_arg "${_art_f}")" \
+    --argjson aw "${artifact_warns:-[]}" \
     --argjson wc "${warn_count}" --argjson w "${warns}" --argjson no "${notes}" \
     --argjson hl "${has_lifecycle}" \
     --argjson rec "${recognised_count}" --argjson asg "${assigned_count}" --argjson sk "${skipped_count}" \
-    --argjson tc "${task_counts}" --argjson cc "${checklist_counts}" --argjson tr "${counts_transitioned}" '
+    --argjson tc "${task_counts}" --argjson cc "${checklist_counts}" --argjson tr "${counts_transitioned}" \
+    '
     ($actions_f[0]) as $actions |
+    ($art_f[0]) as $art |
     {schema_version:"1.0", command:"reconcile", dry_run:$dry,
      counts:({created:$c, updated:$u, skipped:$sk, warnings:$wc, errors:0,
               recognised:$rec, assigned:$asg}
@@ -2389,9 +2684,18 @@ _reconcile_run() {
                   entries:{completed:$cc.entries_completed}
                 } end)),
      actions:$actions}
+    # 036, data-model §5: one entry per artifact, with the reason on every
+    # withholding. Omitted entirely when there is nothing to say, so every
+    # pre-036 summary is byte-identical to what it was.
+    + (if ($art | length) > 0 then {artifacts: $art} else {} end)
+    # 036 T112: the warnings raised by the publication alone, so prose can
+    # print them without printing every other feature. No apostrophe in this
+    # comment: it sits INSIDE a single-quoted jq programme, where one ends the
+    # string and the whole call stops parsing.
+    + (if ($aw | length) > 0 then {artifact_warnings: $aw} else {} end)
     + (if $hl then {warnings:$w, notes:$no} else {} end)
     + {exit_code:$x}' | json_canonical)" || _disp_rc=$?
-  rm -f "${_disp_f}"
+  rm -f "${_disp_f}" "${_art_f}"
   ((_disp_rc == 0)) || return "${_disp_rc}"
 
   timing_phase_end "apply" "$(jira_request_count)"
@@ -2402,8 +2706,17 @@ _reconcile_run() {
   # a success), emitted no warning, and has no pending confirmation
   # outstanding (a pending-confirmation run already returned above, long
   # before this point, so reaching here already proves that condition).
-  if [[ "${dry_run}" != "true" && "${rc_before_hook_downgrade}" == "0" && "${warn_count}" -eq 0 ]]; then
-    run_state_record "${spec_file}" "${base}" "${email}" "${on_drift}" "${hook_event}" "${field_values}"
+  # …and never records one either, for the same reason: a document whose inputs
+  # are empty would match the next empty one and skip a run that should happen.
+  if [[ "${dry_run}" != "true" && "${rc_before_hook_downgrade}" == "0" && "${warn_count}" -eq 0 ]] \
+    && [[ "$(jq -r 'length' <<< "${_pub_set:-[]}")" -gt 0 ]]; then
+    # The set as it stands AFTER the apply — the state the NEXT run will
+    # compare against, and the same set the publication classified. `_pg_set`
+    # is the PRE-write one the privacy sweep needed and is wrong here: it
+    # predates the ticket markers the apply stamps into spec.md, so recording
+    # it produced a hash the next run could never reproduce and nothing ever
+    # short-circuited.
+    run_state_record "${spec_file}" "${base}" "${email}" "${on_drift}" "${hook_event}" "${field_values}" "${_pub_set:-[]}"
   fi
 
   if [[ "${json}" == "true" ]]; then

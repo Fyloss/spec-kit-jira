@@ -274,22 +274,32 @@ constitution anticipates, and it deserves its own spec.
 
 ### 5. Automatic comments for the complementary artefacts
 
-*Envisioned.* Artefacts that do not belong in a ticket description — the
-research log, the interface contracts, the data model — are surfaced as
-structured comments on the relevant ticket, so a Product Owner or a QA
-engineer reading Jira knows they exist and where they live, without the
-description turning into a document dump.
+*Shipped* — `specs/036-attach-feature-artifacts/`, which went further than this
+entry asked. Rather than describing the complementary artefacts in a comment,
+the reconcile **attaches every one of them** to the specification ticket:
+`research.md`, `data-model.md`, everything under `contracts/` and
+`checklists/`, and any asset beside them. One comment per publishing run lists
+what was attached and whether each file is new or a revision.
 
-Two constraints shape this before any spec is written. First, idempotency:
-Principle II demands that a re-run over unchanged artefacts produces **zero**
-writes, so a comment has to be recognisable and updated in place — an
-append-only comment stream would violate the principle on the second run.
-Second, the privacy guard applies to comment bodies exactly as it does to
-descriptions.
+The two constraints this entry named were both met, and the first one was met
+differently than it predicted. Idempotency does not need a comment "updated in
+place": each artefact is compared by content hash against a manifest stored on
+the ticket, so a run over an unchanged folder posts no comment at all and
+writes nothing of any kind — an append-only stream is fine precisely because
+nothing appends to it when nothing changed. The privacy guard does apply, and
+it applies to artefact *content* at the reconcile's pre-write sweep, so a
+blocked artefact leaves the ticket entirely untouched rather than merely
+blocking the comment.
 
-Open questions: one comment per artefact or one consolidated comment; whether
-the comment carries a summary or only a pointer; and whether contracts belong
-on the parent, on the story that consumes them, or on both.
+Its three open questions are decided:
+
+- **One comment per artefact or one consolidated comment** — consolidated. One
+  per run, listing every file it published.
+- **Summary or pointer** — neither: the file itself. The artefact is
+  downloadable from the ticket, so there is nothing to summarise or point at.
+- **Parent, story, or both** — the parent (the specification-tier ticket)
+  alone. A contract is a property of the feature, not of one story, and
+  publishing to both would duplicate every byte on every story.
 
 ### 6. Completing a ticket a human created, without overwriting them
 
@@ -519,7 +529,6 @@ forward here so it is not lost. All *envisioned*, none of them near-term:
 
 - The guarded destructive prune (`re-mode`), for reconciling a spec whose
   stories have been deleted.
-- Attachment and screenshot upload.
 - Xray test-management integration.
 - PI planning and goal linking, for organisations running SAFe (the Scaled
   Agile Framework).

@@ -1,11 +1,30 @@
 {
   "name": "us022-force-bypasses-and-records",
   "description": "T022 [US2, contracts/run-state.md §3 row 1, §4]: --force always bypasses the state read and performs a full reconcile even on its own just-recorded, byte-matching state, and still records on success. Two runs of --force over the same spec share one mock process: run 1 records state, run 2 (same inputs) must still issue every request rather than short-circuiting on the state run 1 left behind.",
-  "mock": { "projects": { "COMP": "company" } },
+  "mock": {
+    "projects": {
+      "COMP": "company"
+    }
+  },
   "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec-clean",
+  "git_branch": "021-run-state",
   "runs": [
-    { "argv": ["reconcile", "--json", "--force", "specs/001-billing-invoices/spec.md"] },
-    { "argv": ["reconcile", "--json", "--force", "specs/001-billing-invoices/spec.md"] }
+    {
+      "argv": [
+        "reconcile",
+        "--json",
+        "--force",
+        "specs/001-billing-invoices/spec.md"
+      ]
+    },
+    {
+      "argv": [
+        "reconcile",
+        "--json",
+        "--force",
+        "specs/001-billing-invoices/spec.md"
+      ]
+    }
   ],
   "env": {
     "JIRA_EMAIL": "user@example.com",

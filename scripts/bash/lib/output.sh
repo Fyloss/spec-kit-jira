@@ -261,6 +261,67 @@ summary_render_prose() {
     printf 'Recognised: %s, Assigned: %s\n' "${recognised}" "${assigned}"
   fi
   printf 'Warnings: %s, Errors: %s\n' "${warnings}" "${errors}"
+  # 036 (T111), FR-021 / FR-017 / Principle XVI: the artifact block, in the
+  # DEFAULT rendering. `--json` carried `artifacts[]` from the day the feature
+  # shipped and prose carried nothing, so a run that withheld three oversized
+  # artifacts printed `Warnings: 3, Errors: 0` and not one word about which
+  # files, why, or against what limit.
+  #
+  # A tally always, then one detail line per artifact that is NOT `unchanged`.
+  # The precedent is `actions`, which prose has never rendered: the arrays live
+  # in `--json`, the actionable summary lives here. Printing every `unchanged`
+  # entry would put forty lines of "nothing happened" on every zero-churn run
+  # of a forty-file folder, which is the opposite of readable.
+  #
+  # The two --dry-run twins fold into the `published` and `revised` tallies
+  # rather than growing two more columns: the Command line above already says
+  # `(dry-run)`, and each detail line prints its action verbatim, so nothing is
+  # ambiguous and the header keeps one shape.
+  #
+  # `LC_ALL=C tr -d '\r'` between jq and the loop is not decoration. This is a
+  # MULTI-LINE jq read, which is exactly where the Windows jq build appends CR
+  # (docs/10-windows-portability.md; single scalars arrive clean, which is why
+  # every other read in this function is one). A CR surviving here would make
+  # the prose differ from the PowerShell twin's on Windows alone — invisible on
+  # the maintainer's machine and caught only by the probe. `LC_ALL=C` because an
+  # unpinned `tr` aborts on a byte sequence it cannot decode, turning the whole
+  # step into a silent no-op.
+  if [[ "$(jq -r 'has("artifacts")' <<< "${json}")" == "true" ]]; then
+    local _art_line
+    while IFS= read -r _art_line; do
+      [[ -z "${_art_line}" ]] && continue
+      printf '%s\n' "${_art_line}"
+    done < <(jq -r '
+      (.artifacts // []) as $a
+      | ([$a[] | select(.action == "published" or .action == "would-publish")] | length) as $pub
+      | ([$a[] | select(.action == "revised"   or .action == "would-revise")]  | length) as $rev
+      | ([$a[] | select(.action == "unchanged")] | length) as $unc
+      | ([$a[] | select(.action == "withheld")]  | length) as $wit
+      | ["Artifacts: \($pub) published, \($rev) revised, \($unc) unchanged, \($wit) withheld"]
+        + [ $a[]
+            | select(.action != "unchanged")
+            | "  \(.path): \(.action)"
+              + (if .reason == null then ""
+                 elif .reason == "oversized"
+                   then " — \(.reason) (\(.size) bytes, limit \(.limit))"
+                 elif .reason == "name-collision"
+                   then " — \(.reason) (collides with \(.collides_with))"
+                 else " — \(.reason)"
+                 end) ]
+      | .[]' <<< "${json}" | LC_ALL=C tr -d '\r')
+  fi
+  # 036 (T112): the publication's own warnings, in prose. Read from
+  # `artifact_warnings` and never from the shared `warnings` array — see the
+  # schema's note on why that distinction is the whole point. Same multi-line
+  # jq hazard as the block above, same guard.
+  if [[ "$(jq -r '((.artifact_warnings) // []) | length' <<< "${json}")" -gt 0 ]]; then
+    printf 'Artifact warnings:\n'
+    local _aw_line
+    while IFS= read -r _aw_line; do
+      [[ -z "${_aw_line}" ]] && continue
+      printf '%s\n' "${_aw_line}"
+    done < <(jq -r '(.artifact_warnings // [])[] | "  " + .' <<< "${json}" | LC_ALL=C tr -d '\r')
+  fi
   # The config ceremony's effects, reported separately (FR-054). Rendered in a
   # fixed order so both ports match byte-for-byte. The list must carry EVERY
   # effect the summary can hold: the renderer skips an absent status silently,

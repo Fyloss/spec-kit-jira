@@ -11,7 +11,7 @@
 #     reads `self.data.get("hooks")` from the manifest root, so a block nested
 #     under `provides:` still VALIDATES (the manifest has commands) and registers
 #     nothing at all (research R1). Nothing warns.
-#   * COVERAGE — exactly the seven declared events, no more (Principle XV) and no
+#   * COVERAGE — exactly the nine declared events, no more (Principle XV) and no
 #     fewer. The host purges our entries from events the manifest no longer
 #     declares, so this block is the complete, self-cleaning set (research R9).
 #   * DISPATCH — `optional: false` on every entry. `optional` decides whether the
@@ -30,7 +30,13 @@
 setup() {
   ROOT="${BATS_TEST_DIRNAME}/../../.."
   MANIFEST="${ROOT}/extension.yml"
-  EXPECTED_EVENTS="after_analyze after_clarify after_implement after_plan after_specify after_tasks before_specify"
+  # 036 FR-019 adds after_converge and after_checklist. after_checklist is the
+  # load-bearing one: /speckit-checklist writes only into `checklists/`, so
+  # under the previous seven plus the run-state short-circuit its output could
+  # sit unpublished indefinitely. after_constitution (writes outside the feature
+  # directory) and after_taskstoissues (writes nothing publishable) stay
+  # refused — Principle XV.
+  EXPECTED_EVENTS="after_analyze after_checklist after_clarify after_converge after_implement after_plan after_specify after_tasks before_specify"
 }
 
 # manifest_block <key> — print the lines of a top-level block, excluding its
@@ -66,7 +72,7 @@ hook_events() {
   [ "$status" -ne 0 ]
 }
 
-@test "exactly the seven declared events, no more and no fewer (research R9)" {
+@test "exactly the nine declared events, no more and no fewer (research R9; 036 FR-019)" {
   local actual
   actual="$(hook_events | LC_ALL=C sort | tr '\n' ' ')"
   [ "${actual% }" = "${EXPECTED_EVENTS}" ]
@@ -78,7 +84,7 @@ hook_events() {
   [ "${cmd}" = "speckit.jira-mirror.feature" ]
 
   local e
-  for e in after_specify after_clarify after_plan after_tasks after_implement after_analyze; do
+  for e in after_specify after_clarify after_plan after_tasks after_implement after_analyze after_converge after_checklist; do
     cmd="$(manifest_block hooks | awk -v ev="  ${e}:" '$0 ~ "^" ev { f = 1; next } f && /^  [A-Za-z_]+:/ { f = 0 } f && /command:/ { print $2; exit }')"
     [ "${cmd}" = "speckit.jira-mirror.reconcile" ]
   done

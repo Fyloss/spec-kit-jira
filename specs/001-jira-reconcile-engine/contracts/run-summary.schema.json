@@ -41,6 +41,43 @@
         }
       }
     },
+    "artifacts": {
+      "type": "array",
+      "description": "036, data-model.md §5: one entry per file of the feature directory, in the artifact set's byte-wise path order. Present ONLY when the run had an artifact set to decide about — a run outside a feature directory, or one whose set is empty, carries no such key and is byte-identical to a pre-036 summary.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "action"],
+        "properties": {
+          "path": { "type": "string", "description": "Relative to the feature directory, always `/`-separated (FR-005)." },
+          "attachment_name": { "type": "string", "description": "The flattened name the file attaches under: path segments joined with `__` (research R7)." },
+          "hash": { "type": "string", "description": "The artifact's content hash. Present only on an entry the run intends to write, because the publication manifest is composed from this array and has nowhere else to record it." },
+          "action": {
+            "description": "`unchanged` is the zero-churn outcome and performs no write. `would-publish` / `would-revise` are the --dry-run twins of the two write actions, predicted but not performed (Constitution XI, the existing `would-` convention).",
+            "enum": ["published", "revised", "unchanged", "withheld", "would-publish", "would-revise"]
+          },
+          "reason": {
+            "description": "Why the artifact was withheld. Required whenever `action` is `withheld`, and accompanied by the facts the operator needs to act on it (FR-021, Principle XVI). The first two are per-artifact decisions and carry the artifact's own facts; the last four take down the WHOLE publication and are recorded on every entry it would have written, so the summary never reports `published` for a file that reached nothing.",
+            "enum": [
+              "oversized",
+              "name-collision",
+              "site-disabled",
+              "limit-unreadable",
+              "manifest-overflow",
+              "upload-failed"
+            ]
+          },
+          "size": { "type": "integer", "minimum": 0, "description": "The artifact's size in bytes; carried by an `oversized` withholding." },
+          "limit": { "type": "integer", "minimum": 0, "description": "The site's DISCOVERED attachment limit in bytes, never an assumed one (Principle VII); carried by an `oversized` withholding." },
+          "collides_with": { "type": "string", "description": "The other path(s) flattening to the same attachment name; carried by a `name-collision` withholding." }
+        }
+      }
+    },
+    "artifact_warnings": {
+      "type": "array",
+      "description": "036, T112: the publication phase's OWN warnings, carried separately from `warnings` so the default prose rendering can print them without printing every other feature's. `warnings` is written by every feature since 021 and prose has only ever shown its count; surfacing that array wholesale would change the default output of runs this feature never touched. Present only when the publication warned. Each string also appears in `warnings`, which stays the complete list.",
+      "items": { "type": "string" }
+    },
     "warnings": {
       "type": "array",
       "description": "Human-readable lifecycle-safety warnings (withheld transitions, drift); present only when lifecycle facts were supplied.",

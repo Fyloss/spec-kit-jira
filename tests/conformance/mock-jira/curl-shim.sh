@@ -74,6 +74,10 @@ done
 _cfg_url=""
 _cfg_method=""
 _cfg_data_file=""
+# 036 C2.1 — one entry per `form =` line, in config order. The Bash port's
+# multipart upload puts its parts here rather than on argv, so this array IS
+# the only place the request body is observable to the shim.
+_cfg_form=()
 
 _shim_unquote() {
   local s="$1"
@@ -87,13 +91,20 @@ if [[ "${_config_file}" == "-" ]]; then
     [[ -z "${_line}" ]] && continue
     _k="${_line%%=*}"
     _v="${_line#*=}"
-    _k="$(printf '%s' "${_k}" | sed 's/[[:space:]]*$//')"
-    _v="$(printf '%s' "${_v}" | sed 's/^[[:space:]]*//')"
+    # Trimmed with parameter expansion, not `sed`. This loop runs once per
+    # config LINE, and 036's multipart config carries one line per artifact —
+    # two `sed` processes each. The whole point of the spawn-budget guards is
+    # to measure the PORT, and a harness that spawns per artifact makes every
+    # such measurement report the harness's own cost as the port's. Measured:
+    # 61 -> 97 sed pairs between a 4-artifact and a 40-artifact run.
+    _k="${_k%"${_k##*[![:space:]]}"}"
+    _v="${_v#"${_v%%[![:space:]]*}"}"
     _v="$(_shim_unquote "${_v}")"
     case "${_k}" in
       url) _cfg_url="${_v}" ;;
       request) _cfg_method="${_v}" ;;
       data) [[ "${_v}" == @* ]] && _cfg_data_file="${_v#@}" ;;
+      form) _cfg_form+=("${_v}") ;;
       header) : ;; # NEVER read or log (the Authorization header lives here)
       *) : ;;
     esac
@@ -123,8 +134,38 @@ query=""
 [[ "${target}" == *"?"* ]] && query="${target#*\?}"
 
 # ---- call log — appended before fault handling, mirroring mock-server.ps1 -----
+#
+# 036 T053: two routes carry an annotation, because they are the only ones whose
+# PAYLOAD the conformance corpus has to compare and whose payload reaches no
+# other capture. The publication phase runs after the planned action set is
+# composed, so the run summary's `actions[]` never sees the upload or the
+# comment; without this line a scenario compares two identical
+# `POST .../attachments` targets and is blind to a port that sent the parts in a
+# different order or announced them with a different body.
+#
+# Additive by construction: a request with neither parts nor body logs exactly
+# the bytes it logged before, so the 260 pre-036 scenarios are untouched. Kept
+# byte-for-byte in step with mock-server.ps1's own writer — a divergence HERE
+# would read as a divergence between the ports.
 
-printf '%s %s\n' "${method}" "${target}" >> "${MOCK_CALLLOG}"
+_calllog_suffix=""
+if [[ "${method}" == "POST" && "${path}" == */attachments && ${#_cfg_form[@]} -gt 0 ]]; then
+  # The flattened names only, in part order. Never the local file paths: they
+  # are the caller's own temp directory and differ between the two ports by
+  # construction.
+  _cl_names=""
+  for _cl_entry in "${_cfg_form[@]}"; do
+    [[ "${_cl_entry}" == file=@*';filename='* ]] || continue
+    _cl_names="${_cl_names:+${_cl_names},}${_cl_entry##*;filename=}"
+  done
+  [[ -n "${_cl_names}" ]] && _calllog_suffix=" parts=${_cl_names}"
+elif [[ "${method}" == "POST" && "${path}" == */comment && -n "${body}" ]]; then
+  # Verbatim, not a digest: the body is composed from pinned literals in two
+  # languages, and a digest would prove they differ without saying how.
+  _calllog_suffix=" body=${body}"
+fi
+
+printf '%s %s%s\n' "${method}" "${target}" "${_calllog_suffix}" >> "${MOCK_CALLLOG}"
 
 # ---- helpers ------------------------------------------------------------------
 
@@ -442,17 +483,38 @@ _shim_issue_get() {
   fi
 }
 
+# 036's manifest key is stored under `.properties[<issue>]`, a map INDEPENDENT
+# of `.issues`; EVERY OTHER key keeps the pre-existing behaviour of recording
+# only for an issue the mock itself created.
+#
+# The narrow scope is not timidity, it is a measurement. 036 needs its key to
+# round-trip on a RECOGNISED issue — one a fixture pins by marker rather than
+# creating — and under the old rule that PUT was silently dropped, so the
+# manifest was written, discarded, read back as absent, and every zero-churn
+# check failed for a reason unrelated to the code under test.
+#
+# Widening the rule to all keys was tried and REVERTED: it made the identity
+# property's PUT land too, where it had previously been dropped in favour of
+# the config's `identity` map, and recognition then refused the parent on the
+# second run ("carries no spec-kit-jira parent identity"). That is a real
+# difference in what the bridge writes versus what the fixtures declare, and it
+# belongs to whoever owns identity stamping — not to 036, which must not change
+# the behaviour of a key it does not own.
 _shim_property_put() {
-  local key="$1" prop_key="$2" value_json="$3" tmp
+  local key="$1" prop_key="$2" value_json="$3" tmp filter
+  # shellcheck disable=SC2016 # jq programmes: $k/$pk/$v are jq variables
+  if [[ "${prop_key}" == "spec-kit-jira-artifacts" ]]; then
+    filter='.properties[$k][$pk] = $v'
+  else
+    filter='if (.issues | has($k)) then .issues[$k].properties[$pk] = $v else . end'
+  fi
   tmp="$(mktemp)"
   if jq -e . > /dev/null 2>&1 <<< "${value_json}"; then
-    jq -c --arg k "${key}" --arg pk "${prop_key}" --argjson v "${value_json}" '
-      if (.issues | has($k)) then .issues[$k].properties[$pk] = $v else . end
-    ' "${MOCK_STATE_PATH}" > "${tmp}"
+    jq -c --arg k "${key}" --arg pk "${prop_key}" --argjson v "${value_json}" "${filter}" \
+      "${MOCK_STATE_PATH}" > "${tmp}"
   else
-    jq -c --arg k "${key}" --arg pk "${prop_key}" --arg v "${value_json}" '
-      if (.issues | has($k)) then .issues[$k].properties[$pk] = $v else . end
-    ' "${MOCK_STATE_PATH}" > "${tmp}"
+    jq -c --arg k "${key}" --arg pk "${prop_key}" --arg v "${value_json}" "${filter}" \
+      "${MOCK_STATE_PATH}" > "${tmp}"
   fi
   mv "${tmp}" "${MOCK_STATE_PATH}"
   RESP_STATUS=204
@@ -493,6 +555,14 @@ _shim_get_identity_marker() {
 
 _shim_property_get() {
   local key="$1" prop_key="$2" has
+  # The decoupled store first (036's key lives there), then the per-issue one.
+  has="$(jq -r --arg k "${key}" --arg pk "${prop_key}" \
+    '((.properties // {}) | has($k)) and (((.properties // {})[$k]) | has($pk))' "${MOCK_STATE_PATH}")"
+  if [[ "${has}" == "true" ]]; then
+    RESP_STATUS=200
+    RESP_BODY="$(jq -c --arg pk "${prop_key}" --arg k "${key}" '{key: $pk, value: .properties[$k][$pk]}' "${MOCK_STATE_PATH}")"
+    return
+  fi
   has="$(jq -r --arg k "${key}" --arg pk "${prop_key}" '(.issues | has($k)) and (.issues[$k].properties | has($pk))' "${MOCK_STATE_PATH}")"
   if [[ "${has}" == "true" ]]; then
     RESP_STATUS=200
@@ -508,6 +578,105 @@ _shim_property_get() {
   fi
   RESP_STATUS=404
   RESP_BODY='{"errorMessages":["not found"],"errors":{}}'
+}
+
+
+# ---- 036: attachments, comments, and the upload limit -------------------------
+
+# _shim_attachment_meta — GET /attachment/meta (036 C1.1). The limit is a SITE
+# fact the bridge must discover rather than assume (Principle VII), so the
+# config can pin it per scenario; the default mirrors a stock Cloud site.
+#
+# `//` is NOT usable for `enabled`: jq's alternative operator treats `false` as
+# a missing value, so `(.attachment_meta.enabled) // true` answers TRUE for a
+# config that says `false` — and the C3.9 "attachments switched off site-wide"
+# path could not be exercised at all. The presence test is spelled out instead,
+# matching mock-server.ps1's `ContainsKey('enabled')`. `uploadLimit` keeps `//`
+# because 0 is not a limit any site sets and the default is what a caller wants.
+_shim_attachment_meta() {
+  RESP_STATUS=200
+  RESP_BODY="$(jq -c '{enabled: (if (.attachment_meta | type) == "object" and (.attachment_meta | has("enabled"))
+                                 then (.attachment_meta.enabled | if . then true else false end)
+                                 else true end),
+                       uploadLimit: ((.attachment_meta.uploadLimit) // 10485760)}' \
+    "${MOCK_CONFIG_PATH}")"
+}
+
+# _shim_create_attachments <key> — POST /issue/{key}/attachments (036 C1.4).
+#
+# Reads the parts out of `_cfg_form`, each spelled `file=@<path>;filename=<name>`
+# by jira_request_multipart. Records them on the issue so a later
+# `GET /issue/{key}?fields=attachment` can list them, and answers with the array
+# Jira answers with — in PART ORDER, which is what the ports are asserted on.
+#
+# Duplicate filenames are ACCEPTED, deliberately: Jira allows several
+# attachments with one name, each with its own id, and 036 depends on that —
+# a revised artifact is published again under the same name and the earlier
+# copy must survive (FR-014).
+_shim_create_attachments() {
+  local key="$1" entry name file created='[]' tmp
+  # The id counter is SESSION-wide, held in `.counters`, not derived from the
+  # issue's own recorded attachment list. Jira ids are globally unique, and the
+  # per-issue derivation handed the same id to two uploads whenever the issue
+  # was not seeded into `.issues` — which made a revision indistinguishable
+  # from its original, exactly the thing FR-014's tests need to tell apart.
+  local n
+  n="$(jq -r '(.counters["attachment"] // 0)' "${MOCK_STATE_PATH}" 2> /dev/null || printf '0')"
+  [[ -n "${n}" && "${n}" != "null" ]] || n=0
+  # ONE jq for the whole part list, not one per part. Same reason as the config
+  # trim above: this shim is the instrument the port's own spawn budget is
+  # measured through, so a per-part process here is reported as the port's.
+  # The rows are accumulated as NUL-free text and folded in a single pass.
+  local rows="${tmp_rows:-}"
+  rows=""
+  for entry in ${_cfg_form+"${_cfg_form[@]}"}; do
+    [[ "${entry}" == file=@* ]] || continue
+    name="${entry##*;filename=}"
+    file="${entry#file=@}"
+    file="${file%%;filename=*}"
+    local size=0
+    [[ -f "${file}" ]] && size="$(wc -c < "${file}" | tr -d '[:space:]')"
+    n=$((n + 1))
+    rows="${rows}1000${n}"$'\037'"${name}"$'\037'"${size}"$'\n'
+  done
+  if [[ -n "${rows}" ]]; then
+    created="$(printf '%s' "${rows}" | jq -Rn '
+      [ inputs | split("\u001f") | {id: .[0], filename: .[1], size: (.[2] | tonumber)} ]')"
+  fi
+
+  tmp="$(mktemp)"
+  jq -c --arg k "${key}" --argjson a "${created}" --argjson n "${n}" '
+    .counters["attachment"] = $n
+    | if (.issues | has($k))
+      then .issues[$k].attachments = (((.issues[$k].attachments) // []) + $a)
+      else . end' "${MOCK_STATE_PATH}" > "${tmp}"
+  mv "${tmp}" "${MOCK_STATE_PATH}"
+
+  RESP_STATUS=200
+  RESP_BODY="${created}"
+}
+
+# _shim_create_comment <key> <body-json> — POST /issue/{key}/comment (036 C1.5).
+# Appends to the issue's recorded comment list so a run that posts twice is
+# distinguishable from one that posts once — which is exactly what the
+# zero-churn assertions read.
+_shim_create_comment() {
+  local key="$1" body="$2" tmp n
+  n="$(jq -r --arg k "${key}" '((.issues[$k].comments) // []) | length' "${MOCK_STATE_PATH}" 2> /dev/null || printf '0')"
+  [[ -n "${n}" ]] || n=0
+  n=$((n + 1))
+  local comment
+  comment="$(jq -cn --arg id "2000${n}" --argjson b "$(jq -c '.body // {}' <<< "${body}" 2> /dev/null || printf '{}')" \
+    '{id: $id, body: $b}')"
+  tmp="$(mktemp)"
+  jq -c --arg k "${key}" --argjson c "${comment}" '
+    if (.issues | has($k))
+    then .issues[$k].comments = (((.issues[$k].comments) // []) + [$c])
+    else . end' "${MOCK_STATE_PATH}" > "${tmp}"
+  mv "${tmp}" "${MOCK_STATE_PATH}"
+
+  RESP_STATUS=201
+  RESP_BODY="${comment}"
 }
 
 # ---- fault check (before routing; call already logged above) ------------------
@@ -607,6 +776,12 @@ else
     _shim_label_search "${query}"
   elif [[ ( "${path}" == "/rest/api/3/search" || "${path}" == "/rest/api/3/search/jql" ) && "${method}" == "GET" ]]; then
     _read_fixture 'search-siblings'
+  elif [[ "${path}" == "/rest/api/3/attachment/meta" && "${method}" == "GET" ]]; then
+    _shim_attachment_meta
+  elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)/attachments$ && "${method}" == "POST" ]]; then
+    _shim_create_attachments "${BASH_REMATCH[1]}"
+  elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)/comment$ && "${method}" == "POST" ]]; then
+    _shim_create_comment "${BASH_REMATCH[1]}" "${body}"
   elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)/properties/([^/]+)$ ]]; then
     ikey="${BASH_REMATCH[1]}" propkey="${BASH_REMATCH[2]}"
     if [[ "${method}" == "PUT" ]]; then
@@ -614,6 +789,18 @@ else
     elif [[ "${method}" == "GET" ]]; then
       _shim_property_get "${ikey}" "${propkey}"
     fi
+  elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)$ && "${method}" == "GET" && "${query}" == "fields=attachment" ]]; then
+    # 036 C1.3 — the trust rule's read. Keyed on the EXACT query, as every other
+    # field-scoped route here is: the mock serves a different fixture per
+    # `fields=` string, so a widened list silently gets the wrong one.
+    #
+    # Without this route the generic issue GET answered with no `attachment`
+    # array, the trust rule read "the id the manifest claims is not on the
+    # ticket", and every artifact was republished on every run — zero-churn
+    # failing for a reason entirely inside the mock.
+    RESP_STATUS=200
+    RESP_BODY="$(jq -c --arg k "${BASH_REMATCH[1]}" \
+      '{key: $k, fields: {attachment: ((.issues[$k].attachments) // [])}}' "${MOCK_STATE_PATH}")"
   elif [[ "${path}" =~ ^/rest/api/3/issue/([^/]+)$ ]]; then
     ikey="${BASH_REMATCH[1]}"
     if [[ "${method}" == "GET" ]]; then

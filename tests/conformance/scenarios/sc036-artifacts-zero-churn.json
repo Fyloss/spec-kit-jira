@@ -1,0 +1,42 @@
+{
+  "name": "sc036-artifacts-zero-churn",
+  "description": "036 T076, FR-009/US2 AS1 — the zero-churn floor, compared across the two ports. Run 1 creates the tickets and publishes every artifact; run 2 revises spec.md alone, because run 1 stamped its identity marker into that file; run 3 is the genuinely unchanged one and must issue ZERO attachment, comment and manifest writes. The steady state is the THIRD run, not the second, and a scenario asserting on run 2 would be asserting against the marker write rather than against this feature. What is compared is the whole call sequence of all three runs, per run, so a port that churned on run 3 diverges on calls.log.2 alone while everything else stays identical.",
+  "mock": {
+    "projects": {
+      "COMP": "company"
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-artifacts",
+  "git_branch": "036-artifacts",
+  "runs": [
+    {
+      "argv": [
+        "reconcile",
+        "--json",
+        "specs/001-reporting/spec.md"
+      ]
+    },
+    {
+      "argv": [
+        "reconcile",
+        "--json",
+        "specs/001-reporting/spec.md"
+      ]
+    },
+    {
+      "argv": [
+        "reconcile",
+        "--json",
+        "specs/001-reporting/spec.md"
+      ]
+    }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-reporting",
+    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111"
+  }
+}

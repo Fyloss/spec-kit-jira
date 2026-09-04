@@ -35,6 +35,14 @@ Import-Module (Join-Path $PSScriptRoot '../sink/jira/PlanApply.psm1') -Force
 # gets both transitively for free from bash's lack of real module scoping.
 Import-Module (Join-Path $PSScriptRoot '../engine/Drift.psm1')
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Transitions.psm1')
+# 036 — the artifact set and the sweep that scans it (C5.1). ArtifactSet is
+# this module's own dependency and takes -Force like the others; PrivacyGuard
+# does NOT, for the same reason as Drift/Transitions above: PlanApply.psm1
+# already loads it, and a second -Force reimport here would tear its exports
+# out of PlanApply's scope and reattach them to this one.
+Import-Module (Join-Path $PSScriptRoot '../engine/ArtifactSet.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/PrivacyGuard.psm1')
+Import-Module (Join-Path $PSScriptRoot '../sink/jira/Attachments.psm1') -Force # 036 — publishing the feature artifacts
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/Discovery.psm1') -Force # Phase 8, US5 — the completion pass's transitions read
 Import-Module (Join-Path $PSScriptRoot '../sink/jira/DuplicateProbe.psm1') -Force # US4, droppable — the second, best-effort guard
 Import-Module (Join-Path $PSScriptRoot '../lib/Config.psm1') -Force          # the operator disable record
@@ -64,6 +72,29 @@ function Write-JiraReconcileNotice {
     # exactly once per run. Mirror of _reconcile_notice.
     param([string[]] $Lines)
     foreach ($l in $Lines) { [Console]::Error.WriteLine($l) }
+}
+
+function Add-JiraWarning {
+    <#
+    .SYNOPSIS
+      Append one message to a JSON warnings array and return the new array.
+    .DESCRIPTION
+      036 needed this and the module had no equivalent: warnings were built as a
+      $warnsList before being serialised once, and the publication phase runs
+      after that point. Kept tiny and pure so the Bash port's `jq '. + [$m]'`
+      one-liner has an exact counterpart rather than a paraphrase.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $WarnsJson,
+        [Parameter(Mandatory)] [string] $Message
+    )
+    $list = [System.Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($WarnsJson)) {
+        foreach ($w in @($WarnsJson | ConvertFrom-Json -Depth 100)) { $list.Add([string] $w) }
+    }
+    $list.Add($Message)
+    return (ConvertTo-Json -InputObject @($list) -Depth 5 -Compress)
 }
 
 function Get-JiraReconcileFaultCode {
@@ -377,7 +408,7 @@ function Get-JiraReconcilePhaseOrder {
     [CmdletBinding()]
     param([string] $PhaseStatusMapJson = '{}')
     $pm = $PhaseStatusMapJson | ConvertFrom-Json -Depth 100
-    $canonicalOrder = @('before_specify', 'after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze')
+    $canonicalOrder = @('before_specify', 'after_specify', 'after_clarify', 'after_plan', 'after_tasks', 'after_implement', 'after_analyze', 'after_converge', 'after_checklist')
     $roleNames = Get-JiraRoleNameList
     $out = [ordered]@{}
     foreach ($role in $roleNames) {
@@ -918,7 +949,20 @@ function Invoke-JiraReconcileRun {
     $shortCircuited = $false
     $email = if ($env:JIRA_EMAIL) { $env:JIRA_EMAIL } else { '' }
     if (-not $force -and -not $dryRun) {
-        if (Test-JiraRunStateMatch -SpecPath $specFile -BaseUrl $base -Email $email -OnDrift $onDrift -HookEvent $hookEvent -FieldValues $fieldValues) {
+        # 036, contracts/run-state-v3.md C2: the comparison is over the WHOLE
+        # artifact set, not three fixed documents. Built here, at the state
+        # phase, and deliberately BEFORE the marker writes further down —
+        # the same point in the file's life the previous run recorded, since
+        # that run recorded after its own marker writes and this one has none
+        # to add unless something changed.
+        $rsSet = Get-JiraArtifactSet -FeatureDirectory ([System.IO.Path]::GetDirectoryName($specFile))
+        if ([string]::IsNullOrWhiteSpace($rsSet)) { $rsSet = '[]' }
+        # An EMPTY set is never a match. The set is `git ls-files`, so it is
+        # empty for a directory outside a repository — and under schema 3 the
+        # inputs ARE the set, so an empty one would compare equal to another
+        # empty one and short-circuit a run whose spec.md had changed
+        # underneath it. Every doubt fails open: no set, no short-circuit.
+        if (@($rsSet | ConvertFrom-Json).Count -gt 0 -and (Test-JiraRunStateMatch -SpecPath $specFile -BaseUrl $base -Email $email -OnDrift $onDrift -HookEvent $hookEvent -FieldValues $fieldValues -ArtifactSetJson $rsSet)) {
             $shortCircuited = $true
         }
     }
@@ -2332,6 +2376,44 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
     }
 
     Stop-JiraTimingPhase -Phase 'plan' -RequestCount (Get-JiraRequestCount)
+
+    # 036, contracts/artifact-publication.md C5.1 — the artifact privacy sweep.
+    # Mirror of the same block in commands/reconcile.sh.
+    #
+    # HERE, and not beside the upload. Publication runs after the description
+    # and story writes, so a guard placed there could only refuse the upload
+    # while the reconcile's own writes had already landed — and FR-016 with
+    # C3.8 require ZERO writes for the ENTIRE run, the reconcile's included.
+    # This is the last point before any Jira write of any kind.
+    #
+    # It runs in dry-run too. A dry-run that predicted a publication the real
+    # run would refuse is a dry-run that lies (FR-020), and the scan writes
+    # nothing.
+    #
+    # The set is rebuilt here rather than threaded down from the parse: it must
+    # reflect the directory as it stands AFTER the marker writes above, which
+    # change spec.md and tasks.md, or the scan would clear content that is not
+    # what gets published.
+    # `Split-Path -Parent` returns an EMPTY STRING for a bare relative filename
+    # ("spec.md"), where `dirname` returns ".". Without the fallback a run
+    # invoked from inside the feature directory died on a parameter-binding
+    # error while the Bash port carried on — caught by the cross-port
+    # equivalence case in tests/bash/commands/test_reconcile.bats, and by
+    # nothing else.
+    $pgDir = Split-Path -Parent $specFile
+    if ([string]::IsNullOrEmpty($pgDir)) { $pgDir = '.' }
+    $pgSet = Get-JiraArtifactSet -FeatureDirectory $pgDir
+    $pgAllow = if ($env:SPEC_KIT_JIRA_ALLOWLIST) { $env:SPEC_KIT_JIRA_ALLOWLIST } else { '[]' }
+    $pgCoords = Get-JiraApplyKnownCoordinate -ExtraJson '[]'
+    $pgCode = Test-JiraArtifactPrivacy -FeatureDirectory $pgDir -SetJson $pgSet `
+        -KnownCoordinatesJson $pgCoords -AllowlistJson $pgAllow
+    if ($pgCode -ne 0) {
+        $pgReason = Get-JiraArtifactPrivacyReason -FeatureDirectory $pgDir -SetJson $pgSet `
+            -KnownCoordinatesJson $pgCoords -AllowlistJson $pgAllow
+        return (Get-JiraReconcileFaultCode -Code $pgCode `
+                -Message "reconcile: $pgReason — a feature artifact carries a blocked shape; zero writes performed (FR-016)")
+    }
+
     Start-JiraTimingPhase -Phase 'apply' -RequestCount (Get-JiraRequestCount)
 
     $rc = 0
@@ -2365,6 +2447,226 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
         # filter keeps 012's sub-tasks out of this tier's tally: they are
         # counted separately in counts.tasks.created (012 FR-011).
         $created = @(@($applyOutcome.Created) | Where-Object { $_.role -eq 'parent' -or $_.role -eq 'story' }).Count
+    }
+
+
+    # ---- 036: publish the feature's artifacts onto the specification ticket ----
+    # Mirror of the same block in commands/reconcile.sh.
+    #
+    # AFTER every other write, deliberately: the specification ticket may have
+    # been CREATED by the apply above (FR-006), so this is the earliest point at
+    # which its key is certainly known, and publication is additive so nothing
+    # above depends on it.
+    #
+    # The privacy sweep that guards this content already ran, far earlier,
+    # before any write at all (C5.1). Nothing here re-scans.
+    # The set is REBUILT here, after the apply, and that is not a duplicate of
+    # the one the privacy sweep used. The sweep's set has to be the pre-write
+    # one — a blocked artifact must stop the run before anything is written
+    # (C5.1) — but the apply then stamps ticket markers INTO spec.md, so the
+    # pre-write bytes are no longer the bytes on disk. Publishing against the
+    # stale set attached the file the run had already superseded and recorded a
+    # hash matching neither: every following run read "the hash differs" and
+    # published spec.md again, and the run-state document recorded a hash the
+    # next run could never reproduce, so nothing ever short-circuited.
+    #
+    # The markers are the only difference between the two sets, and they are
+    # the bridge's own ticket keys — not consumer content, and nothing the
+    # sweep could have blocked.
+    # 036 (T112): the publication's warnings are identified by POSITION, not by
+    # a marker on each site that raises one. $warnsJson is append-only, so
+    # everything added between this mark and the end of the phase is the
+    # publication's.
+    $apWarnBase = @($warnsJson | ConvertFrom-Json).Count
+
+    $pubSet = $pgSet
+    if (-not $dryRun) {
+        $rebuilt = Get-JiraArtifactSet -FeatureDirectory $pgDir
+        if (-not [string]::IsNullOrWhiteSpace($rebuilt)) { $pubSet = $rebuilt }
+    }
+
+    $artifactDecisions = '[]'
+    $artifactPubKey = ''
+    $artifactActions = '[]'
+    if (@($pubSet | ConvertFrom-Json).Count -gt 0) {
+        $artifactPubKey = [string](Get-JiraPlanPropSafe $recogParent 'key')
+        # `Test-Path variable:` first. Under StrictMode a bare read of a
+        # variable that was never ASSIGNED throws, and $applyOutcome is only
+        # assigned by the apply — which a --dry-run never performs. The block
+        # was unreachable on a dry run until the artifact set became non-empty
+        # there, and it then died at run time on a path that parses and lints
+        # perfectly.
+        if ([string]::IsNullOrEmpty($artifactPubKey) -and (Test-Path 'variable:applyOutcome') -and $null -ne $applyOutcome) {
+            $madeParent = @(@($applyOutcome.Created) | Where-Object { $_.role -eq 'parent' }) | Select-Object -First 1
+            if ($madeParent) { $artifactPubKey = [string] $madeParent.key }
+        }
+    }
+
+    # FR-020, US4 AS1: a --dry-run against a specification with no ticket yet
+    # still has to say what it would publish. There is no key to name, so the
+    # placeholder the planned action set already uses for a same-run parent
+    # stands in — and there is no manifest to read either, because a ticket
+    # that does not exist carries nothing.
+    $apPredictOnly = $false
+    if ([string]::IsNullOrEmpty($artifactPubKey) -and $dryRun -and @($pubSet | ConvertFrom-Json).Count -gt 0) {
+        $artifactPubKey = '<resolved at apply time>'
+        $apPredictOnly = $true
+    }
+
+    if (-not [string]::IsNullOrEmpty($artifactPubKey)) {
+        $apMeta = Get-JiraAttachmentLimit -BaseUrl $base
+        if ($null -eq $apMeta) {
+            # C3.7: no upload without a known limit. Principle VII forbids
+            # guessing the default this would otherwise fall back to.
+            $warnsJson = Add-JiraWarning -WarnsJson $warnsJson -Message 'reconcile: the site attachment limit could not be read; feature artifacts were not published (zero writes)'
+            $warnCount++
+            # C3.7, continued: the warning was raised here; the artifact record
+            # is completed so the summary and the warning agree.
+            $artifactDecisions = ConvertTo-JiraArtifactWithheld -Reason 'limit-unreadable' `
+                -DecisionsJson (Get-JiraArtifactDecision -SetJson $pubSet -ManifestJson '{}' -Limit 0)
+        }
+        elseif (-not $apMeta.Enabled) {
+            # A publication the site refuses outright never classifies against a
+            # manifest — there is no point reading one — but the summary must
+            # still account for every artifact, and account for it truthfully.
+            # `withheld` with a reason is what an operator can act on, where
+            # `published` for a file that reached nothing is a lie the audit
+            # trail cannot afford (FR-021, US4 AS3).
+            $artifactDecisions = ConvertTo-JiraArtifactWithheld -Reason 'site-disabled' `
+                -DecisionsJson (Get-JiraArtifactDecision -SetJson $pubSet -ManifestJson '{}' -Limit 0)
+            $warnsJson = Add-JiraWarning -WarnsJson $warnsJson -Message 'reconcile: this Jira site has attachments disabled; feature artifacts were not published'
+            $warnCount++
+        }
+        else {
+            # No ticket, so no manifest — and no request for one either.
+            $apManifest = if ($apPredictOnly) { '{}' } else {
+                Get-JiraArtifactManifest -BaseUrl $base -TicketKey $artifactPubKey
+            }
+            # C4.3, the trust rule: the ticket's real attachment list is fetched
+            # ONLY when the manifest claims an id, the only case where it can
+            # disagree with reality.
+            $apIds = $null
+            if (@(($apManifest | ConvertFrom-Json -AsHashtable).Keys).Count -gt 0) {
+                $apIds = Get-JiraTicketAttachmentId -BaseUrl $base -TicketKey $artifactPubKey
+            }
+            $artifactDecisions = Get-JiraArtifactDecision -SetJson $pubSet -ManifestJson $apManifest `
+                -Limit ([int64] $apMeta.UploadLimit) -TicketAttachmentIdsJson $apIds
+
+            # Every withholding gets its own named warning: the summary carries
+            # the facts, a warning is what an operator actually reads.
+            foreach ($w in @($artifactDecisions | ConvertFrom-Json | Where-Object { $_.action -eq 'withheld' })) {
+                $msg = if ($w.reason -eq 'oversized') {
+                    "reconcile: $($w.path) is $($w.size) bytes, over this site's $($w.limit)-byte attachment limit; it was not published"
+                }
+                else {
+                    "reconcile: $($w.path) and $($w.collides_with) would both attach as $($w.attachment_name); neither was published — rename one"
+                }
+                $warnsJson = Add-JiraWarning -WarnsJson $warnsJson -Message $msg
+                $warnCount++
+            }
+
+            $apPending = @(@($artifactDecisions | ConvertFrom-Json) | Where-Object { $_.action -eq 'published' -or $_.action -eq 'revised' }).Count
+
+            if ($dryRun) {
+                # FR-020, US4 AS1: predict, write nothing. The predicted set is
+                # the decision set with the two write actions renamed — the same
+                # classification the real run performs, so SC-006's "prediction
+                # equals reality" holds by construction rather than by two code
+                # paths agreeing by luck.
+                $artifactDecisions = ConvertTo-JiraArtifactPrediction -DecisionsJson $artifactDecisions
+            }
+            elseif ($apPending -gt 0) {
+                $placeholders = ConvertTo-Json -InputObject @(1..$apPending | ForEach-Object { @{ id = 'pending' } }) -Depth 5 -Compress
+                $apNext = New-JiraArtifactManifest -ManifestJson $apManifest -DecisionsJson $artifactDecisions `
+                    -CreatedJson $placeholders -LifecycleEvent $hookEvent
+                $apNextSize = Get-JiraManifestSize -ArtifactsJson $apNext
+                if (Test-JiraManifestOversized -ArtifactsJson $apNext) {
+                    # C4.4.1: fail closed BEFORE any upload. A partial manifest
+                    # would make the next run republish exactly what this one
+                    # dropped, forever.
+                    $artifactDecisions = ConvertTo-JiraArtifactWithheld -DecisionsJson $artifactDecisions -Reason 'manifest-overflow'
+                    $setCount = @($pubSet | ConvertFrom-Json).Count
+                    $warnsJson = Add-JiraWarning -WarnsJson $warnsJson -Message "reconcile: this feature directory holds more artifacts than one ticket can track — $setCount artifacts need a $apNextSize-byte record and the assumed limit is $(Get-JiraPropertyCap) bytes; nothing was published"
+                    $warnCount++
+                }
+                else {
+                    $apEnv = Publish-JiraArtifactSet -BaseUrl $base -TicketKey $artifactPubKey `
+                        -FeatureDirectory $pgDir -DecisionsJson $artifactDecisions | ConvertFrom-Json
+                    $apCreated = ConvertTo-Json -InputObject @($apEnv.created) -Depth 20 -Compress
+                    $apStatus = [int] $apEnv.status
+                    if (@($apEnv.created).Count -eq 0) {
+                        # Withheld, never fatal — on every one of these rows. The
+                        # shared transport maps 401/403 to the `auth` exit code;
+                        # propagating it here would fail EVERY reconcile for a
+                        # team whose token lacks "Create attachments", the day
+                        # they upgrade, for a feature they did not ask for
+                        # (C3.2). The reconcile's own writes stand.
+                        $artifactDecisions = ConvertTo-JiraArtifactWithheld -DecisionsJson $artifactDecisions -Reason 'upload-failed'
+                        $apMsg = if ($apStatus -in 401, 403) {
+                            # C3.2: the ticket, the missing capability, the remedy.
+                            "reconcile: the feature artifacts could not be attached to $artifactPubKey — this Jira token lacks the ""Create attachments"" permission on that project; grant it to the token's account and the next run will publish them. The rest of the mirror was written"
+                        }
+                        elseif ($apStatus -eq 413) {
+                            # C3.3: the set's own size against the site's limit.
+                            "reconcile: the feature artifacts were rejected by $artifactPubKey as too large — the run offered $apPending files against this site's $([int64] $apMeta.UploadLimit)-byte per-file limit; they were not published"
+                        }
+                        else {
+                            # C3.4: transient. The manifest is NOT written, so
+                            # the next run retries exactly this set.
+                            "reconcile: the feature artifacts could not be uploaded to $artifactPubKey (the site answered $apStatus); nothing was recorded, so the next run will try again. The rest of the mirror was written"
+                        }
+                        $warnsJson = Add-JiraWarning -WarnsJson $warnsJson -Message $apMsg
+                        $warnCount++
+                    }
+                    else {
+                        # C3.5: the comment is announced separately, and a
+                        # failure there does NOT unpublish the attachments.
+                        if (-not (Send-JiraArtifactComment -BaseUrl $base -TicketKey $artifactPubKey `
+                                    -AdfJson (New-JiraArtifactComment -LifecycleEvent $hookEvent -DecisionsJson $artifactDecisions))) {
+                            $warnsJson = Add-JiraWarning -WarnsJson $warnsJson -Message "reconcile: the feature artifacts were attached to $artifactPubKey, but the comment announcing them could not be posted; they are on the ticket and nothing is lost"
+                            $warnCount++
+                        }
+                        # C3.6: only what actually landed reaches the manifest.
+                        # A failure here is a warning, not a loss — the next run
+                        # re-derives through the trust rule (C4.3).
+                        $apFinal = New-JiraArtifactManifest -ManifestJson $apManifest -DecisionsJson $artifactDecisions `
+                            -CreatedJson $apCreated -LifecycleEvent $hookEvent
+                        $apSave = Save-JiraArtifactManifest -BaseUrl $base -TicketKey $artifactPubKey -ArtifactsJson $apFinal | ConvertFrom-Json
+                        if (-not $apSave.ok) {
+                            $apMMsg = "reconcile: the feature artifacts were attached to $artifactPubKey, but the record of them could not be saved; the next run will reconcile it"
+                            # C4.4.2: a 4xx here is the site refusing the
+                            # DOCUMENT, and size is the only property of it
+                            # C4.4.1 could have mispredicted. The operator is
+                            # told which number to look at rather than left with
+                            # a generic save failure — and the cap is named as
+                            # the assumption it is (§R15 item 4).
+                            if ([int] $apSave.status -ge 400 -and [int] $apSave.status -lt 500) {
+                                $apFinalSize = Get-JiraManifestSize -ArtifactsJson $apFinal
+                                $apMMsg = "reconcile: the feature artifacts were attached to $artifactPubKey, but $artifactPubKey refused the $apFinalSize-byte record of them (assumed cap $(Get-JiraPropertyCap) bytes); the next run will publish them again"
+                            }
+                            $warnsJson = Add-JiraWarning -WarnsJson $warnsJson -Message $apMMsg
+                            $warnCount++
+                        }
+                    }
+                }
+            }
+
+            # data-model §5: the two actions the publication contributes,
+            # reported identically whether the run performed them or predicted
+            # them. Composed AFTER every withholding above, so an action set
+            # never names an artifact the run has already decided not to write.
+            $artifactActions = New-JiraArtifactAction -TicketKey $artifactPubKey -DecisionsJson $artifactDecisions `
+                -AdfJson (New-JiraArtifactComment -LifecycleEvent $hookEvent -DecisionsJson $artifactDecisions)
+        }
+    }
+
+    # Taken HERE, before the pending-create-complete block below can append a
+    # warning of its own — that one belongs to the task tier, not the
+    # publication, and prose must not attribute it here.
+    $allWarns = @($warnsJson | ConvertFrom-Json)
+    $artifactWarnings = @()
+    if ($allWarns.Count -gt $apWarnBase) {
+        $artifactWarnings = @($allWarns[$apWarnBase..($allWarns.Count - 1)])
     }
 
     # Edge Cases (contract §6, final line; T084): a task checked before its
@@ -2565,6 +2867,14 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
         }
     }
 
+    # 036, data-model §5: the publication's `attach` and `comment` join the SAME
+    # displayed list, LAST — publication is the last thing a run does, and the
+    # order here is the order of the writes. Already host-relative: they are
+    # composed from the ticket key rather than from a full URL, so no base needs
+    # stripping. Empty whenever the run has nothing to publish, which is what
+    # keeps every summary that predates this feature byte-identical.
+    foreach ($x in @($artifactActions | ConvertFrom-Json -Depth 100)) { $disp.Add($x) }
+
     # Phase 3, US1 (data-model.md 6, SC-006): the task tier's own nested
     # counts, emitted ONLY when a `task` role is declared (research R8) —
     # absence, not a zeroed-out object, is the off switch that keeps a run
@@ -2609,6 +2919,15 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
         $summaryObj['warnings'] = @($warnsJson | ConvertFrom-Json -Depth 100)
         $summaryObj['notes'] = @($notesJson | ConvertFrom-Json -Depth 100)
     }
+    # 036, data-model §5: one entry per artifact, with the reason on every
+    # withholding. Omitted entirely when there is nothing to say, so every
+    # pre-036 summary is byte-identical to what it was.
+    $artifactList = @($artifactDecisions | ConvertFrom-Json)
+    if ($artifactList.Count -gt 0) { $summaryObj['artifacts'] = $artifactList }
+    # 036 T112: the warnings raised by the publication alone, so prose can print
+    # them without printing every other feature. They also stay in `warnings`,
+    # which is still the complete list.
+    if ($artifactWarnings.Count -gt 0) { $summaryObj['artifact_warnings'] = @($artifactWarnings) }
     $summaryObj['exit_code'] = $rc
     $summary = ConvertTo-JiraJsonValue $summaryObj
 
@@ -2622,7 +2941,19 @@ $notesJson = ConvertTo-JiraJsonValue $notesListTaskNotes
     # above, long before this point, so reaching here already proves that
     # condition).
     if (-not $dryRun -and $rcBeforeHookDowngrade -eq 0 -and $warnCount -eq 0) {
-        Save-JiraRunState -SpecPath $specFile -BaseUrl $base -Email $email -OnDrift $onDrift -HookEvent $hookEvent -FieldValues $fieldValues
+        # The set as it stands AFTER the marker writes and the publication —
+        # the state the NEXT run will compare against. $pgSet is that set;
+        # rebuilding here would be a second `git ls-files` for an answer held.
+        # The set as it stands AFTER the apply — the same one the publication
+        # classified. $pgSet is the PRE-write one the privacy sweep needed and
+        # is wrong here: it predates the markers the apply stamps into spec.md.
+        $rsFinal = if ([string]::IsNullOrWhiteSpace($pubSet)) { '[]' } else { $pubSet }
+        # …and never records one either, for the same reason: a document whose
+        # inputs are empty would match the next empty one and skip a run that
+        # should happen.
+        if (@($rsFinal | ConvertFrom-Json).Count -gt 0) {
+            Save-JiraRunState -SpecPath $specFile -BaseUrl $base -Email $email -OnDrift $onDrift -HookEvent $hookEvent -FieldValues $fieldValues -ArtifactSetJson $rsFinal
+        }
     }
 
     if ($json) {

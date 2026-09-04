@@ -22,7 +22,12 @@ source "${_RUN_STATE_LIB_DIR}/output.sh"   # json_canonical, output_warn
 # Shape version of the run-state document (data-model.md §1). A change to the
 # *set* of recorded inputs bumps it, invalidating every existing file.
 # 023, contracts/run-state-v2.md C1: 1 -> 2 for `hook_event` and `plan.md`.
-_RUN_STATE_SCHEMA=2
+# 036, contracts/run-state-v3.md C1: 2 -> 3, because `inputs` stops being three
+# fixed documents and becomes the whole artifact set. Every schema-2 file is
+# invalidated by the bump, and the first run after an upgrade therefore does
+# real work — which is correct rather than wasteful: those artifacts are about
+# to be published for the first time and no record says otherwise.
+_RUN_STATE_SCHEMA=3
 
 # run_state_path <spec-path> — the recorded document's path for the feature
 # directory holding this spec.
@@ -49,36 +54,48 @@ _run_state_add_input() {
 }
 
 # run_state_compose <spec-path> <base-url> <email> <on-drift> <hook-event>
-# <field-values> — 023, contracts/run-state-v2.md §2: `hook_event` is an
-# explicit argument, never read from SPEC_KIT_JIRA_HOOK_EVENT itself, so this
-# module stays a pure function of its arguments (the same discipline
-# base_url/email/on_drift/field_values already have). Prints the canonical
-# JSON document for the current inputs. Returns 1, printing nothing, if any
-# required input cannot be hashed.
+# <field-values> <artifact-set-json> — 023, contracts/run-state-v2.md §2:
+# `hook_event` is an explicit argument, never read from
+# SPEC_KIT_JIRA_HOOK_EVENT itself, so this module stays a pure function of its
+# arguments (the same discipline base_url/email/on_drift/field_values already
+# have). Prints the canonical JSON document for the current inputs. Returns 1,
+# printing nothing, if any required input cannot be hashed.
+#
+# 036, contracts/run-state-v3.md C2/C3: the seventh argument is the ARTIFACT
+# SET — every publishable file of the feature directory, already carrying the
+# `git hash-object --no-filters --stdin-paths` hashes the engine computed in
+# ONE call (C3.4). It is passed in rather than built here for two reasons: this
+# module is `lib/` and the set is built in `engine/`, which is the wrong
+# direction to source; and the reconcile already holds it, so building a second
+# one would be a second `git ls-files` for an answer it has.
+#
+# Under schema 2 this recorded three fixed documents, and a run fired after only
+# `research.md` changed found all three hashes matching and short-circuited with
+# zero Jira calls — leaving the artifact unpublished forever (C4). That is the
+# whole reason for the bump.
 run_state_compose() {
   local spec_path="$1" base_url="$2" email="$3" on_drift="$4" hook_event="$5" field_values="$6"
+  local artifacts="${7:-[]}"
   [[ -f "${spec_path}" ]] || return 1
 
   local ext_version
   ext_version="$(config_extension_version 2> /dev/null)" || return 1
 
-  local spec_hash
-  spec_hash="$(git hash-object --no-filters "${spec_path}" 2> /dev/null)"
-  [[ -z "${spec_hash}" ]] && return 1
-
+  # C3.1/C3.3: the key set IS the artifact set's paths — relative to the
+  # feature directory and `/`-separated on every host, because this document is
+  # byte-compared across ports and machines. No hashing happens here: the set
+  # arrives hashed, which is what makes C5's bounded process budget hold.
   local inputs
-  inputs="$(jq -cn --arg h "${spec_hash}" '{"spec.md": $h}')"
+  inputs="$(jq -c 'map({key: .path, value: .hash}) | from_entries' <<< "${artifacts}" 2> /dev/null)" || return 1
+  [[ -n "${inputs}" && "${inputs}" != "null" ]] || return 1
 
-  local tasks_path plan_path
-  tasks_path="$(dirname "${spec_path}")/tasks.md"
-  inputs="$(_run_state_add_input "${inputs}" "tasks.md" "${tasks_path}")" || return 1
-  # C3 (contracts/run-state-v2.md §1): plan.md is read on every run and
-  # spliced onto the parent's description (commands/reconcile.sh:861), so a
-  # change to it must invalidate — the "present when the file exists, key
-  # omitted otherwise" rule tasks.md already has.
-  plan_path="$(dirname "${spec_path}")/plan.md"
-  inputs="$(_run_state_add_input "${inputs}" "plan.md" "${plan_path}")" || return 1
-
+  # C3.2's "an absent file is not in the set" rule covers the feature
+  # directory. It does NOT cover the three configuration files below: they live
+  # outside it, they are read on every run, and a change to any of them changes
+  # what the run would write. Dropping them would silently weaken the
+  # short-circuit into ignoring a re-pointed project — so they keep both their
+  # hashing and v2's "key omitted when absent" rule, which is what `personal.yml`
+  # being gitignored and frequently absent requires.
   local f
   for f in config.yml config.local.yml personal.yml; do
     inputs="$(_run_state_add_input "${inputs}" "${JIRA_CONFIG_DIR}/${f}" "${JIRA_CONFIG_DIR}/${f}")" || return 1
@@ -106,6 +123,7 @@ run_state_compose() {
 # skipped, since `hook_event` is now part of the byte comparison).
 run_state_matches() {
   local spec_path="$1" base_url="$2" email="$3" on_drift="$4" hook_event="$5" field_values="$6"
+  local artifacts="${7:-[]}"
   local recorded_path
   recorded_path="$(run_state_path "${spec_path}")"
   [[ -f "${recorded_path}" ]] || return 1
@@ -115,7 +133,7 @@ run_state_matches() {
   jq -e . > /dev/null 2>&1 <<< "${recorded}" || return 1
 
   local fresh
-  fresh="$(run_state_compose "${spec_path}" "${base_url}" "${email}" "${on_drift}" "${hook_event}" "${field_values}")" || return 1
+  fresh="$(run_state_compose "${spec_path}" "${base_url}" "${email}" "${on_drift}" "${hook_event}" "${field_values}" "${artifacts}")" || return 1
 
   [[ "${recorded}" == "${fresh}" ]]
 }
@@ -127,6 +145,7 @@ run_state_matches() {
 # warning, not an exit code.
 run_state_record() {
   local spec_path="$1" base_url="$2" email="$3" on_drift="$4" hook_event="$5" field_values="$6"
+  local artifacts="${7:-[]}"
   local recorded_path state_dir
   recorded_path="$(run_state_path "${spec_path}")"
   state_dir="$(dirname "${recorded_path}")"
@@ -140,7 +159,7 @@ run_state_record() {
   [[ -f "${gitignore}" ]] || printf '*\n' > "${gitignore}" 2> /dev/null
 
   local doc
-  doc="$(run_state_compose "${spec_path}" "${base_url}" "${email}" "${on_drift}" "${hook_event}" "${field_values}")"
+  doc="$(run_state_compose "${spec_path}" "${base_url}" "${email}" "${on_drift}" "${hook_event}" "${field_values}" "${artifacts}")"
   if [[ -z "${doc}" ]]; then
     output_warn "run-state: could not compose the state document; state not recorded"
     return 0

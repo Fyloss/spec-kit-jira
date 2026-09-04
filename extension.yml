@@ -14,7 +14,7 @@ schema_version: "1.0"
 extension:
   id: jira-mirror
   name: Jira Mirror
-  version: 0.25.0
+  version: 0.26.0
   description: >-
     Spec Kit ↔ Jira bridge for team-managed and company-managed projects:
     configurable workflows & hierarchies (Scrum/SAFe), multi-project, idempotent
@@ -77,9 +77,26 @@ provides:
 # a non-empty condition makes agent-driven dispatch skip the hook entirely, which
 # would reintroduce the defect through a different door (research R8).
 #
-# These seven events are the complete set. The install purges this extension's
+# These nine events are the complete set. The install purges this extension's
 # entries from events the manifest no longer declares, so the block is
-# self-cleaning; adding an eighth requires a spec (Principle XV, research R9).
+# self-cleaning; adding a tenth requires a spec (Principle XV, research R9).
+#
+# 036 (FR-019) took the set from seven to nine. `after_checklist` is the
+# load-bearing addition rather than the tidy one: `/speckit-checklist` writes
+# only into `checklists/`, so under the previous set — plus the run-state
+# short-circuit, which hashes every publishable artifact — its output could sit
+# unpublished indefinitely. `after_converge` was named by the operator.
+#
+# Two events the host also offers stay REFUSED, and the reasons are the spec's:
+# `after_constitution` writes to `.specify/memory/`, outside the feature
+# directory, so declaring it would fire runs that can publish nothing; and
+# `after_taskstoissues` writes no feature-directory artifact, so where it
+# touches `tasks.md` the next declared event catches it anyway.
+#
+# A side effect worth knowing: `phase_status_map` accepts the lifecycle events
+# as keys, so a team can now declare a board move on `after_converge` or
+# `after_checklist` for free. That falls out of the set being shared; it needs
+# no new code, only the validation lists.
 hooks:
   before_specify:
     command: speckit.jira-mirror.feature
@@ -109,6 +126,14 @@ hooks:
     command: speckit.jira-mirror.reconcile
     optional: false
     description: Mirror the analysis outcome into Jira Cloud.
+  after_converge:
+    command: speckit.jira-mirror.reconcile
+    optional: false
+    description: Mirror the convergence outcome into Jira Cloud.
+  after_checklist:
+    command: speckit.jira-mirror.reconcile
+    optional: false
+    description: Mirror a generated checklist into Jira Cloud.
 
 tags:
   - jira

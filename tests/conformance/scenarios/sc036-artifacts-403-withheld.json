@@ -1,0 +1,29 @@
+{
+  "name": "sc036-artifacts-403-withheld",
+  "description": "036 T095 (C3.2, FR-018) — the 403-WITHHELD class, and C3.2 is the load-bearing row of the whole contract. The shared transport maps 401/403 to the auth exit code for every caller; propagating it here would fail EVERY reconcile for a team whose token merely lacks the optional Create attachments permission. Both ports must translate at the publication call site: identical exit code, identical warning naming the ticket and the remedy, identical `withheld`/`upload-failed` entries, and the reconcile own earlier writes standing. The fault is keyed on COMP-1 because the fixture creates its specification ticket first and deterministically.",
+  "mock": {
+    "projects": {
+      "COMP": "company"
+    },
+    "faults": {
+      "rest/api/3/issue/COMP-1/attachments": {
+        "status": 403
+      }
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-artifacts",
+  "git_branch": "036-artifacts",
+  "argv": [
+    "reconcile",
+    "--json",
+    "specs/001-reporting/spec.md"
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-reporting",
+    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111"
+  }
+}

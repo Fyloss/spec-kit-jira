@@ -230,6 +230,20 @@ stays the same. Change the slug and reconcile blocks the parent — naming the
 slug that already claims the ticket — rather than opening a second one. Leave
 the comment lines where reconcile put them.
 
+The parent issue also carries **every file of the specification folder** as an
+attachment — not only the three documents rendered into descriptions, but
+`research.md`, `data-model.md`, whatever sits under `contracts/` and
+`checklists/`, and any diagram or asset beside them. Nested files attach under
+a flattened name (`contracts/api.md` becomes `contracts__api.md`), and each
+publishing run posts one comment listing what it attached and whether each file
+is new or a revision. A revision is attached again rather than replacing the
+earlier copy, so the ticket keeps the history; nothing is ever deleted, and a
+file removed from the folder keeps the copies already published. A run over an
+unchanged folder attaches nothing and posts no comment. Files your repository
+ignores are never sent, a file larger than the site's own attachment limit is
+skipped with a warning naming the size and the limit, and a publication that
+fails for any reason warns without failing the command that triggered it.
+
 Every ticket the mirror creates or manages also carries a `speckit-<slug>`
 label naming its specification folder, so the whole specification is one
 search away on the board — filtering, say, `labels = "speckit-001-billing"`.

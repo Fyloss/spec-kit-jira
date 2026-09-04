@@ -1,13 +1,32 @@
 {
   "name": "us021-state-version-changed",
   "description": "T021 [US2]: reconcile a three-story specification to completion, edit the recorded run-state document's extension_version to a value that cannot be the real one, then reconcile again. contracts/run-state.md §3 row 'extension_version differs': the second run must be a full reconcile — the sentinel value must not survive into the freshly re-recorded state (a bridge upgrade must not be masked by a stale document, §8 invariant S7).",
-  "mock": { "projects": { "COMP": "company" } },
+  "mock": {
+    "projects": {
+      "COMP": "company"
+    }
+  },
   "fixture": "tests/conformance/fixtures/repo-with-mirrored-spec-clean",
+  "git_branch": "021-run-state",
   "runs": [
-    { "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"] },
     {
-      "argv": ["reconcile", "--json", "specs/001-billing-invoices/spec.md"],
-      "before": { "jq": { ".specify/jira/state/001-billing-invoices.json": ".extension_version = \"0.0.0-t021-sentinel\"" } }
+      "argv": [
+        "reconcile",
+        "--json",
+        "specs/001-billing-invoices/spec.md"
+      ]
+    },
+    {
+      "argv": [
+        "reconcile",
+        "--json",
+        "specs/001-billing-invoices/spec.md"
+      ],
+      "before": {
+        "jq": {
+          ".specify/jira/state/001-billing-invoices.json": ".extension_version = \"0.0.0-t021-sentinel\""
+        }
+      }
     }
   ],
   "env": {

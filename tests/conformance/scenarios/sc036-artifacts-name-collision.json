@@ -1,0 +1,33 @@
+{
+  "name": "sc036-artifacts-name-collision",
+  "description": "036 T095 (FR-005, C4.2) — the NAME-COLLISION withholding class. `contracts/api.md` flattens to `contracts__api.md` (research R7), so a top-level file already spelled that way collides with it and BOTH are withheld, each naming the other. The colliding file is written by the run mutation rather than tracked in the fixture, so every other 036 scenario reads a directory with no collision in it. Withholding precedence puts collision ahead of oversize, and both ports must agree on which reason a doubly-disqualified artifact reports.",
+  "mock": {
+    "projects": {
+      "COMP": "company"
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-artifacts",
+  "git_branch": "036-artifacts",
+  "runs": [
+    {
+      "before": {
+        "write": {
+          "specs/001-reporting/contracts__api.md": "the collision\n"
+        }
+      },
+      "argv": [
+        "reconcile",
+        "--json",
+        "specs/001-reporting/spec.md"
+      ]
+    }
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-reporting",
+    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111"
+  }
+}

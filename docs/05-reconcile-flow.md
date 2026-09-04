@@ -149,6 +149,7 @@ sequenceDiagram
     participant Guard as sink/privacy_guard
     participant Apply as sink/plan_apply
     participant Disc as sink/jira/discovery (012)
+    participant Attach as sink/jira/attachments (036)
     participant Jira as Jira Cloud
 
     Cmd->>Marker: assign an identifier to every unmarked story
@@ -198,11 +199,56 @@ sequenceDiagram
     Disc-->>Cmd: the one done-category transition, or none/ambiguous (reported, never guessed)
     Cmd->>Apply: POST /issue/KEY/transitions
     Apply->>Jira: transition the sub-task
+
+    Note over Cmd,Jira: Publication phase (036) — LAST, after every other write
+    Cmd->>Attach: classify the artifact set against the stored manifest
+    Attach->>Jira: GET /attachment/meta (once per run)
+    Attach->>Jira: GET the publication manifest property
+    alt something to publish
+        Attach->>Jira: ONE multipart POST /issue/KEY/attachments
+        Attach->>Jira: ONE POST /issue/KEY/comment
+        Attach->>Jira: PUT the manifest property
+    else nothing changed
+        Note over Attach,Jira: zero writes of all three kinds
+    end
 ```
 
-The ordering in the last block is the invariant: **guard, then write**. A single
+The ordering in the apply block is the invariant: **guard, then write**. A single
 blocked payload aborts the whole apply — there is no gap through which a leak
 could reach Jira.
+
+## The publication phase (036)
+
+The last thing a run does is put the **whole specification folder** on the
+parent issue: every file, not only the three the descriptions render. It sits
+after every other write for one reason — the parent may have been *created* by
+the apply above, so this is the earliest point at which its key is certainly
+known, and publication is additive, so nothing before it depends on it having
+happened.
+
+**The privacy scan is not here.** It is at the reconcile's existing pre-write
+sweep, hundreds of lines earlier, and that placement is the requirement rather
+than an optimisation: a blocked artifact must leave the ticket *entirely*
+untouched, and a guard beside the upload could only abort the upload — the
+description and story writes would already have landed.
+
+**The zero-churn floor is what makes it shippable.** Each artifact is compared
+by content hash against a manifest stored on the ticket as an entity property.
+A hash that matches means no write; a hash that differs means the file is
+attached again under the same name, and the earlier copy stays. When every
+artifact matches, the run issues **one** call — the manifest read — and zero
+writes of every kind. A `GET /issue/KEY?fields=attachment` is added only when
+the manifest claims an attachment id, which is how a run that died between the
+upload and the property write repairs itself rather than believing its own
+record.
+
+**Nothing here can fail the run.** A site with attachments switched off, a
+token without "Create attachments", an unreadable limit, a directory whose
+record would outgrow one property: each withholds the publication with one
+warning naming the ticket and the remedy, leaves every earlier write standing,
+and returns the exit code the run would have had anyway. The run summary's
+`artifacts[]` reports every file with its outcome and, for a withholding, the
+reason and the numbers to act on.
 
 ## The managed-region boundary (018)
 
@@ -381,7 +427,19 @@ classDiagram
         +Action actions
         +list~string~ warnings
         +list~string~ notes
+        +Artifact artifacts
         +int exit_code
+    }
+
+    class Artifact {
+        +string path
+        +string attachment_name
+        +string hash
+        +string action
+        +string reason
+        +int size
+        +int limit
+        +string collides_with
     }
 
     class Counts {
@@ -415,6 +473,7 @@ classDiagram
 
     RunSummary *-- Counts
     RunSummary "1" *-- "0..n" Action
+    RunSummary "1" *-- "0..n" Artifact
 ```
 
 Two details that make the summary trustworthy:

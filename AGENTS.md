@@ -51,8 +51,11 @@ The short version — one inseparable rule, not two:
 
 ## Running the suites
 
-- `tests/run-bash.sh` — full bash suite. **~16 min** (940 s measured 2026-08-30:
-  2688 tests across 274 files, unloaded machine, parallel via `xargs -P`).
+- `tests/run-bash.sh` — full bash suite. **~19 min** (1142 s measured 2026-09-01:
+  2831 tests across 286 files, unloaded machine, parallel via `xargs -P`).
+  Measure it on an UNLOADED machine: the same suite took 1 h 23 m the same day
+  while a second bats run and a PowerShell suite were sharing the cores, which
+  reads as a hang rather than as contention.
   `bats`+`jq` only — no PowerShell or GNU `parallel` required. The count grows
   fast enough that this figure goes stale: it read 190 s when the suite was a
   third of its current size, which cost more than one session to a run that

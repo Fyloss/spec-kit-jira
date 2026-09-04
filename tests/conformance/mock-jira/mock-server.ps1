@@ -148,6 +148,12 @@ $CreateMetaFields = if ($cfg.ContainsKey('createmetaFields')) { $cfg.createmetaF
 # returns verbatim. Unconfigured means an empty list (the "none" case
 # contract §6 distinguishes) — nothing is assumed for a key not listed.
 $Transitions = if ($cfg.ContainsKey('transitions')) { $cfg.transitions } else { @{} }
+# 036 C1.1 — the upload limit is a SITE fact the bridge discovers rather than
+# assumes (Principle VII), so a scenario can pin it here; the defaults mirror a
+# stock Cloud site.
+$script:AttachmentIdCounter = 0
+$AttachmentMetaEnabled = if ($cfg.ContainsKey('attachment_meta') -and $cfg.attachment_meta.ContainsKey('enabled')) { [bool] $cfg.attachment_meta.enabled } else { $true }
+$AttachmentMetaLimit = if ($cfg.ContainsKey('attachment_meta') -and $cfg.attachment_meta.ContainsKey('uploadLimit')) { [int] $cfg.attachment_meta.uploadLimit } else { 10485760 }
 
 function Get-IssueTypeStyleName {
     param([string]$Path, [string]$DefaultStyle)
@@ -467,6 +473,76 @@ function Resolve-Route {
             if ($Method -eq 'GET' -and $Query -match 'labels') { return (Get-LabelSearchResult -Query $Query) }
             if ($Method -eq 'GET') { return (Read-FixtureBody 'search-siblings') }
         }
+        '^/rest/api/3/attachment/meta$' {
+            # 036 C1.1 — the upload limit is a SITE fact the bridge must
+            # discover rather than assume (Principle VII), so a scenario can
+            # pin it; the default mirrors a stock Cloud site.
+            if ($Method -eq 'GET') {
+                # $AttachmentMeta is read from the config hashtable at start-up,
+                # beside $Transitions and the rest — NOT from a $script:Config that
+                # does not exist. Reaching for one under StrictMode threw inside the
+                # route and the server answered an empty body and stopped.
+                $enabled = $AttachmentMetaEnabled
+                $limit = $AttachmentMetaLimit
+                return @{ status = 200; body = (@{ enabled = $enabled; uploadLimit = $limit } | ConvertTo-Json -Compress) }
+            }
+        }
+        '^/rest/api/3/issue/[^/]+/attachments$' {
+            # 036 C1.4. The part filenames are read straight out of the raw
+            # multipart body rather than through a full parser: they are what
+            # the ports are asserted on, and a parser here would be a second
+            # implementation of something no production code reads.
+            #
+            # Duplicate filenames are ACCEPTED, deliberately — Jira allows
+            # several attachments with one name, each with its own id, and 036
+            # depends on it: a revised artifact is published again under the
+            # same name and the earlier copy must survive (FR-014).
+            if ($Method -eq 'POST') {
+                $ikey = ($Path -split '/')[-2]
+                $created = @()
+                # The id counter is SESSION-wide, not derived from the issue's
+                # own recorded list: Jira ids are globally unique, and the
+                # per-issue derivation handed the same id to two uploads
+                # whenever the issue was not seeded — which made a revision
+                # indistinguishable from its original, exactly what FR-014's
+                # tests need to tell apart. The Bash shim counts the same way.
+                $n = $script:AttachmentIdCounter
+                foreach ($m in [regex]::Matches($Body, 'filename="([^"]*)"')) {
+                    $n++
+                    $created += @{ id = "1000$n"; filename = $m.Groups[1].Value; size = 0 }
+                }
+                if ($script:Issues.ContainsKey($ikey)) {
+                    $existing = @()
+                    if ($script:Issues[$ikey].ContainsKey('attachments')) { $existing = @($script:Issues[$ikey].attachments) }
+                    $script:Issues[$ikey].attachments = @($existing + $created)
+                }
+                $script:AttachmentIdCounter = $n
+                return @{ status = 200; body = (ConvertTo-Json -InputObject @($created) -Depth 10 -Compress) }
+            }
+        }
+        '^/rest/api/3/issue/[^/]+/comment$' {
+            # 036 C1.5. Appended, so a run that posts twice is distinguishable
+            # from one that posts once — which is what the zero-churn
+            # assertions read.
+            if ($Method -eq 'POST') {
+                $ikey = ($Path -split '/')[-2]
+                $n = 0
+                if ($script:Issues.ContainsKey($ikey) -and $script:Issues[$ikey].ContainsKey('comments')) {
+                    $n = @($script:Issues[$ikey].comments).Count
+                }
+                $n++
+                $parsed = $null
+                try { $parsed = ($Body | ConvertFrom-Json -AsHashtable).body } catch { $parsed = @{} }
+                if ($null -eq $parsed) { $parsed = @{} }
+                $comment = @{ id = "2000$n"; body = $parsed }
+                if ($script:Issues.ContainsKey($ikey)) {
+                    $existing = @()
+                    if ($script:Issues[$ikey].ContainsKey('comments')) { $existing = @($script:Issues[$ikey].comments) }
+                    $script:Issues[$ikey].comments = @($existing + $comment)
+                }
+                return @{ status = 201; body = ($comment | ConvertTo-Json -Depth 20 -Compress) }
+            }
+        }
         '^/rest/api/3/issue/[^/]+/properties/[^/]+$' {
             $ikey = ($Path -split '/')[-3]
             $propKey = ($Path -split '/')[-1]
@@ -488,6 +564,21 @@ function Resolve-Route {
                 $b = Read-FixtureBody 'issue-property'
                 if ($b.status -eq 500) { return @{ status = 404; body = '{"errorMessages":["not found"],"errors":{}}' } }
                 return $b
+            }
+        }
+        '^/rest/api/3/issue/[^/]+$' {
+            # 036 C1.3 — the trust rule's read, keyed on the EXACT query as the
+            # other field-scoped branches are. Without it the generic issue GET
+            # answers with no `attachment` array, the trust rule reads "the id
+            # the manifest claims is not on the ticket", and every artifact is
+            # republished on every run.
+            if ($Method -eq 'GET' -and $Query -eq 'fields=attachment') {
+                $ikey = ($Path -split '/')[-1]
+                $atts = @()
+                if ($script:Issues.ContainsKey($ikey) -and $script:Issues[$ikey].ContainsKey('attachments')) {
+                    $atts = @($script:Issues[$ikey].attachments)
+                }
+                return @{ status = 200; body = (@{ key = $ikey; fields = @{ attachment = $atts } } | ConvertTo-Json -Depth 10 -Compress) }
             }
         }
         '^/rest/api/3/issue/[^/]+$' {
@@ -640,7 +731,36 @@ try {
                 $body = $Utf8NoBom.GetString($buf, 0, $read)
             }
 
-            [System.IO.File]::AppendAllText($CallLogPath, "$method $target`n", $Utf8NoBom)
+            # 036 T053: two routes carry an annotation, because they are the
+            # only ones whose PAYLOAD the conformance corpus has to compare and
+            # whose payload reaches no other capture — the publication phase
+            # runs after the planned action set is composed, so the run
+            # summary's `actions[]` never sees the upload or the comment.
+            #
+            # Byte-for-byte the same construction as curl-shim.sh's own writer.
+            # A divergence HERE would read as a divergence between the ports,
+            # which is the most expensive kind of false positive this corpus can
+            # produce. Additive: a request with neither parts nor body logs
+            # exactly what it logged before, leaving the pre-036 scenarios
+            # untouched.
+            $callSuffix = ''
+            if ($method -eq 'POST' -and $path -match '/attachments$') {
+                # The flattened names only, in part order, straight out of the
+                # raw multipart body — never the local file paths, which are
+                # each port's own temp directory and differ by construction.
+                $names = @()
+                foreach ($m in [regex]::Matches($body, 'filename="([^"]*)"')) {
+                    $names += $m.Groups[1].Value
+                }
+                if ($names.Count -gt 0) { $callSuffix = " parts=$($names -join ',')" }
+            } elseif ($method -eq 'POST' -and $path -match '/comment$' -and $body -ne '') {
+                # Verbatim, not a digest: the body is composed from pinned
+                # literals in two languages, and a digest would prove they
+                # differ without saying how.
+                $callSuffix = " body=$body"
+            }
+
+            [System.IO.File]::AppendAllText($CallLogPath, "$method $target$callSuffix`n", $Utf8NoBom)
 
             # Fault selection is path-keyed by project; POST /issue has no project
             # in its path, so a create fault is keyed by the body's project key.

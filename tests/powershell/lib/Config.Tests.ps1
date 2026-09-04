@@ -1020,3 +1020,57 @@ Describe '034 — the retired local-binding key (FR-005, SC-004)' {
         Remove-Item -Recurse -Force $d
     }
 }
+
+Describe 'Import-JiraConfig — the two lifecycle events added by 036 (T029, FR-019)' {
+    # Twin of the `T029` cases in tests/bash/lib/test_config.bats.
+    #
+    # `phase_status_map` accepts the lifecycle events as keys, so widening the
+    # declared set widens this validation for free. That is a side effect of
+    # the set being shared, not a capability 036 asks for — but the lists are
+    # hand-maintained in four places, and an event that fires while its
+    # phase_status_map key is refused as unknown is green suites and broken
+    # config.
+
+    It 'accepts after_converge' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: company_managed`n    phase_status_map:`n      after_converge: `"Converged`"`nrouting_default: PROJ`n" -NoNewline
+        (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 0
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'accepts after_checklist' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: company_managed`n    phase_status_map:`n      after_checklist: `"Checklisted`"`nrouting_default: PROJ`n" -NoNewline
+        (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 0
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'accepts both new events under a role mapping' {
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: company_managed`n    phase_status_map:`n      specification:`n        after_converge: `"Converged`"`n      story:`n        after_checklist: `"Checklisted`"`nrouting_default: PROJ`n" -NoNewline
+        (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 0
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'names all eight lifecycle events in the unknown-key message' {
+        # Eight, not nine: before_specify is a hook but not a PHASE — nothing
+        # moves a board before the specification exists.
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: company_managed`n    phase_status_map:`n      after_nonsense: `"Nowhere`"`nrouting_default: PROJ`n" -NoNewline
+        $r = Import-JiraConfig -ConfigDir $d
+        $r.ExitCode | Should -Be 4
+        ($r.Errors -join "`n") | Should -Match 'after_converge'
+        ($r.Errors -join "`n") | Should -Match 'after_checklist'
+        Remove-Item -Recurse -Force $d
+    }
+
+    It 'still refuses an event the manifest deliberately does not declare' {
+        # after_constitution writes outside the feature directory and
+        # after_taskstoissues writes nothing publishable, so neither is declared
+        # (Principle XV). Neither may quietly become a valid phase key either.
+        $d = New-TempConfigDir
+        Set-Content -Path (Join-Path $d 'config.yml') -Value "projects:`n  - key: PROJ`n    style: company_managed`n    phase_status_map:`n      after_constitution: `"Ratified`"`nrouting_default: PROJ`n" -NoNewline
+        (Import-JiraConfig -ConfigDir $d).ExitCode | Should -Be 4
+        Remove-Item -Recurse -Force $d
+    }
+}

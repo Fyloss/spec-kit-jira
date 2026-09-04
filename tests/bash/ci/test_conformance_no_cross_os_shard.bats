@@ -15,7 +15,7 @@ setup() {
   SCENARIOS_DIR="${ROOT}/tests/conformance/scenarios"
 }
 
-@test "the conformance corpus has exactly the recorded scenario count (259)" {
+@test "the conformance corpus has exactly the recorded scenario count (268)" {
   # 015 adds four scenarios: us1-field-defaults-option-encoded,
   # us2-field-defaults-option-question, us3-created-count-refused,
   # us4-recorded-value-outside-allowed (70 -> 74).
@@ -219,8 +219,14 @@ setup() {
   # 035 adds six for the marker rank and the two mismatch refusals:
   # bound-beats-default, bound-same-for-every-operator, bound-no-default-declared,
   # refuse-markers-split, refuse-routed-mismatch, unbound-unchanged (253 -> 259).
+  # 036 adds NINE for publishing the feature artifacts: the first publication,
+  # the zero-churn cycle, a revision, and one per withholding class — oversized,
+  # name-collision, site-disabled, privacy-blocked, 403-withheld and
+  # manifest-overflow (259 -> 268). The per-class scenarios are not optional
+  # duplicates of the unit tests: each class composes its warning from its own
+  # port's string formatting, which a per-port test cannot compare.
   count="$(find "${SCENARIOS_DIR}" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
-  [ "${count}" -eq 259 ]
+  [ "${count}" -eq 268 ]
 }
 
 # Everything the conformance job declares, as one block.

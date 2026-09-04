@@ -7,9 +7,30 @@
 # test, which is fine here: cross-port byte parity for the "inputs" keys is a
 # conformance-corpus concern (T020/T021), not this file's.
 
+# 036, contracts/run-state-v3.md C2: `inputs` is no longer three fixed
+# documents. It is the ARTIFACT SET, supplied as -ArtifactSetJson, so every
+# call below passes `(Get-FixtureSet)` — a hand-built set for this fixture,
+# since the engine that normally builds one needs a git repository and these
+# cases are about the document's OTHER fields. The artifact-set rules
+# themselves are covered in RunState.Artifacts.Tests.ps1.
+
 BeforeAll {
     $ModulePath = Join-Path $PSScriptRoot '../../../scripts/powershell/lib/RunState.psm1'
     Import-Module $ModulePath -Force
+
+    # Recomputed on demand, so a test that MUTATES a file gets the new hash.
+    function Get-FixtureSet {
+        $dir = [System.IO.Path]::GetDirectoryName($script:Spec)
+        $out = @()
+        foreach ($f in 'spec.md', 'plan.md', 'tasks.md') {
+            $p = Join-Path $dir $f
+            if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { continue }
+            $h = (& git hash-object --no-filters $p 2>$null | Select-Object -First 1)
+            $out += [ordered]@{ path = $f; hash = [string] $h; size = 0; attachment_name = $f }
+        }
+        if ($out.Count -eq 0) { return '[]' }
+        return (ConvertTo-Json -InputObject @($out) -Depth 5 -Compress)
+    }
 }
 
 Describe 'RunState' {
@@ -29,35 +50,35 @@ Describe 'RunState' {
 
     Describe 'New-JiraRunStateDocument — shape and determinism' {
         It 'is deterministic across repeated calls' {
-            $a = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
-            $b = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $a = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
+            $b = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $a | Should -Not -BeNullOrEmpty
             $a | Should -Be $b
         }
 
         It 'carries exactly the documented top-level fields, and no project_key' {
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $keys = ($doc | ConvertFrom-Json).PSObject.Properties.Name | Sort-Object
             ($keys -join ',') | Should -Be 'base_url,email,extension_version,field_values,hook_event,inputs,on_drift,schema'
         }
 
-        It 'schema is the integer 2 since 023''s hook_event/plan.md inputs (contracts/run-state-v2.md C1)' {
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+        It 'schema is the integer 3 since 036''s artifact-set inputs (contracts/run-state-v3.md C1)' {
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $parsed = $doc | ConvertFrom-Json
-            [int]$parsed.schema | Should -Be 2
-            $doc | Should -Match '"schema":2[,}]'
+            [int]$parsed.schema | Should -Be 3
+            $doc | Should -Match '"schema":3[,}]'
         }
 
         It 'hook_event is carried verbatim, empty string when a run has none' {
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan' -ArtifactSetJson (Get-FixtureSet)
             ($doc | ConvertFrom-Json).hook_event | Should -Be 'after_plan'
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             ($doc | ConvertFrom-Json).hook_event | Should -Be ''
         }
 
         It 'carries base_url, email, on_drift, and field_values verbatim' {
             $fv = "KEY=Story=Label=Value`u{1f}KEY=Task=Other=Val"
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'proceed' -FieldValues $fv
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'proceed' -FieldValues $fv -ArtifactSetJson (Get-FixtureSet)
             $parsed = $doc | ConvertFrom-Json
             $parsed.base_url | Should -Be 'https://acme.atlassian.net'
             $parsed.email | Should -Be 'user@example.com'
@@ -66,7 +87,7 @@ Describe 'RunState' {
         }
 
         It 'never contains a credential-shaped string' {
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $doc | Should -Not -Match 'Authorization'
             $doc | Should -Not -Match 'Basic '
             $doc | Should -Not -Match 'ATATT'
@@ -75,40 +96,40 @@ Describe 'RunState' {
 
     Describe 'inputs — hashing primitive and presence rules' {
         It 'spec.md is always present, hashed with git hash-object --no-filters' {
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $want = (& git hash-object --no-filters $script:Spec)
             $got = ($doc | ConvertFrom-Json).inputs.'spec.md'
             $got | Should -Be $want
         }
 
         It 'tasks.md is omitted when absent, present with its hash when it exists' {
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $inputs = ($doc | ConvertFrom-Json).inputs
             ($inputs.PSObject.Properties.Name -contains 'tasks.md') | Should -BeFalse
 
             $tasksPath = Join-Path (Split-Path -Parent $script:Spec) 'tasks.md'
             [System.IO.File]::WriteAllText($tasksPath, "- [ ] T001 do the thing`n")
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $want = (& git hash-object --no-filters $tasksPath)
             $got = ($doc | ConvertFrom-Json).inputs.'tasks.md'
             $got | Should -Be $want
         }
 
         It 'plan.md is omitted when absent, present with its hash when it exists (contracts/run-state-v2.md C3)' {
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $inputs = ($doc | ConvertFrom-Json).inputs
             ($inputs.PSObject.Properties.Name -contains 'plan.md') | Should -BeFalse
 
             $planPath = Join-Path (Split-Path -Parent $script:Spec) 'plan.md'
             [System.IO.File]::WriteAllText($planPath, "## Summary`n")
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $want = (& git hash-object --no-filters $planPath)
             $got = ($doc | ConvertFrom-Json).inputs.'plan.md'
             $got | Should -Be $want
         }
 
         It 'config.yml, config.local.yml, and personal.yml are each omitted when absent' {
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $keys = (($doc | ConvertFrom-Json).inputs.PSObject.Properties.Name | Sort-Object) -join ','
             $keys | Should -Be 'spec.md'
         }
@@ -121,7 +142,7 @@ Describe 'RunState' {
             [System.IO.File]::WriteAllText($cfgLocalYml, "overrides: []`n")
             [System.IO.File]::WriteAllText($personalYml, "name: Ada`n")
 
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $inputs = ($doc | ConvertFrom-Json).inputs
             # The KEY is spelled the way the Bash twin spells it — always a
             # forward slash — not the way Join-Path would spell it on this
@@ -145,80 +166,80 @@ Describe 'RunState' {
             $cfgYml = Join-Path $env:JIRA_CONFIG_DIR 'config.yml'
             [System.IO.File]::WriteAllText($cfgYml, "projects: []`n")
 
-            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $doc = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $keys = ($doc | ConvertFrom-Json).inputs.PSObject.Properties.Name
             $keys | Should -Contain "$env:JIRA_CONFIG_DIR/config.yml"
         }
 
         It 'returns $null when spec.md cannot be hashed' {
             $missing = Join-Path $script:Work 'specs/021-example/does-not-exist.md'
-            $doc = New-JiraRunStateDocument -SpecPath $missing -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $doc = New-JiraRunStateDocument -SpecPath $missing -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $doc | Should -BeNullOrEmpty
         }
     }
 
     Describe 'Test-JiraRunStateMatch' {
         It 'is $false when no state file exists' {
-            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' | Should -BeFalse
+            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet) | Should -BeFalse
         }
 
         It 'is $true after Save-JiraRunState with the identical inputs' {
-            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
-            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' | Should -BeTrue
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
+            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet) | Should -BeTrue
         }
 
         It 'is $false once spec.md changes' {
-            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             [System.IO.File]::WriteAllText($script:Spec, "# Feature Specification: Example (touched)`n")
-            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' | Should -BeFalse
+            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet) | Should -BeFalse
         }
 
         It 'is $false once on_drift differs' {
-            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
-            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'proceed' | Should -BeFalse
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
+            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'proceed' -ArtifactSetJson (Get-FixtureSet) | Should -BeFalse
         }
 
         It 'is $false once field_values differs' {
-            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
-            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues 'KEY=Story=Label=New' | Should -BeFalse
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
+            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues 'KEY=Story=Label=New' -ArtifactSetJson (Get-FixtureSet) | Should -BeFalse
         }
 
         It 'is $false once hook_event differs — an unhonoured lifecycle event is never skipped (S1, S9)' {
-            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
-            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan' | Should -BeFalse
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
+            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan' -ArtifactSetJson (Get-FixtureSet) | Should -BeFalse
         }
 
         It 'is $true after Save-JiraRunState with the identical hook_event' {
-            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan'
-            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan' | Should -BeTrue
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan' -ArtifactSetJson (Get-FixtureSet)
+            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -HookEvent 'after_plan' -ArtifactSetJson (Get-FixtureSet) | Should -BeTrue
         }
 
         It 'is $false when the recorded file is corrupt JSON' {
-            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $recordedPath = Get-JiraRunStatePath -SpecPath $script:Spec
             [System.IO.File]::WriteAllText($recordedPath, 'not json')
-            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' | Should -BeFalse
+            Test-JiraRunStateMatch -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet) | Should -BeFalse
         }
     }
 
     Describe 'Save-JiraRunState' {
         It 'writes a document byte-identical to a fresh compose' {
-            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $recorded = [System.IO.File]::ReadAllText((Get-JiraRunStatePath -SpecPath $script:Spec))
-            $fresh = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            $fresh = New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $recorded | Should -Be $fresh
         }
 
         It 'creates the state directory and its self-ignoring .gitignore' {
             $stateDir = Join-Path $env:JIRA_CONFIG_DIR 'state'
             Test-Path -LiteralPath $stateDir | Should -BeFalse
-            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             Test-Path -LiteralPath $stateDir | Should -BeTrue
             (Get-Content -LiteralPath (Join-Path $stateDir '.gitignore') -Raw).Trim() | Should -Be '*'
         }
 
         It 'leaves no sibling temp file behind on success' {
-            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort'
+            Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet)
             $stateDir = Join-Path $env:JIRA_CONFIG_DIR 'state'
             $leftovers = Get-ChildItem -LiteralPath $stateDir -Filter '*.tmp.*' -ErrorAction SilentlyContinue
             $leftovers | Should -BeNullOrEmpty
@@ -232,7 +253,7 @@ Describe 'RunState' {
             # directory, so the terminal rename step fails without touching
             # filesystem permissions (which `chmod 000` would, on POSIX only).
             New-Item -ItemType Directory -Path $recordedPath -Force | Out-Null
-            { Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' } | Should -Not -Throw
+            { Save-JiraRunState -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -ArtifactSetJson (Get-FixtureSet) } | Should -Not -Throw
         }
     }
 
@@ -264,13 +285,13 @@ Describe 'RunState' {
             # red on windows-latest only.
             $cfgKey = "$env:JIRA_CONFIG_DIR/config.yml"
             [System.IO.File]::WriteAllText($cfgPath, "projects:`n  - key: CONSUMER`n    style: company_managed`nrouting_default: CONSUMER`n")
-            $before = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' | ConvertFrom-Json -Depth 10).inputs.$cfgKey
+            $before = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' -ArtifactSetJson (Get-FixtureSet) | ConvertFrom-Json -Depth 10).inputs.$cfgKey
             # Fail on a missing key HERE rather than letting two $nulls reach
             # the comparison below, where "changed" is vacuously false and the
             # message names the wrong thing.
             $before | Should -Not -BeNullOrEmpty
             Add-Content -LiteralPath $cfgPath -Value "task_mirror:`n  CONSUMER: checklist`n"
-            $after = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' | ConvertFrom-Json -Depth 10).inputs.$cfgKey
+            $after = (New-JiraRunStateDocument -SpecPath $script:Spec -BaseUrl 'https://acme.atlassian.net' -Email 'user@example.com' -OnDrift 'abort' -FieldValues '' -ArtifactSetJson (Get-FixtureSet) | ConvertFrom-Json -Depth 10).inputs.$cfgKey
             $after | Should -Not -Be $before
             $expected = (& git hash-object --no-filters $cfgPath 2>$null | Select-Object -First 1).Trim()
             $after | Should -Be $expected
@@ -319,6 +340,15 @@ Describe 'Invoke-JiraReconcile — S6, --dry-run under a resolved transition (co
         $work = Join-Path $TestDrive ([System.IO.Path]::GetRandomFileName())
         Copy-Item -Recurse $Fixture $work
         $spec = Join-Path $work 'specs/001-declared-mapping/spec.md'
+        # 036, contracts/run-state-v3.md: the recorded inputs ARE the artifact
+        # set, and the set is `git ls-files` over the feature directory. Outside
+        # a repository the set is empty, and an empty set is never recorded and
+        # never short-circuits (it would otherwise match the next empty one).
+        # Every consumer tree is a repository; this fixture has to be one too,
+        # or the state write these cases turn on never happens.
+        & git -C $work init --quiet
+        & git -C $work config user.email 'fixture@example.invalid'
+        & git -C $work config user.name 'fixture'
         $env:JIRA_CONFIG_DIR = Join-Path $work '.specify/jira'
         $env:SPEC_KIT_JIRA_REPO = 'acme/app'
         $env:SPEC_KIT_JIRA_SPEC_SLUG = '001-declared-mapping'

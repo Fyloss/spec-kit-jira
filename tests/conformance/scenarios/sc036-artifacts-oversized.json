@@ -1,0 +1,28 @@
+{
+  "name": "sc036-artifacts-oversized",
+  "description": "036 T095 (FR-017, C4.2) — the OVERSIZED withholding class, as its own scenario. A per-port unit test does not satisfy a per-class conformance obligation: the two ports each compose the withholding warning from their own string formatting, and the summary entry carries the size and the limit as numbers each port formats itself. The site limit is pinned absurdly low so every artifact of the fixture exceeds it and the whole class is exercised in one run.",
+  "mock": {
+    "projects": {
+      "COMP": "company"
+    },
+    "attachment_meta": {
+      "enabled": true,
+      "uploadLimit": 8
+    }
+  },
+  "fixture": "tests/conformance/fixtures/repo-with-artifacts",
+  "git_branch": "036-artifacts",
+  "argv": [
+    "reconcile",
+    "--json",
+    "specs/001-reporting/spec.md"
+  ],
+  "env": {
+    "JIRA_EMAIL": "user@example.com",
+    "JIRA_API_TOKEN": "RAWSECRETXYZ",
+    "JIRA_NO_SLEEP": "1",
+    "SPEC_KIT_JIRA_REPO": "acme/app",
+    "SPEC_KIT_JIRA_SPEC_SLUG": "001-reporting",
+    "SPEC_KIT_JIRA_ID_SOURCE": "aaaaaaaaaaaaaaaa 1111111111111111"
+  }
+}
